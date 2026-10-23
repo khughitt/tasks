@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:11:19Z
+updated: 2026-10-23T00:13:14Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -41,3 +41,5 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-10-23T00:01:26Z (docs/trim-tasks-skill): Scope: direct editorial trim of T3/T7/T13/T17/T19/T28 plus Lifecycle provenance; preserve workflow imperatives, claim-override safeguards, quiet-run format and host-pointer rule. Baseline 8389 words/758 lines. Audit resolved through ai -> hq history to lore/docs/instruction-provenance.md. Workspace .worktrees/trim-tasks-skill; no declared setup route (no just setup or worktree-local setup command), so the required just test baseline builds dependencies before edits.
 - 2026-10-23T00:07:01Z (docs/trim-tasks-skill): Baseline: just test in .worktrees/trim-tasks-skill passed 1610 tests (93.994 s, tt exit 0). No-guidance fresh agent then completed init/prime/add/ready/start/note/park/resume/done/check using CLI help only; idea excluded, resumed note present, claim released. Its initial discovery failure was the known stray ancestor .git; retry with a scratch GIT_CEILING_DIRECTORIES passed. This editorial pass adds no behavioral rules; use the control to support deletion, not invent a failing guidance test.
 - 2026-10-23T00:11:19Z (docs/trim-tasks-skill): Revised skill: 7212 words/663 lines, down 1177 words (14.0%); six stable README anchors added. Fresh agent forward-test verified frozen SHA256 b0885cbd69523decc9eba32d9cb8fcd0735ee7d808784b83ee58cfd5e3965544, completed prime/add/ready/show/start/note/park/resume/done/check in isolated HOME/config/state, excluded the idea, and released the claim. All 11 local links and fragments resolved; tag, stamp, rename/adoption/rollback guidance was retrievable. Limits: one non-git lifecycle, with other mutations checked through docs/help only. just test-fast passed 1606 tests; just check, quick_validate.py and retained-block comparisons passed.
+- 2026-10-23T00:12:35Z (docs/trim-tasks-skill): attached: forward-report.md (4471 bytes): Independent fresh-agent lifecycle and reference-retrieval test of the frozen shorter skill; includes scope limits
+- 2026-10-23T00:13:14Z (docs/trim-tasks-skill): detached: forward-report.md: Raw evaluator transcript includes host-specific scratch paths; retain its canonical copy outside the checkout and record its path/hash instead.
