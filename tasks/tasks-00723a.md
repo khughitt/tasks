@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-22T20:56:05Z
+updated: 2026-10-23T01:04:43Z
 depends: [ops-721511]
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
@@ -19,3 +19,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 ## Notes
 
 - 2026-10-22T20:56:05Z (records-home): Re-scoped 2026-10-22: mindful capture and plan-snapshot wording superseded by tasks-dc16eb's design.
+- 2026-10-23T01:04:43Z (main): Scope note 2026-10-22 from tasks-211e28 (landed, main 85b90f3): the tasks skill should also name tasks init --prefix <p> --records <records-root>, the [records] registry table, the three locations and kind in projects and where (an unreachable projects row carries records but no checkout or kind), records_moved, records_unpaired and records_in_tree with their remedies, that rename moves the records directory and leaves it for the user to commit, and that rename --adopt pairs a directory another host renamed. README.md Linked and detached projects has the wording to draw from.
