@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T01:03:26Z
+updated: 2026-10-23T01:03:46Z
 started: 2026-10-23T00:44:22Z
 depends: []
 tags: [feedback, gap, "from:lore"]
@@ -43,3 +43,4 @@ Original report (preserved): Process and workspace section, 'Then run just setup
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T01:03:26Z (docs/tasks-dd78a5): resumed
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T01:03:46Z (docs/tasks-dd78a5): User approved local merge and live skill activation. Main advanced through detached-records integration, but none of the three reviewed documentation paths changed since this task branched.
