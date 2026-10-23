@@ -1,13 +1,15 @@
 ---
 id: tasks-f36fb8
 title: Amend the records-home design obs row for historical authorship exclusions
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-23T14:00:10Z
-updated: 2026-10-23T16:41:34Z
+updated: 2026-10-23T16:46:43Z
+started: 2026-10-23T16:46:43Z
 depends: [obs-7348a9]
 tags: [docs]
 source: obs-7348a9
@@ -23,3 +25,5 @@ obs-7348a9 landed locally in obs main at 9eb4f982cd60c70d6494c3278caec0cc805108e
 ## Notes
 
 - 2026-10-23T16:18:18Z (main): obs-7348a9 implementation landed locally in obs main at 9eb4f982cd60c70d6494c3278caec0cc805108ec after independent review acceptance (0 findings). The six-prefix path-only rule and paired attribution-version refusal are implemented; verify this landed code and approved spec r4 at ba84f7b before updating records-home section 4. Post-merge obs gate is running; parent completion will release the dependency. No migration or live index run was performed.
+- 2026-10-23T16:46:43Z (main): started
+  provenance: {"harness_session":"claude-code:049fb7ab-86eb-4014-8cfb-ff365280b5ff","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
