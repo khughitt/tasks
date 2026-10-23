@@ -3,8 +3,10 @@ id: tasks-5ab7e8
 title: "Migrate a project's open tasks to its successor: a triage view and a bulk move"
 status: idea
 priority: 3
+reviewed: true
+reviewed_at: 2026-10-23T11:01:50Z
 created: 2026-10-23T00:10:51Z
-updated: 2026-10-23T11:01:47Z
+updated: 2026-10-23T11:01:50Z
 depends: [tasks-f80a97]
 parent: tasks-a7460c
 tags: []
@@ -19,3 +21,7 @@ Scoping handoff: Read [ref:brief] for the current single-task move limits and th
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-23-successor-task-migration-brief.md — requested outcome, current move limits and unresolved migration guarantees
+
+## Notes
+
+- 2026-10-23T11:01:50Z (main): scope: briefed; current move preflight at 60cad3f refuses parented tasks and goals; preserved the full request and source, reused migration lane tasks-a7460c, and filed P3/m/high/planned design task tasks-f80a97 with a waking dependency; graph preservation and transaction guarantees require design review; historical incident and project-generations context remain unverified outside this fixed checkout; brief: docs/notes/2026-10-23-successor-task-migration-brief.md
