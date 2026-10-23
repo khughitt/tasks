@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-23T11:00:07Z
-updated: 2026-10-23T11:00:07Z
+updated: 2026-10-23T11:01:43Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -23,6 +23,9 @@ Where: src/commands/move_.rs, src/moving/{preflight,journal,mod}.rs, src/command
 
 Ideas it wakes: On completion, update the migration brief and run `tasks note tasks-5ab7e8 --no-reviewed "<design finding and review outcome>"` before this result's branch merges.
 
+Handoff: Read [ref:brief] for the preserved request, current guarantees, alternatives and unresolved decisions before drafting the design.
+
 ## References
 
 - move-design (input, required, kind=spec): docs/specs/2026-10-08-task-move-design.md — implemented single-task guarantees and deliberate subtree exclusion; verify against current code
+- brief (input, required, kind=brief): docs/notes/2026-10-23-successor-task-migration-brief.md — requested outcome, current move limits and unresolved migration guarantees
