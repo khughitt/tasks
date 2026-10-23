@@ -174,6 +174,22 @@ fn refusal(snap: &Snapshot) -> Option<String> {
             ));
         }
     }
+    // No rename of this host's moved the directory: another host renamed the project and
+    // the sync delivered it under the new name. Taking that up is `--adopt`.
+    if snap.inventory.is_none() && snap.records == RecordsDir::New {
+        let (old, new) = records_pair(snap);
+        let invocation = &snap.invocation;
+        return Some(format!(
+            "{} is gone and {} exists with no rename of this host's in progress: another \
+             host renamed {} to {}; take it up with `tasks rename {} {} --adopt`",
+            old.display(),
+            new.display(),
+            invocation.source,
+            invocation.target,
+            invocation.source,
+            invocation.target
+        ));
+    }
     if let Some(inventory) = &snap.inventory {
         let baseline: BTreeMap<_, _> = inventory
             .entries
@@ -556,6 +572,17 @@ mod tests {
             };
             assert!(reason.starts_with(word), "{reason}");
         }
+        // Another host's rename, delivered by the sync: no inventory here, only the
+        // directory under the target's name. That is `--adopt`, never a fresh rename.
+        let mut delivered = detached(inventory_only());
+        delivered.inventory = None;
+        delivered.entries.clear();
+        delivered.config = None;
+        delivered.records = RecordsDir::New;
+        let Recovery::Refuse(reason) = classify(&delivered) else {
+            panic!("a delivered rename must refuse: {delivered:?}");
+        };
+        assert!(reason.contains("rename old new --adopt"), "{reason}");
     }
 
     #[test]
@@ -712,6 +739,9 @@ mod tests {
         // the config and registry columns, so `Old` allows only the stages before it and
         // `New` only the stages after it.
         let moved = snap.records == RecordsDir::New;
+        if !has_inventory && moved {
+            return Verdict::Refuse;
+        }
         match (has_inventory, config_column, registry_column) {
             (false, 1, 1) if snap.named.target == 0 && snap.named.target_dirs == 0 => {
                 Verdict::Fresh

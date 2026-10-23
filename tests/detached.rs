@@ -1636,3 +1636,43 @@ fn a_registry_mapping_a_prefix_to_its_detached_records_without_a_pairing_is_a_co
         );
     }
 }
+
+#[test]
+fn rename_without_adopt_after_another_host_renamed_names_adopt() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    // What the sync delivers from the host that ran the rename.
+    let moved = l.records.join("dtx");
+    std::fs::rename(&l.project, &moved).unwrap();
+    let config = moved.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        text.replace("prefix = \"det\"", "prefix = \"dtx\""),
+    )
+    .unwrap();
+    let registry = registry_text(&env);
+    let detail = fail_detail(&env, &l.code, &["rename", "det", "dtx"], "validation");
+    assert!(detail.contains("tasks rename det dtx --adopt"), "{detail}");
+    assert!(
+        detail.contains(&l.project.display().to_string())
+            && detail.contains(&moved.display().to_string()),
+        "{detail}"
+    );
+    let explained = env.json(&l.code, &["rename", "det", "dtx", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"].to_string().contains("--adopt"),
+        "{explained}"
+    );
+    assert_eq!(
+        registry_text(&env),
+        registry,
+        "a refusal wrote the registry"
+    );
+    let out = env.json(&l.code, &["rename", "det", "dtx", "--adopt"]);
+    assert_eq!(out["mode"], "adopt");
+    let registry: toml::Value = toml::from_str(&registry_text(&env)).unwrap();
+    assert_eq!(registry["records"]["dtx"].as_str(), moved.to_str());
+}

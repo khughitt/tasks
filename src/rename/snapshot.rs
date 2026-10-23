@@ -134,8 +134,12 @@ pub fn observe(
     let mut named = Named::default();
     let mut strays = Vec::new();
     let records = observe_records(registry, invocation, inventory.as_ref())?;
-    // With neither directory there is nothing to read; the classifier refuses.
-    let tasks = (records != RecordsDir::Neither)
+    // With neither directory there is nothing to read, and with no inventory a moved
+    // directory is another host's rename (`--adopt`): the current one is gone. The
+    // classifier refuses both.
+    let readable =
+        !(records == RecordsDir::Neither || (inventory.is_none() && records == RecordsDir::New));
+    let tasks = readable
         .then(|| task_paths(&invocation.records.join("tasks")))
         .transpose()?
         .unwrap_or_default();
@@ -182,7 +186,12 @@ pub fn observe(
         .records
         .join("tasks")
         .join(crate::attachments::FILES_DIR);
-    match crate::attachments::dir_state(&files_root)? {
+    let files_state = if readable {
+        crate::attachments::dir_state(&files_root)?
+    } else {
+        crate::attachments::DirState::Absent
+    };
+    match files_state {
         crate::attachments::DirState::Absent => {}
         crate::attachments::DirState::Unsafe(detail) => {
             return Err(Error::AttachmentUnsafe(detail));
@@ -243,7 +252,7 @@ pub fn observe(
             records_old: same_dir(registry.records_dir(&invocation.source), records_from)?,
             records_new: same_dir(registry.records_dir(&invocation.target), records_to)?,
         },
-        config: if records == RecordsDir::Neither {
+        config: if !readable {
             None
         } else {
             observe_config(invocation)?
