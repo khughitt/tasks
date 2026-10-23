@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:17:37Z
+updated: 2026-10-23T00:17:42Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -46,3 +46,4 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-10-23T00:13:37Z (docs/trim-tasks-skill): Full forward-test report retained at /mnt/ssd3/work/tasks/tasks-9a9ef3/forward-report.md, sha256 8e8bc29a15616ff9de91639b098150da126c01bb08e76e8de97046ee0a68ed5a. The hygiene hook correctly refused its attempted attachment because the raw transcript includes a machine-specific scratch path; the attachment was detached, with no bypass, and the observed verdict and limits remain in the preceding task note.
 - 2026-10-23T00:14:25Z (docs/trim-tasks-skill): Implementation frozen at 50735173002c749a5d8ed18f98534756ee31e2d7; authorized audit back-fill frozen at lore e404bbc on lore-028f5a. Independent read-only final review dispatched against those revisions. README coordination with tasks-03bfc3: preserve the six explicit anchors session-selection, claims-and-checkouts, agent-and-completion-stamps, project-routing, lifecycle-provenance and prefix-renames-and-recovery during any later reorganization; no broader README restructuring in this task.
 - 2026-10-23T00:17:37Z (docs/trim-tasks-skill): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-23T00:17:42Z (docs/trim-tasks-skill): attached: trim-review-report.md (2759 bytes): Full independent review of tasks 5073517 and lore e404bbc; codex/gpt-6.1-sol accepted both with no findings
