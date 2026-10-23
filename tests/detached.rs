@@ -188,6 +188,23 @@ fn hook_alternate_index_still_guards_the_detached_migration() {
     assert!(out.status.success(), "{out:?}");
 }
 
+#[test]
+fn migration_guard_uses_the_code_repository_without_an_explicit_hook_index() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let foreign = repo(&l.home, &l.base, "foreign");
+    env.json(&foreign, &["init", "--prefix", "other"]);
+    l.git(&foreign, &["add", "tasks"]);
+    l.git(&foreign, &["commit", "-qm", "foreign records"]);
+    let out = hook_cmd(&env, &l.code, &foreign)
+        .env_remove("GIT_INDEX_FILE")
+        .arg("check")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
 /// The repositories of a detached project named `prefix`: the records root and the code
 /// checkout with a worktree. Nothing is written under `<records>/<prefix>` and nothing is
 /// registered: `register` (or `register_by_hand`) does that.

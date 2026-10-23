@@ -407,11 +407,9 @@ const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
 /// failing git run is an `io` error, never "absent". Keep the invoking hook's index:
 /// this checks the code commit being made, not the records repository.
 pub fn config_in_index(top: &Path) -> Result<bool> {
-    let listed = std::process::Command::new("git")
-        .arg("-C")
-        .arg(top)
+    let listed = crate::git::at(top)
+        .envs(std::env::var_os("GIT_INDEX_FILE").map(|index| ("GIT_INDEX_FILE", index)))
         .args(["ls-files", "-z", "--cached", "--", CONFIG_PATH])
-        .env("LC_ALL", "C")
         .output()?;
     if !listed.status.success() {
         return Err(Error::Io(format!(
