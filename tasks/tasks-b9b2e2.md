@@ -7,9 +7,9 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-10T13:22:07Z
-updated: 2026-10-13T10:55:42Z
+updated: 2026-10-23T09:08:26Z
 depends: []
-tags: [feedback, gap, "from:mind6", cli]
+tags: [feedback, gap, "from:mind6", cli, friction]
 agent: codex
 ---
 
@@ -29,3 +29,5 @@ Original report (preserved): Attachment size cap requires a separate archive and
 - 2026-10-13T10:52:18Z (main): Archive contents checked: 11 review screenshots from .impeccable/review/ (gitignored in mind6; 293-616 KB each, ~4.6 MB total), the 2026-09-18 TUI design+plan (identical copies already in mind6's main checkout, locally excluded), .codex/config.toml and an sdd .gitignore (regenerable). Every file fits the 2 MiB per-file cap; only the bundled tar exceeded it.
 - 2026-10-13T10:55:30Z (main): scope: scoped; user resolved the open question 2026-10-13: keep the per-file cap, no outside store; narrowed to multi-path attach (all-or-nothing, JSON file -> files[]); cleanup-rule triage goes to lore feedback; P2/s/mid/direct
 - 2026-10-13T10:55:42Z (main): Cleanup-rule triage filed to lore as lore-da5aae.
+- 2026-10-23T09:08:26Z (feedback): feedback from mind6: Evidence retention repeats one attachment save and commit per selected file
+- 2026-10-23T09:08:26Z (feedback): detail from mind6: A cleanup pass preserved forty individually selected small reports with forty single-file attach calls, forty automatic record commits and repeated hooks; non-Markdown manifests additionally reran full pre-commit typechecks per file despite unchanged code. Every attachment was kept separately and hash-verified, without bundling or raising the cap. This is further evidence for the existing multi-file attach change to validate once, append one ledger entry per file and commit the batch once while preserving all-or-nothing safety.
