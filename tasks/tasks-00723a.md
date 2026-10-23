@@ -7,8 +7,8 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-23T01:04:43Z
-depends: [ops-721511]
+updated: 2026-10-23T15:08:13Z
+depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
 agent: claude-code/claude-fable-5-1
