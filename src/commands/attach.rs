@@ -136,7 +136,7 @@ pub fn attach(
     let created_dir = if write {
         let created = attachments::ensure_task_dir(&ctx.project, &task.id)?;
         attachments::write_new(&target, &bytes)?;
-        crate::written::record(&ctx.project.root, &target);
+        crate::written::record(&ctx.project.records, &target);
         created
     } else {
         false
@@ -216,7 +216,7 @@ pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Out
     }
     if present {
         std::fs::remove_file(&target)?;
-        crate::written::record(&ctx.project.root, &target);
+        crate::written::record(&ctx.project.records, &target);
         let dir = target.parent().expect("attachment has a directory");
         if std::fs::read_dir(dir)?.next().is_none() {
             std::fs::remove_dir(dir)?;

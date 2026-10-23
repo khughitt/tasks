@@ -345,7 +345,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
 
     // The raw-content comparison below protects this unlocked editing window.
     let routing = ctx.routing.clone();
-    let original_root = ctx.project.root.clone();
+    let original_records = ctx.project.records.clone();
     ctx.lock = None;
     ctx.claims = None;
     let status = std::process::Command::new("sh")
@@ -361,7 +361,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         )));
     }
     super::lock_and_revalidate(&mut ctx, &routing).map_err(keep)?;
-    if ctx.project.prefix != original.id.prefix || ctx.project.root != original_root {
+    if ctx.project.prefix != original.id.prefix || ctx.project.records != original_records {
         return Err(keep(Error::ConcurrentModification(
             original.id.to_string(),
             "the project's identity changed while editing; retry".into(),

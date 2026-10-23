@@ -730,14 +730,14 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
         let project = match routing {
             Routing::Local => Project {
                 worktree: ctx.project.worktree.clone(),
-                ..Project::open(&ctx.project.root)?
+                ..Project::open(&ctx.project.records)?
             },
             Routing::Registered(prefix) => {
                 let live = registry.canonical_prefix(prefix);
                 crate::scope::open_registered(&registry, live, Origin::Prefix)?
             }
         };
-        if project.prefix == ctx.project.prefix && project.root == ctx.project.root {
+        if project.prefix == ctx.project.prefix && project.records == ctx.project.records {
             reject_stale_local(&registry, &project)?;
             reject_retired(&registry, &project)?;
             ctx.project = project;
@@ -753,8 +753,9 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
     ))
 }
 
-/// A retired project takes no writes (ops lifecycle spec §4). The registered checkout is
-/// the authority, but a worktree made before the retirement has no `[retired]` of its own
+/// A retired project takes no writes (ops lifecycle spec §4). The registered copy (its
+/// `scope::config_dir`: a detached project's records directory, else its root) is the
+/// authority, but a worktree made before the retirement has no `[retired]` of its own
 /// until a merge, so either declaring it is enough. `reject_stale_local` only compares the
 /// prefix with the registry's aliases; a registered checkout that does not open, or whose
 /// config names another prefix, is an error here, never "not retired": the write it would
@@ -763,9 +764,8 @@ pub fn reject_retired(registry: &Registry, project: &Project) -> Result<()> {
     let Some(retirement) = effective_retirement(registry, project)? else {
         return Ok(());
     };
-    let authority = registry
-        .project_root(&project.prefix)
-        .unwrap_or(&project.root);
+    let authority = crate::scope::config_dir(registry, &project.prefix)
+        .unwrap_or_else(|| project.records.clone());
     let successor = retirement
         .successor
         .as_ref()
@@ -779,21 +779,23 @@ pub fn reject_retired(registry: &Registry, project: &Project) -> Result<()> {
     )))
 }
 
-/// The retirement `project` is under: its own `[retired]`, else its registered
-/// checkout's when it is another checkout (a worktree made before the retirement).
+/// The retirement `project` is under: its own `[retired]`, else its registered copy's
+/// when it is another copy (a worktree made before the retirement). The registered copy
+/// is decided by records location: two records worktrees of a detached project share one
+/// code root.
 pub fn effective_retirement(
     registry: &Registry,
     project: &Project,
 ) -> Result<Option<crate::repo::Retirement>> {
-    let registered = match registry.project_root(&project.prefix) {
-        Some(root) if root != project.root.as_path() => Some(
+    let registered = match crate::scope::config_dir(registry, &project.prefix) {
+        Some(dir) if dir != project.records => Some(
             crate::scope::open_registered(registry, &project.prefix, Origin::Prefix).map_err(
                 |error| {
                     Error::Config(format!(
                         "cannot tell whether {} is retired: its registered checkout {} did not \
                          open ({error}); fix that checkout, then retry",
                         project.prefix,
-                        root.display()
+                        dir.display()
                     ))
                 },
             )?,
@@ -1934,8 +1936,9 @@ fn dispatch(cli: Cli) -> Result<Output> {
         Command::Init {
             prefix,
             checkout,
+            records,
             force,
-        } => init::run(dir, prefix, checkout, force),
+        } => init::run(dir, prefix, checkout, records, force),
         Command::Where { path } => where_::run(path, dir),
         Command::Rename {
             old,

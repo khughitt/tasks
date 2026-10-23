@@ -64,6 +64,12 @@ pub enum Error {
     #[error("{0}")]
     CheckoutConflict(String),
     #[error("{0}")]
+    RecordsMoved(String),
+    #[error("{0}")]
+    RecordsUnpaired(String),
+    #[error("{0}")]
+    RecordsInTree(String),
+    #[error("{0}")]
     Halted(String),
     #[error("{0}")]
     NestedLane(String),
@@ -143,6 +149,9 @@ impl Error {
             Error::UnreadableCheckout(detail) => Error::UnreadableCheckout(detail + suffix),
             Error::NotRegisteredCheckout(detail) => Error::NotRegisteredCheckout(detail + suffix),
             Error::CheckoutConflict(detail) => Error::CheckoutConflict(detail + suffix),
+            Error::RecordsMoved(detail) => Error::RecordsMoved(detail + suffix),
+            Error::RecordsUnpaired(detail) => Error::RecordsUnpaired(detail + suffix),
+            Error::RecordsInTree(detail) => Error::RecordsInTree(detail + suffix),
             Error::Halted(detail) => Error::Halted(detail + suffix),
             Error::NestedLane(detail) => Error::NestedLane(detail + suffix),
             Error::NeedHeld(detail) => Error::NeedHeld(detail + suffix),
@@ -192,6 +201,9 @@ impl Error {
             Error::UnreadableCheckout(_) => "unreadable_checkout",
             Error::NotRegisteredCheckout(_) => "not_registered_checkout",
             Error::CheckoutConflict(_) => "checkout_conflict",
+            Error::RecordsMoved(_) => "records_moved",
+            Error::RecordsUnpaired(_) => "records_unpaired",
+            Error::RecordsInTree(_) => "records_in_tree",
             Error::Halted(_) => "halted",
             Error::NestedLane(_) => "nested_lane",
             Error::NeedHeld(_) => "need_held",

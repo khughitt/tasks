@@ -41,6 +41,9 @@ impl Format {
 pub struct InitOut {
     pub prefix: String,
     pub root: String,
+    /// The records directory `init --records` paired the checkout with; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub records: Option<String>,
     pub warnings: Vec<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
@@ -111,8 +114,8 @@ pub struct RootOut {
     pub warnings: Vec<String>,
 }
 
-/// `tasks where` (ops linked-checkouts §4, §8.1). `checkout` is serialized as `null` when
-/// absent: consumers require the key on every project object.
+/// `tasks where` (ops linked-checkouts §4, §8.1). Every project object carries `root`,
+/// `checkout` and `records`; `linked` equals `kind == "linked"`.
 #[derive(Serialize)]
 pub struct WhereOut {
     pub project: Option<WhereProject>,
@@ -124,7 +127,9 @@ pub struct WhereOut {
 pub struct WhereProject {
     pub prefix: String,
     pub root: String,
-    pub checkout: Option<String>,
+    pub checkout: String,
+    pub records: String,
+    pub kind: crate::repo::Kind,
     pub linked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
@@ -150,6 +155,9 @@ pub struct ResolveRow {
     pub alias: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// The project's records directory; set whenever `root` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub records: Option<String>,
     /// The resolved project's identity color, when its config sets one and was read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
@@ -174,6 +182,11 @@ pub struct ProjectRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
     pub root: String,
+    /// The registry's records pairing, else the root. Always present.
+    pub records: String,
+    /// In-tree, detached or linked; absent when the config could not be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<crate::repo::Kind>,
     pub reachable: bool,
     /// Present only for a reachable project.
     pub counts: Option<Counts>,
@@ -188,8 +201,7 @@ pub struct ProjectRow {
     /// The project's `[retired]` table, when it has one. Its counts stay in the row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retired: Option<crate::repo::Retirement>,
-    /// A linked project's declared code checkout. Absent on other rows and when
-    /// the project's config could not be read.
+    /// The project's code checkout. Absent when the config could not be read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkout: Option<String>,
 }
@@ -1298,9 +1310,14 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             None => "no project".into(),
             Some(p) => {
                 let prefix = present::project(&p.prefix, p.color).paint(painter);
-                match &p.checkout {
-                    Some(checkout) => format!("{prefix} {} (linked to {checkout})", p.root),
-                    None => format!("{prefix} {}", p.root),
+                match p.kind {
+                    crate::repo::Kind::Linked => {
+                        format!("{prefix} {} (linked to {})", p.root, p.checkout)
+                    }
+                    crate::repo::Kind::Detached => {
+                        format!("{prefix} {} (records at {})", p.root, p.records)
+                    }
+                    crate::repo::Kind::InTree => format!("{prefix} {}", p.root),
                 }
             }
         },
@@ -1390,7 +1407,12 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                         (Some(_), None) => painter.paint(Style::Chrome, "-"),
                     });
                     if o.paths {
-                        cells.push(row.root.clone());
+                        cells.push(match row.kind {
+                            Some(crate::repo::Kind::Detached) => {
+                                format!("{} → {}", row.root, row.records)
+                            }
+                            _ => row.root.clone(),
+                        });
                     }
                     Row::new(cells)
                 })

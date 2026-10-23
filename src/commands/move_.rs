@@ -31,16 +31,24 @@ fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
             "no project registered as {to:?}; register it or choose another project"
         ))
     })?;
-    if !scope::is_reachable(root)? {
+    if !scope::is_reachable(&registry, target_prefix)? {
+        // Records-detached spec §3.2: a root that holds no config and is paired with no
+        // records directory is `records_unpaired` here as from every other entry point.
+        if let Err(error @ Error::RecordsUnpaired(_)) =
+            scope::open_registered(&registry, target_prefix, Origin::Prefix)
+        {
+            return Err(error);
+        }
         return Err(Error::Config(format!(
             "{target_prefix} at {} is unreachable; restore it or choose another project",
             root.display()
         )));
     }
-    let registered = registry
-        .project_root(&source_id.prefix)
+    // The registered copy is decided by records location: two records worktrees of a
+    // detached project share one code root.
+    let registered = scope::config_dir(&registry, &source_id.prefix)
         .ok_or_else(|| Error::Config(format!("no project registered as {:?}", source_id.prefix)))?;
-    if root_identity(&source.project.root)? != root_identity(registered)? {
+    if root_identity(&source.project.records)? != root_identity(&registered)? {
         return Err(Error::Validation(format!(
             "{source_id} is moved from {}'s registered checkout, which foreign readers and check read; run `tasks -C {} move {source_id} --to {target_prefix}`",
             source_id.prefix,

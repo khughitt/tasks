@@ -4,11 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// One registered project that declares a `[checkout]` (linked-checkouts §4.1).
+/// One registered project that declares a `[checkout]` (linked-checkouts §4.1): a linked
+/// or a detached one, as `kind` says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Linked {
     pub prefix: String,
     pub checkout: PathBuf,
+    pub records: PathBuf,
+    pub kind: crate::repo::Kind,
 }
 
 /// Every registered project on this host that declares a checkout, the color of every one
@@ -37,8 +40,8 @@ impl CheckoutScan {
 
 pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
     let mut scan = CheckoutScan::default();
-    for (prefix, root) in &registry.projects {
-        let opened = crate::scope::is_reachable(root).and_then(|reachable| {
+    for prefix in registry.projects.keys() {
+        let opened = crate::scope::is_reachable(registry, prefix).and_then(|reachable| {
             reachable
                 .then(|| {
                     crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)
@@ -50,10 +53,12 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
                 if let Some(color) = project.color {
                     scan.colors.insert(prefix.clone(), color);
                 }
-                if let Some(checkout) = project.checkout {
+                if project.kind != crate::repo::Kind::InTree {
                     scan.linked.push(Linked {
                         prefix: prefix.clone(),
-                        checkout,
+                        checkout: project.checkout,
+                        records: project.records,
+                        kind: project.kind,
                     });
                 }
             }
@@ -257,6 +262,7 @@ pub enum Via {
     Root,
     Storage,
     Checkout,
+    Records,
     FormerRoot,
     FormerStorage,
     Git,
@@ -264,7 +270,10 @@ pub enum Via {
 
 impl Via {
     fn current(self) -> bool {
-        matches!(self, Via::Root | Via::Storage | Via::Checkout)
+        matches!(
+            self,
+            Via::Root | Via::Storage | Via::Checkout | Via::Records
+        )
     }
     fn storage(self) -> bool {
         matches!(self, Via::Storage | Via::FormerStorage)
@@ -352,7 +361,14 @@ impl Index {
             }
         }
         let scan = scan_checkouts(registry);
-        for linked in scan.linked {
+        for (prefix, records) in &registry.records {
+            add(prefix, Via::Records, records, &mut warnings);
+        }
+        for linked in scan
+            .linked
+            .into_iter()
+            .filter(|linked| linked.kind == crate::repo::Kind::Linked)
+        {
             add(
                 &linked.prefix,
                 Via::Checkout,

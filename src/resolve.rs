@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
-use crate::repo::Project;
+use crate::repo::{Kind, Project};
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -93,13 +93,19 @@ impl DocKind {
 /// as missing; otherwise every fresh worktree of such a project fails its own gate.
 pub enum Located {
     Here(PathBuf),
-    Main { root: PathBuf, path: PathBuf },
+    Main {
+        root: PathBuf,
+        path: PathBuf,
+    },
+    /// Under a detached project's code tree: a reference document kept there by design.
+    Code(PathBuf),
     Missing,
 }
 
 pub enum LocatedEntry {
     Here(PathBuf),
     Main { root: PathBuf, path: PathBuf },
+    Code(PathBuf),
     Special(PathBuf),
     Missing,
 }
@@ -119,16 +125,22 @@ pub(crate) fn refuse_special(path: &Path) -> Result<()> {
 impl Located {
     pub fn into_path(self) -> Option<PathBuf> {
         match self {
-            Located::Here(path) | Located::Main { path, .. } => Some(path),
+            Located::Here(path) | Located::Main { path, .. } | Located::Code(path) => Some(path),
             Located::Missing => None,
         }
     }
 }
 
+enum Base {
+    Here,
+    Main(PathBuf),
+    Code(PathBuf),
+}
+
 pub struct Resolver<'a> {
     pub project: &'a Project,
     pub registry: &'a Registry,
-    /// Asked of git once, and only when some document is absent here.
+    /// Asked of git once, and only when a document is absent from the records directory.
     main: OnceCell<Option<PathBuf>>,
     /// One line per document read from the main checkout, for the caller's warnings.
     from_main: RefCell<Vec<String>>,
@@ -183,58 +195,76 @@ impl<'a> Resolver<'a> {
         Ok(self.main.get_or_init(|| main).as_ref())
     }
 
-    /// `rel` in this checkout, else in the main checkout (see [`Located`]).
-    pub fn locate(&self, rel: &str) -> Result<Located> {
-        let here = self.project.root.join(rel);
-        if here.is_file() {
-            return Ok(Located::Here(here));
+    /// Where documents are looked for, in order: the records directory; the main checkout
+    /// of the records repository when records is a linked worktree of it; for a detached
+    /// project, the code worktree the command runs in and then the code root. Only the
+    /// records directory is consulted without asking git: the later bases are computed after
+    /// it misses. The first base where `probe` finds something wins.
+    fn walk<T>(
+        &self,
+        mut probe: impl FnMut(&Base, &Path) -> Result<Option<T>>,
+    ) -> Result<Option<(Base, T)>> {
+        if let Some(found) = probe(&Base::Here, &self.project.records)? {
+            return Ok(Some((Base::Here, found)));
         }
-        Ok(match self.main_root()? {
-            Some(root) if root.join(rel).is_file() => Located::Main {
-                root: root.clone(),
-                path: root.join(rel),
-            },
-            _ => Located::Missing,
+        let mut later = Vec::new();
+        if let Some(main) = self.main_root()? {
+            later.push(Base::Main(main.clone()));
+        }
+        if self.project.kind == Kind::Detached {
+            let resume = self.project.resume_root();
+            later.push(Base::Code(resume.to_path_buf()));
+            if resume != self.project.root {
+                later.push(Base::Code(self.project.root.clone()));
+            }
+        }
+        for base in later {
+            let (Base::Main(root) | Base::Code(root)) = &base else {
+                unreachable!("only Here is not a later base")
+            };
+            if let Some(found) = probe(&base, root)? {
+                return Ok(Some((base, found)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// `rel` in the first base that holds it (see [`Located`] and [`Self::walk`]).
+    pub fn locate(&self, rel: &str) -> Result<Located> {
+        let found = self.walk(|_, root| {
+            let path = root.join(rel);
+            Ok(path.is_file().then_some(path))
+        })?;
+        Ok(match found {
+            None => Located::Missing,
+            Some((Base::Here, path)) => Located::Here(path),
+            Some((Base::Main(root), path)) => Located::Main { root, path },
+            Some((Base::Code(_), path)) => Located::Code(path),
         })
     }
 
     pub fn locate_entry(&self, rel: &str) -> Result<LocatedEntry> {
-        let here = self.project.root.join(rel);
-        match std::fs::metadata(&here) {
-            Ok(meta) => {
-                return Ok(if meta.is_file() || meta.is_dir() {
-                    LocatedEntry::Here(here)
-                } else {
-                    LocatedEntry::Special(here)
-                });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        if let Some(root) = self.main_root()? {
+        let found = self.walk(|_, root| {
             let path = root.join(rel);
             match std::fs::metadata(&path) {
-                Ok(meta) => {
-                    return Ok(if meta.is_file() || meta.is_dir() {
-                        LocatedEntry::Main {
-                            root: root.clone(),
-                            path,
-                        }
-                    } else {
-                        LocatedEntry::Special(path)
-                    });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
+                Ok(meta) => Ok(Some((path, meta.is_file() || meta.is_dir()))),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error.into()),
             }
-        }
-        Ok(LocatedEntry::Missing)
+        })?;
+        Ok(match found {
+            None => LocatedEntry::Missing,
+            Some((_, (path, false))) => LocatedEntry::Special(path),
+            Some((Base::Here, (path, true))) => LocatedEntry::Here(path),
+            Some((Base::Main(root), (path, true))) => LocatedEntry::Main { root, path },
+            Some((Base::Code(_), (path, true))) => LocatedEntry::Code(path),
+        })
     }
 
     /// The file `rel` is read from, noting a main-checkout copy for [`Self::take_warnings`].
     fn find(&self, kind: DocKind, rel: &str) -> Result<Option<PathBuf>> {
         Ok(match self.locate(rel)? {
-            Located::Here(path) => Some(path),
+            Located::Here(path) | Located::Code(path) => Some(path),
             Located::Main { root, path } => {
                 self.note_main(kind, rel, &root);
                 Some(path)
@@ -290,14 +320,15 @@ impl<'a> Resolver<'a> {
             return Ok(name_or_path.to_string());
         }
 
-        let mut matches = doc_matches(&self.project.root, dirs, name_or_path)?;
-        let mut main = None;
-        if matches.is_empty()
-            && let Some(root) = self.main_root()?
-        {
-            matches = doc_matches(root, dirs, name_or_path)?;
-            main = Some(root);
-        }
+        let found = self.walk(|_, root| {
+            let matches = doc_matches(root, dirs, name_or_path)?;
+            Ok((!matches.is_empty()).then_some(matches))
+        })?;
+        let (mut matches, main) = match found {
+            None => (Vec::new(), None),
+            Some((Base::Main(root), matches)) => (matches, Some(root)),
+            Some((_, matches)) => (matches, None),
+        };
         match matches.len() {
             0 => Err(Error::DocNotFound(format!(
                 "no {} matching {name_or_path:?} under {}/{}",
@@ -308,7 +339,7 @@ impl<'a> Resolver<'a> {
             1 => {
                 let found = matches.remove(0);
                 if let Some(root) = main {
-                    self.note_main(kind, &found, root);
+                    self.note_main(kind, &found, &root);
                 }
                 Ok(found)
             }
@@ -333,8 +364,11 @@ impl<'a> Resolver<'a> {
             let path = match self.find(kind, value)? {
                 Some(path) => path,
                 None => match self.locate_entry(value)? {
-                    LocatedEntry::Special(path) => path,
-                    _ => self.project.root.join(value),
+                    LocatedEntry::Here(path)
+                    | LocatedEntry::Main { path, .. }
+                    | LocatedEntry::Code(path)
+                    | LocatedEntry::Special(path) => path,
+                    LocatedEntry::Missing => self.project.doc_path(value),
                 },
             };
             refuse_special(&path)?;
@@ -541,7 +575,7 @@ impl<'a> Resolver<'a> {
         }
         let path = self
             .find(kind, rel)?
-            .unwrap_or_else(|| self.project.root.join(rel));
+            .unwrap_or_else(|| self.project.doc_path(rel));
         Ok(path.display().to_string())
     }
 }
@@ -586,10 +620,10 @@ pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
 /// opener makes malformed config or a registry/config prefix mismatch a config error.
 pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
     let id = &registry.canonical_id(id);
-    let Some(root) = registry.project_root(&id.prefix) else {
+    let Some(dir) = crate::scope::config_dir(registry, &id.prefix) else {
         return Ok(None);
     };
-    if !crate::scope::has_config(root)? {
+    if !crate::scope::has_config(&dir)? {
         return Ok(None);
     }
     let project =
@@ -601,10 +635,10 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
 /// `resolve_registered`: an unregistered prefix or a missing root or config is `Ok(None)`.
 pub fn registered_color(registry: &Registry, prefix: &str) -> Result<Option<crate::palette::Rgb>> {
     let prefix = registry.canonical_prefix(prefix);
-    let Some(root) = registry.project_root(prefix) else {
+    let Some(dir) = crate::scope::config_dir(registry, prefix) else {
         return Ok(None);
     };
-    if !crate::scope::has_config(root)? {
+    if !crate::scope::has_config(&dir)? {
         return Ok(None);
     }
     let project = crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;

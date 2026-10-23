@@ -89,6 +89,17 @@ fn record_cycle(
 }
 
 pub fn run(ctx: Ctx) -> Result<Output> {
+    // A code tree whose index still holds the config is on the pre-move side of the
+    // migration: the walk missed it only because the working tree lost it.
+    if ctx.project.kind == crate::repo::Kind::Detached
+        && let Some(top) = &ctx.project.worktree
+        && crate::link::config_in_index(top)?
+    {
+        return Err(crate::link::records_moved(
+            &ctx.project.prefix,
+            &ctx.project.records,
+        ));
+    }
     let pending: Vec<_> = crate::moving::journal::Journal::pending()?
         .into_iter()
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
@@ -110,14 +121,11 @@ pub fn run(ctx: Ctx) -> Result<Output> {
             false
         }
     };
-    let authority = ctx
-        .registry
-        .project_root(&ctx.project.prefix)
-        .unwrap_or(&ctx.project.root)
-        .to_path_buf();
+    let authority = crate::scope::config_dir(&ctx.registry, &ctx.project.prefix)
+        .unwrap_or_else(|| ctx.project.records.clone());
     // A retired project takes no writes, so the record cannot be closed as it stands;
     // a worktree's open copy is a stale branch of work the retirement already closed.
-    let way_out = if authority == ctx.project.root {
+    let way_out = if authority == ctx.project.records {
         "run `tasks unretire`, close it, then retire again".to_string()
     } else {
         format!(
@@ -151,9 +159,8 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         errors.push(finding(None, file, "parse", error.to_string()));
     }
 
-    if let Some(checkout) = &ctx.project.checkout
-        && !checkout.is_dir()
-    {
+    let checkout = &ctx.project.checkout;
+    if ctx.project.kind != crate::repo::Kind::InTree && !checkout.is_dir() {
         warnings.push(finding(
             None,
             crate::repo::CONFIG_REL.into(),
@@ -216,10 +223,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 None => Counterpart::Missing,
             });
         }
-        let Some(root) = ctx.registry.project_root(&id.prefix) else {
-            return Ok(Counterpart::Unreachable);
-        };
-        if !crate::scope::is_reachable(root)? {
+        if !crate::scope::is_reachable(&ctx.registry, &id.prefix)? {
             return Ok(Counterpart::Unreachable);
         }
         Ok(match foreign(&id) {
@@ -650,7 +654,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     continue;
                 }
                 match resolver.locate(path)? {
-                    Located::Here(_) => {}
+                    Located::Here(_) | Located::Code(_) => {}
                     Located::Main { root, .. } => warnings.push(finding(
                         Some(task),
                         file.clone(),

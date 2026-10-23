@@ -44,8 +44,12 @@ pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)
 /// read is listed with its error instead of failing the caller.
 pub fn owners(registry: &Registry) -> Vec<(String, std::result::Result<String, String>)> {
     let mut found = Vec::new();
-    for (prefix, root) in &registry.projects {
-        match crate::scope::is_reachable(root) {
+    let dirs = registry
+        .projects
+        .keys()
+        .filter_map(|prefix| crate::scope::config_dir(registry, prefix).map(|dir| (prefix, dir)));
+    for (prefix, dir) in dirs {
+        match crate::scope::is_reachable(registry, prefix) {
             Ok(true) => {}
             Ok(false) => continue,
             // An I/O error (e.g. permissions) is not "unreachable": it is named, not
@@ -55,7 +59,7 @@ pub fn owners(registry: &Registry) -> Vec<(String, std::result::Result<String, S
                 continue;
             }
         }
-        match Project::open(root) {
+        match Project::open(&dir) {
             Ok(project) => {
                 if project.retired.is_some() {
                     continue;

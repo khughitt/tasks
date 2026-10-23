@@ -1,9 +1,11 @@
 //! Linked checkouts: a path's git facts and the registered project whose `[checkout]`
-//! names its repository (ops docs/specs/2026-10-01-linked-checkouts-design.md §4.1).
+//! names its repository (ops docs/specs/2026-10-01-linked-checkouts-design.md §4.1), and
+//! the detached project whose registered root is that repository's main checkout
+//! (records-detached spec §3.2).
 
 use crate::error::{Error, Result};
 use crate::registry::Registry;
-use crate::repo::Project;
+use crate::repo::{Kind, Project};
 use std::path::{Path, PathBuf};
 
 /// A path git printed, kept as the bytes git wrote: a path need not be UTF-8, and a lossy
@@ -246,8 +248,79 @@ fn obstruction(marker: &Path, metadata: &std::fs::Metadata) -> String {
     }
 }
 
-/// The registered project whose `[checkout]` is `tree`'s main checkout. Two such projects
-/// are `checkout_conflict`. Opened with `worktree` set to `tree`'s top level.
+/// Spec §3.2 step 2: the project registered at `tree`'s main checkout (compared
+/// canonically), when `[records]` pairs it, opened from its records directory with
+/// `worktree` set to `tree`'s top level. A registered root that holds a config is an
+/// in-tree project reached from a worktree without the file, `Ok(None)` as before; one
+/// with neither a config nor a pairing is `records_unpaired`.
+pub fn paired_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
+    let Some(main) = tree.main_checkout() else {
+        return Ok(None);
+    };
+    for (prefix, root) in &registry.projects {
+        if crate::rename::root_identity(root)? != main {
+            continue;
+        }
+        if registry.records_dir(prefix).is_some() {
+            let mut project =
+                crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;
+            project.worktree = Some(tree.top.clone());
+            return Ok(Some(project));
+        }
+        if crate::scope::has_config(root)? {
+            return Ok(None);
+        }
+        return Err(records_unpaired(prefix, root));
+    }
+    Ok(None)
+}
+
+/// Spec §3.2: a registered root that holds no config while `[records]` pairs the prefix
+/// with nothing (the second host between the sync and its own `init --records`). Never
+/// opened as anything; the remedy that pairs it comes first, then the one for a root that
+/// truly keeps no records anywhere.
+pub fn records_unpaired(prefix: &str, root: &Path) -> Error {
+    Error::RecordsUnpaired(format!(
+        "{prefix} is registered at {}, which holds no {CONFIG_PATH} and is paired with no \
+         records directory; pair it with `tasks init --prefix {prefix} --records \
+         <records-root>` run there, or, if {prefix} keeps no records anywhere yet, run \
+         `tasks init --prefix {prefix}` there",
+        root.display()
+    ))
+}
+
+/// The project a code tree without a config of its own belongs to: the detached project
+/// paired with its main checkout, else the linked project declaring it.
+pub fn project_of_tree(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
+    match paired_project(registry, tree)? {
+        Some(project) => Ok(Some(project)),
+        None => linked_project(registry, tree),
+    }
+}
+
+/// The `records_moved` refusal for `prefix`, whose records live at `dir`.
+pub fn records_moved(prefix: &str, dir: &Path) -> Error {
+    Error::RecordsMoved(format!(
+        "{prefix}'s records live at {}; this tree's tasks/ is read-only history: rebase or \
+         merge the branch onto the main branch",
+        dir.display()
+    ))
+}
+
+/// Spec §3.3: an in-tree config whose prefix `[records]` pairs with another directory is
+/// a branch that predates the detach. Its `tasks/` is history, never written.
+pub fn refuse_moved(registry: &Registry, project: &Project) -> Result<()> {
+    if project.kind != Kind::InTree {
+        return Ok(());
+    }
+    match registry.records_dir(&project.prefix) {
+        Some(dir) if dir != project.records => Err(records_moved(&project.prefix, dir)),
+        _ => Ok(()),
+    }
+}
+
+/// The registered linked project whose `[checkout]` is `tree`'s main checkout. Two such
+/// projects are `checkout_conflict`. Opened with `worktree` set to `tree`'s top level.
 pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
     let Some(main) = tree.main_checkout() else {
         return Ok(None);
@@ -255,7 +328,7 @@ pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
     let matches: Vec<_> = crate::locations::scan_checkouts(registry)
         .strict()?
         .into_iter()
-        .filter(|linked| linked.checkout == main)
+        .filter(|linked| linked.kind == Kind::Linked && linked.checkout == main)
         .collect();
     match matches.as_slice() {
         [] => Ok(None),
@@ -277,21 +350,26 @@ pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
 }
 
 /// Linked-checkouts decision 5 and §8.1: the repository holding `tree` keeps our records
-/// when a registered project's root is in it (the same common git directory), or its top
-/// level holds a `tasks/.config.toml` tracked in `HEAD` as a regular file. Only roots
-/// inside one of the repository's working trees can share its common directory, so git
-/// runs only for those.
+/// when a registered project's config directory (`scope::config_dir`: a detached
+/// project's records directory, else its root) is in it (the same common git directory),
+/// or its top level holds a `tasks/.config.toml` tracked in `HEAD` as a regular file. Only
+/// directories inside one of the repository's working trees can share its common
+/// directory, so git runs only for those.
 pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
     let worktrees = tree.worktrees()?;
-    for root in registry.projects.values() {
-        if !root.try_exists()? {
+    let dirs = registry
+        .projects
+        .keys()
+        .filter_map(|prefix| crate::scope::config_dir(registry, prefix));
+    for dir in dirs {
+        if !dir.try_exists()? {
             continue;
         }
-        let root = root.canonicalize()?;
-        if !worktrees.iter().any(|worktree| root.starts_with(worktree)) {
+        let dir = dir.canonicalize()?;
+        if !worktrees.iter().any(|worktree| dir.starts_with(worktree)) {
             continue;
         }
-        if GitTree::of(&root)?.is_some_and(|theirs| theirs.common == tree.common) {
+        if GitTree::of(&dir)?.is_some_and(|theirs| theirs.common == tree.common) {
             return Ok(true);
         }
     }
@@ -337,6 +415,26 @@ fn tracked_config(top: &Path) -> Result<bool> {
 }
 
 const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
+
+/// `tasks/.config.toml` is in the index at `top` (records-detached spec §5.1): `git
+/// ls-files --cached` names it. A staged deletion takes it out, whatever `HEAD` tracks. A
+/// failing git run is an `io` error, never "absent".
+pub fn config_in_index(top: &Path) -> Result<bool> {
+    let listed = std::process::Command::new("git")
+        .arg("-C")
+        .arg(top)
+        .args(["ls-files", "-z", "--cached", "--", CONFIG_PATH])
+        .env("LC_ALL", "C")
+        .output()?;
+    if !listed.status.success() {
+        return Err(Error::Io(format!(
+            "git ls-files in {} failed: {}",
+            top.display(),
+            String::from_utf8_lossy(&listed.stderr).trim()
+        )));
+    }
+    Ok(!listed.stdout.is_empty())
+}
 
 /// `HEAD` names a branch that does not exist yet, and nothing is wrong: `symbolic-ref`
 /// resolves `HEAD` to a ref name, and `for-each-ref` on that name lists nothing and says

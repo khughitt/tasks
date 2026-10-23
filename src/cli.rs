@@ -397,6 +397,10 @@ pub enum Command {
         /// checkout. Records stay here; nothing is written there.
         #[arg(long, value_name = "PATH")]
         checkout: Option<PathBuf>,
+        /// Keep this checkout's records at <PATH>/<prefix> (a records root kept elsewhere);
+        /// registers the pairing and writes nothing here.
+        #[arg(long, value_name = "PATH", conflicts_with = "checkout")]
+        records: Option<PathBuf>,
         /// Re-point the prefix at this directory even if it is registered elsewhere.
         #[arg(long)]
         force: bool,

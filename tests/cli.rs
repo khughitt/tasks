@@ -3476,10 +3476,11 @@ fn project_scope_reports_an_unusable_prefix_as_config() {
     std::fs::write(fam.join("tasks/.config.toml"), "prefix = \"nope\"\n").unwrap();
     assert_eq!(env.fail(&sci, &["list", "--project", "fam"]), "config");
 
+    // An existing root with no config and no records pairing (records-detached §3.2).
     std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
     assert_eq!(
         env.fail(&sci, &["list", "--project", "fam"]),
-        "config",
+        "records_unpaired",
         "unreachable is a warning registry-wide, but an error when named"
     );
 }
@@ -6573,7 +6574,7 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
                 "gap"
             ]
         ),
-        "config"
+        "records_unpaired"
     );
     assert!(
         std::fs::read_dir(target.join("tasks"))
@@ -13851,18 +13852,18 @@ fn completion_is_silent_when_anything_is_wrong() {
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
     assert!(out.is_empty(), "{out:?}");
-    // a malformed registry does not disable the local project: it is opened by walking
-    // up from the effective directory, not through the registry, so its ids are still
-    // offered even though the registry itself cannot be read
+    // a malformed registry: `locate` reads the registry on every walk hit (an in-tree
+    // config may be a pre-detach branch, records-detached spec §3.2), so the local
+    // project does not open and completion stays silent rather than failing
     std::fs::write(
         env.home.path().join(".config/tasks/projects.toml"),
         "not toml = [",
     )
     .unwrap();
-    assert_eq!(
-        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
-        [fine.as_str()],
-        "a malformed registry must not disable the local project"
+    assert!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""])
+            .is_empty(),
+        "a malformed registry leaves the menu empty"
     );
 }
 

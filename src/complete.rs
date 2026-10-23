@@ -444,8 +444,7 @@ fn offers(id: &TaskId, current: &str, local: Option<&str>) -> Vec<String> {
 
 /// A registered project, if the registry knows it and it is reachable.
 fn open_prefix(registry: &Registry, prefix: &str) -> Option<Project> {
-    let root = registry.project_root(prefix)?;
-    if !crate::scope::is_reachable(root).unwrap_or(false) {
+    if !crate::scope::is_reachable(registry, prefix).unwrap_or(false) {
         return None;
     }
     crate::scope::open_registered(registry, prefix, Origin::Prefix).ok()

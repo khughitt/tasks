@@ -69,7 +69,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     )?;
     validate_destination_docs(&ctx.target, &ctx.registry, &target, id)?;
     validate_record(&ctx.target, &ctx.registry, &target)?;
-    let destination = commands::open_ctx(Some(&ctx.target.root))?;
+    let destination = commands::open_ctx(Some(&ctx.target.records))?;
     commands::dep::ensure_acyclic(&destination, &target)?;
     for other in ctx.target.scan()? {
         let why = if other
@@ -192,7 +192,7 @@ fn validate_destination_docs(
             continue;
         };
         match resolver.locate_entry(path)? {
-            LocatedEntry::Here(_) | LocatedEntry::Main { .. } => {}
+            LocatedEntry::Here(_) | LocatedEntry::Main { .. } | LocatedEntry::Code(_) => {}
             LocatedEntry::Missing => {
                 return Err(Error::Validation(format!(
                     "{source}: reference {} {} does not exist in {}; run `tasks edit {source} --rm-ref {}` or create it there",

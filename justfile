@@ -16,7 +16,7 @@ tt := "python3 tools/tt"
 # This is a single Rust crate, so there is no affected-only selection; the two grains
 # it does have are the ones the baseline showed being used. `test-one` accepts runner
 # arguments; `test-fast` runs the fixed non-ignored set: the exhaustive rename::classify
-# enumeration alone costs ~7 s in debug. `test` runs everything, ignored included.
+# enumeration alone costs ~17 s in debug. `test` runs everything, ignored included.
 #
 # Every test command first stops git discovery at the temp directory, so a stray `.git`
 # in $TMPDIR (some host process leaves an empty one) cannot fail the fixtures' temp

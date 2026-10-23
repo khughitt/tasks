@@ -24,6 +24,22 @@ pub(crate) fn root_identity(root: &std::path::Path) -> Result<std::path::PathBuf
     }
 }
 
+/// A records directory compared by identity. One that does not exist (the side of a
+/// detached rename's move that is gone) compares by its parent's identity and its name,
+/// so it still matches the spelling the inventory or the registry recorded.
+pub(crate) fn dir_identity(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    match path.canonicalize() {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match (path.parent(), path.file_name()) {
+                (Some(parent), Some(name)) => Ok(root_identity(parent)?.join(name)),
+                _ => Ok(path.to_path_buf()),
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// The command holds both prefix locks and the registry lock for mutating calls.
 /// Observation is repeated here after lock acquisition; explain needs none of the locks.
 pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> Result<RenameOut> {
@@ -52,17 +68,10 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         Recovery::Complete => "complete",
         Recovery::Refuse(reason) => {
             if !explain {
-                let state = &snapshot.registry;
-                let registry_old = state.old_key.as_ref() == Some(&invocation.root)
-                    && state.new_key.is_none()
-                    && state.alias.is_none();
-                let registry_new = state.old_key.is_none()
-                    && state.new_key.as_ref() == Some(&invocation.root)
-                    && state.alias.as_ref() == Some(&invocation.target);
                 return Err(
                     if registry.aliases.contains_key(&invocation.target)
                         || registry.groups.contains_key(&invocation.target)
-                        || !(registry_old || registry_new)
+                        || !(classify::registry_old(&snapshot) || classify::registry_new(&snapshot))
                     {
                         Error::Config(reason.clone())
                     } else {
@@ -136,7 +145,8 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             )));
         }
     }
-    let project = Project::open(&invocation.root)?;
+    // The files are in the current records directory; `root` is only the identity.
+    let project = Project::open(&invocation.records)?;
     authorize(&project, invocation, &mut out.warnings)?;
     if recovery != Recovery::Fresh {
         // Resumed records may already use the target prefix and skip the file-write pass.
@@ -249,7 +259,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         if stop_after("files") {
             return Ok(out);
         }
-        let config = project.root.join(CONFIG_REL);
+        let config = project.records.join(CONFIG_REL);
         verify_bytes(&config, &inventory.config_from)?;
         let rewritten =
             rewrite_config_prefix(&std::fs::read_to_string(&config)?, &invocation.target)?;
@@ -264,8 +274,36 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             return Ok(out);
         }
     }
+    // The `records` stage (spec §5.4): a plain rename, as every other stage is; git
+    // records it at the user's commit. From here on nothing opens `records_from`.
+    if recovery != Recovery::ResumeCleanup
+        && let (Some(from), Some(to)) = (&inventory.records_from, &inventory.records_to)
+    {
+        match (snapshot::present(from)?, snapshot::present(to)?) {
+            (true, false) => {
+                std::fs::rename(from, to)?;
+                if stop_after("records") {
+                    return Ok(out);
+                }
+            }
+            (false, true) => {}
+            (from_present, to_present) => {
+                return Err(Error::Validation(format!(
+                    "records directories disagree with the inventory: {} {}, {} {}",
+                    from.display(),
+                    if from_present { "exists" } else { "is missing" },
+                    to.display(),
+                    if to_present { "exists" } else { "is missing" },
+                )));
+            }
+        }
+    }
     if recovery != Recovery::ResumeCleanup {
         registry.rename(&invocation.source, &invocation.target)?;
+        // The key moved with `rename`; the value follows the directory, in the same save.
+        if let Some(to) = &inventory.records_to {
+            registry.pair_records(&invocation.target, to);
+        }
         let today = crate::time::day(&crate::time::now()).to_string();
         out.warnings
             .extend(registry.note_root_change(&invocation.target, None, &today)?);

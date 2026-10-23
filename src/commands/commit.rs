@@ -10,7 +10,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     let Some(files) = ctx.project.uncommitted_task_files()? else {
         return Err(Error::Validation(format!(
             "commit_unavailable: {} is not in a git repository (or git is missing)",
-            ctx.project.root.display()
+            ctx.project.records.display()
         )));
     };
     if files.is_empty() {
@@ -22,7 +22,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     }
     let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     let message = format!("chore(tasks): commit {} records", paths.len());
-    let refused = crate::record_commit::commit_paths(&ctx.project.root, &paths, &message);
+    let refused = crate::record_commit::commit_paths(&ctx.project.records, &paths, &message);
     if !refused.is_empty() {
         return Err(Error::Validation(refused.join("\n")));
     }

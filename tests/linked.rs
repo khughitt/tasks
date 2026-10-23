@@ -521,25 +521,30 @@ fn where_answers_linked_in_tree_and_no_project() {
     assert_eq!(linked["project"]["root"], l.nexc.to_str().unwrap());
     assert_eq!(linked["project"]["checkout"], l.code.to_str().unwrap());
     assert_eq!(linked["project"]["linked"], true);
+    assert_eq!(linked["project"]["records"], l.nexc.to_str().unwrap());
+    assert_eq!(linked["project"]["kind"], "linked");
     assert_eq!(
         linked["holds_records"], false,
         "the code repository keeps no records"
     );
     assert_eq!(linked["warnings"], serde_json::json!([]));
 
-    let intree = env.json(&l.nexc, &["where"]);
-    assert_eq!(intree["project"]["linked"], false);
-    assert!(
-        intree["project"]
-            .as_object()
-            .unwrap()
-            .contains_key("checkout")
-    );
-    assert!(intree["project"]["checkout"].is_null());
+    // Reached from its own root, the overlay is still a linked project.
+    let from_root = env.json(&l.nexc, &["where"]);
+    assert_eq!(from_root["project"]["linked"], true);
+    assert_eq!(from_root["project"]["kind"], "linked");
+    assert_eq!(from_root["project"]["checkout"], l.code.to_str().unwrap());
     assert_eq!(
-        intree["holds_records"], true,
+        from_root["holds_records"], true,
         "the overlay holds a registered root"
     );
+
+    let other = project(&env, &l.overlay, "oth", None);
+    let intree = env.json(&other, &["where"]);
+    assert_eq!(intree["project"]["linked"], false);
+    assert_eq!(intree["project"]["checkout"], other.to_str().unwrap());
+    assert_eq!(intree["project"]["records"], other.to_str().unwrap());
+    assert_eq!(intree["project"]["kind"], "in-tree");
 
     let plain = tempfile::tempdir().unwrap();
     let none = env.json(plain.path(), &["where"]);
@@ -1229,7 +1234,7 @@ fn corrupt_head_discovery_errors_without_writing_into_linked_checkouts() {
 }
 
 #[test]
-fn projects_rows_carry_checkout_only_when_linked() {
+fn projects_rows_carry_checkout_records_and_kind_on_every_reachable_row() {
     let env = TestEnv::new();
     let l = layout(&env);
     let other = project(&env, &l.overlay, "oth", None);
@@ -1239,7 +1244,11 @@ fn projects_rows_carry_checkout_only_when_linked() {
         .clone();
     let row = |p: &str| rows.iter().find(|r| r["prefix"] == p).unwrap().clone();
     assert_eq!(row("nexc")["checkout"], l.code.to_str().unwrap());
-    assert!(!row("oth").as_object().unwrap().contains_key("checkout"));
+    assert_eq!(row("nexc")["records"], l.nexc.to_str().unwrap());
+    assert_eq!(row("nexc")["kind"], "linked");
+    assert_eq!(row("oth")["checkout"], row("oth")["root"]);
+    assert_eq!(row("oth")["records"], row("oth")["root"]);
+    assert_eq!(row("oth")["kind"], "in-tree");
 }
 
 #[test]
