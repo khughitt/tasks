@@ -1,15 +1,17 @@
 ---
 id: tasks-9a9ef3
 title: Trim the tasks skill to what tasks --help cannot supply
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:20:53Z
+updated: 2026-10-23T00:20:56Z
 started: 2026-10-22T23:59:31Z
+completed: 2026-10-23T00:20:56Z
+closed: 2026-10-23T00:20:56Z
 depends: []
 parent: tasks-6ed79b
 tags: [skills]
@@ -52,3 +54,7 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-10-23T00:20:50Z (docs/trim-tasks-skill): resumed
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T00:20:53Z (docs/trim-tasks-skill): User approved local merge and activation of the reviewed skill. Implementation files still match reviewed commit 5073517 exactly; resume to close before merge, verify the installed skill after integration, and remove only this task's worktree. No push authorized or planned.
+- 2026-10-23T00:20:56Z (docs/trim-tasks-skill): done
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:20:56Z (docs/trim-tasks-skill): Trimmed skill from 8389 to 7212 words (14.0%) while preserving workflow safeguards; linked precise contracts, passed fresh-agent lifecycle/reference tests, and independent review accepted with no findings. Audit back-fill landed in lore. User approved local activation.
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
