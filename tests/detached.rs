@@ -1676,3 +1676,23 @@ fn rename_without_adopt_after_another_host_renamed_names_adopt() {
     let registry: toml::Value = toml::from_str(&registry_text(&env)).unwrap();
     assert_eq!(registry["records"]["dtx"].as_str(), moved.to_str());
 }
+
+#[test]
+fn a_registered_root_without_config_or_pairing_is_records_unpaired_from_every_entry_point() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    write_registry(
+        &env,
+        &format!("[projects]\ndet = {:?}\n", l.code.display().to_string()),
+    );
+    for args in [
+        &["show", "det-000000"][..],
+        &["list", "--project", "det"][..],
+    ] {
+        let detail = fail_detail(&env, &l.base, args, "records_unpaired");
+        assert!(
+            detail.contains("tasks init --prefix det --records"),
+            "{args:?}: {detail}"
+        );
+    }
+}

@@ -3476,10 +3476,11 @@ fn project_scope_reports_an_unusable_prefix_as_config() {
     std::fs::write(fam.join("tasks/.config.toml"), "prefix = \"nope\"\n").unwrap();
     assert_eq!(env.fail(&sci, &["list", "--project", "fam"]), "config");
 
+    // An existing root with no config and no records pairing (records-detached §3.2).
     std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
     assert_eq!(
         env.fail(&sci, &["list", "--project", "fam"]),
-        "config",
+        "records_unpaired",
         "unreachable is a warning registry-wide, but an error when named"
     );
 }
@@ -6573,7 +6574,7 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
                 "gap"
             ]
         ),
-        "config"
+        "records_unpaired"
     );
     assert!(
         std::fs::read_dir(target.join("tasks"))

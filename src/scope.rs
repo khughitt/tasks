@@ -53,6 +53,14 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
         return Err(fail(format!("no project registered as {prefix:?}")));
     };
     if !has_config(&dir)? {
+        // Nothing at all at the config path of an existing root (a directory there is a
+        // broken config, reported below).
+        if registry.records_dir(live).is_none()
+            && dir.is_dir()
+            && !crate::rename::snapshot::present(&dir.join(CONFIG_REL))?
+        {
+            return Err(crate::link::records_unpaired(live, &dir));
+        }
         let advice = if dir.is_dir() {
             "run `tasks init` there"
         } else if dir.exists() {
@@ -290,18 +298,20 @@ mod tests {
         ));
     }
 
+    /// Records-detached spec §3.2: an existing root with no config and no `[records]` row
+    /// is `records_unpaired` whatever the origin, never "run `tasks init` there" alone.
     #[test]
-    fn missing_config_kind_follows_origin() {
+    fn missing_config_is_records_unpaired_whatever_the_origin() {
         let dir = tempfile::tempdir().unwrap();
         let registry = registry_with("sci", dir.path());
         let id = TaskId::parse("sci-000001").unwrap();
         assert!(matches!(
             open_registered(&registry, "sci", Origin::Id(&id)),
-            Err(Error::UnresolvableId(_))
+            Err(Error::RecordsUnpaired(_))
         ));
         assert!(matches!(
             open_registered(&registry, "sci", Origin::Prefix),
-            Err(Error::Config(_))
+            Err(Error::RecordsUnpaired(_))
         ));
     }
 

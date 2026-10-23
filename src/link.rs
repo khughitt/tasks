@@ -270,14 +270,23 @@ pub fn paired_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
         if crate::scope::has_config(root)? {
             return Ok(None);
         }
-        return Err(Error::RecordsUnpaired(format!(
-            "{prefix} is registered at {}, which holds no {CONFIG_PATH} and is paired with no \
-             records directory; pair it with `tasks init --prefix {prefix} --records \
-             <records-root>`",
-            root.display()
-        )));
+        return Err(records_unpaired(prefix, root));
     }
     Ok(None)
+}
+
+/// Spec §3.2: a registered root that holds no config while `[records]` pairs the prefix
+/// with nothing (the second host between the sync and its own `init --records`). Never
+/// opened as anything; the remedy that pairs it comes first, then the one for a root that
+/// truly keeps no records anywhere.
+pub fn records_unpaired(prefix: &str, root: &Path) -> Error {
+    Error::RecordsUnpaired(format!(
+        "{prefix} is registered at {}, which holds no {CONFIG_PATH} and is paired with no \
+         records directory; pair it with `tasks init --prefix {prefix} --records \
+         <records-root>` run there, or, if {prefix} keeps no records anywhere yet, run \
+         `tasks init --prefix {prefix}` there",
+        root.display()
+    ))
 }
 
 /// The project a code tree without a config of its own belongs to: the detached project
