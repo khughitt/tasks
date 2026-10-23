@@ -1,15 +1,17 @@
 ---
 id: tasks-10385f
 title: "Keep inherited GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE out of the git the binary runs for a detached project's records repository"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: fix/tasks-10385f-git-selectors
 created: 2026-10-23T01:04:39Z
-updated: 2026-10-23T11:34:53Z
+updated: 2026-10-23T11:34:58Z
 started: 2026-10-23T11:17:47Z
+completed: 2026-10-23T11:34:58Z
+closed: 2026-10-23T11:34:58Z
 depends: []
 tags: []
 source: tasks-211e28
@@ -36,3 +38,7 @@ Raised by the final review of docs/plans/2026-10-22-records-detached.md (decline
 - 2026-10-23T11:34:42Z (fix/tasks-10385f-git-selectors): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-23T11:34:47Z (fix/tasks-10385f-git-selectors): attached: migration-index-round-2-report.md (2337 bytes): Fresh scoped review of 6e1492a by codex/gpt-6.1-sol: narrowed migration-index exception accepted with no findings.
 - 2026-10-23T11:34:53Z (fix/tasks-10385f-git-selectors): Ruling on review round 2, revision 6e1492a: keep broader Git environment overrides outside this change. Why: the scoped correction concerns repository/index selection; the whole-branch round 1 and this scoped re-review together cover the implementation. Cost: object-store/configuration overrides remain effective, as recorded for round 1. No minor findings were deferred in either review.
+- 2026-10-23T11:34:58Z (fix/tasks-10385f-git-selectors): done
+  provenance: {"harness_session":"codex:01a16873-670b-76a1-af8d-052e18860638","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T11:34:58Z (fix/tasks-10385f-git-selectors): Isolated repository-targeted Git calls from inherited hook selectors, preserved only explicit code-hook indexes in migration guards, and proved record commits/status/discovery/stale-copy checks with RED-to-GREEN regressions. Final fast suite: 1659 passed, 4 existing ignored; checks passed; independent whole-branch and fresh corrective reviews accepted 92b1c96 and 6e1492a.
+  provenance: {"harness_session":"codex:01a16873-670b-76a1-af8d-052e18860638","harness_session_source":"CODEX_THREAD_ID"}
