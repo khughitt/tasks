@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:20:56Z
+updated: 2026-10-23T00:21:59Z
 started: 2026-10-22T23:59:31Z
 completed: 2026-10-23T00:20:56Z
 closed: 2026-10-23T00:20:56Z
@@ -58,3 +58,4 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T00:20:56Z (docs/trim-tasks-skill): Trimmed skill from 8389 to 7212 words (14.0%) while preserving workflow safeguards; linked precise contracts, passed fresh-agent lifecycle/reference tests, and independent review accepted with no findings. Audit back-fill landed in lore. User approved local activation.
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:21:59Z (main): Activated by approved local merge ae61da8. Post-merge just test-fast passed 1606 tests (25.384 s), just check passed (13.179 s), and the globally installed skill matches reviewed SHA256 b0885cbd69523decc9eba32d9cb8fcd0735ee7d808784b83ee58cfd5e3965544 with all 11 links/fragments resolving. Task is done, with no claim or park. Cleanup: only ignored target/ is regenerable; review attachment exists in main and matches its canonical copy, raw forward-report hash still matches, no plan workspace or host pointer targets this worktree, and timings are harvested before removal. No push.
