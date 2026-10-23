@@ -959,9 +959,17 @@ verification, and code review. If direct work outgrows its scope or exposes an
 unresolved design decision, note the evidence and reassess it to planned.
 
 Both code paths commit the task record before they reuse an isolated task worktree or
-create one with `git worktree add` under `.worktrees/`. They then run `just setup` when
-defined, otherwise only the root guide's explicit setup command; they never guess an
-installer. Planned work creates the worktree before the spec. Read-only investigation and
+create one with `git worktree add` under `.worktrees/`. Immediately after creation,
+they hydrate from the first declared source: `just setup` when the justfile defines it;
+else the setup command the root guide names, or one its README or CONTRIBUTING names
+that writes only inside the worktree; else the frozen install of a lockfile that names
+its package manager and installs inside the worktree (`package-lock.json`: `npm ci`;
+`uv.lock`: `uv sync --frozen`). A bare manifest (`pyproject.toml`, `package.json` or
+`requirements.txt` without a lockfile), or a lockfile whose install can leave the
+worktree (Poetry's default cache environment), declares no usable installer: never
+guess one, and report the missing setup route before the first commit. Hydration
+precedes that commit. A checkout that declares no dependencies needs no setup.
+Planned work creates the worktree before the spec. Read-only investigation and
 task-record maintenance alone need no new worktree, and explicit user overrides win. This
 is instruction policy; the CLI does not launch skills, create worktrees, or require
 process on `start`. Scoping chooses process with size/complexity; curation can fill

@@ -1,15 +1,17 @@
 ---
 id: tasks-dd78a5
 title: "The tasks skill's worktree setup sentence (just setup, otherwise only the root guide's explicit command) is narrower than the global instructions' setup order, which also allows a README/CONTRIBUTING command that writes only inside the worktree and a lockfile's frozen worktree-local install, reports a bare manifest before the first commit, and requires hydration before the first commit; align the skill with that order"
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T00:44:22Z
+updated: 2026-10-23T01:03:48Z
 started: 2026-10-23T00:44:22Z
+completed: 2026-10-23T01:03:48Z
+closed: 2026-10-23T01:03:48Z
 depends: []
 tags: [feedback, gap, "from:lore"]
 agent: claude-code/claude-opus-5-5
@@ -30,4 +32,21 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 - 2026-10-17T17:50:15Z (main): scope: scoped; narrow sentence traced to tasks-63742b (2026-09-15) predating the global order; copies at skills/tasks/SKILL.md:348, AGENTS.md:41, docs/specs/2026-08-29-tasks-design.md:963; doc-only alignment
 - 2026-10-23T00:31:05Z (main): Follow-up check after tasks-9a9ef3: the seven-area trim deliberately left Process and workspace setup policy unchanged. The narrow root-guide-only sentence remains; this existing task is the appropriate next fix, not a new concern against the completed trim.
 - 2026-10-23T00:44:22Z (main): started
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:44:59Z (docs/tasks-dd78a5): resumed
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:45:00Z (docs/tasks-dd78a5): Direct documentation alignment in three scoped paths; no CLI or runtime changes. Setup audit: no just setup or declared worktree-local installer; documented cargo install writes outside the worktree. Reporting missing setup route before the first worktree commit; baseline uses the declared just test route without guessing an installer.
+- 2026-10-23T00:46:07Z (docs/tasks-dd78a5): Reference-skill baseline: fresh read-only agent using current skill selected just setup and root-guide commands, but found no README/CONTRIBUTING fallback, lockfile installs, no-dependencies exemption, hydration-before-commit deadline, or missing-route reporting deadline.
+- 2026-10-23T00:46:51Z (docs/tasks-dd78a5): Baseline: just test passed, 1710 tests, zero failures (full suite including ignored exhaustive enumeration); completed before documentation edits.
+- 2026-10-23T00:49:54Z (docs/tasks-dd78a5): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-23T00:49:56Z (docs/tasks-dd78a5): Verification: just check passed after formatting generic AGENTS.md examples as plain text per ops-check; just test-fast passed 1706 tests, zero failures, four ignored; eight updated reference-skill application cases passed; no obsolete only-the-root-guide wording in scoped paths; git diff --check passed. Hygiene friction filed as ops-dc540e.
+- 2026-10-23T00:49:58Z (docs/tasks-dd78a5): Ruling: accept final reviewer scope exclusions at base 44f861c96eafadbbd66ffa73bf2a2056e367d690 plus reviewed three-document diff. Leave README adoption snippet unchanged. Why: it adopts the complete skill policy and does not prohibit other setup sources. Cost: its abbreviated reminder remains. Leave runtime and tests unchanged. Why: documentation-only alignment. Cost: installer commands were checked as instructions, not executed.
+- 2026-10-23T00:50:11Z (docs/tasks-dd78a5): parked (waiting on user, approval): User approves local merge of reviewed documentation commit 15c2f98 on docs/tasks-dd78a5 because the installed tasks skill points to main; then agent resumes, marks done on the task branch, merges locally, and cleans up the worktree.
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T01:03:26Z (docs/tasks-dd78a5): resumed
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T01:03:46Z (docs/tasks-dd78a5): User approved local merge and live skill activation. Main advanced through detached-records integration, but none of the three reviewed documentation paths changed since this task branched.
+- 2026-10-23T01:03:48Z (docs/tasks-dd78a5): done
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T01:03:48Z (docs/tasks-dd78a5): Aligned skill, agent guide, and current design spec with the declared hydration order and deadlines; reviewed with no findings and verified by full baseline, fast suite, and just check. User approved local merge.
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
