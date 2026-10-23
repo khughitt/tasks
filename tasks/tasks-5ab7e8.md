@@ -4,8 +4,9 @@ title: "Migrate a project's open tasks to its successor: a triage view and a bul
 status: idea
 priority: 3
 created: 2026-10-23T00:10:51Z
-updated: 2026-10-23T00:10:51Z
+updated: 2026-10-23T10:59:25Z
 depends: []
+parent: tasks-a7460c
 tags: []
 source: "forge-0e720e, 2026-10-22"
 agent: claude-code
