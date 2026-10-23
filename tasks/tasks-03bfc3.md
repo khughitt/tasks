@@ -1,15 +1,17 @@
 ---
 id: tasks-03bfc3
 title: "Restructure README into quick start, concepts, and reference"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: readme-restructure
 created: 2026-09-19T13:13:54Z
-updated: 2026-10-23T01:04:08Z
+updated: 2026-10-23T01:13:36Z
 started: 2026-10-23T01:03:54Z
+completed: 2026-10-23T01:13:36Z
+closed: 2026-10-23T01:13:36Z
 depends: []
 parent: tasks-6ed79b
 tags: [docs]
@@ -36,4 +38,8 @@ Where to look: README.md, skills/tasks/SKILL.md, the design links already in REA
 - 2026-10-23T01:03:54Z (main): started
   provenance: {"harness_session":"claude-code:915d6bb9-2a85-4261-8f71-92733dd9bdcb","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-23T01:04:08Z (readme-restructure): resumed
+  provenance: {"harness_session":"claude-code:915d6bb9-2a85-4261-8f71-92733dd9bdcb","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T01:13:36Z (readme-restructure): done
+  provenance: {"harness_session":"claude-code:915d6bb9-2a85-4261-8f71-92733dd9bdcb","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T01:13:36Z (readme-restructure): README reorganized into quick start (install, init, adoption snippet, session loop), concepts (statuses, goals/lanes/dependencies, process, parks, claims, session envelope) and per-feature reference; paragraphs carried verbatim, nine skill-linked anchors preserved, quick-start walk passes tasks check (61cb3f5)
   provenance: {"harness_session":"claude-code:915d6bb9-2a85-4261-8f71-92733dd9bdcb","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
