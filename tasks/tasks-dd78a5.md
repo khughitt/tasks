@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T00:46:51Z
+updated: 2026-10-23T00:49:54Z
 started: 2026-10-23T00:44:22Z
 depends: []
 tags: [feedback, gap, "from:lore"]
@@ -36,3 +36,4 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 - 2026-10-23T00:45:00Z (docs/tasks-dd78a5): Direct documentation alignment in three scoped paths; no CLI or runtime changes. Setup audit: no just setup or declared worktree-local installer; documented cargo install writes outside the worktree. Reporting missing setup route before the first worktree commit; baseline uses the declared just test route without guessing an installer.
 - 2026-10-23T00:46:07Z (docs/tasks-dd78a5): Reference-skill baseline: fresh read-only agent using current skill selected just setup and root-guide commands, but found no README/CONTRIBUTING fallback, lockfile installs, no-dependencies exemption, hydration-before-commit deadline, or missing-route reporting deadline.
 - 2026-10-23T00:46:51Z (docs/tasks-dd78a5): Baseline: just test passed, 1710 tests, zero failures (full suite including ignored exhaustive enumeration); completed before documentation edits.
+- 2026-10-23T00:49:54Z (docs/tasks-dd78a5): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
