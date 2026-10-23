@@ -1,15 +1,17 @@
 ---
 id: tasks-dd78a5
 title: "The tasks skill's worktree setup sentence (just setup, otherwise only the root guide's explicit command) is narrower than the global instructions' setup order, which also allows a README/CONTRIBUTING command that writes only inside the worktree and a lockfile's frozen worktree-local install, reports a bare manifest before the first commit, and requires hydration before the first commit; align the skill with that order"
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T01:03:46Z
+updated: 2026-10-23T01:03:48Z
 started: 2026-10-23T00:44:22Z
+completed: 2026-10-23T01:03:48Z
+closed: 2026-10-23T01:03:48Z
 depends: []
 tags: [feedback, gap, "from:lore"]
 agent: claude-code/claude-opus-5-5
@@ -44,3 +46,7 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 - 2026-10-23T01:03:26Z (docs/tasks-dd78a5): resumed
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T01:03:46Z (docs/tasks-dd78a5): User approved local merge and live skill activation. Main advanced through detached-records integration, but none of the three reviewed documentation paths changed since this task branched.
+- 2026-10-23T01:03:48Z (docs/tasks-dd78a5): done
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T01:03:48Z (docs/tasks-dd78a5): Aligned skill, agent guide, and current design spec with the declared hydration order and deadlines; reviewed with no findings and verified by full baseline, fast suite, and just check. User approved local merge.
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
