@@ -819,11 +819,7 @@ impl Project {
     }
 
     fn git(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
-        std::process::Command::new("git")
-            .args(args)
-            .env("LC_ALL", "C")
-            .current_dir(&self.records)
-            .output()
+        crate::git::at(&self.records).args(args).output()
     }
 
     /// git's own repository discovery from this project's root, canonicalized. `None` in

@@ -842,7 +842,7 @@ fn a_repository_above_a_git_ceiling_is_no_project() {
         assert!(found["project"].is_null(), "{ceiling}: {found}");
     }
 
-    // An explicit GIT_DIR is not discovery: a ceiling does not excuse git rejecting it.
+    // A hook's repository selector cannot override discovery from the requested path.
     let missing = base.join("missing-git-dir");
     let out = env
         .cmd(&child)
@@ -851,8 +851,9 @@ fn a_repository_above_a_git_ceiling_is_no_project() {
         .env("GIT_DIR", &missing)
         .output()
         .unwrap();
-    let detail = io_error(&out);
-    assert!(detail.contains(missing.to_str().unwrap()), "{detail}");
+    assert!(out.status.success(), "{out:?}");
+    let found: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(found["project"].is_null(), "{found}");
 }
 
 #[test]
@@ -920,7 +921,7 @@ fn a_marker_below_a_git_ceiling_is_still_named() {
 }
 
 #[test]
-fn a_git_dir_override_is_not_blamed_on_a_healthy_dot_git() {
+fn a_git_dir_override_does_not_redirect_path_discovery() {
     let env = TestEnv::new();
     let l = layout(&env);
     let missing = l.base.join("missing-git-dir");
@@ -930,9 +931,9 @@ fn a_git_dir_override_is_not_blamed_on_a_healthy_dot_git() {
         .env("GIT_DIR", &missing)
         .output()
         .unwrap();
-    let detail = io_error(&out);
-    assert!(detail.contains(missing.to_str().unwrap()), "{detail}");
-    assert!(!detail.contains("the nearest .git"), "{detail}");
+    assert!(out.status.success(), "{out:?}");
+    let found: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(found["project"]["prefix"], "nexc", "{found}");
 }
 
 #[test]

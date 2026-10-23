@@ -985,6 +985,11 @@ reference document kept in the code tree still links and `check` does not warn
 `ref_in_main_checkout` for it. `check` warns `checkout_missing` when the code checkout
 is absent on this host, for detached and linked projects alike.
 
+Git queries and record commits select their repository by path, ignoring inherited
+`GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` from a calling hook.
+The migration guard's code-index check keeps the hook's index, so a staged removal
+is judged against the index being committed.
+
 A detached project in `tasks where --json`:
 
     {"project":{"prefix":"<p>","root":"<code>","checkout":"<code>","records":"<records-root>/<p>","kind":"detached","linked":false},"holds_records":false,"warnings":[]}

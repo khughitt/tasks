@@ -5,7 +5,7 @@
 use crate::claims::MutationLock;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 const SHOWN: usize = 5;
 
@@ -28,11 +28,9 @@ pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String>
 }
 
 fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
-    Command::new("git")
+    crate::git::at(dir)
         .arg("--literal-pathspecs")
         .args(args)
-        .env("LC_ALL", "C")
-        .current_dir(dir)
         .output()
 }
 

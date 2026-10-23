@@ -12,6 +12,7 @@ mod error;
 mod filter;
 mod format;
 mod frontmatter;
+mod git;
 mod halt;
 mod hierarchy;
 mod holds;

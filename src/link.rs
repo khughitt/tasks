@@ -31,9 +31,7 @@ impl GitTree {
     /// `LC_ALL=C` pins the message matched, as `Project::git_toplevel` does. One line per requested fact, in
     /// the order of the flags.
     pub fn of(dir: &Path) -> Result<Option<GitTree>> {
-        let output = match std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
+        let output = match crate::git::at(dir)
             .args([
                 "rev-parse",
                 "--path-format=absolute",
@@ -41,7 +39,6 @@ impl GitTree {
                 "--git-common-dir",
                 "--absolute-git-dir",
             ])
-            .env("LC_ALL", "C")
             .output()
         {
             Ok(output) => output,
@@ -57,9 +54,8 @@ impl GitTree {
                 stderr.trim()
             );
             if stderr.contains("not a git repository") {
-                // A failed discovery names its scope `(or any …)`; `not a git repository:
-                // '<path>'` is git rejecting an explicit GIT_DIR, which searched nothing,
-                // so no discovery boundary applies and git's message already names it.
+                // A failed discovery names its scope `(or any …)`; a rejected gitdir
+                // target names its path directly, without a discovery boundary.
                 let discovery = stderr.contains("not a git repository (or any");
                 let start = dir.canonicalize()?;
                 let mut stops = Vec::new();
@@ -127,11 +123,8 @@ impl GitTree {
 
     /// Every working tree of the repository, canonical where it still exists, main first.
     pub fn worktrees(&self) -> Result<Vec<PathBuf>> {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&self.top)
+        let output = crate::git::at(&self.top)
             .args(["worktree", "list", "--porcelain", "-z"])
-            .env("LC_ALL", "C")
             .output()?;
         if !output.status.success() {
             return Err(Error::Io(format!(
@@ -382,14 +375,7 @@ pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
 /// nothing; every other failure to read `HEAD` (a malformed loose ref, a corrupt
 /// `packed-refs`) is an `io` error, never "no records" (plan review round 2).
 fn tracked_config(top: &Path) -> Result<bool> {
-    let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(top)
-            .args(args)
-            .env("LC_ALL", "C")
-            .output()
-    };
+    let git = |args: &[&str]| crate::git::at(top).args(args).output();
     let listed = git(&["ls-tree", "-z", "HEAD", "--", CONFIG_PATH])?;
     if !listed.status.success() {
         if unborn(top)? {
@@ -418,7 +404,8 @@ const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
 
 /// `tasks/.config.toml` is in the index at `top` (records-detached spec §5.1): `git
 /// ls-files --cached` names it. A staged deletion takes it out, whatever `HEAD` tracks. A
-/// failing git run is an `io` error, never "absent".
+/// failing git run is an `io` error, never "absent". Keep the invoking hook's index:
+/// this checks the code commit being made, not the records repository.
 pub fn config_in_index(top: &Path) -> Result<bool> {
     let listed = std::process::Command::new("git")
         .arg("-C")
@@ -442,14 +429,7 @@ pub fn config_in_index(top: &Path) -> Result<bool> {
 /// corrupt `packed-refs` fails both, so neither reads as unborn (both reproduced in
 /// scratch repositories while planning).
 fn unborn(top: &Path) -> Result<bool> {
-    let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(top)
-            .args(args)
-            .env("LC_ALL", "C")
-            .output()
-    };
+    let git = |args: &[&str]| crate::git::at(top).args(args).output();
     let head = git(&["symbolic-ref", "-q", "HEAD"])?;
     if !head.status.success() {
         return Ok(false);

@@ -480,9 +480,7 @@ impl Index {
     /// the worktree, and match again.
     fn through_git(&self, path: &Path, warnings: &mut Vec<String>) -> Option<Answer> {
         let dir = if path.is_dir() { path } else { path.parent()? };
-        let output = match std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
+        let output = match crate::git::at(dir)
             .args([
                 "rev-parse",
                 "--path-format=absolute",

@@ -76,6 +76,118 @@ impl Layout {
     }
 }
 
+fn hook_cmd(env: &TestEnv, dir: &Path, code: &Path) -> assert_cmd::Command {
+    let mut cmd = env.cmd(dir);
+    cmd.env("GIT_DIR", code.join(".git"))
+        .env("GIT_COMMON_DIR", code.join(".git"))
+        .env("GIT_WORK_TREE", code)
+        .env("GIT_INDEX_FILE", code.join(".git/index"));
+    cmd
+}
+
+#[test]
+fn hook_git_selectors_do_not_redirect_detached_record_commits() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    std::fs::write(l.code.join("README"), "staged code\n").unwrap();
+    l.git(&l.code, &["add", "README"]);
+    let code_head = l.git(&l.code, &["rev-parse", "HEAD"]);
+    let code_index = std::fs::read(l.code.join(".git/index")).unwrap();
+    let out = hook_cmd(&env, &l.code, &l.code)
+        .args(["add", "from a code hook"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let added: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let id = added["id"].as_str().unwrap();
+    assert_eq!(
+        l.git(&l.records, &["show", "--name-only", "--format=", "HEAD"])
+            .trim(),
+        format!("det/tasks/{id}.md"),
+        "the record commits despite staged code: {added}"
+    );
+    assert_eq!(l.git(&l.records, &["status", "--porcelain"]), "");
+    assert_eq!(l.git(&l.code, &["rev-parse", "HEAD"]), code_head);
+    assert_eq!(
+        std::fs::read(l.code.join(".git/index")).unwrap(),
+        code_index
+    );
+}
+
+#[test]
+fn hook_git_selectors_do_not_hide_uncommitted_detached_records() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let config = l.project.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, text.replace("commit = true", "commit = false")).unwrap();
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "manual record commits"]);
+    let added = env.json(&l.code, &["add", "uncommitted"]);
+    let id = added["id"].as_str().unwrap();
+    let out = hook_cmd(&env, &l.code, &l.code)
+        .arg("prime")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let prime: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        prime["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| { w.as_str() == Some(&format!("uncommitted task files: tasks/{id}.md")) }),
+        "{prime}"
+    );
+}
+
+#[test]
+fn hook_git_selectors_do_not_redirect_explicit_project_paths() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let foreign = repo(&l.home, &l.base, "foreign");
+    for (dir, holds_records) in [(&l.code, false), (&l.project, true)] {
+        let out = hook_cmd(&env, dir, &foreign).arg("where").output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let found: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(found["project"]["prefix"], "det", "{found}");
+        assert_eq!(found["holds_records"], holds_records, "{found}");
+    }
+}
+
+#[test]
+fn hook_alternate_index_still_guards_the_detached_migration() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    env.json(&l.code, &["init", "--prefix", "det"]);
+    l.git(&l.code, &["add", "tasks"]);
+    l.git(&l.code, &["commit", "-qm", "in-tree records"]);
+    register_by_hand(&env, &l, "det");
+    let index = l.base.join("hook-index");
+    let index_output = format!("--index-output={}", index.display());
+    l.git(&l.code, &["read-tree", &index_output, "HEAD"]);
+    l.git(&l.code, &["rm", "-r", "-q", "tasks"]);
+
+    let run = || {
+        hook_cmd(&env, &l.code, &l.code)
+            .env("GIT_INDEX_FILE", &index)
+            .arg("check")
+            .output()
+            .unwrap()
+    };
+    let out = run();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "records_moved", "{error}");
+
+    l.git(&l.code, &["read-tree", &index_output, "--empty"]);
+    let out = run();
+    assert!(out.status.success(), "{out:?}");
+}
+
 /// The repositories of a detached project named `prefix`: the records root and the code
 /// checkout with a worktree. Nothing is written under `<records>/<prefix>` and nothing is
 /// registered: `register` (or `register_by_hand`) does that.
@@ -576,6 +688,13 @@ fn stale_copy_never_fires_across_code_worktrees_and_fires_across_records_worktre
         env.fail(&l.code, &["note", &id, "stale write"]),
         "stale_copy"
     );
+    let out = hook_cmd(&env, &l.code, &l.code)
+        .args(["note", &id, "stale write from hook"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
 }
 
 /// The registry file as text.

@@ -156,10 +156,8 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
             return;
         }
     }
-    let listed = match std::process::Command::new("git")
+    let listed = match crate::git::at(&ctx.project.records)
         .args(["worktree", "list", "--porcelain"])
-        .env("LC_ALL", "C")
-        .current_dir(&ctx.project.records)
         .output()
     {
         Ok(listed) => listed,

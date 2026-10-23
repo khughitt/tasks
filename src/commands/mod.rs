@@ -1902,9 +1902,8 @@ fn raw_owner_name(project: &Project) -> Result<String> {
     {
         return Ok(owner);
     }
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = crate::git::at(project.resume_root())
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(project.resume_root())
         .output()
         && output.status.success()
     {
