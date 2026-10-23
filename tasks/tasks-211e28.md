@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-detached
 created: 2026-10-22T20:54:24Z
-updated: 2026-10-22T22:13:28Z
+updated: 2026-10-23T00:03:13Z
 started: 2026-10-22T21:07:05Z
 depends: []
 tags: []
@@ -46,3 +46,4 @@ Implement the tasks CLI part of the approved design (tasks:docs/specs/2026-10-22
 - 2026-10-22T22:11:07Z (records-detached): review: plan round 3 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
 - 2026-10-22T22:11:08Z (records-detached): Plan approved by the user 2026-10-22 at revision 3 (bea738c). Linking the plan, filing step children, running the just test baseline, then subagent-driven execution.
 - 2026-10-22T22:13:28Z (records-detached): baseline: just test in .worktrees/records-detached at 3030425 before any code change: 1609 passed, 0 failed, 13 test binaries, ignored included, rc 0. Step children filed: tasks-466f18 (T1) … tasks-a3c8a8 (T10), chained by dependency.
+- 2026-10-23T00:03:13Z (records-detached): Execution 2026-10-22: all ten plan tasks landed on records-detached at 4eeb456 (16 code/doc commits), each with a fresh task review; three fix rounds (T2 evidence, T3 move guard, T8 lazy resolver walk) and one own-concerns round (T5). just test 1652 passed at Task 9. Final whole-branch review dispatched; ledger at .superpowers/sdd/2026-10-22-records-detached/progress.md in the worktree.
