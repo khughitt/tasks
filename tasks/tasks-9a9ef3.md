@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:20:50Z
+updated: 2026-10-23T00:20:53Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -51,3 +51,4 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T00:20:50Z (docs/trim-tasks-skill): resumed
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:20:53Z (docs/trim-tasks-skill): User approved local merge and activation of the reviewed skill. Implementation files still match reviewed commit 5073517 exactly; resume to close before merge, verify the installed skill after integration, and remove only this task's worktree. No push authorized or planned.
