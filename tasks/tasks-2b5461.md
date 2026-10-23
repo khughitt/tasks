@@ -6,10 +6,10 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-17T16:47:39Z
 created: 2026-10-17T00:51:23Z
-updated: 2026-10-17T16:47:39Z
+updated: 2026-10-23T09:08:29Z
 depends: [tasks-57425c]
 parent: tasks-037538
-tags: [feedback, idea, "from:material"]
+tags: [feedback, idea, "from:material", "from:mind6", friction]
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -19,3 +19,5 @@ Seen: a task parked for an idle host named its frozen input (a tmpfs path) only 
 
 - 2026-10-17T02:57:34Z (main): scope: briefed; no record or park field names files today (park store holds next_step, reason, quiet recipe, host, worktree; store is host-local, records sync); lean park-scoped --input paths checked by park and the quiet/next/prime readers on the recorded host, plus a guidance line; record-wide artifacts and done/drop scratch listing left as the user's scope call; no follow-up until then; brief: docs/notes/2026-10-16-park-resume-inputs-brief.md
 - 2026-10-17T16:47:39Z (main): scope: briefed; rerun of a stranded brief (premises rechecked at 496a967: ParkInfo still has no file field). Took the brief's lean on Q1 (park-scoped inputs, no scratch listing); filed goal tasks-037538 (parent) and planned design tasks-57425c, which this idea now depends on; brief: docs/notes/2026-10-16-park-resume-inputs-brief.md
+- 2026-10-23T09:08:29Z (feedback): feedback from mind6: Resume-input audit still blocks a previously quiet-host diagnostic
+- 2026-10-23T09:08:29Z (feedback): detail from mind6: A later maintenance audit confirmed the previously reported frozen input is still absent after reboot. Capturing a replacement would change the approved input identity, so the task now explicitly waits on a user scope decision rather than being offered as runnable quiet-host work. Persistent canonical-input guidance is already available; the existing park-scoped input checks are still needed to catch missing artifacts before arranging host time. This is follow-up evidence on the same incident, not a second lost-input incident.
