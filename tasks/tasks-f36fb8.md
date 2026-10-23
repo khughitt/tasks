@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-23T14:00:10Z
-updated: 2026-10-23T15:07:40Z
+updated: 2026-10-23T16:18:18Z
 depends: [obs-7348a9]
 tags: [docs]
 source: obs-7348a9
@@ -19,3 +19,7 @@ After obs-7348a9 lands, amend the obs authorship row in records-home section 4 a
 ## References
 
 - records-home (input, required, kind=spec): docs/specs/2026-10-22-records-home-design.md
+
+## Notes
+
+- 2026-10-23T16:18:18Z (main): obs-7348a9 implementation landed locally in obs main at 9eb4f982cd60c70d6494c3278caec0cc805108ec after independent review acceptance (0 findings). The six-prefix path-only rule and paired attribution-version refusal are implemented; verify this landed code and approved spec r4 at ba84f7b before updating records-home section 4. Post-merge obs gate is running; parent completion will release the dependency. No migration or live index run was performed.
