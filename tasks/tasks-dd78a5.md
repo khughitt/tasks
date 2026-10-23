@@ -6,9 +6,9 @@ priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T00:44:22Z
+updated: 2026-10-23T00:44:59Z
 started: 2026-10-23T00:44:22Z
 depends: []
 tags: [feedback, gap, "from:lore"]
@@ -30,4 +30,6 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 - 2026-10-17T17:50:15Z (main): scope: scoped; narrow sentence traced to tasks-63742b (2026-09-15) predating the global order; copies at skills/tasks/SKILL.md:348, AGENTS.md:41, docs/specs/2026-08-29-tasks-design.md:963; doc-only alignment
 - 2026-10-23T00:31:05Z (main): Follow-up check after tasks-9a9ef3: the seven-area trim deliberately left Process and workspace setup policy unchanged. The narrow root-guide-only sentence remains; this existing task is the appropriate next fix, not a new concern against the completed trim.
 - 2026-10-23T00:44:22Z (main): started
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:44:59Z (docs/tasks-dd78a5): resumed
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
