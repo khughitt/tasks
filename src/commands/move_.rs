@@ -32,6 +32,13 @@ fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
         ))
     })?;
     if !scope::is_reachable(&registry, target_prefix)? {
+        // Records-detached spec §3.2: a root that holds no config and is paired with no
+        // records directory is `records_unpaired` here as from every other entry point.
+        if let Err(error @ Error::RecordsUnpaired(_)) =
+            scope::open_registered(&registry, target_prefix, Origin::Prefix)
+        {
+            return Err(error);
+        }
         return Err(Error::Config(format!(
             "{target_prefix} at {} is unreachable; restore it or choose another project",
             root.display()

@@ -1695,4 +1695,16 @@ fn a_registered_root_without_config_or_pairing_is_records_unpaired_from_every_en
             "{args:?}: {detail}"
         );
     }
+    let other = env.init("oth");
+    let id = common::id_of(env.json(&other, &["add", "first"]));
+    let detail = fail_detail(
+        &env,
+        &other,
+        &["move", &id, "--to", "det"],
+        "records_unpaired",
+    );
+    assert!(
+        detail.contains("tasks init --prefix det --records"),
+        "{detail}"
+    );
 }
