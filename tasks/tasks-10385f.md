@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-10385f-git-selectors
 created: 2026-10-23T01:04:39Z
-updated: 2026-10-23T11:21:07Z
+updated: 2026-10-23T11:26:50Z
 started: 2026-10-23T11:17:47Z
 depends: []
 tags: []
@@ -27,3 +27,4 @@ Raised by the final review of docs/plans/2026-10-22-records-detached.md (decline
 - 2026-10-23T11:20:48Z (fix/tasks-10385f-git-selectors): Root cause confirmed in the path-targeted Git constructors: inherited repository/index selectors override current_dir and -C. Use one shared path-targeted constructor for discovery, record status/worktree checks and commits; preserve the invoking index only in link::config_in_index. Update the two existing GIT_DIR-override expectations to the path-targeted contract and cover detached operations plus the alternate-index migration guard.
 - 2026-10-23T11:20:59Z (fix/tasks-10385f-git-selectors): Workspace hydrated with cargo install --locked --path . --root .local --target-dir target (confined installation). Baseline: just test exited 0; 2469 tests passed, 0 failed, 0 ignored.
 - 2026-10-23T11:21:07Z (fix/tasks-10385f-git-selectors): Correction to the preceding baseline note: the log totals 1658 tests across 14 test binaries, all passed (not 2469); just test exited 0.
+- 2026-10-23T11:26:50Z (fix/tasks-10385f-git-selectors): Verification: regression RED reproduced wrong-repository panics, missed dirty records, incorrect path discovery and bypassed stale-copy rejection; focused detached suite now 45 passed. just test-fast: 1658 passed, 4 existing ignored, exit 0. just check and pre-commit passed. Implementation frozen for independent review at 92b1c96.
