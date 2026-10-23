@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:00:40Z
+updated: 2026-10-23T00:01:26Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -38,3 +38,4 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T00:00:40Z (docs/trim-tasks-skill): resumed
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:01:26Z (docs/trim-tasks-skill): Scope: direct editorial trim of T3/T7/T13/T17/T19/T28 plus Lifecycle provenance; preserve workflow imperatives, claim-override safeguards, quiet-run format and host-pointer rule. Baseline 8389 words/758 lines. Audit resolved through ai -> hq history to lore/docs/instruction-provenance.md. Workspace .worktrees/trim-tasks-skill; no declared setup route (no just setup or worktree-local setup command), so the required just test baseline builds dependencies before edits.
