@@ -1,13 +1,15 @@
 ---
 id: tasks-dd78a5
 title: "The tasks skill's worktree setup sentence (just setup, otherwise only the root guide's explicit command) is narrower than the global instructions' setup order, which also allows a README/CONTRIBUTING command that writes only inside the worktree and a lockfile's frozen worktree-local install, reports a bare manifest before the first commit, and requires hydration before the first commit; align the skill with that order"
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T00:31:05Z
+updated: 2026-10-23T00:44:22Z
+started: 2026-10-23T00:44:22Z
 depends: []
 tags: [feedback, gap, "from:lore"]
 agent: claude-code/claude-opus-5-5
@@ -27,3 +29,5 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 
 - 2026-10-17T17:50:15Z (main): scope: scoped; narrow sentence traced to tasks-63742b (2026-09-15) predating the global order; copies at skills/tasks/SKILL.md:348, AGENTS.md:41, docs/specs/2026-08-29-tasks-design.md:963; doc-only alignment
 - 2026-10-23T00:31:05Z (main): Follow-up check after tasks-9a9ef3: the seven-area trim deliberately left Process and workspace setup policy unchanged. The narrow root-guide-only sentence remains; this existing task is the appropriate next fix, not a new concern against the completed trim.
+- 2026-10-23T00:44:22Z (main): started
+  provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
