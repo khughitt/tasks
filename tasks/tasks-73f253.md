@@ -6,9 +6,9 @@ priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/hydration-confinement
 created: 2026-10-23T10:20:40Z
-updated: 2026-10-23T10:44:55Z
+updated: 2026-10-23T10:45:02Z
 started: 2026-10-23T10:44:55Z
 depends: []
 tags: [feedback, gap, "from:lore"]
@@ -30,4 +30,6 @@ Where: the global rule is the Git section of the user's global instructions (own
 
 - 2026-10-23T10:24:48Z (main): scope: scoped; premises checked against main 1524a4a: skills/tasks/SKILL.md, AGENTS.md and the design spec still carry the 15c2f98 wording without the confinement/no-approval and read-only-worktree clauses; body rewritten with the clauses and all three locations; todo, P2 unchanged, xs, low, direct
 - 2026-10-23T10:44:55Z (main): started
+  provenance: {"harness_session":"claude-code:c2975679-c527-4213-b8e2-df18920e1084","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T10:45:02Z (docs/hydration-confinement): resumed
   provenance: {"harness_session":"claude-code:c2975679-c527-4213-b8e2-df18920e1084","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
