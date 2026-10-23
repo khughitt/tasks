@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-09-19T13:13:54Z
-updated: 2026-10-06T16:50:00Z
+updated: 2026-10-23T00:14:47Z
 depends: []
 parent: tasks-6ed79b
 tags: [docs]
@@ -29,3 +29,4 @@ Where to look: README.md, skills/tasks/SKILL.md, the design links already in REA
 ## Notes
 
 - 2026-09-30T10:10:19Z (main): scope: scoped; verified README still puts reference detail before Install; specified quick-start/concepts/reference organization, preservation and link checks, and an isolated command walkthrough; p2/s/mid, direct
+- 2026-10-23T00:14:47Z (main): README anchor coordination from tasks-9a9ef3: pending reviewed commit 50735173002c749a5d8ed18f98534756ee31e2d7 adds explicit anchors session-selection, claims-and-checkouts, agent-and-completion-stamps, project-routing, lifecycle-provenance and prefix-renames-and-recovery for skill pointers. Preserve those ids when reorganizing the README; this trim does not otherwise restructure it.
