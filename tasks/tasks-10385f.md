@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-10385f-git-selectors
 created: 2026-10-23T01:04:39Z
-updated: 2026-10-23T11:30:53Z
+updated: 2026-10-23T11:31:25Z
 started: 2026-10-23T11:17:47Z
 depends: []
 tags: []
@@ -30,3 +30,4 @@ Raised by the final review of docs/plans/2026-10-22-records-detached.md (decline
 - 2026-10-23T11:26:50Z (fix/tasks-10385f-git-selectors): Verification: regression RED reproduced wrong-repository panics, missed dirty records, incorrect path discovery and bypassed stale-copy rejection; focused detached suite now 45 passed. just test-fast: 1658 passed, 4 existing ignored, exit 0. just check and pre-commit passed. Implementation frozen for independent review at 92b1c96.
 - 2026-10-23T11:29:43Z (fix/tasks-10385f-git-selectors): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-23T11:30:53Z (fix/tasks-10385f-git-selectors): Post-review boundary probe found that config_in_index retains unrelated repository selectors when GIT_INDEX_FILE is absent: a detached check incorrectly returns records_moved for a foreign indexed config. New regression migration_guard_uses_the_code_repository_without_an_explicit_hook_index fails with that error. Narrow the exception to the explicit hook index only; the task remains direct and within its selector-isolation scope.
+- 2026-10-23T11:31:25Z (fix/tasks-10385f-git-selectors): attached: git-selectors-round-1-report.md (2088 bytes): Independent implementation review of 92b1c96 by codex/gpt-6.1-sol; first revision accepted, followed by the controller’s narrower migration-index fix.
