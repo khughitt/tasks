@@ -1,15 +1,17 @@
 ---
 id: tasks-f36fb8
 title: Amend the records-home design obs row for historical authorship exclusions
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: docs/records-home-obs-authorship
 created: 2026-10-23T14:00:10Z
-updated: 2026-10-23T16:51:30Z
+updated: 2026-10-23T16:52:59Z
 started: 2026-10-23T16:46:43Z
+completed: 2026-10-23T16:52:59Z
+closed: 2026-10-23T16:52:59Z
 depends: [obs-7348a9]
 tags: [docs]
 source: obs-7348a9
@@ -30,3 +32,7 @@ obs-7348a9 landed locally in obs main at 9eb4f982cd60c70d6494c3278caec0cc805108e
 - 2026-10-23T16:48:28Z (docs/records-home-obs-authorship): resumed
   provenance: {"harness_session":"claude-code:049fb7ab-86eb-4014-8cfb-ff365280b5ff","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-23T16:51:30Z (docs/records-home-obs-authorship): baseline: just test in .worktrees/tasks-f36fb8 passed 1663 tests (0 failed). Verified obs spec r4 at ba84f7b (user approval 2026-10-23T15:21Z on obs-7348a9) and landed code at 9eb4f98 in obs main: authorship.EXCLUDED holds the six prefixes, VERSION authorship-v4, CLAIMS_VERSION claims-v4, outcome_report refuses missing or unequal versions with run obs index.
+- 2026-10-23T16:52:59Z (docs/records-home-obs-authorship): done
+  provenance: {"harness_session":"claude-code:049fb7ab-86eb-4014-8cfb-ff365280b5ff","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T16:52:59Z (docs/records-home-obs-authorship): Records-home spec amended: §4 obs authorship row and a following paragraph describe obs-7348a9's landed v4 rule (six prefixes plus own spec/plan for every kind, placed relative path, no location class, overlay files outside stay eligible, reports refuse stale versions), kept distinct from flow-state's live fingerprint; §8 lists v4 as a prerequisite of the first non-pilot migration; §10 and the status header updated. Verified against obs spec r4 at ba84f7b and code at 9eb4f98.
+  provenance: {"harness_session":"claude-code:049fb7ab-86eb-4014-8cfb-ff365280b5ff","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
