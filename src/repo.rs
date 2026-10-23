@@ -430,6 +430,31 @@ impl Project {
         self.worktree.as_deref().unwrap_or(&self.root)
     }
 
+    /// A plain `init` never adopts a detached project's records directory: registering it
+    /// as the root would leave the registry and the config disagreeing about where the
+    /// project's checkout is. Pairing is `init --records`, run from the checkout.
+    pub fn refuse_detached_config(root: &Path) -> Result<()> {
+        if !crate::scope::has_config(root)? {
+            return Ok(());
+        }
+        let existing = Self::open(root)?;
+        if existing.kind != Kind::Detached {
+            return Ok(());
+        }
+        let records_root = existing.records.parent().unwrap_or(&existing.records);
+        Err(Error::Config(format!(
+            "{} is the records directory of detached project {}, whose checkout is {}; a \
+             plain init does not adopt it: pair it with `tasks init --prefix {} --records {}` \
+             run from {}",
+            existing.records.display(),
+            existing.prefix,
+            existing.root.display(),
+            existing.prefix,
+            records_root.display(),
+            existing.root.display()
+        )))
+    }
+
     pub fn init(root: &Path, prefix: &str, checkout: Option<&Path>) -> Result<Project> {
         if !is_valid_prefix(prefix) {
             return Err(Error::Config(format!(
@@ -438,6 +463,7 @@ impl Project {
         }
         let config = root.join(CONFIG_REL);
         if config.exists() {
+            Self::refuse_detached_config(root)?;
             let existing = Self::open(root)?;
             if existing.prefix != prefix {
                 return Err(Error::Config(format!(

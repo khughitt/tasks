@@ -54,8 +54,25 @@ pub fn run(
         Some(records_root) => Some(validate_records(&root, &records_root, &registry, &prefix)?),
         None => {
             reject_linked_destination(&root, &registry)?;
+            Project::refuse_detached_config(&root)?;
             None
         }
+    };
+    // Spec §5.1: re-pairing with another records directory is a repoint, so it needs
+    // `--force`; a mistyped records root must not silently replace the pairing.
+    let repaired = match (&records, registry.records_dir(&prefix)) {
+        (Some(derived), Some(current)) if crate::rename::dir_identity(current)? != *derived => {
+            if !force {
+                return Err(Error::Config(format!(
+                    "prefix {prefix:?} is paired with {}; re-pair it with {} by adding \
+                     `--force`",
+                    current.display(),
+                    derived.display()
+                )));
+            }
+            Some(current.to_path_buf())
+        }
+        _ => None,
     };
     let checkout = checkout
         .map(|checkout| validate_checkout(&root, &root.join(checkout), &registry, &prefix))
@@ -66,6 +83,12 @@ pub fn run(
         registry.register(&prefix, &root)?;
         None
     };
+    let records = records
+        .map(|derived| {
+            std::fs::create_dir_all(&derived)?;
+            derived.canonicalize()
+        })
+        .transpose()?;
     let project = match &records {
         Some(derived) => {
             let project = Project::init_detached(derived, &prefix, &root)?;
@@ -91,6 +114,12 @@ pub fn run(
         warnings.push(format!(
             "prefix {prefix:?} was registered to {}",
             previous.display()
+        ));
+    }
+    if let Some(dir) = repaired {
+        warnings.push(format!(
+            "prefix {prefix:?} was paired with {}",
+            dir.display()
         ));
     }
     if let Some(dir) = unpaired {
@@ -326,8 +355,9 @@ fn validate_checkout(
 /// main checkout of a git repository that keeps no records in its working tree or index,
 /// overlapping no other registered project, and declared by no other prefix; the records
 /// directory `<records_root>/<prefix>` must lie outside its repository. Returns that
-/// directory, created and canonical; a refusal creates nothing. `run` has checked that
-/// `prefix` is valid, so it is one path component.
+/// directory, canonical when it exists and otherwise under the canonical records root;
+/// nothing is created here, so every refusal before `run` creates it leaves no trace.
+/// `run` has checked that `prefix` is valid, so it is one path component.
 fn validate_records(
     root: &Path,
     records_root: &Path,
@@ -456,6 +486,5 @@ fn validate_records(
             }
         }
     }
-    std::fs::create_dir_all(&derived)?;
-    Ok(derived.canonicalize()?)
+    Ok(derived)
 }

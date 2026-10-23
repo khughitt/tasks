@@ -1555,3 +1555,84 @@ fn adopt_pairs_the_renamed_records_directory() {
         "complete"
     );
 }
+
+#[test]
+fn init_records_refuses_to_re_pair_with_another_records_root_without_force() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let other = repo(&l.home, &l.base, "other");
+    let before = registry_text(&env);
+    let detail = fail_detail(&env, &l.code, &init_records("det", &other), "config");
+    assert!(
+        detail.contains(&l.project.display().to_string()) && detail.contains("--force"),
+        "{detail}"
+    );
+    assert!(!other.join("det").exists(), "the refusal created nothing");
+    assert_eq!(registry_text(&env), before);
+    // The same records root again is still idempotent without --force.
+    env.json(&l.code, &init_records("det", &l.records));
+    assert_eq!(registry_text(&env), before);
+    let mut args = init_records("det", &other).to_vec();
+    args.push("--force");
+    let out = env.json(&l.code, &args);
+    let warnings = out["warnings"].to_string();
+    assert!(
+        warnings.contains(&format!(
+            "prefix \\\"det\\\" was paired with {}",
+            l.project.display()
+        )),
+        "{warnings}"
+    );
+    let registry: toml::Value = toml::from_str(&registry_text(&env)).unwrap();
+    assert_eq!(
+        registry["records"]["det"].as_str(),
+        other.join("det").to_str()
+    );
+}
+
+#[test]
+fn a_plain_init_in_a_records_directory_refuses_and_names_init_records() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let before = registry_text(&env);
+    for args in [
+        &["init", "--prefix", "det", "--force"][..],
+        &["init", "--prefix", "det"][..],
+    ] {
+        let detail = fail_detail(&env, &l.project, args, "config");
+        assert!(
+            detail.contains(&format!(
+                "tasks init --prefix det --records {}",
+                l.records.display()
+            )),
+            "{args:?}: {detail}"
+        );
+        assert!(
+            detail.contains(&l.code.display().to_string()),
+            "{args:?}: {detail}"
+        );
+        assert_eq!(registry_text(&env), before, "{args:?}");
+    }
+    env.json(&l.code, &["list"]);
+}
+
+#[test]
+fn a_registry_mapping_a_prefix_to_its_detached_records_without_a_pairing_is_a_config_error() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    write_registry(
+        &env,
+        &format!("[projects]\ndet = {:?}\n", l.project.display().to_string()),
+    );
+    for args in [&["show", "det-000000"][..], &["projects"][..]] {
+        let detail = fail_detail(&env, &l.base, args, "config");
+        assert!(detail.contains("detached"), "{args:?}: {detail}");
+        assert!(
+            detail.contains("tasks init --prefix det --records"),
+            "{args:?}: {detail}"
+        );
+    }
+}

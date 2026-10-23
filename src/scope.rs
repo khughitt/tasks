@@ -67,6 +67,19 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
         )));
     }
     let project = Project::open(&dir)?;
+    // A detached config reached through `[projects]` alone: the registry calls the records
+    // directory the root, the config names another checkout, and `tasks root` and
+    // `tasks projects` would disagree with every command run from the checkout.
+    if registry.records_dir(live).is_none() && project.kind == Kind::Detached {
+        let records_root = project.records.parent().unwrap_or(&project.records);
+        return Err(Error::Config(format!(
+            "registry maps {live} to {}, whose config is detached; pair it with `tasks init \
+             --prefix {live} --records {}` from {}",
+            dir.display(),
+            records_root.display(),
+            project.root.display()
+        )));
+    }
     if project.prefix != live {
         return Err(Error::Config(format!(
             "registry maps {live:?} to {}, whose prefix is {:?}; fix the registry",
