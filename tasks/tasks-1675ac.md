@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-22T21:18:57Z
-updated: 2026-10-22T23:04:45Z
+updated: 2026-10-23T18:27:17Z
 depends: []
 parent: tasks-606dd3
 tags: [feedback, friction, "from:ops"]
@@ -36,3 +36,4 @@ Assessment: P2 retained; s/low/direct because the outcome, existing condition, t
 ## Notes
 
 - 2026-10-22T23:04:45Z (main): scope: scoped; P2/s/low/direct; d0564d1 confirms shelved_dep warns without reading intent (introduced by 4a7bc5b); retain the warning and add the valid disposition of preserving an intentional wait with a recorded wake condition; no suppression state or readiness change; coordinate pending wording with tasks-52bd39; brief: docs/notes/2026-10-22-dependency-state-brief.md
+- 2026-10-23T18:27:17Z (main): proposal from ops scope, with user agreement 2026-10-23: lead the shelved_dep remedy list with 'replace the shelf with a dependency on the task it waits for' (tasks unshelve <dep>, then tasks dep <dep> --on <awaited>). Reserve keeping the shelf and its warning for waits that no task can stand for (an upstream release, say); a warning that is acceptable to ignore and fires on every commit teaches agents to ignore check output. Case: autonomy-bf446b was shelved until autonomy-9e8a43 ran, while goal ops-3f5aa6 depended on it; it was converted to idea + dep edge, and the warning cleared with no loss of sequencing. tasks-52bd39's write-time warnings should use the same wording. Judge this against the reviewed scope before implementing.
