@@ -4,26 +4,96 @@ A fast, file-based task tracker for software projects, built for coding agents a
 humans supervising them. One markdown file per task, checked into the project; a single
 Rust binary as the only writer. JSON output by default.
 
-JSON task records omit unset optional fields and empty task collections (`tags`,
-`depends`, `notes`, `refs`, `depends_on`, `children`). Missing means unset or empty; consumers
-must not require those keys. Values such as `false`, `0`, and `body: ""` remain.
-Response containers such as `tasks: []` and `warnings: []` remain, as does `next: null`
-when nothing is eligible. See
-[the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
+Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
+Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
 
-`check` warnings distinguish `doc_unreachable` (this host could not resolve a
-reference) from `doc_unchecked` (one summary listing external checks unfinished
-because the shared fetch budget ended). Warning-only checks exit 0; a warning
-does not verify a document. Finding consumers, including obs and the TUI, must
-recognize both kinds. Summary and parked rows include `step` only when set.
-`tasks doc` exports exact UTF-8 body bytes in every format, with warnings on
-stderr and no JSON envelope.
+A terminal front end, [tasks-tui](https://github.com/khughitt/tasks-tui), sits on top of
+the CLI: it shells out to `tasks`, reads the JSON, and launches an agent on a task in a
+new terminal. The CLI is the whole contract; the TUI never touches `tasks/*.md`.
 
-Task objects expose optional `moved_to` (the destination id on a source tombstone)
-and `moved_from` (the source id on the destination). `status` includes `moved`, a
-closed, read-only status; counts include `moved`, and `total` counts every record.
-Only `move` sets the pointer fields. Older binaries cannot parse these records:
-update every host reading synced tasks before the first move.
+This README runs from a [quick start](#quick-start) through the [concepts](#concepts)
+to a [reference](#reference) section per feature, each with its design link.
+
+## Quick start
+
+If you are an agent asked to install `tasks` or adopt it in a project, do steps 1–3 in
+order. Each step is idempotent.
+
+### 1. Install
+
+Install the binary and the skill (once per machine; needs a Rust toolchain):
+
+    git clone https://github.com/khughitt/tasks ~/.local/src/tasks
+    cargo install --locked --path ~/.local/src/tasks
+    just --justfile ~/.local/src/tasks/justfile install-skills
+
+`--locked` installs the checked dependency versions; from a checkout you already have,
+`cargo install --locked --path .` does the same. `install-skills` symlinks every
+`skills/*` directory into `~/.claude/skills` and `~/.agents/skills` (the latter for other
+harnesses). Without `just`:
+`ln -sfn ~/.local/src/tasks/skills/tasks ~/.claude/skills/tasks`.
+
+Without a checkout (binary only; the skill still needs the `skills/tasks` directory
+from a clone):
+
+    cargo install --git https://github.com/khughitt/tasks
+
+See [Agent skills](#agent-skills) for a per-project copy and the other skills.
+
+### 2. Initialize a project
+
+Once per repository:
+
+    cd <repo>
+    tasks init --prefix <p>          # p: a letter then 1-7 letters/digits, e.g. sci
+
+`init` creates `tasks/` and the doc roots and registers the project. If the project keeps
+specs or plans outside `docs/specs/` and `docs/plans/`, see
+[Adopting in an existing project](#adopting-in-an-existing-project) before running `init`.
+
+### 3. Tell the project's agents
+
+Add this to the project's `AGENTS.md` or `CLAUDE.md`:
+
+    Work is tracked with `tasks` (see ~/.claude/skills/tasks/SKILL.md). Start every
+    session with `tasks prime`, `tasks start <id>` before changing code, `tasks done <id>`
+    on the task's branch before it merges, and `tasks check` before every commit.
+
+    Adopt the process and workspace policy in the tasks skill: the task's process
+    field, not generic Superpowers triggers, decides whether brainstorming runs.
+    Direct executes scoped work without brainstorming or new design/plan documents;
+    planned requires user review of a written spec, then a written implementation
+    plan, before implementation. Assess missing process explicitly before coding.
+    Both code paths use an isolated task worktree, reusing one on resume or creating
+    one with git worktree add under .worktrees/; run just setup when defined.
+    Planned work creates it before drafting the spec. Explicit user overrides win.
+
+### 4. Add a task and work it
+
+    tasks add "Emit rows" -p 1 --size s --complexity low --process direct
+    tasks prime                      # counts, lanes, ready list, who is doing what
+    tasks ready                      # what can be worked on now
+    tasks tree                       # the goal hierarchy
+    tasks start <id>                 # claim it
+    tasks note <id> "<one line>"     # when scope or understanding changes
+    tasks park <id> "<next step>"    # set it down; start resumes it
+    tasks done <id> "<what landed>"  # on the task's branch before it merges
+    tasks check                      # before every commit
+    tasks feedback --project tasks "<about the tool>" --category friction   # file friction with this tool
+
+Never edit `tasks/*.md` by hand. Add `--pretty` to any command for human-readable
+output. The [command tour](#command-tour) shows the rest of the CLI, and
+[Output and errors](#output-and-errors) covers help, exit codes and the JSON contract.
+
+## Concepts
+
+### Statuses
+
+Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`, plus
+`moved`, the read-only tombstone [`tasks move`](#moving-tasks) leaves behind.
+An idea is an uncommitted thought and is never offered by `ready`; scope it into a `todo`
+first. `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
+`tasks unshelve <id>` to return it as an idea.
 
 Ideas carry an optional `reviewed` flag (set by `note --reviewed` and `edit --reviewed`,
 which also stamp `reviewed_at`; cleared by `--no-reviewed` and by every status change),
@@ -35,78 +105,83 @@ pretty tables mark it with `*`. Older binaries cannot parse records carrying `re
 `awaiting_user`, `reviewed_at` or `closed`: update every host reading synced tasks
 before any of them runs this version, since every `done` and `drop` writes `closed`.
 
-Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
-Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
+`--defer <date|Nd|Nw>` hides a task from the pickers until the date; any status change
+clears it. A recurring task (`--every`) closes normally: `done` records the completion
+and anchors its next cycle. When due, it appears in `ready` with status `done`; use
+`start` before completing the next occurrence. Early runs are allowed. `--every` accepts
+positive whole days or weeks (for example, `30d` or `2w`), up to 36500 days; goals
+cannot recur.
 
-A terminal front end, [tasks-tui](https://github.com/khughitt/tasks-tui), sits on top of
-the CLI: it shells out to `tasks`, reads the JSON, and launches an agent on a task in a
-new terminal. The CLI is the whole contract; the TUI never touches `tasks/*.md`.
+### Goals, lanes and dependencies
 
-## For agents
+A task with children is a goal: `tasks add "<piece>" --parent <goal>` decomposes it,
+and `ready` and `next` never offer it. `done` refuses while any descendant is open
+(`--force` overrides); `drop` refuses too, with no override. `prime`'s closeout lists
+goals whose work is all done, to confirm and close. A parent must be in the same project.
 
-If you have been asked to install `tasks` or adopt it in a project, do these in order.
-Each step is idempotent.
+`depends` orders work: `ready` offers a task only once all its dependencies are closed.
+`edit --depends` adds one, and `tasks dep <id> --on <x> --rm <y>` swaps one in a single
+save. A dependency may name a task in another registered project, so a goal whose pieces
+live elsewhere holds them as dependencies.
 
-1. Install the binary and the skill (once per machine; needs a Rust toolchain):
+A lane (`add --lane`) is a goal for an effort meant to run beside the project's other
+efforts. The first paragraph of its body is its guidance in `prime` and `tasks lanes`;
+`next --under <lane>` picks within it, and `tasks block <lane> "<why>"` pauses its
+subtree until `tasks unblock`. A lane cannot nest inside a lane.
 
-       git clone https://github.com/khughitt/tasks ~/.local/src/tasks
-       cargo install --locked --path ~/.local/src/tasks
-       just --justfile ~/.local/src/tasks/justfile install-skills
+A need (`--need <name>`, declared under `[needs]` in `tasks/.config.toml`) names a shared
+resource a step uses. An exclusive need serves one session at a time; see [Claims](#claims).
 
-   `install-skills` symlinks every `skills/*` directory into `~/.claude/skills` and
-   `~/.agents/skills` (the latter for other harnesses). Without `just`:
-   `ln -sfn ~/.local/src/tasks/skills/tasks ~/.claude/skills/tasks`.
+### Process
 
-2. Initialise the project (once per repository):
+Every task can record how an agent works it. `--process direct|planned` on `add` or
+`edit` chooses; [Choosing a process](#choosing-a-process) is the full policy.
 
-       cd <repo>
-       tasks init --prefix <p>          # p: a letter then 1-7 letters/digits, e.g. sci
+| Process | Agent workflow |
+|---------|----------------|
+| `direct` | Execute the scoped task or reviewed plan without brainstorming or new design/plan documents. |
+| `planned` | Review a written design spec with the user, then review a written implementation plan, before implementing. |
+| Unassessed | Read the task and relevant code, explicitly record the choice and its reason before implementation. |
 
-   If the project keeps specs or plans outside `docs/specs/` and `docs/plans/`, see
-   "Adopting in an existing project" below before running `init`.
+### Parks
 
-3. Add this to the project's `AGENTS.md` or `CLAUDE.md`:
+`park` sets a task down with its next step in the same store, who it waits on, and
+optionally why:
 
-       Work is tracked with `tasks` (see ~/.claude/skills/tasks/SKILL.md). Start every
-       session with `tasks prime`, `tasks start <id>` before changing code, `tasks done <id>`
-       on the task's branch before it merges, and `tasks check` before every commit.
+| reason        | The work stopped because…                                                        |
+|---------------|----------------------------------------------------------------------------------|
+| `review`      | an artifact the user must inspect and judge: art sheets, screenshots, a document read |
+| `decision`    | a decision only the user can make — scope, taste, priority                       |
+| `approval`    | the agent holds a recommendation and wants it confirmed                          |
+| `environment` | the checkout or machine cannot run the work — missing deps, a restart, a TTY     |
+| `dependency`  | another task or project must land first                                          |
+| `session`     | the session ended before the work did — context exhausted, time, crash           |
+| `capability`  | the work needs more reasoning than this session can supply; `--complexity` raises the rating |
+| `quiet`       | the host is in use; the work is prepared, unattended, and needs only an idle machine — `--minutes <n>` (required) and `--needs idle\|headless` record the recipe |
 
-       Adopt the process and workspace policy in the tasks skill: the task's process
-       field, not generic Superpowers triggers, decides whether brainstorming runs.
-       Direct executes scoped work without brainstorming or new design/plan documents;
-       planned requires user review of a written spec, then a written implementation
-       plan, before implementation. Assess missing process explicitly before coding.
-       Both code paths use an isolated task worktree, reusing one on resume or creating
-       one with git worktree add under .worktrees/; run just setup when defined.
-       Planned work creates it before drafting the spec. Explicit user overrides win.
+`start` resumes it, and `prime` lists parked work first. Parks are host-local, so a park
+can outlive a close made on another host or checkout; `prime` reports such a park as a
+warning naming the command that clears it (repeating the close) rather than as a row,
+while `list --parked` omits it unless given a status filter. Every record also carries two
+stamps written only by status changes: `started`, the first time work began, and
+`completed`, the latest completion (cleared by a reopen). Design:
+`docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
 
-4. Work:
+`tasks quiet` lists quiet parks across every registered project as resume briefs (design:
+`docs/specs/2026-09-13-quiet-queue-design.md`); the ordinary pretty tables (`list`,
+`prime`, `ready`) mark a quiet park's row with its recipe, such as
+`waits on user, quiet; idle, 40 min`. A quiet park's next step lists the run's
+phases and any refusal or hang an earlier attempt of the recipe hit. Every attempt then ends
+with one note in a fixed form, so the estimate can be compared with what happened:
 
-       tasks prime                      # counts, lanes, ready list, who is doing what
-       tasks ready                      # what can be worked on now
-       tasks tree                       # the goal hierarchy
-       tasks start <id>                 # claim it
-       tasks note <id> "<one line>"     # when scope or understanding changes
-       tasks shelve <id> "<wake condition>" # keep open work out of active views
-       tasks unshelve <id>              # bring it back as an idea
-       tasks done <id> "<what landed>"  # on the task's branch before it merges
-       tasks check                      # before every commit
-       tasks feedback --project tasks "<about the tool>" --category friction   # file friction with this tool
+    run: <actual> min (est <n>, <needs>); <phase> <m>, …; <outcome>[: <cause>]
 
-Never edit `tasks/*.md` by hand. `tasks --help` lists every command and `tasks help <command>`
-one command's; add `--pretty` to any command, before or after its name, for human-readable
-output (`--json` is the default, spelled out). A usage error — an unknown command or option,
-a missing argument, a value outside a closed set — exits 2 with the problem and the usage
-line on stderr; a command that ran and failed exits 1 with one JSON error object there.
-
-Task ids on the command line accept trailing sentence punctuation: a trailing run of
-ASCII periods and commas on any positional id or id-valued flag (`--parent`, `--depends`,
-`dep --on/--rm`, `feedback --recur`) is stripped before validation and alias resolution,
-so an id copied from a sentence or a list works. Embedded or leading punctuation, other
-punctuation, and leading or trailing whitespace are not accepted; records on disk and
-every output stay canonical.
+`<outcome>` is `passed`, `failed`, `refused`, `hung`, or `aborted`. A refused attempt is
+timed up to the refusal and gets its note too.
 
 <a id="claims-and-checkouts"></a>
+
+### Claims
 
 `start` also writes a per-project claim outside git, so every worktree sees the session and
 its liveness. `ready` and `next` omit live claims with an explanatory warning. When concrete native identity is unavailable, set
@@ -126,7 +201,172 @@ refuses them with `need_held`. `tasks start <id> --force --reason "…"` overrid
 note on the task, and on the holder when it is in the same project. A park or a dead
 session releases the hold.
 
+[Relay identity](#relay-identity-opt-in) covers keying claims by harness session, PID
+views, `unverifiable` claims, and `tasks release`.
+
+<a id="session-selection"></a>
+
+### Session envelope
+
+`TASKS_MAX_COMPLEXITY` per harness process is the envelope a session picks within:
+`ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
+many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
+`docs/specs/2026-09-12-task-complexity-design.md`.
+`TASKS_WITHOUT` (comma-separated need names) is the other half of a session's envelope:
+`ready`, `next`, and `prime` hide tasks needing any of them, in the projects that declare
+the name, and say how many.
+`--without` adds to it for one call and refuses a name no project in scope declares; the
+variable never errors, so a host in ordinary use can set `TASKS_WITHOUT=quiet` once for
+every project. Needs are declared per project in `[needs]` (see the design's §6). Design:
+`docs/specs/2026-10-03-lanes-needs-groups-design.md`.
+
+## Reference
+
+### Command tour
+
+    cd <repo>
+    tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
+    tasks init --prefix sci --force  # re-point the prefix here after moving the repo
+    tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
+    tasks retire --successor mind6 --reason "superseded"  # declare this project over; unretire undoes it
+    tasks rename dot dots            # rename a registered prefix; old ids still resolve
+    tasks rename dot dots --explain  # diagnose an interruption without locks or writes
+    tasks add "Bank the ledger" -p 1 --size m --complexity low --process direct --tag ledger --agent codex/gpt-6
+    tasks add "Emit rows" --parent sci-4f2a9c
+    tasks edit <id> --process planned # choose a workflow explicitly
+    tasks edit <id> --no-process     # clear it to unassessed
+    tasks add "Curation sweep" --every 30d  # days or weeks since each completion
+    tasks list --periodic            # recurring tasks, soonest due first
+    tasks edit <sweep-id> --every 2w # change the cadence; --no-every clears it and its anchor
+    tasks add "Revisit the cache idea" --status idea --defer 60d  # hidden from the pickers until then
+    tasks list --deferred            # deferred tasks, soonest first; due ones lead
+    tasks edit <id> --no-defer       # clear it; any status change clears it too
+    tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
+    tasks add "Reply to Dana" --source "mail:<42@example.org>"  # again: reuses the id, writes nothing
+    tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
+    tasks list -p 0 -p 1 --size s --size xs   # P0 or P1, and small or extra-small
+    tasks search "claim identity" --all-projects  # title or body contains the phrase; every list option applies
+    tasks ready --complexity none             # ready work nobody has rated yet
+    tasks ready                      # what can be worked on now (JSON)
+    tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
+    tasks add "Capture lane" --lane -p 1 -b "Why it runs; first milestone"  # an effort beside the others
+    tasks edit <id> --no-lane        # clear the lane marker
+    tasks lanes                      # each lane: guidance, state, and the step it could take now
+    tasks next --under sci-4f2a9c    # the next step inside one lane, at any depth
+    tasks list --under sci-4f2a9c    # a goal's whole subtree (--parent is direct children)
+    tasks block sci-4f2a9c "host busy"  # pause a lane; tasks unblock resumes it
+    tasks add "Capture the trace" --need quiet  # a shared resource from [needs] in tasks/.config.toml
+    tasks edit <id> --rm-need quiet  # --need adds; --rm-need/--no-needs remove
+    tasks list --need quiet          # tasks that need it (all-of, like --tag)
+    tasks ready --without quiet      # hide steps this session cannot meet; also TASKS_WITHOUT
+    tasks sample --limit 3           # random open tasks for a curation pass (see skills/curate)
+    tasks tree                       # the goal hierarchy
+    tasks next                       # parked work waiting on you, else the first ready task
+    tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
+    tasks park <id> "rerun the preflight" --reason quiet --waiting-on user --minutes 50  # needs an idle host
+    tasks quiet                      # what could run tonight, across every project; -n 1 for the top
+    tasks list --parked --waiting-on user --all-projects  # everything waiting on you, with its next step
+    tasks --pretty --headers list     # label each column of a pretty table
+    tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
+    tasks release <id> "sandbox exited"  # drop a claim this command cannot judge, holder known gone; records why
+    tasks release new-4f2a9c "gone" --adopting old  # the same for a claim recorded before a rename this host has not adopted
+    tasks shelve <id> "when the dependency lands" # keep open work out of active views
+    tasks unshelve <id>             # return shelved work to idea
+    tasks next --all-projects        # the same across every registered project
+    tasks prime --project fam        # read another registered project; also list, ready,
+                                     #   next, tree, tags, sample. Needs no local project.
+    tasks projects                   # the registry: reachable? counts?
+    tasks group set vf nodes atoms   # a named set of registered projects (this host only)
+    tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
+                                     #   sample, lanes, quiet. Needs no local project.
+    tasks groups                     # each group, its members, and whether they are reachable
+    tasks group rm vf                # delete the group; its projects stay registered
+    tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project
+    tasks move dots-5760ef --to wali --explain  # diagnose without locks or writes
+    tasks add "Piece" --project fam  # create in another registered project
+    tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
+    tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
+    tasks edit sci-4f2a9c --tag cli --rm-tag triage  # --tag adds; --rm-tag/--no-tags remove
+    tasks edit sci-4f2a9c --depends sci-7b1e04       # --depends adds; --no-depends clears
+    tasks dep sci-4f2a9c --on sci-7b1e04 --rm sci-0c3d7e  # swap a dependency in one save
+    tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
+    tasks --pretty --color auto ready # color when stdout is a terminal
+    tasks start sci-4f2a9c
+    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt or held-need override
+    tasks note sci-4f2a9c "spec §4 no longer holds"
+    tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
+    tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name
+    tasks detach sci-4f2a9c before.png "wrong screenshot"  # recorded; uncommitted bytes are gone
+    tasks done sci-91be03 "rows emitted"
+    tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
+    tasks check                      # validate files, links, plan steps, dependencies; silent when clean
+    tasks commit [--project <p>]     # commit every uncommitted file under tasks/, ignoring [git] commit
+
+Run `tasks --help` for the full command list.
+
+### Output and errors
+
+`tasks --help` lists every command and `tasks help <command>` one command's; add
+`--pretty` to any command, before or after its name, for human-readable output (`--json`
+is the default, spelled out). A usage error — an unknown command or option, a missing
+argument, a value outside a closed set — exits 2 with the problem and the usage line on
+stderr; a command that ran and failed exits 1 with one JSON error object there.
+
+JSON task records omit unset optional fields and empty task collections (`tags`,
+`depends`, `notes`, `refs`, `depends_on`, `children`). Missing means unset or empty; consumers
+must not require those keys. Values such as `false`, `0`, and `body: ""` remain.
+Response containers such as `tasks: []` and `warnings: []` remain, as does `next: null`
+when nothing is eligible. See
+[the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
+
+`check` warnings distinguish `doc_unreachable` (this host could not resolve a
+reference) from `doc_unchecked` (one summary listing external checks unfinished
+because the shared fetch budget ended). Warning-only checks exit 0; a warning
+does not verify a document. Finding consumers, including obs and the TUI, must
+recognize both kinds. Summary and parked rows include `step` only when set.
+`tasks doc` exports exact UTF-8 body bytes in every format, with warnings on
+stderr and no JSON envelope.
+
+Task ids on the command line accept trailing sentence punctuation: a trailing run of
+ASCII periods and commas on any positional id or id-valued flag (`--parent`, `--depends`,
+`dep --on/--rm`, `feedback --recur`) is stripped before validation and alias resolution,
+so an id copied from a sentence or a list works. Embedded or leading punctuation, other
+punctuation, and leading or trailing whitespace are not accepted; records on disk and
+every output stay canonical.
+
+<a id="project-routing"></a>
+
+### Routing across projects
+
+Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
+work from outside every project: the prefix selects the registered root. Inside a
+project, a matching prefix keeps the current checkout, including a worktree selected
+with `-C`. `feedback` works there too and reports as `from:unregistered`.
+
+The registry can also declare project groups (`[groups]`), named sets of live prefixes
+that `--group <name>` reads together. `rename` carries a member to its new prefix.
+`unregister` removes the prefix from every group and deletes, with a warning, any group it
+leaves empty. A group name is never a live or retired prefix.
+
+<a id="agent-and-completion-stamps"></a>
+
+### Creation and completion stamps
+
+`TASKS_MODEL` per harness process records which model completed each task: a fresh
+`done` stamps the record's `model` field from it (and clears the stamp when it is
+unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
+`TASKS_AGENT` per harness process records which harness and model filed each task
+(`<harness>/<model>`, or the harness alone): `add` and `feedback` stamp the record's
+`agent` field from it, `add --agent` overrides it, and `tasks edit --agent`/`--no-agent`
+corrects a stamp. The harness owns exporting it: Claude Code is wired through the ops
+`claude-provenance` hook (session start and model switch, so the stamp follows
+`/model`), Codex exports the harness alone, and other harnesses pass `--agent` when
+they know their ids. Design:
+`docs/specs/2026-09-13-creation-provenance-design.md`.
+
 <a id="lifecycle-provenance"></a>
+
+### Lifecycle notes
 
 Lifecycle notes automatically record native harness provenance, independently of
 claim identity and liveness. A stamped note has one indented JSON continuation:
@@ -189,70 +429,6 @@ use it to name the session at each stage boundary.
 Binaries older than the provenance writer reject a stamped file outright, so every host
 that reads synced task files needs a current `tasks`. The contract and its rollout are
 recorded in `docs/plans/2026-09-17-lifecycle-provenance.md`.
-
-<a id="agent-and-completion-stamps"></a>
-
-`TASKS_MODEL` per harness process records which model completed each task: a fresh
-`done` stamps the record's `model` field from it (and clears the stamp when it is
-unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
-`TASKS_AGENT` per harness process records which harness and model filed each task
-(`<harness>/<model>`, or the harness alone): `add` and `feedback` stamp the record's
-`agent` field from it, `add --agent` overrides it, and `tasks edit --agent`/`--no-agent`
-corrects a stamp. The harness owns exporting it: Claude Code is wired through the ops
-`claude-provenance` hook (session start and model switch, so the stamp follows
-`/model`), Codex exports the harness alone, and other harnesses pass `--agent` when
-they know their ids. Design:
-`docs/specs/2026-09-13-creation-provenance-design.md`.
-
-<a id="session-selection"></a>
-
-`TASKS_MAX_COMPLEXITY` per harness process is the envelope a session picks within:
-`ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
-many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
-`docs/specs/2026-09-12-task-complexity-design.md`.
-`TASKS_WITHOUT` (comma-separated need names) is the other half of a session's envelope:
-`ready`, `next`, and `prime` hide tasks needing any of them, in the projects that declare
-the name, and say how many.
-`--without` adds to it for one call and refuses a name no project in scope declares; the
-variable never errors, so a host in ordinary use can set `TASKS_WITHOUT=quiet` once for
-every project. Needs are declared per project in `[needs]` (see the design's §6). Design:
-`docs/specs/2026-10-03-lanes-needs-groups-design.md`.
-`park` sets a task down with its next step in the same store, who it waits on, and
-optionally why:
-
-| reason        | The work stopped because…                                                        |
-|---------------|----------------------------------------------------------------------------------|
-| `review`      | an artifact the user must inspect and judge: art sheets, screenshots, a document read |
-| `decision`    | a decision only the user can make — scope, taste, priority                       |
-| `approval`    | the agent holds a recommendation and wants it confirmed                          |
-| `environment` | the checkout or machine cannot run the work — missing deps, a restart, a TTY     |
-| `dependency`  | another task or project must land first                                          |
-| `session`     | the session ended before the work did — context exhausted, time, crash           |
-| `capability`  | the work needs more reasoning than this session can supply; `--complexity` raises the rating |
-| `quiet`       | the host is in use; the work is prepared, unattended, and needs only an idle machine — `--minutes <n>` (required) and `--needs idle\|headless` record the recipe |
-
-`start` resumes it, and `prime` lists parked work first. Parks are host-local, so a park
-can outlive a close made on another host or checkout; `prime` reports such a park as a
-warning naming the command that clears it (repeating the close) rather than as a row,
-while `list --parked` omits it unless given a status filter. Every record also carries two
-stamps written only by status changes: `started`, the first time work began, and
-`completed`, the latest completion (cleared by a reopen). Design:
-`docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
-`tasks quiet` lists quiet parks across every registered project as resume briefs (design:
-`docs/specs/2026-09-13-quiet-queue-design.md`); the ordinary pretty tables (`list`,
-`prime`, `ready`) mark a quiet park's row with its recipe, such as
-`waits on user, quiet; idle, 40 min`. A quiet park's next step lists the run's
-phases and any refusal or hang an earlier attempt of the recipe hit. Every attempt then ends
-with one note in a fixed form, so the estimate can be compared with what happened:
-
-    run: <actual> min (est <n>, <needs>); <phase> <m>, …; <outcome>[: <cause>]
-
-`<outcome>` is `passed`, `failed`, `refused`, `hung`, or `aborted`. A refused attempt is
-timed up to the refusal and gets its note too.
-
-Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`.
-`shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
-`tasks unshelve <id>` to return it as an idea.
 
 ### Relay identity (opt-in)
 
@@ -361,108 +537,37 @@ to set `TASKS_SESSION` and `TASKS_SESSION_PID`. That override is the recovery pa
 of them, and distinguishes agents sharing a process when native thread identity is
 unavailable. It never supplies native note provenance.
 
-## Install
+### Choosing a process
 
-From a checkout (`--locked` installs the checked dependency versions):
+Set `--process direct|planned` on `add` or `edit`; `edit --no-process` clears it.
+Choose it alongside size and complexity when scoping work, including each plan child.
+It is never derived from those fields, parentage, or document links. The
+[Process](#process) concept tabulates what each value asks of an agent.
 
-    cargo install --locked --path .
+Both code paths retain appropriate debugging, tests, and review, and use an isolated
+task worktree under the adopted policy. A direct task that uncovers an unresolved
+design decision or grows beyond its scope needs a note and reassessment to planned.
+Ideas still need scoping. Existing document links do not establish approval.
 
-Without a checkout (binary only; the skill still needs the `skills/tasks` directory
-from a clone):
+JSON task, summary, and parked rows expose `process` as a string when assessed;
+unassessed rows omit it. Pretty summary and parked rows show a process column (`-` when unassessed); show and next
+print a `process:` row reading `direct`, `planned`, or `unassessed`. The parked
+`phase` remains a link-derived resume hint: a todo without document links can show
+`phase: implementing` alongside `process: planned`, which still requires both reviews.
 
-    cargo install --git https://github.com/khughitt/tasks
+`tasks check` warns `process_missing` only for doing records without a choice,
+including goals and plan steps. Unassessed todos need no backfill sweep. The CLI
+does not change readiness, ordering, or `start` eligibility based on process, and
+does not run skills or create worktrees.
 
-## Use
+Projects must adopt the process policy in their agent instructions (see the
+[adoption snippet](#3-tell-the-projects-agents) in the quick start) before it can take
+precedence over generic brainstorming triggers.
+This repo has adopted it. The writing-plans integration is the tasks skill's child
+command (`--complexity <level> --process <value>`), not the upstream plan-writing skill.
+Design: `docs/specs/2026-09-13-task-process-design.md`.
 
-    cd <repo>
-    tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
-    tasks init --prefix sci --force  # re-point the prefix here after moving the repo
-    tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
-    tasks retire --successor mind6 --reason "superseded"  # declare this project over; unretire undoes it
-    tasks rename dot dots            # rename a registered prefix; old ids still resolve
-    tasks rename dot dots --explain  # diagnose an interruption without locks or writes
-    tasks add "Bank the ledger" -p 1 --size m --complexity low --process direct --tag ledger --agent codex/gpt-6
-    tasks add "Emit rows" --parent sci-4f2a9c
-    tasks edit <id> --process planned # choose a workflow explicitly
-    tasks edit <id> --no-process     # clear it to unassessed
-    tasks add "Curation sweep" --every 30d  # days or weeks since each completion
-    tasks list --periodic            # recurring tasks, soonest due first
-    tasks edit <sweep-id> --every 2w # change the cadence; --no-every clears it and its anchor
-    tasks add "Revisit the cache idea" --status idea --defer 60d  # hidden from the pickers until then
-    tasks list --deferred            # deferred tasks, soonest first; due ones lead
-    tasks edit <id> --no-defer       # clear it; any status change clears it too
-    tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
-    tasks add "Reply to Dana" --source "mail:<42@example.org>"  # again: reuses the id, writes nothing
-    tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
-    tasks list -p 0 -p 1 --size s --size xs   # P0 or P1, and small or extra-small
-    tasks search "claim identity" --all-projects  # title or body contains the phrase; every list option applies
-    tasks ready --complexity none             # ready work nobody has rated yet
-    tasks ready                      # what can be worked on now (JSON)
-    tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
-    tasks add "Capture lane" --lane -p 1 -b "Why it runs; first milestone"  # an effort beside the others
-    tasks edit <id> --no-lane        # clear the lane marker
-    tasks lanes                      # each lane: guidance, state, and the step it could take now
-    tasks next --under sci-4f2a9c    # the next step inside one lane, at any depth
-    tasks list --under sci-4f2a9c    # a goal's whole subtree (--parent is direct children)
-    tasks block sci-4f2a9c "host busy"  # pause a lane; tasks unblock resumes it
-    tasks add "Capture the trace" --need quiet  # a shared resource from [needs] in tasks/.config.toml
-    tasks edit <id> --rm-need quiet  # --need adds; --rm-need/--no-needs remove
-    tasks list --need quiet          # tasks that need it (all-of, like --tag)
-    tasks ready --without quiet      # hide steps this session cannot meet; also TASKS_WITHOUT
-    tasks sample --limit 3           # random open tasks for a curation pass (see skills/curate)
-    tasks tree                       # the goal hierarchy
-    tasks next                       # parked work waiting on you, else the first ready task
-    tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
-    tasks park <id> "rerun the preflight" --reason quiet --waiting-on user --minutes 50  # needs an idle host
-    tasks quiet                      # what could run tonight, across every project; -n 1 for the top
-    tasks list --parked --waiting-on user --all-projects  # everything waiting on you, with its next step
-    tasks --pretty --headers list     # label each column of a pretty table
-    tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
-    tasks release <id> "sandbox exited"  # drop a claim this command cannot judge, holder known gone; records why
-    tasks release new-4f2a9c "gone" --adopting old  # the same for a claim recorded before a rename this host has not adopted
-    tasks shelve <id> "when the dependency lands" # keep open work out of active views
-    tasks unshelve <id>             # return shelved work to idea
-    tasks next --all-projects        # the same across every registered project
-    tasks prime --project fam        # read another registered project; also list, ready,
-                                     #   next, tree, tags, sample. Needs no local project.
-    tasks projects                   # the registry: reachable? counts?
-    tasks group set vf nodes atoms   # a named set of registered projects (this host only)
-    tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
-                                     #   sample, lanes, quiet. Needs no local project.
-    tasks groups                     # each group, its members, and whether they are reachable
-    tasks group rm vf                # delete the group; its projects stay registered
-    tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project
-    tasks move dots-5760ef --to wali --explain  # diagnose without locks or writes
-    tasks add "Piece" --project fam  # create in another registered project
-    tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
-    tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
-    tasks edit sci-4f2a9c --tag cli --rm-tag triage  # --tag adds; --rm-tag/--no-tags remove
-    tasks edit sci-4f2a9c --depends sci-7b1e04       # --depends adds; --no-depends clears
-    tasks dep sci-4f2a9c --on sci-7b1e04 --rm sci-0c3d7e  # swap a dependency in one save
-    tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
-    tasks --pretty --color auto ready # color when stdout is a terminal
-    tasks start sci-4f2a9c
-    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt or held-need override
-    tasks note sci-4f2a9c "spec §4 no longer holds"
-    tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
-    tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name
-    tasks detach sci-4f2a9c before.png "wrong screenshot"  # recorded; uncommitted bytes are gone
-    tasks done sci-91be03 "rows emitted"
-    tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
-    tasks check                      # validate files, links, plan steps, dependencies; silent when clean
-    tasks commit [--project <p>]     # commit every uncommitted file under tasks/, ignoring [git] commit
-
-<a id="project-routing"></a>
-
-Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
-work from outside every project: the prefix selects the registered root. Inside a
-project, a matching prefix keeps the current checkout, including a worktree selected
-with `-C`. `feedback` works there too and reports as `from:unregistered`.
-
-A recurring task closes normally: `done` records the completion and anchors its next
-cycle. When due, it appears in `ready` with status `done`; use `start` before completing
-the next occurrence. Early runs are allowed. `--every` accepts positive whole days or
-weeks (for example, `30d` or `2w`), up to 36500 days; goals cannot recur.
+### Attachments
 
 Attachments live in `tasks/files/<id>/`, one directory per task, committed with the
 record. Each file is capped at 2 MiB unless `tasks/.config.toml` sets
@@ -482,6 +587,8 @@ An interrupted `attach` leaves a file that `check` reports as `attachment_unnote
 Rerun it with the same bytes and `--name <name>` to finish, or `detach` the file. An
 interrupted `detach` finishes when rerun.
 
+### Moving tasks
+
 `tasks move <id> --to <prefix> [--explain]` moves an open, unparented,
 childless, unclaimed task from its registered checkout to another live registered
 project. Destination validation still applies to its spec, plan, needs and dependencies.
@@ -491,12 +598,11 @@ refuse with `moved`, naming the destination id. Existing dependents follow the p
 `check` warns `moved_dep` with `tasks dep <id> --on <new> --rm <old>` for their owners.
 `show` displays the tombstone; `resolve` continues to resolve prefixes and paths only.
 
-Closed records (`done`, `dropped`, and `moved`) keep their historical plan and step
-links. If the plan is absent from both the record's checkout and its main checkout,
-`show` returns the record with a warning that the plan is unavailable and
-`step_found: false` when a step is linked. Available plans still have their steps
-checked; missing local plans for open work and other local read errors still fail.
-External availability follows the contract below.
+Task objects expose optional `moved_to` (the destination id on a source tombstone)
+and `moved_from` (the source id on the destination). `status` includes `moved`, a
+closed, read-only status; counts include `moved`, and `total` counts every record.
+Only `move` sets the pointer fields. Older binaries cannot parse these records:
+update every host reading synced tasks before the first move.
 
 The move output (`MoveOut`) names the paths written in each root. Under `[git] commit`
 it commits each opted-in root; otherwise commit each root its `paths` lists:
@@ -523,9 +629,167 @@ journal, `move_incomplete` for a reachable missing or mismatched counterpart, an
 Recovery covers process interruption, not power loss; parks on other hosts stay keyed
 to the old id. See [recovery limits and manual undo](docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
 
-Run `tasks --help` for the full command list.
+### Task references
+
+Alongside the governing `--spec` and `--plan` links, `add --ref` and `edit --ref`
+accept repeatable reference entries. The binary stores them in a managed
+`## References` section between the body and `## Notes`; do not put that heading
+in `--body`. Each stored line uses this grammar (omit the leading `- ` in `--ref`):
+
+```text
+- <handle> (<relation>[, required][, kind=<kind>]): <reference>[ — <description>]
+```
+
+Handles match `[a-z][a-z0-9-]{0,31}` and are unique within the task. Relations are
+`context` (consult when needed), `input` (used by the work), or `output` (produced
+or revised by the work). `required` marks an entry for reading before work;
+`kind` is a descriptive label matching `[a-z][a-z0-9-]*`. Attributes stay in the
+order shown. Descriptions follow a space, em dash, and space.
+
+A reference is a normalized repo-relative file or directory path (no trailing
+slash), an attachment `files:<name>`, or an external `<scheme>:<remainder>`.
+Cross-project `@` references are not supported. References containing whitespace,
+`"`, or `\` must be double-quoted, with `\"` and `\\` as the only escapes.
+Decoded references must also be unique within a task. New or changed context
+and input targets must exist locally or be attached; outputs may be pending.
+External entries are validated for shape without fetching.
+
+```sh
+tasks add "Revise the runbook" \
+  --ref 'brief (input, required, kind=brief): docs/notes/brief.md — admission rules' \
+  --ref 'runbook (output, required, kind=runbook): "docs/runbooks/trigger sweep.md"' \
+  --body 'Follow [ref:brief] §7 and revise [ref:runbook].'
+tasks edit <id> --ref 'brief (input, required): docs/notes/revised-brief.md'
+tasks edit <id> --rm-ref brief --body 'Revise [ref:runbook].'
+tasks edit <id> --no-refs --body 'References no longer needed.'
+```
+
+`edit --ref` replaces an existing handle in place or appends a new one.
+`--rm-ref` is repeatable; `--no-refs` clears all entries and conflicts with
+`--ref` and `--rm-ref`. A body citation is `[ref:<handle>]`; unknown or malformed
+handles are refused when saving body or entry changes, and reported by `check`
+for open tasks. Citation syntax inside CommonMark code spans or fenced or
+indented code blocks is literal. Notes are not audited. Remove citations when
+removing their entries, replacing the body in the same call if needed.
+
+```sh
+tasks doc <id> brief            # exact UTF-8 text, without an envelope
+tasks list --ref docs/notes/brief.md
+tasks search "runbook" --ref docs/notes/brief.md
+```
+
+`doc` accepts exactly one handle, `--spec`, or `--plan`. Directories and binary
+files fail as `ref_not_text`; pending outputs fail as `doc_not_found`. External
+entries use the host's document provider and respect `--no-fetch`.
+`list --ref` and `search --ref` match the stored reference byte for byte,
+without fetching or alias resolution.
+
+`show` includes an optional `inventory`: spec, plan, explicit entries in order,
+source, then unreferenced attached files in name order. Rows report origin,
+location, status and any entry metadata. Entries matching a spec or plan merge
+into its row when both resolve to the same target; an attachment entry replaces
+its standalone attachment row. Required rows form the reading list in inventory
+order: spec and plan are always required, then entries marked `required`.
+Missing outputs show as `pending`; external entries are not fetched for inventory.
+Full task objects expose `refs` only when nonempty; summary rows omit it.
+
+Every fresh transition to `done`, including `edit --status done` and the editor,
+requires local output paths and output attachments to exist (`ref_output_missing`).
+Produce them or explicitly remove their entries; `--force` does not bypass this
+gate. Special files are refused. External outputs and `drop` are not checked.
+Each reopened or recurring completion is checked; repeating `done` on an already
+completed task still releases its claim even if an output has since disappeared.
+
+Closed records (`done`, `dropped`, and `moved`) keep their historical plan and step
+links. If the plan is absent from both the record's checkout and its main checkout,
+`show` returns the record with a warning that the plan is unavailable and
+`step_found: false` when a step is linked. Available plans still have their steps
+checked; missing local plans for open work and other local read errors still fail.
+External availability follows the contract below.
+
+### External documents
+
+`--spec` and `--plan` also accept `<scheme>:<remainder>`, for example
+`mindful:thought:abc`. The scheme matches `[a-z][a-z0-9-]*`; the nonempty
+remainder is opaque and may contain further colons, slashes, spaces and quotes,
+but no newline, carriage return or NUL. A colon in the first path segment
+reserves the external form; `docs/plans/x:y.md` remains local. Configured
+`spec_dirs` and `plan_dirs` cannot contain a colon in their first segment.
+
+Configure fetch commands on each host in `~/.config/tasks/config.toml`:
+
+```toml
+[docs.schemes]
+mindful = "mindful-doc"
+```
+
+The command is trusted host configuration. Tasks invokes
+`sh -c '<command> "$1"' -- <remainder>` with closed stdin, so the reference is
+one literal argument. The command must return one UTF-8 JSON object with string
+`id` and `body` fields; `id` is nonempty and single-line, without NUL. Extra
+fields are allowed. Tasks stores `<scheme>:<id>` after a successful write.
+Each fetch has a 30-second deadline, a 2 MiB stdout limit and a diagnostic
+prefix of at most 200 stderr bytes. Remaining processes in its group are
+terminated when the shell exits or a limit is reached. Providers must keep
+children in that group and must not daemonize; escaped jobs are their
+responsibility. Pipe reads remain deadline-bounded even if a provider violates
+that restriction.
+
+Writes fetch only changed external links and verify an external step only when
+its plan or step changed. Unrelated title, priority or body edits work without
+the scheme. Changing an alias counts as a change. Adding links, exporting a
+document and moving a task with an external step require successful reads.
+A move without a step preserves external references without fetching.
+
+`check` uses up to four concurrent fetches within one five-second budget. It
+prioritizes open plans with steps, other open plans, open specs, then closed-only
+plans; within each tier references sort lexically. A shared reference belongs
+to its highest tier and is read once. Missing schemes or attempted provider
+failures produce per-task `doc_unreachable` warnings for open work. Budget
+exhaustion produces one `doc_unchecked` summary listing unfinished references
+in priority order. Local checks continue; available plans still produce errors
+for missing steps. Malformed host configuration remains fatal.
+
+`show` and `next` spend at most five seconds fetching a stepped external plan.
+An unavailable open plan gives a warning and omits `step_found`; a closed task
+uses `step_found: false` with a historical warning. Without a step they do not
+fetch the external plan, and spec links do not trigger fetches. Displayed
+`spec_path` and `plan_path` are the stored external references; local links
+remain absolute paths.
+
+`show --no-fetch`, `next --no-fetch` and `doc --no-fetch` never run a provider
+command, for a caller that must stay read-only on a host with `[docs.schemes]`.
+`show` and `next` then omit `step_found` for an external plan, open or closed,
+without a warning: a skipped fetch says nothing about availability. `doc` fails
+an external link as `doc_not_found` (`fetch disabled by --no-fetch`). Local
+documents read as usual.
+
+```sh
+tasks doc <id> --plan       # exactly one of --plan, --spec, or a reference handle
+tasks doc <id> --spec
+tasks list --plan mindful:thought:abc --status done
+tasks search "phrase" --plan mindful:thought:abc
+```
+
+`doc` returns only the selected document's exact body, even with `--json` or
+`--pretty`, and adds no newline, color or headers. `--plan` on list/search is
+an exact comparison against the stored reference: no fetch, alias resolution
+or parent restriction. Local paths use the same exact comparison. Optional
+`step` is exposed in JSON rows without adding a pretty table column.
+
+Upgrade each host's binary before adding `[docs.schemes]` on that host: older
+binaries reject the table. Upgrade every host reading synced records before
+the first external link. Roll back by removing the table before restoring an
+older binary, and remove external links before reverting every reader.
+The workflow activation pilot must show three clean full-backlog checks on
+each host with its real wrapper and web app running, under five seconds with
+no `doc_unchecked`. Failed pilots require a faster provider before activation;
+later `doc_unchecked` findings are latency incidents. Provider rollout and pilot
+evidence belong to the ops rollout task, `ops-721511`.
 
 <a id="prefix-renames-and-recovery"></a>
+
+### Renaming a prefix
 
 The registry maps live prefixes to project roots and retired prefixes to their current
 live name. `tasks rename <old> <new>` updates the project's filenames, ids, local
@@ -533,26 +797,6 @@ live name. `tasks rename <old> <new>` updates the project's filenames, ids, loca
 prose need no edits: retired names keep resolving **for as long as the project stays
 registered**. `unregister` removes that project's aliases too; retired names cannot be
 reused while registered.
-
-A project that is over declares it in its own `tasks/.config.toml` with `tasks retire
-[--successor <prefix>] --reason "<one line>"`, run in its registered checkout. It refuses
-while any task is open in any checkout, while a claim is live, or while a linked worktree
-cannot be read, and writes a `[retired]` table (`date`, `reason`, optional `successor`,
-stored as the successor's live prefix). It refuses an already retired project too:
-`tasks unretire` first to declare it again. From then on every write to the project is
-refused with `retired_project`, from every checkout, a worktree made before the
-retirement included, whose `tasks check` also reports its open work; its ids keep
-resolving and satisfy other projects' dependencies; `--all-projects` and `--group` reads
-and their id completion leave it out, as does the list of feedback owners, while
-`--project` reads and `show` warn; `tasks projects` keeps its row with `retired`;
-`group set` refuses it as a member; `init --force` and `rename` refuse it. `tasks
-unretire` in the registered checkout removes the table. The project lifecycle runbook in
-ops has the whole procedure.
-
-The registry can also declare project groups (`[groups]`), named sets of live prefixes
-that `--group <name>` reads together. `rename` carries a member to its new prefix.
-`unregister` removes the prefix from every group and deletes, with a warning, any group it
-leaves empty. A group name is never a live or retired prefix.
 
 A live id and its retired spelling are one task. `tasks dep <id> --on <x>` when the task
 already depends on `x` under any spelling changes nothing, keeps the stored spelling, and
@@ -585,7 +829,7 @@ stop its owning session or wait for it to become stale, then retry. For a rehear
 both `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to scratch directories so no live registry or
 park is touched. `--explain --adopt` diagnoses the local state without writes.
 
-### Location history
+#### Location history
 
 The host-local registry's optional `[locations.<prefix>]` table records the current
 root's symlinked worktree `storage` and `former` roots, each with optional storage and
@@ -621,7 +865,24 @@ Preserve existing history when adding an entry, then run
 `tasks` binary drops `[locations]` whenever it writes the registry; update each host's
 binary before recording history.
 
-## Linked and detached projects
+### Retiring a project
+
+A project that is over declares it in its own `tasks/.config.toml` with `tasks retire
+[--successor <prefix>] --reason "<one line>"`, run in its registered checkout. It refuses
+while any task is open in any checkout, while a claim is live, or while a linked worktree
+cannot be read, and writes a `[retired]` table (`date`, `reason`, optional `successor`,
+stored as the successor's live prefix). It refuses an already retired project too:
+`tasks unretire` first to declare it again. From then on every write to the project is
+refused with `retired_project`, from every checkout, a worktree made before the
+retirement included, whose `tasks check` also reports its open work; its ids keep
+resolving and satisfy other projects' dependencies; `--all-projects` and `--group` reads
+and their id completion leave it out, as does the list of feedback owners, while
+`--project` reads and `show` warn; `tasks projects` keeps its row with `retired`;
+`group set` refuses it as a member; `init --force` and `rename` refuse it. `tasks
+unretire` in the registered checkout removes the table. The project lifecycle runbook in
+ops has the whole procedure.
+
+### Linked and detached projects
 
 A linked project keeps its task records, specs, and plans in an overlay project directory
 while its code lives in another git checkout. Run this in the overlay project directory:
@@ -659,7 +920,7 @@ none. Two
 projects declaring the same checkout fail with `checkout_conflict`. Init refuses
 writes into a declared code checkout or any of its worktrees.
 
-### Detached projects
+#### Detached projects
 
 A detached project keeps its records and working documents in a separate records
 repository, at `<records-root>/<prefix>`, while the code checkout stays free of them.
@@ -766,7 +1027,7 @@ Update each host's binary before the first detached project. An older binary can
 parse `kind = "detached"`, and it drops the `[records]` table on its next registry
 save.
 
-## Resolving ids and paths
+### Resolving ids and paths
 
 Use `tasks resolve <id|prefix|path>...` or `tasks resolve --stdin` (one input per line)
 to map inputs through prefix renames and directory moves. It is read-only and needs no
@@ -803,192 +1064,7 @@ adds an invalid diagnostic and stops reading, preserving earlier rows. Unavailab
 relative-path bases also produce invalid rows. Only registry problems fail command
 execution with the usual error envelope on stderr and exit 1.
 
-## Task references
-
-Alongside the governing `--spec` and `--plan` links, `add --ref` and `edit --ref`
-accept repeatable reference entries. The binary stores them in a managed
-`## References` section between the body and `## Notes`; do not put that heading
-in `--body`. Each stored line uses this grammar (omit the leading `- ` in `--ref`):
-
-```text
-- <handle> (<relation>[, required][, kind=<kind>]): <reference>[ — <description>]
-```
-
-Handles match `[a-z][a-z0-9-]{0,31}` and are unique within the task. Relations are
-`context` (consult when needed), `input` (used by the work), or `output` (produced
-or revised by the work). `required` marks an entry for reading before work;
-`kind` is a descriptive label matching `[a-z][a-z0-9-]*`. Attributes stay in the
-order shown. Descriptions follow a space, em dash, and space.
-
-A reference is a normalized repo-relative file or directory path (no trailing
-slash), an attachment `files:<name>`, or an external `<scheme>:<remainder>`.
-Cross-project `@` references are not supported. References containing whitespace,
-`"`, or `\` must be double-quoted, with `\"` and `\\` as the only escapes.
-Decoded references must also be unique within a task. New or changed context
-and input targets must exist locally or be attached; outputs may be pending.
-External entries are validated for shape without fetching.
-
-```sh
-tasks add "Revise the runbook" \
-  --ref 'brief (input, required, kind=brief): docs/notes/brief.md — admission rules' \
-  --ref 'runbook (output, required, kind=runbook): "docs/runbooks/trigger sweep.md"' \
-  --body 'Follow [ref:brief] §7 and revise [ref:runbook].'
-tasks edit <id> --ref 'brief (input, required): docs/notes/revised-brief.md'
-tasks edit <id> --rm-ref brief --body 'Revise [ref:runbook].'
-tasks edit <id> --no-refs --body 'References no longer needed.'
-```
-
-`edit --ref` replaces an existing handle in place or appends a new one.
-`--rm-ref` is repeatable; `--no-refs` clears all entries and conflicts with
-`--ref` and `--rm-ref`. A body citation is `[ref:<handle>]`; unknown or malformed
-handles are refused when saving body or entry changes, and reported by `check`
-for open tasks. Citation syntax inside CommonMark code spans or fenced or
-indented code blocks is literal. Notes are not audited. Remove citations when
-removing their entries, replacing the body in the same call if needed.
-
-```sh
-tasks doc <id> brief            # exact UTF-8 text, without an envelope
-tasks list --ref docs/notes/brief.md
-tasks search "runbook" --ref docs/notes/brief.md
-```
-
-`doc` accepts exactly one handle, `--spec`, or `--plan`. Directories and binary
-files fail as `ref_not_text`; pending outputs fail as `doc_not_found`. External
-entries use the host's document provider and respect `--no-fetch`.
-`list --ref` and `search --ref` match the stored reference byte for byte,
-without fetching or alias resolution.
-
-`show` includes an optional `inventory`: spec, plan, explicit entries in order,
-source, then unreferenced attached files in name order. Rows report origin,
-location, status and any entry metadata. Entries matching a spec or plan merge
-into its row when both resolve to the same target; an attachment entry replaces
-its standalone attachment row. Required rows form the reading list in inventory
-order: spec and plan are always required, then entries marked `required`.
-Missing outputs show as `pending`; external entries are not fetched for inventory.
-Full task objects expose `refs` only when nonempty; summary rows omit it.
-
-Every fresh transition to `done`, including `edit --status done` and the editor,
-requires local output paths and output attachments to exist (`ref_output_missing`).
-Produce them or explicitly remove their entries; `--force` does not bypass this
-gate. Special files are refused. External outputs and `drop` are not checked.
-Each reopened or recurring completion is checked; repeating `done` on an already
-completed task still releases its claim even if an output has since disappeared.
-
-## External documents
-
-`--spec` and `--plan` also accept `<scheme>:<remainder>`, for example
-`mindful:thought:abc`. The scheme matches `[a-z][a-z0-9-]*`; the nonempty
-remainder is opaque and may contain further colons, slashes, spaces and quotes,
-but no newline, carriage return or NUL. A colon in the first path segment
-reserves the external form; `docs/plans/x:y.md` remains local. Configured
-`spec_dirs` and `plan_dirs` cannot contain a colon in their first segment.
-
-Configure fetch commands on each host in `~/.config/tasks/config.toml`:
-
-```toml
-[docs.schemes]
-mindful = "mindful-doc"
-```
-
-The command is trusted host configuration. Tasks invokes
-`sh -c '<command> "$1"' -- <remainder>` with closed stdin, so the reference is
-one literal argument. The command must return one UTF-8 JSON object with string
-`id` and `body` fields; `id` is nonempty and single-line, without NUL. Extra
-fields are allowed. Tasks stores `<scheme>:<id>` after a successful write.
-Each fetch has a 30-second deadline, a 2 MiB stdout limit and a diagnostic
-prefix of at most 200 stderr bytes. Remaining processes in its group are
-terminated when the shell exits or a limit is reached. Providers must keep
-children in that group and must not daemonize; escaped jobs are their
-responsibility. Pipe reads remain deadline-bounded even if a provider violates
-that restriction.
-
-Writes fetch only changed external links and verify an external step only when
-its plan or step changed. Unrelated title, priority or body edits work without
-the scheme. Changing an alias counts as a change. Adding links, exporting a
-document and moving a task with an external step require successful reads.
-A move without a step preserves external references without fetching.
-
-`check` uses up to four concurrent fetches within one five-second budget. It
-prioritizes open plans with steps, other open plans, open specs, then closed-only
-plans; within each tier references sort lexically. A shared reference belongs
-to its highest tier and is read once. Missing schemes or attempted provider
-failures produce per-task `doc_unreachable` warnings for open work. Budget
-exhaustion produces one `doc_unchecked` summary listing unfinished references
-in priority order. Local checks continue; available plans still produce errors
-for missing steps. Malformed host configuration remains fatal.
-
-`show` and `next` spend at most five seconds fetching a stepped external plan.
-An unavailable open plan gives a warning and omits `step_found`; a closed task
-uses `step_found: false` with a historical warning. Without a step they do not
-fetch the external plan, and spec links do not trigger fetches. Displayed
-`spec_path` and `plan_path` are the stored external references; local links
-remain absolute paths.
-
-`show --no-fetch`, `next --no-fetch` and `doc --no-fetch` never run a provider
-command, for a caller that must stay read-only on a host with `[docs.schemes]`.
-`show` and `next` then omit `step_found` for an external plan, open or closed,
-without a warning: a skipped fetch says nothing about availability. `doc` fails
-an external link as `doc_not_found` (`fetch disabled by --no-fetch`). Local
-documents read as usual.
-
-```sh
-tasks doc <id> --plan       # exactly one of --plan, --spec, or a reference handle
-tasks doc <id> --spec
-tasks list --plan mindful:thought:abc --status done
-tasks search "phrase" --plan mindful:thought:abc
-```
-
-`doc` returns only the selected document's exact body, even with `--json` or
-`--pretty`, and adds no newline, color or headers. `--plan` on list/search is
-an exact comparison against the stored reference: no fetch, alias resolution
-or parent restriction. Local paths use the same exact comparison. Optional
-`step` is exposed in JSON rows without adding a pretty table column.
-
-Upgrade each host's binary before adding `[docs.schemes]` on that host: older
-binaries reject the table. Upgrade every host reading synced records before
-the first external link. Roll back by removing the table before restoring an
-older binary, and remove external links before reverting every reader.
-The workflow activation pilot must show three clean full-backlog checks on
-each host with its real wrapper and web app running, under five seconds with
-no `doc_unchecked`. Failed pilots require a faster provider before activation;
-later `doc_unchecked` findings are latency incidents. Provider rollout and pilot
-evidence belong to the ops rollout task, `ops-721511`.
-
-## Choosing a process
-
-Set `--process direct|planned` on `add` or `edit`; `edit --no-process` clears it.
-Choose it alongside size and complexity when scoping work, including each plan child.
-It is never derived from those fields, parentage, or document links.
-
-| Process | Agent workflow |
-|---------|----------------|
-| `direct` | Execute the scoped task or reviewed plan without brainstorming or new design/plan documents. |
-| `planned` | Review a written design spec with the user, then review a written implementation plan, before implementing. |
-| Unassessed | Read the task and relevant code, explicitly record the choice and its reason before implementation. |
-
-Both code paths retain appropriate debugging, tests, and review, and use an isolated
-task worktree under the adopted policy. A direct task that uncovers an unresolved
-design decision or grows beyond its scope needs a note and reassessment to planned.
-Ideas still need scoping. Existing document links do not establish approval.
-
-JSON task, summary, and parked rows expose `process` as a string when assessed;
-unassessed rows omit it. Pretty summary and parked rows show a process column (`-` when unassessed); show and next
-print a `process:` row reading `direct`, `planned`, or `unassessed`. The parked
-`phase` remains a link-derived resume hint: a todo without document links can show
-`phase: implementing` alongside `process: planned`, which still requires both reviews.
-
-`tasks check` warns `process_missing` only for doing records without a choice,
-including goals and plan steps. Unassessed todos need no backfill sweep. The CLI
-does not change readiness, ordering, or `start` eligibility based on process, and
-does not run skills or create worktrees.
-
-Projects must adopt the process policy in their agent instructions (see the install
-snippet above) before it can take precedence over generic brainstorming triggers.
-This repo has adopted it. The writing-plans integration is the tasks skill's child
-command (`--complexity <level> --process <value>`), not the upstream plan-writing skill.
-Design: `docs/specs/2026-09-13-task-process-design.md`.
-
-## Completions
+### Completions
 
 Bash and zsh complete subcommands, flags, `--status`/`--size`/`--sort`/`--color`
 values, registered project prefixes, and task ids — `tasks show sci-4f<TAB>`. The id
@@ -1011,6 +1087,8 @@ that framework's initialization.
 Re-source the stub or open a new shell after upgrading `tasks`; a running shell keeps the
 function it loaded at startup. Fish, elvish, and powershell use the same mechanism with
 their own syntax. `TASKS_COMPLETE=` or `TASKS_COMPLETE=0` disables completion.
+
+### Color and layout
 
 Color is off unless you ask for it. `--color auto|always|never`, or `TASKS_COLOR` with the
 same three values, styles `--pretty` output only; JSON never carries escape sequences.
@@ -1071,10 +1149,11 @@ width (or `COLUMNS`), capped at 100 columns, and stays unwrapped when piped. Fie
 the colors `list` gives them. The task file itself is `tasks/<id>.md`, and JSON output
 carries every field.
 
-## Agent skill
+### Agent skills
 
-`skills/tasks/SKILL.md` teaches agents the session protocol. Install every skill at user
-level so they apply to every project, from a checkout of this repo:
+`skills/tasks/SKILL.md` teaches agents the session protocol. [Install](#1-install) puts
+every skill at user level so they apply to every project; from a checkout of this repo
+the recipe is:
 
     just install-skills
 
@@ -1094,7 +1173,7 @@ refines them within fixed bounds.
 `skills/scope/SKILL.md` is the deliberate idea review between capture and maintenance:
 `/scope` turns a bounded cluster into supported next actions and handoffs.
 
-## Feedback
+### Feedback
 
 A report about a project's tooling goes to the project that owns it:
 
@@ -1111,7 +1190,7 @@ appends a note to the open entry instead of creating a duplicate; `--recur <id>`
 each and redact project content with `tasks edit` (history keeps the original). This
 repository is public.
 
-## Adopting in an existing project
+### Adopting in an existing project
 
 1. Keep historical docs in place. By default spec links accept docs/specs/,
    docs/designs/, docs/superpowers/specs/, and docs/superpowers/designs/; plan links
@@ -1147,7 +1226,7 @@ repository is public.
    `tasks check` to automation once the binary has a pinned install source; never skip it
    conditionally when unavailable.
 
-### Record commits
+#### Record commits
 
 Opt in per project in `tasks/.config.toml`:
 
@@ -1162,7 +1241,7 @@ Opt in per project in `tasks/.config.toml`:
 - Clear the warning's cause, then run `tasks commit [--project <p>]` to recover or sweep every uncommitted file under `tasks/` into one commit; it ignores the switch and exits 1 when it cannot commit.
 - Record commits preserve intermediate task history while code is in progress; code and record commits land on the task's branch before it merges.
 
-## Layout
+### Layout
 
     tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags] / [git]
     tasks/sci-4f2a9c.md              one task
