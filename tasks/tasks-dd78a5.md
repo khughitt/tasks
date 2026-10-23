@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T01:03:48Z
+updated: 2026-10-23T01:06:20Z
 started: 2026-10-23T00:44:22Z
 completed: 2026-10-23T01:03:48Z
 closed: 2026-10-23T01:03:48Z
@@ -50,3 +50,4 @@ Original report (preserved): Process and workspace section, 'Then run just setup
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T01:03:48Z (docs/tasks-dd78a5): Aligned skill, agent guide, and current design spec with the declared hydration order and deadlines; reviewed with no findings and verified by full baseline, fast suite, and just check. User approved local merge.
   provenance: {"harness_session":"codex:01a16636-449d-7a42-8ebb-98f3b41b15a5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T01:06:20Z (main): Post-merge verification on main: just check passed; just test-fast passed 1754 tests, zero failures, four ignored. Task is done with no claim or park. Cleanup audit: only ignored target/ (regenerable build output and verification logs), no plan workspace, no host pointers into this task's worktree; tt-report harvested its timings.
