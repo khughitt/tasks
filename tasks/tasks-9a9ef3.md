@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-22T23:59:31Z
+updated: 2026-10-23T00:00:40Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -35,4 +35,6 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-09-24T13:35:22Z (main): Decided: trim the six audited rows plus the Lifecycle provenance section in one pass; keep the quiet-run note format and the host-pointer rule; back-fill the ai audit rows afterwards rather than blocking on them.
 - 2026-09-30T10:10:19Z (main): scope: scoped; retained the recorded seven-area trim decision and source, refreshed the baseline to 4317 words, and specified an isolated fresh-session check; external audit remains to verify during execution; p2/s/mid, direct
 - 2026-10-22T23:59:31Z (main): started
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:00:40Z (docs/trim-tasks-skill): resumed
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
