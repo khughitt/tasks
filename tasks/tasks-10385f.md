@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/tasks-10385f-git-selectors
 created: 2026-10-23T01:04:39Z
-updated: 2026-10-23T11:17:47Z
+updated: 2026-10-23T11:17:58Z
 started: 2026-10-23T11:17:47Z
 depends: []
 tags: []
@@ -21,4 +21,6 @@ Raised by the final review of docs/plans/2026-10-22-records-detached.md (decline
 ## Notes
 
 - 2026-10-23T11:17:47Z (main): started
+  provenance: {"harness_session":"codex:01a16873-670b-76a1-af8d-052e18860638","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T11:17:58Z (fix/tasks-10385f-git-selectors): resumed
   provenance: {"harness_session":"codex:01a16873-670b-76a1-af8d-052e18860638","harness_session_source":"CODEX_THREAD_ID"}
