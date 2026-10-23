@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T00:49:54Z
+updated: 2026-10-23T00:49:56Z
 started: 2026-10-23T00:44:22Z
 depends: []
 tags: [feedback, gap, "from:lore"]
@@ -37,3 +37,4 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 - 2026-10-23T00:46:07Z (docs/tasks-dd78a5): Reference-skill baseline: fresh read-only agent using current skill selected just setup and root-guide commands, but found no README/CONTRIBUTING fallback, lockfile installs, no-dependencies exemption, hydration-before-commit deadline, or missing-route reporting deadline.
 - 2026-10-23T00:46:51Z (docs/tasks-dd78a5): Baseline: just test passed, 1710 tests, zero failures (full suite including ignored exhaustive enumeration); completed before documentation edits.
 - 2026-10-23T00:49:54Z (docs/tasks-dd78a5): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-23T00:49:56Z (docs/tasks-dd78a5): Verification: just check passed after formatting generic AGENTS.md examples as plain text per ops-check; just test-fast passed 1706 tests, zero failures, four ignored; eight updated reference-skill application cases passed; no obsolete only-the-root-guide wording in scoped paths; git diff --check passed. Hygiene friction filed as ops-dc540e.
