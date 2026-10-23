@@ -6,7 +6,7 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-20T02:03:30Z
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-23T10:57:18Z
+updated: 2026-10-23T11:10:24Z
 depends: [tasks-e7424b]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
@@ -38,3 +38,5 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 - 2026-10-22T23:20:03Z (feedback): detail from tasks: A session-start prime read was truncated at roughly 31,000 tokens; removing ready still left roughly 33,000 tokens because roadmap dominates the remaining output. Extracting selected fields locally recovered a useful summary. This recurrence supports the existing bounded-summary design task; no JSON contract change was made.
 - 2026-10-23T10:57:18Z (feedback): feedback from tasks: The default prime JSON exceeds an agent tool output budget
 - 2026-10-23T10:57:18Z (feedback): detail from tasks: A session-start prime read produced about 30,410 tokens and was truncated at 6,500 tokens. A second read filtered through jq recovered the session summary. A bounded default should preserve the session-selection signals within one tool read.
+- 2026-10-23T11:10:24Z (feedback): feedback from tasks: Session-start JSON exceeds the tool output budget
+- 2026-10-23T11:10:24Z (feedback): detail from tasks: During next-work selection, the default prime response exceeded a 10,000-token output budget and was truncated. Reading its session state required a second invocation with a consumer-side filter; a bounded summary with an explicit complete-data route would make the initial read usable.
