@@ -1,15 +1,17 @@
 ---
 id: tasks-73f253
 title: The tasks skill's Process and workspace setup-hydration sentence lags the global rule on confining a declared setup command and on read-only worktrees
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: docs/hydration-confinement
 created: 2026-10-23T10:20:40Z
-updated: 2026-10-23T10:45:02Z
+updated: 2026-10-23T10:50:48Z
 started: 2026-10-23T10:44:55Z
+completed: 2026-10-23T10:50:48Z
+closed: 2026-10-23T10:50:48Z
 depends: []
 tags: [feedback, gap, "from:lore"]
 agent: claude-code/claude-opus-5-5
@@ -32,4 +34,8 @@ Where: the global rule is the Git section of the user's global instructions (own
 - 2026-10-23T10:44:55Z (main): started
   provenance: {"harness_session":"claude-code:c2975679-c527-4213-b8e2-df18920e1084","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-23T10:45:02Z (docs/hydration-confinement): resumed
+  provenance: {"harness_session":"claude-code:c2975679-c527-4213-b8e2-df18920e1084","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T10:50:48Z (docs/hydration-confinement): done
+  provenance: {"harness_session":"claude-code:c2975679-c527-4213-b8e2-df18920e1084","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T10:50:48Z (docs/hydration-confinement): skill, AGENTS.md and design spec hydration paragraphs now carry the global rule's setup-command confinement, no-approval report, and read-only worktree exemption
   provenance: {"harness_session":"claude-code:c2975679-c527-4213-b8e2-df18920e1084","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
