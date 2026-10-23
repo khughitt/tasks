@@ -38,9 +38,16 @@ to planned before continuing implementation.
 For either code path, commit the task record before git worktree add, then reuse its
 isolated worktree or create one under .worktrees/; in a new worktree, run `tasks start <id>`
 before any other `tasks` command for it; planned work does this before drafting
-its spec. Run Just's setup recipe immediately after creation when the justfile defines it;
-otherwise run only the root guide's explicit setup command. Do not guess an
-installer. Read-only investigation and task-record maintenance alone need no new
+its spec. Immediately after creation, hydrate from the first declared source:
+just setup when the justfile defines it; else the setup command the root guide names,
+or one its README or CONTRIBUTING names that writes only inside the worktree; else the
+frozen install of a lockfile that names its package manager and installs inside the
+worktree (package-lock.json: `npm ci`; uv.lock: `uv sync --frozen`). A bare manifest
+(pyproject.toml, package.json or requirements.txt without a lockfile), or a lockfile
+whose install can leave the worktree (Poetry's default cache environment), declares no
+usable installer: never guess one, and report the missing setup route before the first
+commit. Hydrate before that commit. A checkout that declares no dependencies needs no
+setup. Read-only investigation and task-record maintenance alone need no new
 worktree. An explicit user instruction to work in place wins.
 
 ## Gates

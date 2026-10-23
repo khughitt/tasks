@@ -298,8 +298,17 @@ applicable debugging, testing, verification, and code-review skills.
 
 Both code paths use an isolated task worktree: commit the task record before creating
 one with `git worktree add` (automatic under `[git] commit`: `add` and `start` commit it)
-under `.worktrees/`, or reuse it on resume. Then run `just setup` when defined; otherwise run only the root guide's explicit setup command. Do not
-guess an installer. After creating a worktree for a task you have started, run
+under `.worktrees/`, or reuse it on resume. Immediately after creation, hydrate from
+the first declared source: `just setup` when the justfile defines it; else the setup
+command the root guide names, or one its README or CONTRIBUTING names that writes only
+inside the worktree; else the frozen install of a lockfile that names its package
+manager and installs inside the worktree (`package-lock.json`: `npm ci`; `uv.lock`:
+`uv sync --frozen`). A bare manifest (`pyproject.toml`, `package.json` or
+`requirements.txt` without a lockfile), or a lockfile whose install can leave the
+worktree (Poetry's default cache environment), declares no usable installer: never
+guess one, and report the missing setup route before the first commit. Hydrate before
+that commit. A checkout that declares no dependencies needs no setup.
+After creating a worktree for a task you have started, run
 `tasks start <id>` there before any other `tasks` command for it: the claim moves there,
 and a later write from the main checkout refuses instead of forking the record.
 Planned work creates the worktree before drafting the spec.
