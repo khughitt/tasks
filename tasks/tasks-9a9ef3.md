@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:13:37Z
+updated: 2026-10-23T00:14:25Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -44,3 +44,4 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-10-23T00:12:35Z (docs/trim-tasks-skill): attached: forward-report.md (4471 bytes): Independent fresh-agent lifecycle and reference-retrieval test of the frozen shorter skill; includes scope limits
 - 2026-10-23T00:13:14Z (docs/trim-tasks-skill): detached: forward-report.md: Raw evaluator transcript includes host-specific scratch paths; retain its canonical copy outside the checkout and record its path/hash instead.
 - 2026-10-23T00:13:37Z (docs/trim-tasks-skill): Full forward-test report retained at /mnt/ssd3/work/tasks/tasks-9a9ef3/forward-report.md, sha256 8e8bc29a15616ff9de91639b098150da126c01bb08e76e8de97046ee0a68ed5a. The hygiene hook correctly refused its attempted attachment because the raw transcript includes a machine-specific scratch path; the attachment was detached, with no bypass, and the observed verdict and limits remain in the preceding task note.
+- 2026-10-23T00:14:25Z (docs/trim-tasks-skill): Implementation frozen at 50735173002c749a5d8ed18f98534756ee31e2d7; authorized audit back-fill frozen at lore e404bbc on lore-028f5a. Independent read-only final review dispatched against those revisions. README coordination with tasks-03bfc3: preserve the six explicit anchors session-selection, claims-and-checkouts, agent-and-completion-stamps, project-routing, lifecycle-provenance and prefix-renames-and-recovery during any later reorganization; no broader README restructuring in this task.
