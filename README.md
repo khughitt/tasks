@@ -106,6 +106,8 @@ so an id copied from a sentence or a list works. Embedded or leading punctuation
 punctuation, and leading or trailing whitespace are not accepted; records on disk and
 every output stay canonical.
 
+<a id="claims-and-checkouts"></a>
+
 `start` also writes a per-project claim outside git, so every worktree sees the session and
 its liveness. `ready` and `next` omit live claims with an explanatory warning. When concrete native identity is unavailable, set
 `TASKS_SESSION` per agent sharing a terminal or harness process; use
@@ -123,6 +125,8 @@ that need it leave `ready`, `next` and `prime` with a warning naming the holder,
 refuses them with `need_held`. `tasks start <id> --force --reason "…"` overrides with a
 note on the task, and on the holder when it is in the same project. A park or a dead
 session releases the hold.
+
+<a id="lifecycle-provenance"></a>
 
 Lifecycle notes automatically record native harness provenance, independently of
 claim identity and liveness. A stamped note has one indented JSON continuation:
@@ -186,6 +190,8 @@ Binaries older than the provenance writer reject a stamped file outright, so eve
 that reads synced task files needs a current `tasks`. The contract and its rollout are
 recorded in `docs/plans/2026-09-17-lifecycle-provenance.md`.
 
+<a id="agent-and-completion-stamps"></a>
+
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is
 unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
@@ -197,6 +203,9 @@ corrects a stamp. The harness owns exporting it: Claude Code is wired through th
 `/model`), Codex exports the harness alone, and other harnesses pass `--agent` when
 they know their ids. Design:
 `docs/specs/2026-09-13-creation-provenance-design.md`.
+
+<a id="session-selection"></a>
+
 `TASKS_MAX_COMPLEXITY` per harness process is the envelope a session picks within:
 `ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
 many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
@@ -443,6 +452,8 @@ from a clone):
     tasks check                      # validate files, links, plan steps, dependencies; silent when clean
     tasks commit [--project <p>]     # commit every uncommitted file under tasks/, ignoring [git] commit
 
+<a id="project-routing"></a>
+
 Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
 work from outside every project: the prefix selects the registered root. Inside a
 project, a matching prefix keeps the current checkout, including a worktree selected
@@ -513,6 +524,8 @@ Recovery covers process interruption, not power loss; parks on other hosts stay 
 to the old id. See [recovery limits and manual undo](docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
 
 Run `tasks --help` for the full command list.
+
+<a id="prefix-renames-and-recovery"></a>
 
 The registry maps live prefixes to project roots and retired prefixes to their current
 live name. `tasks rename <old> <new>` updates the project's filenames, ids, local
