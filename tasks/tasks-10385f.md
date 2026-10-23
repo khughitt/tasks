@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-10385f-git-selectors
 created: 2026-10-23T01:04:39Z
-updated: 2026-10-23T11:37:21Z
+updated: 2026-10-23T11:41:10Z
 started: 2026-10-23T11:17:47Z
 completed: 2026-10-23T11:34:58Z
 closed: 2026-10-23T11:34:58Z
@@ -43,3 +43,4 @@ Raised by the final review of docs/plans/2026-10-22-records-detached.md (decline
 - 2026-10-23T11:34:58Z (fix/tasks-10385f-git-selectors): Isolated repository-targeted Git calls from inherited hook selectors, preserved only explicit code-hook indexes in migration guards, and proved record commits/status/discovery/stale-copy checks with RED-to-GREEN regressions. Final fast suite: 1659 passed, 4 existing ignored; checks passed; independent whole-branch and fresh corrective reviews accepted 92b1c96 and 6e1492a.
   provenance: {"harness_session":"codex:01a16873-670b-76a1-af8d-052e18860638","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-23T11:37:21Z (main): Integrated locally into main; merged-source detached suite passed all 46 tests. Reinstalled with cargo install --locked --path . using the task-local target directory; installed binary matches the merged release build and tasks check passes. Both complete review reports are attached and byte-verified. Cleanup disposition: target/ contains only regenerable builds, the confined installation, disposable test/install logs and report copies already attached; discard it with the task worktree. tt-report ran; no plan workspace was created.
+- 2026-10-23T11:41:10Z (main): Post-close follow-up: tasks-171b8b scopes the older linked-project and record-commit integration-helper environment isolation excluded by review. Existing tasks-79a907 retains the distinct unit-runner selector/cleanup coverage. Broader production Git object/config-variable hardening is not filed without a concrete failure.
