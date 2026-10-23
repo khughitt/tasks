@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-dd78a5
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-23T00:49:56Z
+updated: 2026-10-23T00:49:58Z
 started: 2026-10-23T00:44:22Z
 depends: []
 tags: [feedback, gap, "from:lore"]
@@ -38,3 +38,4 @@ Original report (preserved): Process and workspace section, 'Then run just setup
 - 2026-10-23T00:46:51Z (docs/tasks-dd78a5): Baseline: just test passed, 1710 tests, zero failures (full suite including ignored exhaustive enumeration); completed before documentation edits.
 - 2026-10-23T00:49:54Z (docs/tasks-dd78a5): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-23T00:49:56Z (docs/tasks-dd78a5): Verification: just check passed after formatting generic AGENTS.md examples as plain text per ops-check; just test-fast passed 1706 tests, zero failures, four ignored; eight updated reference-skill application cases passed; no obsolete only-the-root-guide wording in scoped paths; git diff --check passed. Hygiene friction filed as ops-dc540e.
+- 2026-10-23T00:49:58Z (docs/tasks-dd78a5): Ruling: accept final reviewer scope exclusions at base 44f861c96eafadbbd66ffa73bf2a2056e367d690 plus reviewed three-document diff. Leave README adoption snippet unchanged. Why: it adopts the complete skill policy and does not prohibit other setup sources. Cost: its abbreviated reminder remains. Leave runtime and tests unchanged. Why: documentation-only alignment. Cost: installer commands were checked as instructions, not executed.
