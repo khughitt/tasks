@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-23T00:13:14Z
+updated: 2026-10-23T00:13:37Z
 started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
@@ -43,3 +43,4 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-10-23T00:11:19Z (docs/trim-tasks-skill): Revised skill: 7212 words/663 lines, down 1177 words (14.0%); six stable README anchors added. Fresh agent forward-test verified frozen SHA256 b0885cbd69523decc9eba32d9cb8fcd0735ee7d808784b83ee58cfd5e3965544, completed prime/add/ready/show/start/note/park/resume/done/check in isolated HOME/config/state, excluded the idea, and released the claim. All 11 local links and fragments resolved; tag, stamp, rename/adoption/rollback guidance was retrievable. Limits: one non-git lifecycle, with other mutations checked through docs/help only. just test-fast passed 1606 tests; just check, quick_validate.py and retained-block comparisons passed.
 - 2026-10-23T00:12:35Z (docs/trim-tasks-skill): attached: forward-report.md (4471 bytes): Independent fresh-agent lifecycle and reference-retrieval test of the frozen shorter skill; includes scope limits
 - 2026-10-23T00:13:14Z (docs/trim-tasks-skill): detached: forward-report.md: Raw evaluator transcript includes host-specific scratch paths; retain its canonical copy outside the checkout and record its path/hash instead.
+- 2026-10-23T00:13:37Z (docs/trim-tasks-skill): Full forward-test report retained at /mnt/ssd3/work/tasks/tasks-9a9ef3/forward-report.md, sha256 8e8bc29a15616ff9de91639b098150da126c01bb08e76e8de97046ee0a68ed5a. The hygiene hook correctly refused its attempted attachment because the raw transcript includes a machine-specific scratch path; the attachment was detached, with no bypass, and the observed verdict and limits remain in the preceding task note.
