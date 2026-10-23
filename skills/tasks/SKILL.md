@@ -25,23 +25,15 @@ mean those documents were verified.
    work is all done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
-   A `shelved` task is out of active work: `list --status shelved` sees it, and
-   `tasks unshelve <id>` brings it back as an idea.
-   A deferred task (`defer: <date>`) is hidden from `ready`, `next`, `quiet`, and `sample`
-   until its date; `ready` and `next` say in one warning how many they hid, `prime`'s
-   `deferred:` line counts what is waiting and what has come due, and `tasks list --deferred`
-   lists them. `start` on a deferred task works and spends the deferral.
+   Read picker warnings for omitted work; see `tasks ready --help` and the
+   [selection contract](../../README.md#session-selection) for hiding and filter rules.
    A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
-   `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`, which
-   hide tasks rated above the level and unassessed tasks and say in warnings how many they
-   hid. Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
-   and close goals only when `prime`'s closeout offers them. The variable is the harness
-   form; the flag is for a person at a terminal.
+   `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`.
+   Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
+   and close goals only when `prime`'s closeout offers them.
    A session that cannot meet a shared resource says so: `TASKS_WITHOUT=quiet` (comma-
    separated) in a host's ordinary session environment, or `--without <need>` on
-   `ready`/`next`/`prime`/`lanes`, hides tasks that need it: `ready`, `next`, and `prime`
-   with one warning counting them, `lanes` under its `without` cause.
-   The flag refuses a name no project in scope declares; the variable never errors.
+   `ready`/`next`/`prime`/`lanes`.
    A TTY session handed the idle host runs without the variable.
    The one exception: an idea `next` hands you because it is parked waiting on the agent,
    which means resume its scoping, never implement it.
@@ -93,28 +85,13 @@ mean those documents were verified.
    and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
-   `start` also records a claim outside git, visible from every worktree of the project,
-   with the session identity and a liveness handle. A task claimed by another live session
-   fails with `claimed`; `tasks start --force <id>` takes it over and records that in the
-   task's notes.
-   A claim whose pid this command cannot judge (recorded in another PID view, such as
-   a sandbox's, or before views were recorded) is held and shows as `unverifiable`.
-   Its own view, its owner, a reboot or `start --force` releases it. When you know its
-   holder is gone (a finished sandbox, a removed container), `tasks release <id> "<why>"`
-   removes it with one note and leaves status, owner and park alone; a live claim is
-   refused.
-   Before this host adopts a prefix another host renamed, a claim recorded under the old
-   prefix is released with `tasks release <new id> "<why>" --adopting <old>`, which
-   `tasks rename <old> <new> --adopt` names when it refuses.
-   A write refuses with `stale_copy` when another checkout holds a newer copy of the
-   record, and the error says what to do: rerun there with the printed `tasks -C <root> …`,
-   merge the main checkout's copy into your worktree, or leave the record to the session
-   named as working there. There is no override. A write by the claim's holder moves the
-   claim to the checkout it lands in, and `show` finds a task that exists only in the
-   checkout its claim or park names.
-   A write missing that local record keeps `task_not_found`, names the recorded checkout (or says it is unavailable), and offers a `tasks -C` retry only when no other session's claim or park occupies it; no write is routed automatically.
-   `ready` and `next` omit live claims and explain each omission in warnings,
-   and `ready` omits tasks parked waiting on the user.
+   `ready` and `next` omit live claims; see the [claim and checkout contract](../../README.md#claims-and-checkouts)
+   and `tasks start --help` / `tasks release --help` for ownership and recovery.
+   `tasks start --force <id>` deliberately takes over another session's claim and records it;
+   do not treat it as an ordinary retry. Treat `unverifiable` claims as held; use
+   `tasks release <id> "<why>"` only when you know the holder is gone.
+   Follow `stale_copy` and `task_not_found` recovery guidance for the recorded checkout;
+   `stale_copy` has no override. Leave records held by another live session to that session.
    An open task tagged `halt` in the registered checkout stops new lower-priority starts
    in that project, including from older worktrees. `prime`, `ready`, and `next` name
    the halt and show eligible work; an already doing task may resume. To override a
@@ -137,13 +114,7 @@ mean those documents were verified.
    when concrete native identity is unavailable and several agents share one terminal or
    harness process. Distinct Codex threads already supply separate native identities;
    unnecessary explicit overrides bypass native root association.
-   On a host with relay identity enabled (`[identity] relay = true` in
-   `~/.config/tasks/config.toml`), a claim is keyed by the relay agent id
-   `<harness>:<sessionId>`, so it belongs to the session rather than to the terminal. The
-   owner can still `park` and `done` a claim it already holds while the registry is
-   unavailable; resuming a parked task needs the registry back, because parking releases
-   the claim and resuming is a fresh acquisition. Any relay identity error is resolved by
-   setting `TASKS_SESSION` and `TASKS_SESSION_PID`, which sit above the level.
+   For relay identity setup and recovery, see [Relay identity](../../README.md#relay-identity-opt-in).
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
 5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a
    turn that waits on the user, or whenever you set work down. It records the next step
@@ -205,18 +176,12 @@ mean those documents were verified.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
-   When the harness exports `TASKS_MODEL` (the model id it is running), every fresh
-   completion stamps the record's `model` field with it — latest-completion attribution,
-   cleared by a recompletion without the variable; `tasks edit --model/--no-model`
-   corrects it.
-   Every task an agent files carries `agent`, the harness and model that created it
-   (`<harness>/<model>`, or the harness alone), from `TASKS_AGENT` when the harness
-   exports it. When it is unset and you know your harness and model ids, pass
-   `--agent <harness>/<model>` on `add`; when you know only the harness, pass that;
-   when unsure, pass nothing — never guess. `feedback` has no flag: supply the variable
-   on that invocation, `TASKS_AGENT=<harness>/<model> tasks feedback …`. Under Claude
-   Code the model half is the enclosing session's model. `tasks edit --agent/--no-agent`
-   corrects a stamp; an edit never reads the variable.
+   For creation and completion stamps, see the [stamp contract](../../README.md#agent-and-completion-stamps)
+   and `tasks add --help` / `tasks edit --help`. When `TASKS_AGENT` is unset, pass
+   `--agent` on `add` only with the harness/model you know (`<harness>/<model>`, or
+   the harness alone); when unsure, pass nothing — never guess. `feedback` has no
+   flag: supply `TASKS_AGENT=<harness>/<model>` on that invocation when known.
+   Under Claude Code the model half is the enclosing session's model.
    Recurring sweeps use `--every 30d` (positive whole days or weeks, up to 36500 days;
    goals cannot recur). `done` closes normally, anchors the next cycle, and writes an
    occurrence note. A due recurrence appears in `ready` still marked `done`; use `start`
@@ -227,16 +192,11 @@ mean those documents were verified.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--lane/--no-lane/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--ref/--rm-ref/--no-refs/--agent/--no-agent/--every/--no-every/--defer/--no-defer/--need/--rm-need/--no-needs`
-updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
-Notes stay append-only there: the one note change it accepts is removing trailing spaces
-and tabs, which every new note already has stripped.
-`--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
-`--rm-tag <tag>` removes one and `--no-tags` clears them all. `--depends` likewise adds;
-`--no-depends` clears, and with `--depends` replaces the list. When the project keeps a
-tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
-prefer a defined tag, and add an entry when a new tag is worth keeping — `check` warns
-on open tasks carrying an undefined one.
+Never edit `tasks/*.md` directly. Use `tasks edit --help` for field flags, additive
+and clearing semantics, and editor mode. Notes stay append-only; the editor permits
+only trailing-space/tab cleanup in existing notes.
+Prefer a defined tag (`tasks tags`); add a dictionary entry when a new tag is worth
+keeping. See the [tag dictionary](../../README.md#adopting-in-an-existing-project).
 
 A step that uses a shared resource records it with `--need <name>` (repeatable), drawn
 from the project's `[needs]` vocabulary in `tasks/.config.toml`:
@@ -271,13 +231,8 @@ A sourced `add` is idempotent: when the project already holds a task with that s
 written, so refiling a batch from one origin never duplicates. The other flags on a reused
 call are ignored, not merged — `tasks edit` that id if the record should change.
 
-Every write command that takes an id writes to the project that id's prefix names, so
-`tasks note`, `tasks dep`, `tasks edit`, and the status commands work on a task in another
-registered project without leaving the current one, or from outside every project.
-`show` and bare `tree <id>` follow the same rule. A prefix matching the current project
-always means this checkout; without a local project, the registry supplies the root.
-Malformed local configuration still fails. `feedback` works from anywhere: outside every
-project it reports as `from:unregistered`.
+Id-taking commands route by prefix, retaining the current checkout for a matching prefix;
+see [Project routing](../../README.md#project-routing).
 
 A linked project keeps its records outside its code checkout: its `tasks/.config.toml`
 carries `[checkout] path`, and every command run anywhere in that checkout or its
@@ -294,15 +249,9 @@ the code checkout, and `tasks start <id>` in it moves the claim. Task ids never 
 the code repository: its commits, branches, pull requests and docs cite the repository's
 own issue key when there is one, which the task records with `--source`.
 
-The read commands say where to look instead of inferring it from an id: `list`, `ready`,
-`next`, `prime`, `lanes`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one
-registered project, `--group <name>` for the members of a project group, or
-`--all-projects` for every reachable one. Each works from anywhere, including
-outside every project. `--project` reads that project's *registered* root, so from a
-worktree it is how you ask for the main checkout. `tree <id>` is the exception that needs
-no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
-`tasks tree <other-prefix>-<hex>` reads that subtree from wherever you are. Passing
-`--project` alongside an id names the scope explicitly and wins over the prefix.
+For read scopes, consult the command's `--help`: `--project <prefix>` reads the registered
+root (including from a worktree), `--group <name>` a group, and `--all-projects` every
+reachable project. On `tree <id>`, an explicit `--project` wins over the id's prefix.
 
 A project group is a named set of registered projects, declared in this host's registry
 and not synced. Each host declares its own groups.
@@ -430,32 +379,10 @@ A successful write still exits 0 when its commit is skipped or fails; read its w
 
 ### Lifecycle provenance
 
-Start/resume, park and close notes automatically carry optional `harness_session`
-and `harness_session_source` fields in JSON, persisted as an indented `provenance:`
-JSON continuation under the note bullet. Sources are `CLAUDE_CODE_SESSION_ID`
-(`claude-code:<id>`), `CODEX_SESSION_ID` or `CODEX_THREAD_ID` (`codex:<id>`);
-Codex selects `CODEX_THREAD_ID` whenever present, even for equal IDs, otherwise
-`CODEX_SESSION_ID`. Unequal valid IDs are supported; historical source values
-remain unchanged and the serialized pair keeps its existing shape. Missing/empty native input
-omits both fields; invalid/conflicting input omits them and warns without preventing
-the lifecycle operation. A qualified `TASKS_SESSION` conflicting with the native
-key warns too; it never supplies or replaces the native source.
-
-This is independent of claim identity and liveness, which read the same Codex
-variables on their own: a Codex claim is keyed by the thread id, carries no pid, and
-lives by the TTL. Do not set `TASKS_SESSION` merely for obs.
-Generated lifecycle markers are `started`, `resumed`, `done`, `dropped`,
-`parked (waiting on …): <next step>`, and `completed; next due <YYYY-MM-DD>`.
-Close-message notes are stamped but are not lifecycle markers; plain `tasks note`,
-feedback, shelf notes and takeover commentary remain unstamped.
-`tasks note <id> "<text>" --stamp` stamps one note the same way (use it for gate notes);
-its text is never interpreted, so it is not a marker either. Consumers use
-generated text, not the presence of fields, to identify transitions.
-User text can equal a marker; the pair-only schema cannot disambiguate that collision.
-
-Binaries older than the provenance writer reject the whole stamped file, so every
-host reading synced task files needs a current `tasks`; the README has the complete
-contract.
+Lifecycle notes carry native harness provenance; see the [lifecycle contract](../../README.md#lifecycle-provenance)
+for fields, source selection, and marker limits. Every host reading stamped records
+needs a current `tasks`. Do not set `TASKS_SESSION` merely for obs.
+Use `tasks note <id> "<text>" --stamp` for gate notes.
 
 ### Task operations
 
@@ -577,42 +504,20 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 
 ## Prefix renames and recovery
 
-`tasks rename <old> <new>` renames a registered prefix and the project's own ids and local
-references. The retired prefix keeps resolving **for as long as the project stays
-registered**, so references in other projects and in prose need no edit. `unregister`
-drops the project's aliases with it. Retired names are reserved, and completion offers
-only live names; `check` can warn about stored retired references without rewriting them.
-A live id and its retired spelling are one task: `dep --on` of a dependency already
-stored under either spelling changes nothing and warns, and `dep --rm` with either
-spelling removes it. Never repoint a stored reference with `--on` then `--rm`; in two
-calls that drops the dependency, and in one call it is refused.
+`tasks rename <old> <new>` renames a prefix; retired names resolve while registered.
+Read [rename and recovery](../../README.md#prefix-renames-and-recovery) and `tasks rename --help`
+before using it. Never rewrite a dependency's prefix with `--on` then `--rm`:
+the names identify the same task, so that removes the dependency.
 
 Tools map ids and paths through renames and moves with
 `tasks resolve <id|prefix|path>...` (or `--stdin`), never by parsing `projects.toml`
 by hand. Before moving a checkout, run `tasks init --prefix <p> --force` there
 on every host while the old root and storage still exist, so storage is recorded.
 
-Start with clean `tasks/`, no live claims, and at most one git worktree. A pending rename
-freezes every writer to that project, including `start`, feedback, `init --force`, and
-`unregister`; reads remain available. `tasks rename <old> <new> --explain` reports the
-observed recovery verdict without writes, locks, or authorization checks. Re-run the same
-command without `--explain` to resume; live claims and extra worktrees still block recovery.
-
-When another host has already renamed a synced checkout, run
-`tasks rename <old> <new> --adopt` from the renamed checkout before starting work there.
-It changes this host's registry and claim state, not the synced task files, and old ids
-continue to resolve. A live claim in either store blocks adoption until its owner stops
-or it becomes stale. Re-run after interruption; `--explain --adopt` diagnoses without
-writes. Rehearsals must set both `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to scratch
-directories; isolating only the registry can move live parks.
-
-Recovery covers process interruption, not power loss. Outside git, once a source was
-removed, only forward recovery is available. `git checkout .` alone is not an undo: new
-filenames and the registry survive it. Follow the
-[manual rollback procedure](../../docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery)
-when rollback is needed: restore and verify each source before deleting its destination,
-keep the destination and stop if restoration fails, restore config and registry (including
-all moved aliases), and remove the inventory last.
+Adopt a rename already synced from another host with `tasks rename <old> <new> --adopt`
+before starting work there. Rehearsals must isolate both `XDG_CONFIG_HOME` and
+`XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
+not an undo; follow the [manual rollback procedure](../../docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
 
 ## Retiring a project
 

@@ -1,15 +1,17 @@
 ---
 id: tasks-9a9ef3
 title: Trim the tasks skill to what tasks --help cannot supply
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: docs/trim-tasks-skill
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-22T23:59:31Z
+updated: 2026-10-23T00:21:59Z
 started: 2026-10-22T23:59:31Z
+completed: 2026-10-23T00:20:56Z
+closed: 2026-10-23T00:20:56Z
 depends: []
 parent: tasks-6ed79b
 tags: [skills]
@@ -36,3 +38,24 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-09-30T10:10:19Z (main): scope: scoped; retained the recorded seven-area trim decision and source, refreshed the baseline to 4317 words, and specified an isolated fresh-session check; external audit remains to verify during execution; p2/s/mid, direct
 - 2026-10-22T23:59:31Z (main): started
   provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:00:40Z (docs/trim-tasks-skill): resumed
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:01:26Z (docs/trim-tasks-skill): Scope: direct editorial trim of T3/T7/T13/T17/T19/T28 plus Lifecycle provenance; preserve workflow imperatives, claim-override safeguards, quiet-run format and host-pointer rule. Baseline 8389 words/758 lines. Audit resolved through ai -> hq history to lore/docs/instruction-provenance.md. Workspace .worktrees/trim-tasks-skill; no declared setup route (no just setup or worktree-local setup command), so the required just test baseline builds dependencies before edits.
+- 2026-10-23T00:07:01Z (docs/trim-tasks-skill): Baseline: just test in .worktrees/trim-tasks-skill passed 1610 tests (93.994 s, tt exit 0). No-guidance fresh agent then completed init/prime/add/ready/start/note/park/resume/done/check using CLI help only; idea excluded, resumed note present, claim released. Its initial discovery failure was the known stray ancestor .git; retry with a scratch GIT_CEILING_DIRECTORIES passed. This editorial pass adds no behavioral rules; use the control to support deletion, not invent a failing guidance test.
+- 2026-10-23T00:11:19Z (docs/trim-tasks-skill): Revised skill: 7212 words/663 lines, down 1177 words (14.0%); six stable README anchors added. Fresh agent forward-test verified frozen SHA256 b0885cbd69523decc9eba32d9cb8fcd0735ee7d808784b83ee58cfd5e3965544, completed prime/add/ready/show/start/note/park/resume/done/check in isolated HOME/config/state, excluded the idea, and released the claim. All 11 local links and fragments resolved; tag, stamp, rename/adoption/rollback guidance was retrievable. Limits: one non-git lifecycle, with other mutations checked through docs/help only. just test-fast passed 1606 tests; just check, quick_validate.py and retained-block comparisons passed.
+- 2026-10-23T00:12:35Z (docs/trim-tasks-skill): attached: forward-report.md (4471 bytes): Independent fresh-agent lifecycle and reference-retrieval test of the frozen shorter skill; includes scope limits
+- 2026-10-23T00:13:14Z (docs/trim-tasks-skill): detached: forward-report.md: Raw evaluator transcript includes host-specific scratch paths; retain its canonical copy outside the checkout and record its path/hash instead.
+- 2026-10-23T00:13:37Z (docs/trim-tasks-skill): Full forward-test report retained at /mnt/ssd3/work/tasks/tasks-9a9ef3/forward-report.md, sha256 8e8bc29a15616ff9de91639b098150da126c01bb08e76e8de97046ee0a68ed5a. The hygiene hook correctly refused its attempted attachment because the raw transcript includes a machine-specific scratch path; the attachment was detached, with no bypass, and the observed verdict and limits remain in the preceding task note.
+- 2026-10-23T00:14:25Z (docs/trim-tasks-skill): Implementation frozen at 50735173002c749a5d8ed18f98534756ee31e2d7; authorized audit back-fill frozen at lore e404bbc on lore-028f5a. Independent read-only final review dispatched against those revisions. README coordination with tasks-03bfc3: preserve the six explicit anchors session-selection, claims-and-checkouts, agent-and-completion-stamps, project-routing, lifecycle-provenance and prefix-renames-and-recovery during any later reorganization; no broader README restructuring in this task.
+- 2026-10-23T00:17:37Z (docs/trim-tasks-skill): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-23T00:17:42Z (docs/trim-tasks-skill): attached: trim-review-report.md (2759 bytes): Full independent review of tasks 5073517 and lore e404bbc; codex/gpt-6.1-sol accepted both with no findings
+- 2026-10-23T00:18:14Z (docs/trim-tasks-skill): parked (waiting on user, approval): User approves activating the reviewed skill by local merge; then agent resumes here, closes the task before merging docs/trim-tasks-skill into main, verifies the merged skill and links, and cleans up only this task's worktree. Main supplies the globally installed tasks skill through its symlink; no push requested.
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:20:50Z (docs/trim-tasks-skill): resumed
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:20:53Z (docs/trim-tasks-skill): User approved local merge and activation of the reviewed skill. Implementation files still match reviewed commit 5073517 exactly; resume to close before merge, verify the installed skill after integration, and remove only this task's worktree. No push authorized or planned.
+- 2026-10-23T00:20:56Z (docs/trim-tasks-skill): done
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:20:56Z (docs/trim-tasks-skill): Trimmed skill from 8389 to 7212 words (14.0%) while preserving workflow safeguards; linked precise contracts, passed fresh-agent lifecycle/reference tests, and independent review accepted with no findings. Audit back-fill landed in lore. User approved local activation.
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-23T00:21:59Z (main): Activated by approved local merge ae61da8. Post-merge just test-fast passed 1606 tests (25.384 s), just check passed (13.179 s), and the globally installed skill matches reviewed SHA256 b0885cbd69523decc9eba32d9cb8fcd0735ee7d808784b83ee58cfd5e3965544 with all 11 links/fragments resolving. Task is done, with no claim or park. Cleanup: only ignored target/ is regenerable; review attachment exists in main and matches its canonical copy, raw forward-report hash still matches, no plan workspace or host pointer targets this worktree, and timings are harvested before removal. No push.
