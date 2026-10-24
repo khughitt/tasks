@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:42:59Z
+updated: 2026-10-24T14:43:01Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -54,3 +54,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T14:42:56Z (design/tasks-e7424b): resumed
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T14:42:59Z (design/tasks-e7424b): review: spec round 3 — verdict: accept; findings: Minor 2; reviewer: claude-code/claude-opus-5-5
+- 2026-10-24T14:43:01Z (design/tasks-e7424b): User approved frozen design 76501bdd333e5c6b49758fdec1b6662b5c57fa6f for planning. Round 3 minors to absorb in plan: isolate README summary guidance from every skill-linked section until gated adoption; reject a missing/replaced running-executable recovery path with typed I/O error and cover Linux deleted-executable case. No implementation authorized before plan review.
