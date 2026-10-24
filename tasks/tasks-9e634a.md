@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:53:21Z
+updated: 2026-10-24T13:54:11Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -56,3 +56,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:53:18Z (fix/tasks-9e634a): Ruling (9dc9d1a review): retain stdin-only terminal detection. Why: scoped contract deliberately uses IsTerminal on stdin rather than probing host tty usability. Cost: an unusable terminal may still be reported as terminal-capable.
 - 2026-10-24T13:53:19Z (fix/tasks-9e634a): Ruling (9dc9d1a review): retain unrestricted explicit editor launch. Why: --editor is the deliberate override for scripted or GUI editors. Cost: an explicitly selected editor can still hang.
 - 2026-10-24T13:53:21Z (fix/tasks-9e634a): Ruling (9dc9d1a review): leave unrelated science vocabulary behavior outside this task. Why: immutable adoption brings already-landed rows; this parser checks only the tasks section. Cost: science runtime behavior is unverified here.
+- 2026-10-24T13:54:11Z (fix/tasks-9e634a): detached: fast.log: Replace with suite rerun after the one-line review correction
