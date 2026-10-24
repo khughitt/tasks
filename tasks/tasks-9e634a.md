@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:55:55Z
+updated: 2026-10-24T13:56:48Z
 started: 2026-10-24T13:36:42Z
 completed: 2026-10-24T13:55:55Z
 closed: 2026-10-24T13:55:55Z
@@ -69,3 +69,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
   provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T13:55:55Z (fix/tasks-9e634a): Implemented nonterminal flagless-edit refusal and explicit --editor at 9dc9d1a; restored conflict coverage at 2400a80. Two implementation reviews accepted; no deferred findings. Fast suite 1665 passed/4 ignored, just check and PTY smoke passed; ops-678532 declared the option and adoption byte-matches ops main. Local merge and reinstall follow.
   provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T13:56:48Z (main): Integrated locally into main; cargo install --locked --path . succeeded from main. Installed CLI smoke passed nonterminal refusal, --editor execution, --editor/--title usage conflict and flagless PTY success. No push; no deferred review findings.
