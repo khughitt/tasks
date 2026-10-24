@@ -1,13 +1,15 @@
 ---
 id: tasks-e7424b
 title: Design bounded session summaries from the CLI consumer brief
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-20T02:03:05Z
+updated: 2026-10-24T13:59:41Z
+started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -26,3 +28,8 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — evidence and question this follow-up must resolve
+
+## Notes
+
+- 2026-10-24T13:59:41Z (main): started
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
