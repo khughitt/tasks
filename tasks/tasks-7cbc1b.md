@@ -7,8 +7,9 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-23T12:43:58Z
-updated: 2026-10-24T11:31:27Z
+updated: 2026-10-24T11:32:17Z
 depends: []
+parent: tasks-b34076
 tags: [feedback, idea, "from:hq"]
 agent: claude-code/claude-opus-5-5
 ---
