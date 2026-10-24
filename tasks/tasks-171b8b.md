@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T13:01:38Z
+updated: 2026-10-24T13:02:40Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -36,3 +36,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 - 2026-10-24T12:59:04Z (fix/tasks-171b8b): resumed
   provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T13:01:38Z (fix/tasks-171b8b): Process direct; workspace .worktrees/tasks-171b8b. Hydrated with README cargo install --locked --path . confined by --root and CARGO_TARGET_DIR inside the worktree. Full baseline just test passed; test count recorded next.
+- 2026-10-24T13:02:40Z (fix/tasks-171b8b): Baseline: just test passed 1664 tests (0 failures, 0 ignored). Scope reaches tests/linked.rs and tests/record_commit.rs helpers/direct Git calls plus shared test-only regression support; no production, CLI, fixture assertions, or documentation contract changes.
