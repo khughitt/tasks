@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:20:22Z
+updated: 2026-10-24T16:20:24Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -43,3 +43,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:20:18Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/ops/ops-8d4c5b/baseline-full.log","purpose":"Ops source-row verification/startup evidence retained after ops code completion.","sha256":"999d9bd8e3449f841c4b831dfa2afe504c9dbf4e7b5ffc000a3b6acb90ae3d96"}
 - 2026-10-24T16:20:20Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/ops/ops-8d4c5b/fast.log","purpose":"Ops source-row verification/startup evidence retained after ops code completion.","sha256":"54a6cbb57fe9f91e9487e86f3010ca7cac1cb88e7e8d4cb1b3228ffc5d3d6400"}
 - 2026-10-24T16:20:22Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/ops/ops-8d4c5b/focused.log","purpose":"Ops source-row verification/startup evidence retained after ops code completion.","sha256":"1ba3f2a04f6cc38cfae1374540b59af31b847e170e9b090876a8707c60a11a68"}
+- 2026-10-24T16:20:24Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/ops/ops-8d4c5b/prime.json","purpose":"Ops source-row verification/startup evidence retained after ops code completion.","sha256":"f822ffc27c2a5e9899b99f90f8ff9cdab910eb1f39bd0f0901b00af9b3107ef4"}
