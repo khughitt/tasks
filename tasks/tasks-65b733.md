@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:56:50Z
+updated: 2026-10-24T17:12:21Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -67,3 +67,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:56:39Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/merged-fast.log","purpose":"Merged main 2c1ffb5 test-fast verification: 1681 passed, 4 ignored, no failures, 14 binaries.","sha256":"0c3f31fcf7b52db5a792b89ba7fd9b890e720d3ce17782efe8bc7a9b86fd4444"}
 - 2026-10-24T16:56:41Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"worktree","path":".worktrees/tasks-e7424b","purpose":"Merged design/tasks-e7424b branch retained with confined verified binary and execution evidence for approved reinstall/adoption; no shared pointer targets it."}
 - 2026-10-24T16:56:50Z (main): Tasks 1–2 merged locally on main at 2c1ffb55f02b8c74f08fc184031a4d127e4ca868 after codex/gpt-6-astra acceptance with no findings. Merged-tree just test-fast passed 1681, ignored 4, failed 0 across 14 binaries. Code task tasks-7c5a4b is done; installed PATH binary still lacks --summary. Next owner action: on user approval, resume tasks-72093a, run the prepared locked install from main and verify installed help/bounded read/recovery. Task 3 and twelve owner guide records remain blocked by adoption gate; unfiltered measurement comparisons prevent a blanket no-effect verdict. Both retained branches are merged; no pushes or host pointers changed.
+- 2026-10-24T17:12:21Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"scratch","path":"$WORK_ROOT/tasks/tasks-65b733","purpose":"Canonical implementation, merged-tree and approved shared-install verification evidence retained for gated adoption.","manifest":"$WORK_ROOT/tasks/tasks-65b733/retained-manifest.json","sha256":"ea9b03b92e7402349c5cd9780661549bb9f5ded9f0f44961e2eeb9692a8c9d2c"}
