@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:53:13Z
+updated: 2026-10-24T16:53:17Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -62,3 +62,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:53:04Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/task2-fast-final.log","purpose":"Implementation verification evidence: task2-fast-final","sha256":"6fbcd1707fa1c2b1ea9c705fb37b63c5d1849fae9b3c63bdc407e3294ef34547"}
 - 2026-10-24T16:53:08Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/task2-fast.log","purpose":"Implementation verification evidence: task2-fast","sha256":"443708a37ff28798f34498c0897610f851657e2049d5266a5f6dff2df0985065"}
 - 2026-10-24T16:53:13Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/.worktrees/tasks-e7424b/.superpowers/sdd/2026-10-24-bounded-session-summary","purpose":"Execution ledger, briefs, final tests, frozen branch diff and full independent review; ledger and review are attached to task records.","manifest":"$WORK_ROOT/tasks/.worktrees/tasks-e7424b/.superpowers/sdd/2026-10-24-bounded-session-summary/retained-manifest.json","sha256":"8c35bc66c0db840edf341dfd5177ef9dbf19daeaefdd8a75b29c00ad70c4f05b"}
+- 2026-10-24T16:53:17Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"worktree","path":".worktrees/tasks-e7424b","purpose":"Reviewed binary delivery worktree; keep confined executable and execution evidence across shared reinstall and gated adoption."}
