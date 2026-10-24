@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:52:09Z
+updated: 2026-10-24T16:52:15Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -48,3 +48,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:51:31Z (design/tasks-e7424b): attached: progress.md (6213 bytes): Inline Tasks 1–2 execution ledger, verification and final review rulings; Task 3 remains gated.
 - 2026-10-24T16:52:04Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"scratch","path":"$WORK_ROOT/tasks/tasks-65b733","purpose":"Canonical implementation baseline, RED/GREEN, final checks and explicit-path smoke evidence.","manifest":"$WORK_ROOT/tasks/tasks-65b733/retained-manifest.json","sha256":"bfc050a91c1d25952c73360715d389e64691fea7e716cfd0ea0810d068462b5e"}
 - 2026-10-24T16:52:09Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/baseline-full.log","purpose":"Implementation verification evidence: baseline-full","sha256":"1d4babe004dc1f5aa43d590f67bf352f34e394ba906010bbf2726af2959c007e"}
+- 2026-10-24T16:52:15Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/parser-surface.log","purpose":"Implementation verification evidence: parser-surface","sha256":"c39fc89049bbcf87204e5945c153fd44be397db7d95dfd60eaa7bcebd48c5c2a"}
