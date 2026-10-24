@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T13:06:07Z
+updated: 2026-10-24T13:06:09Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -42,3 +42,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 - 2026-10-24T13:05:40Z (fix/tasks-171b8b): attached: linked-red.log (1828 bytes): Before helper isolation: hostile child redirects linked fixture writes and changes the owned foreign HEAD.
 - 2026-10-24T13:05:42Z (fix/tasks-171b8b): attached: record-red.log (1962 bytes): Before helper isolation: hostile child redirects record-commit fixture writes and changes the owned foreign HEAD.
 - 2026-10-24T13:06:07Z (fix/tasks-171b8b): detached: linked-red.log: Replace with evidence normalized to checkout-relative paths for repository hygiene.
+- 2026-10-24T13:06:09Z (fix/tasks-171b8b): detached: record-red.log: Replace with evidence normalized to checkout-relative paths for repository hygiene.
