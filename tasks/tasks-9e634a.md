@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:53:18Z
+updated: 2026-10-24T13:53:19Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -54,3 +54,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:53:04Z (fix/tasks-9e634a): attached: implementation-review-report.md (2556 bytes): Full implementation review by codex/gpt-6.1-sol of 9dc9d1a; checkout path redacted
 - 2026-10-24T13:53:16Z (fix/tasks-9e634a): Full original review retained at /mnt/ssd3/work/tasks/tasks-9e634a/implementation-review-report.md; sha256 56661e8d94eeb8890cec91948e1d8b25455975d564b37dcc221a500f1e8c6de3. Attached copy changes only the machine-specific checkout path.
 - 2026-10-24T13:53:18Z (fix/tasks-9e634a): Ruling (9dc9d1a review): retain stdin-only terminal detection. Why: scoped contract deliberately uses IsTerminal on stdin rather than probing host tty usability. Cost: an unusable terminal may still be reported as terminal-capable.
+- 2026-10-24T13:53:19Z (fix/tasks-9e634a): Ruling (9dc9d1a review): retain unrestricted explicit editor launch. Why: --editor is the deliberate override for scripted or GUI editors. Cost: an explicitly selected editor can still hang.
