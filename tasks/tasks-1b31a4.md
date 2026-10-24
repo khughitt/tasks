@@ -4,8 +4,8 @@ title: Support grouping by project in tasks list --pretty --all-projects
 status: idea
 priority: 2
 created: 2026-10-24T11:07:36Z
-updated: 2026-10-24T11:23:24Z
-depends: []
+updated: 2026-10-24T11:23:27Z
+depends: [tasks-6fcb58]
 parent: tasks-eceb1c
 tags: [feedback, idea, "from:tasks"]
 agent: codex
