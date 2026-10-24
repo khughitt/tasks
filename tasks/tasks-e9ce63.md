@@ -3,8 +3,10 @@ id: tasks-e9ce63
 title: init --force --records cannot re-point a detached project's checkout after the checkout directory moves
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-24T11:16:24Z
 created: 2026-10-23T11:56:47Z
-updated: 2026-10-24T11:16:22Z
+updated: 2026-10-24T11:16:24Z
 depends: [tasks-34424b]
 parent: tasks-72e3d7
 tags: [feedback, gap, "from:hq"]
@@ -16,3 +18,7 @@ Moving a detached project's code checkout to a new directory leaves the records 
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-detached-migration-recovery-brief.md — incident evidence, contract tensions and investigation
+
+## Notes
+
+- 2026-10-24T11:16:24Z (main): scope: briefed; forced relocation is blocked by init_detached's existing-checkout guard; safe identity and synchronized-config changes remain to establish; evidence: eedf9a9; waits on tasks-34424b; brief: docs/notes/2026-10-24-detached-migration-recovery-brief.md
