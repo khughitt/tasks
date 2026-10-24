@@ -33,11 +33,26 @@ TaskSummary,ParkedRow,TreeNode}`, `src/lanes.rs::LaneRow`, `src/cli.rs::Command:
 
 ## 2. Recommendation and alternatives
 
-Add **`tasks --json prime --summary`**, with a hard 16,384-byte successful stdout
+Add **`tasks --json prime --summary`**, with a hard 12,288-byte (12 KiB) successful stdout
 limit, fixed row caps and explicit omission metadata. Reuse the existing rows and
 selection logic. Ordinary `prime` remains the complete read with its existing
 JSON contract. All numbers and interface choices below are the author's proposed
 defaults, not prior user decisions.
+
+The target consumer is this session's `exec_command` response with its observed
+6,000-token output cap. At an estimated 3–4 UTF-8 bytes per token for these JSON
+rows, 12 KiB is about 3,072–4,096 tokens. Reserving 1,000 tokens for tool framing
+and surrounding output leaves at least 904 tokens of additional margin under that
+estimate. This replaces the original 16 KiB proposal's narrower margin. The
+conversion and reserve are sizing assumptions, not tokenizer measurements or a
+guarantee for arbitrary text; §8 requires an end-to-end consumer check before adoption.
+
+A design-only projection of the captured response, using the fixed caps and local
+explicit executable/directory in recovery argv, is 13,277 bytes. Applying the
+12 KiB limit drops three roadmap roots and yields 11,770 bytes, retaining five
+ready rows, five lanes, one doing row and two roadmap roots. The five lanes alone
+are 6,564 bytes; more active work can evict additional orientation rows. These are
+projection measurements, not results from an implemented summary command.
 
 Alternatives considered:
 
@@ -103,7 +118,8 @@ nested arrays are not sampled. If a large lane cannot fit, omit that entire lane
 under the byte rule. Do not clip titles, guidance, paths, next steps, warnings,
 identifiers or claim details. A roadmap root retains its entire `TaskSummary` but
 has no `children`; descendant omission is explicit below. This is a shallow overview,
-not a claim that a goal has no descendants.
+not a claim that a goal has no descendants: existing `child_count` and
+`open_descendant_count` remain present and unchanged on each shown root.
 
 All six `summary.sections` entries are always present, with:
 
@@ -120,17 +136,21 @@ non-root nodes across the complete forest, including children of omitted roots.
 Count tree occurrences, not a separate global task count. Every such node is absent
 from this shallow roadmap, even if the task appears in ready or another section.
 
-`summary.byte_limit` is always `16384`. `summary.complete` is true exactly when all
+`summary.byte_limit` is always `12288`. `summary.complete` is true exactly when all
 six `omitted` values and `descendants_omitted` are zero. It means prime's displayed
 data is complete, not that the registry was entirely reachable or no selection
 filters applied; warnings still describe those conditions. Metadata totals derive
 from the same read snapshot as the returned rows.
 
 `summary.full` is an argv array for a complete JSON prime read. It starts with
-`["tasks", "--json", "-C", "<effective command directory>", "prime"]`, preserves
+`["<running executable>", "--json", "-C", "<effective command directory>", "prime"]`, preserves
 the original scope, `--closed` and explicit `--without` arguments, and omits
-`--summary`. The directory is an actual absolute effective directory, including
-the worktree when local; the example placeholder is not a literal output value.
+`--summary`. Its first member is the absolute running executable path returned by
+`std::env::current_exe()`, so invoking a worktree binary yields recovery through
+that binary, independent of `PATH`. The directory is the absolute effective
+directory, including the worktree when local. The example placeholders are not
+literal output values. If either path cannot be obtained or represented as UTF-8,
+return a typed I/O error; do not substitute `tasks` or a lossy path.
 Treat each array member as an argument, never concatenate it into a shell command.
 Run it with the same environment and registry. Environment-driven cutoff/without
 settings still apply, as they do to full prime today. This is a fresh read, not a
@@ -141,7 +161,7 @@ roadmap, before any extra byte pruning (ids and totals here are examples):
 
 ```json
 {
-  "byte_limit": 16384,
+  "byte_limit": 12288,
   "complete": false,
   "sections": {
     "parked": {"total": 0, "shown": 0, "omitted": 0},
@@ -151,7 +171,7 @@ roadmap, before any extra byte pruning (ids and totals here are examples):
     "lanes": {"total": 7, "shown": 5, "omitted": 2, "first_omitted": "demo-000106"},
     "roadmap": {"total": 46, "shown": 5, "omitted": 41, "first_omitted": "demo-000206", "descendants_omitted": 150}
   },
-  "full": ["tasks", "--json", "-C", "<effective command directory>", "prime"]
+  "full": ["<running executable>", "--json", "-C", "<effective command directory>", "prime"]
 }
 ```
 
@@ -164,7 +184,8 @@ are zero, complete is true, all six arrays are empty and full is still present.
 
 The hard limit covers the complete compact JSON stdout response, UTF-8 encoded,
 including object keys, metadata, escaping and the one trailing LF. It is a byte
-guarantee, not a token guarantee for every harness or a runtime/memory bound.
+guarantee, not a token guarantee for every harness or a runtime/memory bound. The
+consumer sizing and estimated token margin are given in §2.
 
 Build the same complete prime result first, preserving its scan, dependency,
 claim/copy precedence, cutoff, needs, halt and warning logic. Record totals, remove
@@ -189,15 +210,17 @@ id can be large; it stays exact and counts against the budget.
 If the result still exceeds the budget with every sampled array empty, fail with
 `summary_too_large`, exit 1, no stdout, and the existing error envelope on stderr.
 Use this fixed bounded detail, without embedding the unbounded warning or path:
-`prime summary exceeds 16384 bytes with required metadata; rerun the same JSON prime without --summary and capture stdout to a file`.
+`prime summary exceeds 12288 bytes with required metadata; rerun the same JSON prime without --summary and capture stdout to a file`.
 Warnings and halts are never dropped, truncated, deduplicated anew or silently
 redirected to make a successful summary fit. Their existing order is retained.
 This explicit failure is the cost of preserving actionable safety information.
 
 Malformed task records and other existing fatal errors still fail before sampling;
-an excluded row cannot conceal a parse error. Existing nonfatal unreachable-project,
-unknown-halt, claim and stale-copy warnings remain nonfatal when they fit. The
-summary introduces no changes to what is considered eligible or safe to start.
+an excluded row cannot conceal a parse error. Unreachable-project, unknown-halt,
+claim and stale-copy warnings remain warnings rather than record errors, but their
+combined size can now make `--summary` fail with `summary_too_large` even when full
+prime succeeds. This is an intentional opt-in exit-status change, requiring the
+consumer failure path in §8. Eligibility and start-safety rules remain unchanged.
 
 ## 6. How an agent uses and expands the summary
 
@@ -211,6 +234,7 @@ Recovery uses existing commands in the same scope and environment:
 | Need | Complete or focused read |
 |---|---|
 | Exact full prime sections, including warnings | `summary.full`, with stdout captured to a file |
+| Every goal offered for closeout, including omitted goals | `summary.full`, then read its `closeout` section; `list` and `tree` cannot substitute for this invitation |
 | Next eligible work or additional ready candidates | `tasks next`; `tasks ready -n 10` |
 | A known omitted task's record and claim | `tasks show <id>` |
 | All parks and their resume instructions | `tasks list --parked`, captured if large |
@@ -237,7 +261,7 @@ under the existing lane semantics, not a reservation of a shared resource.
 
 Use current full prime as the oracle for selection, order and row values, under
 stable fake clocks, registries and claims. Every successful summary must parse as
-JSON and be at most 16,384 stdout bytes including LF. These are future test
+JSON and be at most 12,288 stdout bytes including LF. These are future test
 requirements; this design task does not claim they already run.
 
 | Case | Required result |
@@ -252,7 +276,7 @@ requirements; this design task does not claim they already run.
 | Required metadata overflow | Enough warnings, halts, scope data or first_omitted metadata to exceed the budget with sampled arrays empty; summary_too_large, exit 1, empty stdout, bounded stderr detail |
 | Large and escaped strings | Multibyte Unicode, control characters, quotes and long titles/tags/paths; exact JSON byte measurement, whole-row eviction, no clipping or broken UTF-8 |
 | Cutoff, unavailable needs, paused lanes, future deferral, due recurrence | Same ready and closeout candidate sets as full prime, then prefix caps; complete does not mean these filters were absent |
-| Group/all-project and local worktree reads | Existing prefix/group/projects contract, warnings and copy precedence unchanged; full argv restores the same scope and directory; retired/unreachable members follow current rules |
+| Group/all-project and local worktree reads | Existing prefix/group/projects contract, warnings and copy precedence unchanged; full argv restores the running executable, scope and directory, even with another tasks binary first on PATH; retired/unreachable members follow current rules |
 | Format and existing errors | Explicit JSON wins over valid pretty env; resolved pretty summary rejects; malformed env, record and unknown scope still produce typed errors |
 | Existing callers | All preexisting full JSON and pretty tests unchanged; no summary key without the new flag; normal full output remains unbounded |
 
@@ -272,18 +296,48 @@ The implementation plan, after this spec's user review, must cover:
   ParkedRow, LaneRow, TreeNode and the existing error/rendering conventions. Add no
   second scanner, selection engine, row schema or dependency.
 - Typed errors, serialization byte accounting and the acceptance fixtures above.
-- README and tasks skill usage/recovery guidance, accurately labeled opt-in until
-  rollout is allowed; no claim that installing the option changes existing sessions.
-- Binary-before-consumer rollout, test/check routes and the separate default decision.
+- README usage/recovery guidance for the opt-in binary feature; keep the separately
+  gated skill and session guidance out of that implementation change.
+- Separate binary and consumer rollout steps, test/check routes, the consumer's
+  overflow recovery and token-budget pilot, and the later default decision.
 
-The gate from tasks-282666 is assessed conservatively: changing the command used
-at session startup, its returned summary, or the default changes what enrolled
-sessions see. Do not migrate session instructions, hooks or enrolled consumers
-before the 2027-02-16 flow-trial-1 readout unless the measurement owner records a
-no-effect verdict for that precise change. An unused opt-in implementation leaves
-existing calls unchanged, but that alone is not evidence of no effect on the
-measurement path; assess it with the owner before landing, or wait for readout.
-This document does not issue that verdict or waive the gate.
+**Binary delivery is not held by the trial gate.** After the document reviews and
+normal implementation checks, the new unused binary option, its tests and README
+can land. Existing calls return the same data and keep the same defaults. Do not
+bundle changes to agent-loaded instructions or consumers into that delivery.
+
+**Consumer adoption is held by the trial gate.** `skills/tasks/SKILL.md` is loaded
+in other projects' sessions: mentioning `--summary` there can cause enrolled agents
+to use it immediately. Keep even opt-in skill guidance, hooks, session instructions
+and enrolled-consumer changes out until the 2027-02-16 flow-trial-1 readout, unless
+the user, as **flow-trial-1's owner**, records a no-effect verdict for that specific
+change. The owner is identified in flows's
+`docs/notes/2026-10-22-records-only-direct-path-brief.md` §5; the frozen trial's
+`evals/trials/flow-trial-1.md` records the readout date. This split applies the gate
+recorded by tasks-282666 to changes in what enrolled sessions see or what verdict
+tools measure. This spec neither supplies a no-effect verdict nor authorizes rollout.
+
+The deferred consumer rollout must handle `summary_too_large` explicitly. Retain
+the original invocation because failed summary output contains no `summary.full`.
+Use that same executable, effective directory, scope and environment, remove only
+`--summary`, and capture the full JSON read to a caller-chosen persistent file.
+Emit a short visible notice naming the summary failure and the capture's actual
+path, so session startup supplies actionable context instead of blank stdout.
+Read the file in bounded sections, including all warnings/halts and any omitted
+ownership or closeout data before acting. Do not print the whole file or claim the
+bounded summary succeeded. If full capture fails, report its error and retain a
+nonzero consumer result; other summary errors are reported rather than retried.
+
+Before adopting the consumer, run one end-to-end pilot through its actual tool
+with the 6,000-token cap, using representative JSON and the overflow/recovery case.
+Check that framing plus the response fits without truncation and that recovery
+reports the saved path and remains readable. Record the actual output/token
+accounting when the harness supplies it; otherwise record whether truncation
+occurred and the captured byte count without claiming an exact token count. A
+different or smaller consumer budget needs its own check. A failed pilot stops
+adoption and returns the cap or consumer framing for review; it does not weaken
+the complete-warning rule. This pilot is rollout verification, not a claim that
+12 KiB universally fits every tokenizer or tool wrapper.
 
 After the gate permits adoption, recommend explicit `tasks --json prime --summary`
 in session consumers. Assess making summary the CLI default in a separately
