@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-23T12:43:58Z
-updated: 2026-10-24T11:32:17Z
+updated: 2026-10-24T11:32:23Z
 depends: []
 parent: tasks-b34076
 tags: [feedback, idea, "from:hq"]
@@ -26,3 +26,7 @@ Asked by the user: avoid losing track of scratch made during a task. The global 
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-scratch-evidence-brief.md — evidence, bounded warning contract and routing questions
+
+## Notes
+
+- 2026-10-24T11:32:23Z (main): scope: scoped; 89e0371 has no WORK_ROOT reader or close-time scratch warning; P2/s/mid/direct with explicit non-blocking directory, retry and error checks; existing park-input design tasks-57425c excludes close-time scratch; brief: docs/notes/2026-10-24-scratch-evidence-brief.md
