@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:55:58Z
+updated: 2026-10-24T14:56:00Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -59,3 +59,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T14:47:00Z (design/tasks-e7424b): Planning uses the existing task-references plan's design-task closeout convention: plan is an output reference while under review; after approval, create a separate implementation goal and one step record per Task heading, then close this design task independently. Proposed sequence: ops CLI row, tasks binary/isolated README, gated skill adoption. No existing automated prime caller was found in the inspected session hook; no new startup hook is planned. Recommend inline execution after plan approval because the steps are sequential and share one command contract.
 - 2026-10-24T14:54:50Z (design/tasks-e7424b): review: plan round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T14:55:58Z (design/tasks-e7424b): attached: spec-review-r3-report.md (3184 bytes): Full spec round 3 acceptance and user approval for planning; two minors assigned to plan
+- 2026-10-24T14:56:00Z (design/tasks-e7424b): attached: plan-self-review-r1-report.md (2571 bytes): Controller self-review of frozen plan fbb9e6a; no findings; user plan approval remains required
