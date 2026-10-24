@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:19:00Z
+updated: 2026-10-24T16:20:15Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -38,3 +38,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:18:57Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After binary integration/reinstall and review evidence preservation, verify any transfer or disposal under current retained-item rules; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/spec-review-r2-report.md","purpose":"Retained spec-review-r2-report.md for review provenance, rulings or verification evidence; copies attached elsewhere have not been removed from this location.","sha256":"d4418fb3407f8fc616d4b6f7f68adf1a027c0e0762a5b6a447278f57c7aa2a74"}
 - 2026-10-24T16:18:58Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After binary integration/reinstall and review evidence preservation, verify any transfer or disposal under current retained-item rules; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/spec-review-r3-report.md","purpose":"Retained spec-review-r3-report.md for review provenance, rulings or verification evidence; copies attached elsewhere have not been removed from this location.","sha256":"f9708b6e74edf1e4e3086774cfececa433806e8cebe8e8bb97ba8ac1b3279bba"}
 - 2026-10-24T16:19:00Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After binary integration/reinstall and review evidence preservation, verify any transfer or disposal under current retained-item rules; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/test-fast.log","purpose":"Retained test-fast.log for review provenance, rulings or verification evidence; copies attached elsewhere have not been removed from this location.","sha256":"3c234e8a8184d6b7ec0ec938c3068ebff5510e1b82dd17f3e5b6b4401d07466c"}
+- 2026-10-24T16:20:15Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"worktree","path":"/mnt/ssd3/work/ops/.worktrees/ops-8d4c5b","purpose":"Keep reviewed ops CLI-row branch until Tasks 1–2 integration and evidence/removal checks; source commit 3a0c4e4."}
