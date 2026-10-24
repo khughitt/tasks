@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-7cae19-git-trace
 created: 2026-10-17T11:24:25Z
-updated: 2026-10-24T11:42:50Z
+updated: 2026-10-24T11:46:17Z
 started: 2026-10-24T11:42:16Z
 depends: []
 tags: [feedback, friction, "from:ops"]
@@ -32,3 +32,4 @@ Original report (preserved): Repro: git init a scratch repo, then run a client t
   provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T11:42:50Z (fix/tasks-7cae19-git-trace): resumed
   provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T11:46:17Z (fix/tasks-7cae19-git-trace): Direct process in .worktrees/tasks-7cae19-git-trace. Confined README install: CARGO_TARGET_DIR under worktree, cargo install --locked --path . --root target/setup. Baseline just test passed: 1663 tests, 0 failures. Scope: the two src/link.rs Git closures and linked-discovery regression coverage; preserve corrupt-ref errors and JSON shapes.
