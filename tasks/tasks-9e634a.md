@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:50:00Z
+updated: 2026-10-24T13:50:03Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -44,3 +44,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:49:56Z (fix/tasks-9e634a): attached: baseline.log (123212 bytes): Test evidence with host-specific paths redacted
 - 2026-10-24T13:49:59Z (fix/tasks-9e634a): detached: red-refusal.log: Replace raw tool output with the same evidence after redacting machine-specific paths
 - 2026-10-24T13:50:00Z (fix/tasks-9e634a): attached: red-refusal.log (938 bytes): Test evidence with host-specific paths redacted
+- 2026-10-24T13:50:03Z (fix/tasks-9e634a): detached: red-explicit.log: Replace raw tool output with the same evidence after redacting machine-specific paths
