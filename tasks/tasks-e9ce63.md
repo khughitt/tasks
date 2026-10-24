@@ -4,8 +4,8 @@ title: init --force --records cannot re-point a detached project's checkout afte
 status: idea
 priority: 2
 created: 2026-10-23T11:56:47Z
-updated: 2026-10-24T11:16:19Z
-depends: []
+updated: 2026-10-24T11:16:22Z
+depends: [tasks-34424b]
 parent: tasks-72e3d7
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
