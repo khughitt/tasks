@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-24T11:15:26Z
-updated: 2026-10-24T11:15:26Z
+updated: 2026-10-24T11:15:50Z
 depends: []
 parent: tasks-72e3d7
 tags: []
@@ -24,3 +24,7 @@ Ideas it wakes: On completion, before this result's branch merges, run tasks not
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-detached-migration-recovery-brief.md — all reported asks, code evidence and investigation limits
+
+## Notes
+
+- 2026-10-24T11:15:50Z (main): concerns: tasks-211e28 extension — establish post-rollout relocation, unpaired discovery and init configuration-write recovery contracts before scoping implementation
