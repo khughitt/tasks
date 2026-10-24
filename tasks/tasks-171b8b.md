@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T12:58:27Z
+updated: 2026-10-24T12:59:04Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -32,4 +32,6 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 
 - 2026-10-23T11:41:06Z (main): concerns: tasks-10385f extension — Extend the completed production selector-isolation work to older linked-project and record-commit integration-test Git helpers, which its review explicitly left outside scope.
 - 2026-10-24T12:58:27Z (main): started
+  provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T12:59:04Z (fix/tasks-171b8b): resumed
   provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
