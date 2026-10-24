@@ -1,0 +1,23 @@
+   Compiling tasks v0.4.0 (<worktree>)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.16s
+     Running tests/cli.rs (target/debug/deps/cli-28b7360b3c04fa10)
+
+running 1 test
+test edit_without_terminal_refuses_before_creating_a_temp_or_running_editor ... FAILED
+
+failures:
+
+---- edit_without_terminal_refuses_before_creating_a_temp_or_running_editor stdout ----
+
+thread 'edit_without_terminal_refuses_before_creating_a_temp_or_running_editor' (2491981) panicked at tests/cli.rs:5357:5:
+a flagless edit must not run EDITOR without a terminal
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    edit_without_terminal_refuses_before_creating_a_temp_or_running_editor
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 682 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--test cli`
+error: recipe `test-one` failed on line 46 with exit code 101
