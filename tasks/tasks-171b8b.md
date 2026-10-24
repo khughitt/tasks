@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T13:06:14Z
+updated: 2026-10-24T13:06:40Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -45,3 +45,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 - 2026-10-24T13:06:09Z (fix/tasks-171b8b): detached: record-red.log: Replace with evidence normalized to checkout-relative paths for repository hygiene.
 - 2026-10-24T13:06:11Z (fix/tasks-171b8b): attached: linked-red.log (1807 bytes): Before helper isolation: hostile child redirects linked fixture writes and changes the owned foreign HEAD. Checkout paths normalized.
 - 2026-10-24T13:06:14Z (fix/tasks-171b8b): attached: record-red.log (1941 bytes): Before helper isolation: hostile child redirects record-commit fixture writes and changes the owned foreign HEAD. Checkout paths normalized.
+- 2026-10-24T13:06:40Z (fix/tasks-171b8b): Verification: just test-one --test linked --test record_commit passed 65; just test-fast passed 1662 with 4 ignored exhaustive cases; just check passed hygiene, fmt, clippy all targets with warnings denied, and tasks check. Full baseline included all 1664 pre-change tests. RED logs attached with checkout paths normalized after the hygiene hook refused machine-specific paths.
