@@ -8,13 +8,14 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:00:07Z
+updated: 2026-10-24T14:07:33Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
 tags: []
 source: tasks-4ca7bd
 agent: codex
+spec: docs/specs/2026-10-24-bounded-session-summary-design.md
 ---
 
 Why: tasks-4ca7bd reports session-start output truncation; [ref:brief] records a 101,001-byte local response whose roadmap is larger than its ready list. The summary must preserve useful work discovery and disclose omissions.
