@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T17:12:29Z
+updated: 2026-10-24T17:12:42Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -73,3 +73,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T17:12:26Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/installed-summary.json","purpose":"Approved shared reinstall verification: installed-summary.json","sha256":"b0e1b58c25ac3391f50ad9bb945c2cb2a2345bfc2ba00fb4ba19597c49e7ed8b"}
 - 2026-10-24T17:12:28Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/installed-full.json","purpose":"Approved shared reinstall verification: installed-full.json","sha256":"ee8662cd3fe39224423a5fc524c87a13e4885513f6358df6d3328dd6af8596a4"}
 - 2026-10-24T17:12:29Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/installed-verification.json","purpose":"Approved shared reinstall verification: installed-verification.json","sha256":"f6ed4917bc20dba7136a72ba6c254f753fd29da2a218c67840365715fddace97"}
+- 2026-10-24T17:12:42Z (main): Shared reinstall tasks-72093a verified after user approval; installed executable /home/keith/.cargo/bin/tasks now supports --summary and successful bounded/recovery reads. Tasks 1–2 and required reinstall are complete and locally merged. Goal stays open for tasks-dc696d and its twelve owner guide tasks: agent resumes adoption/pilot after trial readout 2027-02-16 or the trial owner records a specific no-effect verdict; no no-effect verdict issued. Retained design/ops worktrees and evidence remain owned by this open goal for that next phase; the temporary isolated smoke HOME was discarded as regenerable fixture state.
