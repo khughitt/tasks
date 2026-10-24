@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T15:19:34Z
+updated: 2026-10-24T15:19:36Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -75,3 +75,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T15:18:21Z (design/tasks-e7424b): Raw review attachment layout refusal resolved via retained-item fallback, not a check bypass. Portable derivative mapping for retained $WORK_ROOT/tasks/tasks-e7424b/plan-external-review-r1-report.md (sha256 adb0cd3cbac25d6c0b7465fddc22d08469dadbfd2a408cb86fa788f78fd2981c): <SYNC_ROOT> means /mnt/ssd/Dropbox on titan. Keep exact raw bytes until an executing checker accepts a shipped ledger-backed exemption or ownership is verifiably transferred; design completion does not ship that exemption.
 - 2026-10-24T15:18:24Z (design/tasks-e7424b): attached: plan-external-review-r1-portable-report.md (4729 bytes): Portable derivative of external plan review round 1; <SYNC_ROOT> substituted; raw retained item and mapping are recorded on tasks-e7424b
 - 2026-10-24T15:19:34Z (design/tasks-e7424b): attached: review-ledger-plan-r1.md (7671 bytes): External plan round 1 rulings resolved in frozen revision 3a264b9; reasons, costs and prior rulings retained; raw-review fallback recorded
+- 2026-10-24T15:19:36Z (design/tasks-e7424b): Revised plan frozen at 3a264b91111137b065393936080188f826b15ed1:docs/plans/2026-10-24-bounded-session-summary.md; user review required. Important 1 and Minor 2 all accepted: Task 3 covers 13 active startup guides plus local skill/README, with other-owner filing after plan approval and the same trial gate; lore's descriptive halt wording unchanged; retired mind3 excluded. Recovery directory uses std::path::absolute with a symlink-preserving assertion. Required post-merge reinstall has an open owner/host-approval step independent of Task 3. Inline execution retained. No implementation or owner tasks filed yet. just test-fast: 1665 passed, 0 failed, 4 ignored; task/diff/pre-commit checks passed. Raw review layout refusal used the retained/portable fallback; tool feedback filed as ops-1b4842.
