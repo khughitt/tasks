@@ -1,13 +1,15 @@
 ---
 id: tasks-7cae19
 title: "The project resolver (tasks where / linked lookup) fails in a repository with no commits yet when GIT_TRACE is set: git ls-tree HEAD's trace lines on stderr seem to defeat the no-HEAD classification, so the lookup errors instead of answering"
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-17T11:24:25Z
-updated: 2026-10-17T17:49:59Z
+updated: 2026-10-24T11:42:16Z
+started: 2026-10-24T11:42:16Z
 depends: []
 tags: [feedback, friction, "from:ops"]
 agent: claude-code/claude-opus-5-5
@@ -26,3 +28,5 @@ Original report (preserved): Repro: git init a scratch repo, then run a client t
 ## Notes
 
 - 2026-10-17T17:49:59Z (main): scope: scoped; root cause reproduced: unborn() in src/link.rs:361 requires empty for-each-ref stderr, which GIT_TRACE fills; fix strips GIT_TRACE* from those git calls, regression in tests/linked.rs
+- 2026-10-24T11:42:16Z (main): started
+  provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
