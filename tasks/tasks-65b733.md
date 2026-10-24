@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:09:05Z
+updated: 2026-10-24T16:09:40Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -18,3 +18,7 @@ plan: docs/plans/2026-10-24-bounded-session-summary.md
 ---
 
 Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks binary inline; track required post-merge reinstall separately. Gated skill/project-guide adoption remains blocked pending readout or the user's specific no-effect verdict. Preserve default full prime and complete warnings; owns transferred design worktree/scratch/evidence until verified disposition.
+
+## Notes
+
+- 2026-10-24T16:09:40Z (design/tasks-e7424b): Created persistent scratch on titan at $WORK_ROOT/tasks/tasks-65b733 for inline implementation logs, test evidence and measurement-scope investigation; current owner task:tasks-65b733. Contents are mutable and not checkpointed yet; retained-item manifests will be recorded at park/done.
