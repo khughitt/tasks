@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-7cae19-git-trace
 created: 2026-10-17T11:24:25Z
-updated: 2026-10-24T11:50:17Z
+updated: 2026-10-24T11:52:33Z
 started: 2026-10-24T11:42:16Z
 completed: 2026-10-24T11:50:17Z
 closed: 2026-10-24T11:50:17Z
@@ -43,3 +43,4 @@ Original report (preserved): Repro: git init a scratch repo, then run a client t
   provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T11:50:17Z (fix/tasks-7cae19-git-trace): Fixed unborn-HEAD discovery under every GIT_TRACE-prefixed variable without weakening corrupt-ref errors; regression RED to GREEN, fast suite 1660 passed, independent review accepted with no findings.
   provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T11:52:33Z (main): Integrated locally into main. Merged-result just test-fast passed 1660 tests, 0 failures, 4 intentionally ignored; cargo install --locked --path . rebuilt and replaced the installed CLI from main. Installed-binary smoke passed unborn lookup and corrupt-ref io refusal under both GIT_TRACE and GIT_TRACE2 in isolated state. Cleanup inventory: only ignored target/ remains in the task worktree, containing regenerable builds, confined setup binary and test logs whose results are recorded here; discard it. Review report is attached and present from main; no plan workspace or host pointer references into the worktree were found.
