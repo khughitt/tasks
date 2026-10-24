@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:09:14Z
+updated: 2026-10-24T14:09:16Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -41,3 +41,5 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T14:08:35Z (design/tasks-e7424b): Verification before frozen spec review: just test-fast passed 1665 tests across 14 test binaries, 0 failed, 4 ignored; tasks check and git diff --check passed; pre-commit hygiene/fmt/clippy/tasks checks passed. Frozen spec revision 5d95ea1fe22f07439f38e5b82dbab1e256770ba8:docs/specs/2026-10-24-bounded-session-summary-design.md sent for read-only builder check. User design review remains required before writing the plan.
 - 2026-10-24T14:09:12Z (design/tasks-e7424b): review: spec round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T14:09:14Z (design/tasks-e7424b): attached: spec-review-r1-report.md (463 bytes): Builder acceptance of frozen spec 5d95ea1; no important questions; user review still required
+- 2026-10-24T14:09:16Z (design/tasks-e7424b): parked (waiting on user, review): User reviews frozen spec 5d95ea1fe22f07439f38e5b82dbab1e256770ba8 at .worktrees/tasks-e7424b/docs/specs/2026-10-24-bounded-session-summary-design.md. After user approval, agent resumes here and writes the implementation plan for separate user review; no implementation in this design task. Measurement input: /mnt/ssd3/work/tasks/tasks-e7424b/prime-before.json, sha256 3bda742e27be7913e3475bed7f9d039e09365ec16ad69dd98c40b0f08ab6cd67. Builder report attached as spec-review-r1-report.md.
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
