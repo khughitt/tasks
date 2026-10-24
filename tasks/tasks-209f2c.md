@@ -1,13 +1,15 @@
 ---
 id: tasks-209f2c
 title: Land the source CLI option in ops
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: design/tasks-e7424b
 created: 2026-10-24T16:09:33Z
-updated: 2026-10-24T16:10:46Z
+updated: 2026-10-24T16:25:03Z
+started: 2026-10-24T16:25:03Z
 depends: [ops-8d4c5b]
 parent: tasks-65b733
 tags: []
@@ -19,3 +21,8 @@ step: "Task 1: Land the source CLI option in ops"
 ---
 
 Execute the exact approved plan step inline, with its interfaces, tests, source ownership and review requirements. Record evidence and finish on the task branch before integration.
+
+## Notes
+
+- 2026-10-24T16:25:03Z (design/tasks-e7424b): started
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
