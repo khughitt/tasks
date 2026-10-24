@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T13:09:42Z
+updated: 2026-10-24T13:11:41Z
 started: 2026-10-24T12:58:27Z
 completed: 2026-10-24T13:09:42Z
 closed: 2026-10-24T13:09:42Z
@@ -55,3 +55,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
   provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T13:09:42Z (fix/tasks-171b8b): Isolated linked and record-commit integration Git commands and post-init repository boundaries; hostile child regressions proved RED to GREEN without changing foreign HEAD/index/global config. Reviewed 99ad63d with zero findings; focused 65 and fast 1662 passed, just check passed.
   provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T13:11:41Z (main): Integrated locally into main by fast-forward through caeef58. Post-merge just test-fast passed 1662 tests with 4 ignored. Independent review accepted with no findings; full report and normalized RED logs are retained as task attachments. Cleanup disposition: discard worktree target/ as regenerable build/install output and redundant verification logs; results are recorded here. No plan workspace or host pointers into the worktree.
