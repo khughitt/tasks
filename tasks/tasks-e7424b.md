@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T15:07:15Z
+updated: 2026-10-24T15:14:00Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -68,3 +68,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T15:07:14Z (design/tasks-e7424b): review: plan round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T15:07:15Z (design/tasks-e7424b): Recorded the external plan review with the user's supplied round 1 label. The earlier codex plan round 1 note was the controller's writing-plans self-review, not external acceptance; append-only history is retained. Revise frozen fbb9e6a for project startup instruction coverage, lexical absolute recovery directory, and explicit post-merge shared-binary reinstall approval. No implementation approval yet.
+- 2026-10-24T15:14:00Z (design/tasks-e7424b): Replacement retained-item instructions received during plan revision. Observed existing persistent scratch on titan at $WORK_ROOT/tasks/tasks-e7424b, owned by task:tasks-e7424b, for the canonical prime measurement, reviews and verification logs. This directory predates these instructions; contents are currently mutable and will be checkpointed with a manifest before park. Existing .worktrees/tasks-e7424b and its ignored review workspace remain under this open task until plan approval and verified transfer to implementation ownership.
