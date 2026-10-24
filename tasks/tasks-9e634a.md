@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:36:42Z
+updated: 2026-10-24T13:37:12Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -29,4 +29,6 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 
 - 2026-10-13T10:48:22Z (main): scope: scoped; chose refuse-when-stdin-not-a-terminal plus an explicit --editor override (rejected env var and /dev/tty probe); editor path is edit.rs::run -> editor, no terminal check today (checked at d698a36); P2/s/low/direct
 - 2026-10-24T13:36:42Z (main): started
+  provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T13:37:12Z (fix/tasks-9e634a): resumed
   provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
