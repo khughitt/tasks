@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: main
 created: 2026-10-24T16:10:36Z
-updated: 2026-10-24T17:10:09Z
+updated: 2026-10-24T17:10:12Z
 started: 2026-10-24T16:54:11Z
 depends: [tasks-7c5a4b]
 parent: tasks-65b733
@@ -32,3 +32,4 @@ After Task 2 is reviewed and merged, resolve current tasks PATH target and Cargo
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T17:10:09Z (main): resumed
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T17:10:12Z (main): User approved the prepared shared reinstall in this session. Execute cargo install --locked --path . from registered main; approval covers replacing the verified Cargo PATH binary and installed-binary verification, with startup guidance still gated.
