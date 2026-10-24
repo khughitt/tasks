@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:52:37Z
+updated: 2026-10-24T16:52:41Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -54,3 +54,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:52:28Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/summary-cli-extended.log","purpose":"Implementation verification evidence: summary-cli-extended","sha256":"214a08b7dd5fc7034c19b80001df5b1d047e6fe0c2dbd506cf2138378ebb20c2"}
 - 2026-10-24T16:52:32Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/summary-cli-green-initial.log","purpose":"Implementation verification evidence: summary-cli-green-initial","sha256":"6828c87c760a664a3f6b24c7fb8ef3fb9b43e3540813b1490a4fd2551567f7f4"}
 - 2026-10-24T16:52:37Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/summary-cli-red.log","purpose":"Implementation verification evidence: summary-cli-red","sha256":"f472a18375b2f135276a372e8aec1a8932fcd467047100ce010bd25ed1daf08c"}
+- 2026-10-24T16:52:41Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/summary-unit-extended.log","purpose":"Implementation verification evidence: summary-unit-extended","sha256":"876cf0ed6350a622191f9c5ddece0c2be9bf35cb3dee145856f4c246e505e4a7"}
