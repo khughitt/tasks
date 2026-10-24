@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T13:09:25Z
+updated: 2026-10-24T13:09:26Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -48,3 +48,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 - 2026-10-24T13:06:40Z (fix/tasks-171b8b): Verification: just test-one --test linked --test record_commit passed 65; just test-fast passed 1662 with 4 ignored exhaustive cases; just check passed hygiene, fmt, clippy all targets with warnings denied, and tasks check. Full baseline included all 1664 pre-change tests. RED logs attached with checkout paths normalized after the hygiene hook refused machine-specific paths.
 - 2026-10-24T13:09:22Z (fix/tasks-171b8b): review: impl round 1 — verdict: accept; findings: Critical 0, Important 0, Minor 0; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T13:09:25Z (fix/tasks-171b8b): attached: fixture-isolation-review-report.md (2414 bytes): Full read-only final branch review by codex/gpt-6.1-sol of a0f1d8e..99ad63d: Ship, zero findings.
+- 2026-10-24T13:09:26Z (fix/tasks-171b8b): Ruling: 99ad63d impl review — accept exclusion of production Git isolation. Why: task explicitly changes only integration fixtures and production code is unchanged. Cost: this change adds no production-path assurance. Ruling: 99ad63d impl review — accept exclusion of Git fixtures in other integration modules. Why: task explicitly bounds hardening to linked and record-commit fixtures. Cost: other existing fixture helpers may still inherit their parent environment. No deferred minor findings.
