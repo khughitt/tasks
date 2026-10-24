@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: main
 created: 2026-10-24T16:10:36Z
-updated: 2026-10-24T17:10:12Z
+updated: 2026-10-24T17:12:17Z
 started: 2026-10-24T16:54:11Z
 depends: [tasks-7c5a4b]
 parent: tasks-65b733
@@ -33,3 +33,4 @@ After Task 2 is reviewed and merged, resolve current tasks PATH target and Cargo
 - 2026-10-24T17:10:09Z (main): resumed
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T17:10:12Z (main): User approved the prepared shared reinstall in this session. Execute cargo install --locked --path . from registered main; approval covers replacing the verified Cargo PATH binary and installed-binary verification, with startup guidance still gated.
+- 2026-10-24T17:12:17Z (main): Approved shared reinstall completed with cargo install --locked --path . from main source 4ad76fb8e928c61e8dfb4d1d1784b015d71fa4e1 (source identical to reviewed merge 2c1ffb5, feature 9cfb0bb). PATH and resolved executable remain /home/keith/.cargo/bin/tasks; installed SHA256 a2c4635f54b676fec12786b3e024aa6e748e28f27d971b2a4a39c85ad41c85f6 matches main target/release/tasks. prime --help exposes --summary. Installed-binary smoke with isolated HOME and explicit environment over actual main records: summary 11634 bytes, full 132302 bytes; full argv selects installed executable and main directory; replay preserved sampled prefixes/warnings/halts. tasks check passed. No startup guidance changed and no real-consumer pilot or trial gate release is claimed.
