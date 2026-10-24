@@ -1,10 +1,21 @@
 mod common;
 use common::TestEnv;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+#[test]
+fn linked_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("linked_git_fixtures_ignore_hostile_environment") {
+        return;
+    }
+    a_linked_checkout_opens_its_overlay_project_from_every_tree();
+    where_answers_no_project_for_a_repository_whose_path_is_not_utf8();
+    where_finds_the_linked_project_from_a_worktree_whose_path_is_not_utf8();
+    an_unborn_repository_is_discovered_under_git_tracing();
+}
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let home = tempfile::tempdir().unwrap();
+    let out = common::git_fixture::command(home.path(), dir)
         .args([
             "-c",
             "user.name=t",
@@ -14,9 +25,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
             "init.defaultBranch=main",
         ])
         .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .unwrap();
     assert!(
@@ -24,6 +32,9 @@ fn git(dir: &Path, args: &[&str]) -> String {
         "git {args:?}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    if args.first() == Some(&"init") {
+        common::git_fixture::assert_repo(home.path(), dir);
+    }
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
@@ -617,12 +628,9 @@ fn where_finds_the_linked_project_from_a_worktree_whose_path_is_not_utf8() {
     let env = TestEnv::new();
     let l = layout(&env);
     let tree = l.base.join("storage").join(not_utf8());
-    let status = Command::new("git")
+    let status = common::git_fixture::command(env.home.path(), &l.code)
         .args(["worktree", "add", "-q", "-b", "latin"])
         .arg(&tree)
-        .current_dir(&l.code)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .status()
         .unwrap();
     assert!(status.success());
@@ -702,14 +710,8 @@ fn an_unborn_repository_is_discovered_under_git_tracing() {
     let scratch = tempfile::tempdir().unwrap();
     let repo = scratch.path().canonicalize().unwrap();
     let git = |args: &[&str]| {
-        let out = Command::new("git")
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap())
-            .env("HOME", env.home.path())
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
+        let out = common::git_fixture::command(env.home.path(), &repo)
             .env("GIT_CEILING_DIRECTORIES", repo.parent().unwrap())
-            .current_dir(&repo)
             .args(args)
             .output()
             .unwrap();

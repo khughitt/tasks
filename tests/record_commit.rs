@@ -1,14 +1,22 @@
 mod common;
 use common::TestEnv;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+#[test]
+fn record_commit_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("record_commit_git_fixtures_ignore_hostile_environment")
+    {
+        return;
+    }
+    add_note_and_done_each_commit_their_record();
+    a_linked_checkout_commits_only_its_overlay_records();
+    start_from_a_worktree_commits_the_halt_in_its_authority_root();
+}
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let home = tempfile::tempdir().unwrap();
+    let out = common::git_fixture::command(home.path(), dir)
         .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .unwrap();
     assert!(
@@ -16,6 +24,9 @@ fn git(dir: &Path, args: &[&str]) -> String {
         "git {args:?}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    if args.first() == Some(&"init") {
+        common::git_fixture::assert_repo(home.path(), dir);
+    }
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
