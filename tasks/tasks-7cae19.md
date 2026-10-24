@@ -6,9 +6,9 @@ priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: fix/tasks-7cae19-git-trace
 created: 2026-10-17T11:24:25Z
-updated: 2026-10-24T11:42:16Z
+updated: 2026-10-24T11:42:50Z
 started: 2026-10-24T11:42:16Z
 depends: []
 tags: [feedback, friction, "from:ops"]
@@ -29,4 +29,6 @@ Original report (preserved): Repro: git init a scratch repo, then run a client t
 
 - 2026-10-17T17:49:59Z (main): scope: scoped; root cause reproduced: unborn() in src/link.rs:361 requires empty for-each-ref stderr, which GIT_TRACE fills; fix strips GIT_TRACE* from those git calls, regression in tests/linked.rs
 - 2026-10-24T11:42:16Z (main): started
+  provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T11:42:50Z (fix/tasks-7cae19-git-trace): resumed
   provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
