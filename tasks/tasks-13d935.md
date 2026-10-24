@@ -4,8 +4,8 @@ title: "tasks projects fails with records_unpaired when run inside a checkout wh
 status: idea
 priority: 2
 created: 2026-10-23T12:39:31Z
-updated: 2026-10-24T11:16:27Z
-depends: []
+updated: 2026-10-24T11:16:29Z
+depends: [tasks-34424b]
 parent: tasks-72e3d7
 tags: [feedback, friction, "from:ops"]
 agent: claude-code/claude-opus-5-5
