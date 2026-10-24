@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:54:50Z
+updated: 2026-10-24T14:54:52Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -29,6 +29,7 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — evidence and question this follow-up must resolve
+- plan (output, kind=plan): docs/plans/2026-10-24-bounded-session-summary.md — implementation plan pending separate user review; spec accepted at 76501bd
 
 ## Notes
 
