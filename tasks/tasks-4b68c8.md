@@ -3,8 +3,10 @@ id: tasks-4b68c8
 title: "tasks attach fails outside a checkout although tasks show resolves the same id from anywhere, and its error suggests removing an unrelated empty .git directory"
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-24T11:32:25Z
 created: 2026-10-23T17:52:50Z
-updated: 2026-10-24T11:32:22Z
+updated: 2026-10-24T11:32:25Z
 depends: [tasks-e147b9]
 parent: tasks-b34076
 tags: [feedback, friction, "from:hq"]
@@ -18,3 +20,7 @@ Scoping evidence at 89e0371: show and attach both route through open_id_ctx_unwa
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-scratch-evidence-brief.md — shared routing evidence and unanswered incident questions
+
+## Notes
+
+- 2026-10-24T11:32:25Z (main): scope: briefed; at 89e0371 show, note and attach share ID routing and only NoProject falls through to the registry; 328790d deliberately diagnoses broken .git markers; same-environment contrast remains unverified; depends on tasks-e147b9 for isolated routing evidence and a safe recommendation; brief: docs/notes/2026-10-24-scratch-evidence-brief.md
