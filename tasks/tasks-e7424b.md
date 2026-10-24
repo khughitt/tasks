@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T16:22:17Z
+updated: 2026-10-24T16:22:20Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -101,3 +101,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T16:08:05Z (design/tasks-e7424b): User accepted frozen plan 3a264b91111137b065393936080188f826b15ed1 and directed Tasks 1–2 inline. Create implementation/reinstall/gated owner records, transfer retained resources, then close this design task before integration. Task 3 remains gated; inspect whether measurements use outside-trial sessions before recommending any guide-only no-effect verdict. Shared reinstall remains separately authorized after code merge.
 - 2026-10-24T16:22:13Z (design/tasks-e7424b): retained: {"host":"titan","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/plan-external-review-r1-report.md","state":"released","verification":"verified","purpose":"Verified responsibility transferred to open implementation goal tasks-65b733, whose receiving kept record names this unchanged item and its hash/manifest. No data removed.","next_owner":"none","cleanup_trigger":"none"}
 - 2026-10-24T16:22:17Z (design/tasks-e7424b): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-e7424b","state":"released","verification":"verified","purpose":"Verified responsibility transferred to open implementation goal tasks-65b733, whose receiving kept record names this unchanged item and its hash/manifest. No data removed.","next_owner":"none","cleanup_trigger":"none"}
+- 2026-10-24T16:22:20Z (design/tasks-e7424b): retained: {"host":"titan","kind":"scratch","path":"$WORK_ROOT/tasks/tasks-e7424b","state":"released","verification":"verified","purpose":"Verified responsibility transferred to open implementation goal tasks-65b733, whose receiving kept record names this unchanged item and its hash/manifest. No data removed.","next_owner":"none","cleanup_trigger":"none"}
