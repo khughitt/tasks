@@ -1,15 +1,17 @@
 ---
 id: tasks-9e634a
 title: Refuse a flagless edit without a terminal instead of stalling in $EDITOR
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:55:53Z
+updated: 2026-10-24T13:55:55Z
 started: 2026-10-24T13:36:42Z
+completed: 2026-10-24T13:55:55Z
+closed: 2026-10-24T13:55:55Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
 agent: codex
@@ -63,3 +65,7 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:54:23Z (fix/tasks-9e634a): Review correction 2400a80 restores the original setter/clearer usage-error test by dropping only the accidental --editor argument; focused 1 test, fast 1665 passed/4 ignored, just check passed. cmp confirms tools/cli.toml equals ops main. No production changes or deferred minors.
 - 2026-10-24T13:55:52Z (fix/tasks-9e634a): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T13:55:53Z (fix/tasks-9e634a): attached: correction-review-report.md (1123 bytes): Fresh scoped review of 2400a80 by codex/gpt-6.1-sol; zero findings
+- 2026-10-24T13:55:55Z (fix/tasks-9e634a): done
+  provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T13:55:55Z (fix/tasks-9e634a): Implemented nonterminal flagless-edit refusal and explicit --editor at 9dc9d1a; restored conflict coverage at 2400a80. Two implementation reviews accepted; no deferred findings. Fast suite 1665 passed/4 ignored, just check and PTY smoke passed; ops-678532 declared the option and adoption byte-matches ops main. Local merge and reinstall follow.
+  provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
