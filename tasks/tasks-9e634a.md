@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:49:09Z
+updated: 2026-10-24T13:49:54Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -39,3 +39,5 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:49:06Z (fix/tasks-9e634a): attached: red-refusal.log (972 bytes): RED: flagless nonterminal edit incorrectly launched EDITOR
 - 2026-10-24T13:49:07Z (fix/tasks-9e634a): attached: red-explicit.log (2444 bytes): RED: explicit editor option was unrecognized
 - 2026-10-24T13:49:09Z (fix/tasks-9e634a): attached: fast.log (120809 bytes): Final fast suite: 1665 passed, four ignored, zero failures
+- 2026-10-24T13:49:12Z (fix/tasks-9e634a): attached: check.log (145 bytes): Final hygiene, formatting, clippy and task validation passed
+- 2026-10-24T13:49:54Z (fix/tasks-9e634a): detached: baseline.log: Replace raw tool output with the same evidence after redacting machine-specific paths
