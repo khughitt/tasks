@@ -375,7 +375,15 @@ pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
 /// nothing; every other failure to read `HEAD` (a malformed loose ref, a corrupt
 /// `packed-refs`) is an `io` error, never "no records" (plan review round 2).
 fn tracked_config(top: &Path) -> Result<bool> {
-    let git = |args: &[&str]| crate::git::at(top).args(args).output();
+    let git = |args: &[&str]| {
+        let mut command = crate::git::at(top);
+        for (key, _) in std::env::vars_os() {
+            if key.as_encoded_bytes().starts_with(b"GIT_TRACE") {
+                command.env_remove(key);
+            }
+        }
+        command.args(args).output()
+    };
     let listed = git(&["ls-tree", "-z", "HEAD", "--", CONFIG_PATH])?;
     if !listed.status.success() {
         if unborn(top)? {
@@ -427,7 +435,16 @@ pub fn config_in_index(top: &Path) -> Result<bool> {
 /// corrupt `packed-refs` fails both, so neither reads as unborn (both reproduced in
 /// scratch repositories while planning).
 fn unborn(top: &Path) -> Result<bool> {
-    let git = |args: &[&str]| crate::git::at(top).args(args).output();
+    let git = |args: &[&str]| {
+        let mut command = crate::git::at(top);
+        // Trace noise must not mask the corrupt-ref warnings checked below.
+        for (key, _) in std::env::vars_os() {
+            if key.as_encoded_bytes().starts_with(b"GIT_TRACE") {
+                command.env_remove(key);
+            }
+        }
+        command.args(args).output()
+    };
     let head = git(&["symbolic-ref", "-q", "HEAD"])?;
     if !head.status.success() {
         return Ok(false);

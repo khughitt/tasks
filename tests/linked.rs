@@ -697,6 +697,62 @@ fn holds_records_refuses_a_tracked_tree_or_symlink_at_the_config_path() {
 }
 
 #[test]
+fn an_unborn_repository_is_discovered_under_git_tracing() {
+    let env = TestEnv::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = scratch.path().canonicalize().unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .env("HOME", env.home.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CEILING_DIRECTORIES", repo.parent().unwrap())
+            .current_dir(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    git(&["init", "-q", "--initial-branch=main"]);
+    assert_eq!(Path::new(&git(&["rev-parse", "--show-toplevel"])), repo);
+    assert_eq!(
+        Path::new(&git(&["rev-parse", "--absolute-git-dir"])),
+        repo.join(".git")
+    );
+
+    for trace in [
+        "GIT_TRACE",
+        "GIT_TRACE2",
+        "GIT_TRACE_PERFORMANCE",
+        "GIT_TRACE2_EVENT",
+    ] {
+        let out = env
+            .cmd(&repo)
+            .env(trace, "1")
+            .arg("where")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{trace}: {out:?}");
+        let found: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(found["holds_records"], false, "{trace}: {found}");
+    }
+
+    std::fs::write(repo.join(".git/refs/heads/main"), "garbage\n").unwrap();
+    for trace in ["GIT_TRACE", "GIT_TRACE2"] {
+        let out = env
+            .cmd(&repo)
+            .env(trace, "1")
+            .arg("where")
+            .output()
+            .unwrap();
+        io_error(&out);
+    }
+}
+
+#[test]
 fn a_corrupt_head_ref_is_an_error_not_an_empty_repository() {
     let env = TestEnv::new();
     let l = layout(&env);
