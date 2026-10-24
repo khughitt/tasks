@@ -4,8 +4,8 @@ title: "tasks attach fails outside a checkout although tasks show resolves the s
 status: idea
 priority: 2
 created: 2026-10-23T17:52:50Z
-updated: 2026-10-24T11:32:18Z
-depends: []
+updated: 2026-10-24T11:32:22Z
+depends: [tasks-e147b9]
 parent: tasks-b34076
 tags: [feedback, friction, "from:hq"]
 agent: claude-code
