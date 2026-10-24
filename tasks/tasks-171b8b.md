@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T13:03:49Z
+updated: 2026-10-24T13:05:17Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -38,3 +38,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 - 2026-10-24T13:01:38Z (fix/tasks-171b8b): Process direct; workspace .worktrees/tasks-171b8b. Hydrated with README cargo install --locked --path . confined by --root and CARGO_TARGET_DIR inside the worktree. Full baseline just test passed; test count recorded next.
 - 2026-10-24T13:02:40Z (fix/tasks-171b8b): Baseline: just test passed 1664 tests (0 failures, 0 ignored). Scope reaches tests/linked.rs and tests/record_commit.rs helpers/direct Git calls plus shared test-only regression support; no production, CLI, fixture assertions, or documentation contract changes.
 - 2026-10-24T13:03:49Z (fix/tasks-171b8b): RED confirmed independently: just test-one --test linked linked_git_fixtures_ignore_hostile_environment and just test-one --test record_commit record_commit_git_fixtures_ignore_hostile_environment each exited 101 because old fixture helpers changed the owned foreign HEAD. Child environments were explicit before both RED runs; no host or process-wide environment mutations.
+- 2026-10-24T13:05:17Z (fix/tasks-171b8b): GREEN: just test-one --test linked --test record_commit passed 65 tests. Both hostile-selector regressions pass with unchanged owned foreign HEAD/index/global config. The first focused run caught UTF-8 decoding in the new boundary assertion; fixed by preserving raw Unix path bytes, and the existing non-UTF-8 repository fixture now also runs under hostile selectors.
