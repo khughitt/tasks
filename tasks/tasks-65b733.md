@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T17:12:24Z
+updated: 2026-10-24T17:12:26Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -70,3 +70,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T17:12:21Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"scratch","path":"$WORK_ROOT/tasks/tasks-65b733","purpose":"Canonical implementation, merged-tree and approved shared-install verification evidence retained for gated adoption.","manifest":"$WORK_ROOT/tasks/tasks-65b733/retained-manifest.json","sha256":"ea9b03b92e7402349c5cd9780661549bb9f5ded9f0f44961e2eeb9692a8c9d2c"}
 - 2026-10-24T17:12:22Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/shared-install.log","purpose":"Approved shared reinstall verification: shared-install.log","sha256":"9be879933d656994493623afd669a407fb3f1712281c0b581e8dc1f40a2990c5"}
 - 2026-10-24T17:12:24Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/installed-prime-help.txt","purpose":"Approved shared reinstall verification: installed-prime-help.txt","sha256":"c02b8d19da10cc94d4ab353eeb7d3e4fea8f0dea47b25a85700340c959cff906"}
+- 2026-10-24T17:12:26Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After the gated consumer pilot and adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-65b733/installed-summary.json","purpose":"Approved shared reinstall verification: installed-summary.json","sha256":"b0e1b58c25ac3391f50ad9bb945c2cb2a2345bfc2ba00fb4ba19597c49e7ed8b"}
