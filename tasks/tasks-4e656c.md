@@ -3,8 +3,10 @@ id: tasks-4e656c
 title: "init --records writes the [checkout] table (and [git] commit = true) into the records directory's config but does not commit it, although that config sets [git] commit = true"
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-24T11:16:41Z
 created: 2026-10-23T12:39:33Z
-updated: 2026-10-24T11:16:38Z
+updated: 2026-10-24T11:16:41Z
 depends: [tasks-34424b]
 parent: tasks-72e3d7
 tags: [feedback, friction, "from:ops"]
@@ -16,3 +18,7 @@ Action: tasks init --prefix <p> --records <root> --force on a migrated project w
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-detached-migration-recovery-brief.md — incident evidence, contract tensions and investigation
+
+## Notes
+
+- 2026-10-24T11:16:41Z (main): scope: briefed; init is excluded from automatic record commits; the existing docs-only task does not settle the requested config commit or explicit-warning behavior; evidence: eedf9a9; waits on tasks-34424b; brief: docs/notes/2026-10-24-detached-migration-recovery-brief.md
