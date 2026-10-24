@@ -1,15 +1,17 @@
 ---
 id: tasks-7c5a4b
 title: Deliver the bounded prime binary and isolated README section
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: direct
 owner: design/tasks-e7424b
 created: 2026-10-24T16:09:35Z
-updated: 2026-10-24T16:53:39Z
+updated: 2026-10-24T16:53:44Z
 started: 2026-10-24T16:25:09Z
+completed: 2026-10-24T16:53:44Z
+closed: 2026-10-24T16:53:44Z
 depends: [tasks-209f2c]
 parent: tasks-65b733
 tags: []
@@ -31,3 +33,7 @@ Execute the exact approved plan step inline, with its interfaces, tests, source 
 - 2026-10-24T16:50:58Z (design/tasks-e7424b): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
 - 2026-10-24T16:51:27Z (design/tasks-e7424b): attached: final-review-report.md (3264 bytes): Full read-only whole-branch review by codex/gpt-6-astra of frozen 90e6e50: accept, no findings.
 - 2026-10-24T16:53:39Z (design/tasks-e7424b): Before code close: open goal tasks-65b733 owns the retained implementation worktree .worktrees/tasks-e7424b, canonical evidence scratch $WORK_ROOT/tasks/tasks-65b733, execution review workspace and all inherited design/ops items. Receiving retained records include current manifest/file hashes; review report and ledger are attached and listed. Reinstall tasks-72093a remains open: after local merge, inspect PATH and Cargo install destination, request approval for the concrete shared replacement, install and verify; Task 3 stays gated. No host pointers were changed.
+- 2026-10-24T16:53:44Z (design/tasks-e7424b): done
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T16:53:44Z (design/tasks-e7424b): Implemented and independently reviewed bounded JSON prime summaries at 9cfb0bb; 1681 fast tests passed, 4 ignored, checks/build/recovery passed. Shared reinstall required on tasks-72093a; adoption remains gated on tasks-dc696d.
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
