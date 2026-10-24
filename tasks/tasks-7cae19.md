@@ -1,15 +1,17 @@
 ---
 id: tasks-7cae19
 title: "The project resolver (tasks where / linked lookup) fails in a repository with no commits yet when GIT_TRACE is set: git ls-tree HEAD's trace lines on stderr seem to defeat the no-HEAD classification, so the lookup errors instead of answering"
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: fix/tasks-7cae19-git-trace
 created: 2026-10-17T11:24:25Z
-updated: 2026-10-24T11:50:15Z
+updated: 2026-10-24T11:50:17Z
 started: 2026-10-24T11:42:16Z
+completed: 2026-10-24T11:50:17Z
+closed: 2026-10-24T11:50:17Z
 depends: []
 tags: [feedback, friction, "from:ops"]
 agent: claude-code/claude-opus-5-5
@@ -37,3 +39,7 @@ Original report (preserved): Repro: git init a scratch repo, then run a client t
 - 2026-10-24T11:47:59Z (fix/tasks-7cae19-git-trace): Verification: just test-fast passed 1660 tests, 0 failures, 4 ignored by the fixed fast recipe; tasks check clean. Baseline full just test previously passed 1663 tests. No CLI, JSON, dependency or public interface changes.
 - 2026-10-24T11:50:12Z (fix/tasks-7cae19-git-trace): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T11:50:15Z (fix/tasks-7cae19-git-trace): attached: impl-review-report.md (1377 bytes): Independent final branch review of c83093be..2ddcc8e by codex/gpt-6.1-sol: accepted with no findings
+- 2026-10-24T11:50:17Z (fix/tasks-7cae19-git-trace): done
+  provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T11:50:17Z (fix/tasks-7cae19-git-trace): Fixed unborn-HEAD discovery under every GIT_TRACE-prefixed variable without weakening corrupt-ref errors; regression RED to GREEN, fast suite 1660 passed, independent review accepted with no findings.
+  provenance: {"harness_session":"codex:01a16db5-709f-7583-9487-e278f2c67739","harness_session_source":"CODEX_THREAD_ID"}
