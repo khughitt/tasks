@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:07:34Z
+updated: 2026-10-24T14:08:35Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -38,3 +38,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T14:00:07Z (design/tasks-e7424b): resumed
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T14:07:34Z (design/tasks-e7424b): Draft contract: opt-in JSON-only prime --summary, 16384-byte stdout cap, existing row shapes with whole-row eviction, complete warnings/halts and explicit omission/full-data recovery; default and trial consumers unchanged. just test-fast passed 2026-10-24; full planned-work baseline deferred to execution. Canonical measurement: /mnt/ssd3/work/tasks/tasks-e7424b/prime-before.json, sha256 3bda742e27be7913e3475bed7f9d039e09365ec16ad69dd98c40b0f08ab6cd67.
+- 2026-10-24T14:08:35Z (design/tasks-e7424b): Verification before frozen spec review: just test-fast passed 1665 tests across 14 test binaries, 0 failed, 4 ignored; tasks check and git diff --check passed; pre-commit hygiene/fmt/clippy/tasks checks passed. Frozen spec revision 5d95ea1fe22f07439f38e5b82dbab1e256770ba8:docs/specs/2026-10-24-bounded-session-summary-design.md sent for read-only builder check. User design review remains required before writing the plan.
