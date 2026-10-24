@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:54:14Z
+updated: 2026-10-24T13:54:17Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -58,3 +58,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:53:21Z (fix/tasks-9e634a): Ruling (9dc9d1a review): leave unrelated science vocabulary behavior outside this task. Why: immutable adoption brings already-landed rows; this parser checks only the tasks section. Cost: science runtime behavior is unverified here.
 - 2026-10-24T13:54:11Z (fix/tasks-9e634a): detached: fast.log: Replace with suite rerun after the one-line review correction
 - 2026-10-24T13:54:14Z (fix/tasks-9e634a): attached: fast.log (120809 bytes): After review correction: 1665 passed, four ignored, zero failures
+- 2026-10-24T13:54:17Z (fix/tasks-9e634a): detached: check.log: Replace with check rerun after the one-line review correction
