@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T14:33:26Z
+updated: 2026-10-24T14:33:28Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -49,3 +49,5 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T14:33:23Z (design/tasks-e7424b): attached: spec-review-r2-report.md (5286 bytes): Full round 2 review by claude-code/claude-opus-5-5 against frozen spec 5d95ea1: Important 2, Minor 3
 - 2026-10-24T14:33:25Z (design/tasks-e7424b): attached: review-ledger-r2.md (3333 bytes): Five accepted findings resolved in frozen revision 76501bd; reasons, costs and verification; no deferred minors
 - 2026-10-24T14:33:26Z (design/tasks-e7424b): Round 2 findings all accepted and addressed in frozen spec 76501bdd333e5c6b49758fdec1b6662b5c57fa6f. Cap now 12288 bytes: estimated <=4096 payload tokens plus 1000 framing tokens leaves 904 against observed 6000-token tool cap; actual consumer pilot remains required. Binary/README/tests separated from gated skill/hooks/session adoption; flow-trial-1 owner is user. Explicit closeout recovery, running-executable full argv, and visible summary_too_large full-file recovery added. Full review and five Why/Cost rulings attached. just test-fast: 1665 passed, 0 failed, 4 ignored; tasks check, diff check and pre-commit checks passed. No implementation or plan; revised spec needs user review.
+- 2026-10-24T14:33:28Z (design/tasks-e7424b): parked (waiting on user, review): User reviews revised frozen spec 76501bdd333e5c6b49758fdec1b6662b5c57fa6f at .worktrees/tasks-e7424b/docs/specs/2026-10-24-bounded-session-summary-design.md; compare against 5d95ea1. Agent resumes here after design approval to write the implementation plan for separate user review. Full review and dispositions are attachments spec-review-r2-report.md and review-ledger-r2.md. Canonical measurement: /mnt/ssd3/work/tasks/tasks-e7424b/prime-before.json, sha256 3bda742e27be7913e3475bed7f9d039e09365ec16ad69dd98c40b0f08ab6cd67. No product implementation or consumer rollout performed.
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
