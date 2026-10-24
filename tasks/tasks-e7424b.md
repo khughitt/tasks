@@ -1,15 +1,17 @@
 ---
 id: tasks-e7424b
 title: Design bounded session summaries from the CLI consumer brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T16:22:42Z
+updated: 2026-10-24T16:22:44Z
 started: 2026-10-24T13:59:41Z
+completed: 2026-10-24T16:22:44Z
+closed: 2026-10-24T16:22:44Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -114,3 +116,7 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T16:22:39Z (design/tasks-e7424b): retained: {"host":"titan","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/spec-review-r2-report.md","state":"released","verification":"verified","purpose":"Verified responsibility transferred to open implementation goal tasks-65b733, whose receiving kept record names this unchanged item and its hash/manifest. No data removed.","next_owner":"none","cleanup_trigger":"none"}
 - 2026-10-24T16:22:40Z (design/tasks-e7424b): retained: {"host":"titan","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/spec-review-r3-report.md","state":"released","verification":"verified","purpose":"Verified responsibility transferred to open implementation goal tasks-65b733, whose receiving kept record names this unchanged item and its hash/manifest. No data removed.","next_owner":"none","cleanup_trigger":"none"}
 - 2026-10-24T16:22:42Z (design/tasks-e7424b): retained: {"host":"titan","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/test-fast.log","state":"released","verification":"verified","purpose":"Verified responsibility transferred to open implementation goal tasks-65b733, whose receiving kept record names this unchanged item and its hash/manifest. No data removed.","next_owner":"none","cleanup_trigger":"none"}
+- 2026-10-24T16:22:44Z (design/tasks-e7424b): done
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T16:22:44Z (design/tasks-e7424b): User-reviewed spec 76501bd and plan 3a264b9 delivered; implementation goal tasks-65b733 and all step/reinstall/owner records filed. Brief updated and tasks-4ca7bd woken. Retained worktree/scratch/evidence responsibility verified on the open goal before design closure; no implementation claim made by this design task.
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
