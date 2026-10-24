@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:20:17Z
+updated: 2026-10-24T16:20:18Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -40,3 +40,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:19:00Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After binary integration/reinstall and review evidence preservation, verify any transfer or disposal under current retained-item rules; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/test-fast.log","purpose":"Retained test-fast.log for review provenance, rulings or verification evidence; copies attached elsewhere have not been removed from this location.","sha256":"3c234e8a8184d6b7ec0ec938c3068ebff5510e1b82dd17f3e5b6b4401d07466c"}
 - 2026-10-24T16:20:15Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"worktree","path":"/mnt/ssd3/work/ops/.worktrees/ops-8d4c5b","purpose":"Keep reviewed ops CLI-row branch until Tasks 1–2 integration and evidence/removal checks; source commit 3a0c4e4."}
 - 2026-10-24T16:20:17Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"scratch","path":"$WORK_ROOT/ops/ops-8d4c5b","purpose":"Canonical ops startup and source-inventory baseline/focused/fast verification logs.","manifest":"$WORK_ROOT/ops/ops-8d4c5b/retained-manifest.json","sha256":"e8e23570984983086b525ad23f1e5a849c41e864ea0741fcd31183399fdabc5b"}
+- 2026-10-24T16:20:18Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/ops/ops-8d4c5b/baseline-full.log","purpose":"Ops source-row verification/startup evidence retained after ops code completion.","sha256":"999d9bd8e3449f841c4b831dfa2afe504c9dbf4e7b5ffc000a3b6acb90ae3d96"}
