@@ -6,7 +6,7 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-20T02:03:30Z
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-24T12:56:05Z
+updated: 2026-10-24T14:02:03Z
 depends: [tasks-e7424b]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
@@ -44,3 +44,5 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 - 2026-10-24T11:41:08Z (feedback): detail from tasks: The required session-start prime read was truncated by the tool output limit again; a second read filtered through a JSON parser was needed to inspect lanes and blockers. A bounded session summary with an explicit full-data route would avoid the repeat read.
 - 2026-10-24T12:56:05Z (feedback): feedback from tasks: prime JSON exceeds an agent tool output limit during session selection
 - 2026-10-24T12:56:05Z (feedback): detail from tasks: The session-start prime response was truncated at the tool output limit. Recovering the queue required parsing and projecting sections through a separate command. A bounded summary should preserve warnings, ownership and useful next-work discovery while offering an explicit full-data route.
+- 2026-10-24T14:02:03Z (feedback): feedback from tasks: Session-start prime JSON exceeds the tool response budget
+- 2026-10-24T14:02:03Z (feedback): detail from tasks: The required session-start prime read was truncated at a 6,000-token tool budget. A subsequent capture measured 133,228 bytes, including about 81.5 KB of roadmap and 40.4 KB of ready rows. A bounded summary needs to cover every growing section and preserve warnings plus an explicit complete-data route.
