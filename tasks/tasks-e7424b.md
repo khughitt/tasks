@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T15:14:00Z
+updated: 2026-10-24T15:15:49Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -69,3 +69,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T15:07:14Z (design/tasks-e7424b): review: plan round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T15:07:15Z (design/tasks-e7424b): Recorded the external plan review with the user's supplied round 1 label. The earlier codex plan round 1 note was the controller's writing-plans self-review, not external acceptance; append-only history is retained. Revise frozen fbb9e6a for project startup instruction coverage, lexical absolute recovery directory, and explicit post-merge shared-binary reinstall approval. No implementation approval yet.
 - 2026-10-24T15:14:00Z (design/tasks-e7424b): Replacement retained-item instructions received during plan revision. Observed existing persistent scratch on titan at $WORK_ROOT/tasks/tasks-e7424b, owned by task:tasks-e7424b, for the canonical prime measurement, reviews and verification logs. This directory predates these instructions; contents are currently mutable and will be checkpointed with a manifest before park. Existing .worktrees/tasks-e7424b and its ignored review workspace remain under this open task until plan approval and verified transfer to implementation ownership.
+- 2026-10-24T15:15:49Z (design/tasks-e7424b): retained: {"host":"titan","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/plan-external-review-r1-report.md","state":"kept","verification":"verified","purpose":"Exact raw external plan review of fbb9e6a; preserve for revision review and any attachment layout fallback.","next_owner":"task:tasks-e7424b","cleanup_trigger":"After plan approval, verify transfer to the open implementation owner or verified lossless attachment, then reassess under removal rules; no deletion permission implied.","sha256":"adb0cd3cbac25d6c0b7465fddc22d08469dadbfd2a408cb86fa788f78fd2981c"}
