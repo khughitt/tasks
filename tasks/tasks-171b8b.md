@@ -1,13 +1,15 @@
 ---
 id: tasks-171b8b
 title: Isolate Git subprocesses in linked and record-commit integration fixtures
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-23T11:41:06Z
+updated: 2026-10-24T12:58:27Z
+started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
 source: "tasks-10385f:integration-fixture-isolation"
@@ -29,3 +31,5 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 ## Notes
 
 - 2026-10-23T11:41:06Z (main): concerns: tasks-10385f extension — Extend the completed production selector-isolation work to older linked-project and record-commit integration-test Git helpers, which its review explicitly left outside scope.
+- 2026-10-24T12:58:27Z (main): started
+  provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
