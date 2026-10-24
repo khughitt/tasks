@@ -722,7 +722,7 @@ fn external_doc_editor_skips_unchanged_links_and_canonicalizes_changes() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &command)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
@@ -737,7 +737,7 @@ fn external_doc_editor_skips_unchanged_links_and_canonicalizes_changes() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &command)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
@@ -757,7 +757,7 @@ fn external_doc_editor_skips_unchanged_links_and_canonicalizes_changes() {
     let refused = env
         .cmd(&dir)
         .env("EDITOR", &command)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(refused.status.code(), Some(1));

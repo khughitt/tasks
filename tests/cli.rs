@@ -149,7 +149,7 @@ fn lifecycle_provenance_covers_editor_and_flag_transitions() {
     env.cmd(&dir)
         .env("CODEX_SESSION_ID", "native-a")
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     env.cmd(&dir)
@@ -339,7 +339,7 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
         env.cmd(&dir)
             .env("TASKS_SESSION", "worker")
             .env("EDITOR", &editor)
-            .args(["edit", &id])
+            .args(["edit", &id, "--editor"])
             .assert()
             .success();
         let edited = env.json(&dir, &["show", &id]);
@@ -1477,7 +1477,7 @@ fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
     let editor = editor_script(&sci, "sed -i '/^## Notes/i edited body' \"$1\"");
     as_agent(&env, &sci, "agent-a")
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     let v = env.json(&sci, &["show", &id]);
@@ -1517,7 +1517,7 @@ fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
     write_claim(&env, "sci", &held, "agent-z", true);
     let out = as_agent(&env, &sci, "agent-a")
         .env("EDITOR", &editor)
-        .args(["edit", &held])
+        .args(["edit", &held, "--editor"])
         .output()
         .unwrap();
     assert_eq!(err_kind(&out), "claimed");
@@ -2371,7 +2371,7 @@ fn editor_path_validates_parent() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &set)
-        .args(["edit", &child])
+        .args(["edit", &child, "--editor"])
         .output()
         .unwrap();
     assert!(
@@ -2388,7 +2388,7 @@ fn editor_path_validates_parent() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &loop_back)
-        .args(["edit", &goal])
+        .args(["edit", &goal, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -3722,7 +3722,7 @@ fn the_editor_may_only_strip_trailing_whitespace_from_notes() {
             .env("CLAUDE_CODE_SESSION_ID", "native-a")
             .env("CLAUDE_PID", std::process::id().to_string())
             .env("EDITOR", &editor)
-            .args(["edit", &id])
+            .args(["edit", &id, "--editor"])
             .output()
             .unwrap()
     };
@@ -4512,7 +4512,7 @@ fn edit_status_done_and_editor_flips_stamp_like_done() {
     let via_editor = id_of(env.json(&sci, &["add", "Editor", "-p", "2"]));
     let editor = editor_script(&sci, "sed -i 's/^status: todo$/status: done/' \"$1\"");
     env.cmd(&sci)
-        .args(["edit", &via_editor])
+        .args(["edit", &via_editor, "--editor"])
         .env("EDITOR", &editor)
         .env("TASKS_MODEL", "F")
         .assert()
@@ -4660,7 +4660,7 @@ fn editor_reopen_keeps_the_completed_stamp_and_transition_clears_it() {
     env.json(&sci, &["done", &id, "landed"]);
     let editor = editor_script(&sci, "sed -i 's/^status: done$/status: todo/' \"$1\"");
     env.cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -4680,7 +4680,7 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
     );
     let out = env
         .cmd(&sci)
-        .args(["edit", &fresh])
+        .args(["edit", &fresh, "--editor"])
         .env("EDITOR", &editor)
         .output()
         .unwrap();
@@ -4711,7 +4711,7 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
         let editor = editor_script(&sci, body);
         let out = env
             .cmd(&sci)
-            .args(["edit", &id])
+            .args(["edit", &id, "--editor"])
             .env("EDITOR", &editor)
             .output()
             .unwrap();
@@ -4731,7 +4731,7 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
         let editor = editor_script(&sci, body);
         let out = env
             .cmd(&sci)
-            .args(["edit", &id])
+            .args(["edit", &id, "--editor"])
             .env("EDITOR", &editor)
             .output()
             .unwrap();
@@ -4864,7 +4864,7 @@ fn a_completing_edit_stamps_last_over_a_same_invocation_correction() {
         "sed -i -e 's/^status: todo$/status: done/' -e 's/^tags: \\[\\]$/tags: []\\nmodel: C/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &editor)
         .env("TASKS_MODEL", "A")
         .assert()
@@ -4961,7 +4961,7 @@ fn completing_a_recurrence_anchors_and_notes_every_completion_path() {
                 let editor = editor_script(&sci, "sed -i 's/^status: doing$/status: done/' \"$1\"");
                 env.cmd(&sci)
                     .env("EDITOR", editor)
-                    .args(["edit", &id])
+                    .args(["edit", &id, "--editor"])
                     .assert()
                     .success();
             }
@@ -4993,7 +4993,7 @@ fn ordinary_completion_paths_and_same_status_editor_do_not_create_an_anchor() {
             let editor = editor_script(&sci, "sed -i 's/^status: todo$/status: done/' \"$1\"");
             env.cmd(&sci)
                 .env("EDITOR", editor)
-                .args(["edit", &id])
+                .args(["edit", &id, "--editor"])
                 .assert()
                 .success();
         }
@@ -5010,7 +5010,7 @@ fn ordinary_completion_paths_and_same_status_editor_do_not_create_an_anchor() {
     let editor = editor_script(&sci, "sed -i 's/^title: Periodic$/title: Renamed/' \"$1\"");
     env.cmd(&sci)
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     let after = env.read(&sci, &format!("tasks/{id}.md"));
@@ -5221,7 +5221,7 @@ fn an_editor_save_cannot_set_or_move_the_anchor() {
     let out = env
         .cmd(&sci)
         .env("EDITOR", &move_it)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -5230,7 +5230,7 @@ fn an_editor_save_cannot_set_or_move_the_anchor() {
     let recadence = editor_script(&sci, "sed -i 's/^every: 30d$/every: 7d/' \"$1\"");
     env.cmd(&sci)
         .env("EDITOR", &recadence)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     let after = env.read(&sci, &format!("tasks/{id}.md"));
@@ -5243,7 +5243,7 @@ fn an_editor_save_cannot_set_or_move_the_anchor() {
     let clear = editor_script(&sci, "sed -i '/^every: /d; /^last_done: /d' \"$1\"");
     env.cmd(&sci)
         .env("EDITOR", &clear)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     let cleared = env.read(&sci, &format!("tasks/{id}.md"));
@@ -5258,7 +5258,7 @@ fn an_editor_save_cannot_set_or_move_the_anchor() {
     let out = env
         .cmd(&sci)
         .env("EDITOR", &orphan)
-        .args(["edit", &id2])
+        .args(["edit", &id2, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -5337,6 +5337,84 @@ fn edit_flags_update_fields_and_enforce_rules() {
 }
 
 #[test]
+fn edit_without_terminal_refuses_before_creating_a_temp_or_running_editor() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Original"]));
+    let before = env.read(&dir, &format!("tasks/{id}.md"));
+    let marker = dir.join("editor-ran");
+    let editor = editor_script(&dir, &format!("touch '{}'; exit 1", marker.display()));
+    let out = env
+        .cmd(&dir)
+        .args(["edit", &id])
+        .env("EDITOR", editor)
+        .timeout(std::time::Duration::from_secs(10))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "editor");
+    assert!(
+        !marker.exists(),
+        "a flagless edit must not run EDITOR without a terminal"
+    );
+    assert!(!std::fs::read_dir(dir.join("tasks")).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".edit.md")
+    }));
+    let detail = err["error"]["detail"].as_str().unwrap();
+    for hint in [
+        "flagless",
+        "$EDITOR",
+        "terminal",
+        "tasks edit --help",
+        "--editor",
+    ] {
+        assert!(detail.contains(hint), "missing {hint}: {detail}");
+    }
+    assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), before);
+}
+
+#[test]
+fn edit_explicit_editor_runs_without_terminal() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Original"]));
+    let editor = editor_script(&dir, "sed -i 's/^title: Original$/title: Edited/' \"$1\"");
+    env.cmd(&dir)
+        .args(["edit", &id, "--editor"])
+        .env("EDITOR", editor)
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["title"], "Edited");
+}
+
+#[test]
+fn edit_explicit_editor_conflicts_with_field_flags() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Original"]));
+    for fields in [
+        vec!["--title", "Edited"],
+        vec!["--priority", "1"],
+        vec!["--status", "doing"],
+        vec!["--no-tags"],
+        vec!["--force"],
+        vec!["--reason", "override"],
+    ] {
+        let mut args = vec!["edit", &id, "--editor"];
+        args.extend(fields);
+        let err = env.usage(&dir, &args);
+        assert!(err.contains("cannot be used with"), "{err}");
+    }
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["title"], "Original");
+}
+
+#[test]
 fn edit_editor_path_validates_and_is_atomic() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -5351,7 +5429,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &bad)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -5383,7 +5461,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &tamper)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -5392,7 +5470,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &notes)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -5400,7 +5478,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let good = editor_script(&dir, "sed -i 's/^title: A$/title: Edited/' \"$1\"");
     env.cmd(&dir)
         .env("EDITOR", &good)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     assert_eq!(env.json(&dir, &["show", &id])["task"]["title"], "Edited");
@@ -5423,7 +5501,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &fail_save)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -5450,7 +5528,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &racy)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
@@ -5460,7 +5538,7 @@ fn edit_editor_path_validates_and_is_atomic() {
     let out = env
         .cmd(&dir)
         .env_remove("EDITOR")
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
@@ -5487,7 +5565,7 @@ fn edit_reports_deleted_original_as_concurrent_modification_and_keeps_edit() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
 
@@ -5883,7 +5961,7 @@ fn edit_clears_spec_plan_and_step_links() {
         ["--step", "Task 1: all", "--no-step"],
     ] {
         env.cmd(&dir)
-            .args(["edit", &open].iter().copied().chain(pair))
+            .args(["edit", &open, "--editor"].iter().copied().chain(pair))
             .assert()
             .code(2);
     }
@@ -9568,7 +9646,7 @@ fn defer_refuses_bad_values_and_incompatible_records() {
     let out = env
         .cmd(&sci)
         .env("EDITOR", &reparent)
-        .args(["edit", &loose])
+        .args(["edit", &loose, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -9666,7 +9744,7 @@ fn editor_saves_follow_the_one_thing_per_save_rule_for_defer() {
 
     let editor = editor_script(&sci, "sed -i 's/^status: todo$/status: doing/' \"$1\"");
     env.cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -9680,7 +9758,7 @@ fn editor_saves_follow_the_one_thing_per_save_rule_for_defer() {
     );
     let out = env
         .cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &editor)
         .output()
         .unwrap();
@@ -9703,7 +9781,7 @@ fn editor_saves_follow_the_one_thing_per_save_rule_for_defer() {
     );
     let out = env
         .cmd(&sci)
-        .args(["edit", &both])
+        .args(["edit", &both, "--editor"])
         .env("EDITOR", &editor)
         .output()
         .unwrap();
@@ -9723,7 +9801,7 @@ fn editor_saves_follow_the_one_thing_per_save_rule_for_defer() {
         "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2026-01-01/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &plain])
+        .args(["edit", &plain, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -11260,7 +11338,7 @@ fn closure_force_never_authorizes_a_foreign_claim() {
     let editor = editor_script(&dir, "sed -i 's/^status: doing$/status: done/' \"$1\"");
     let out = as_agent(&env, &dir, "agent-b")
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(err_kind(&out), "claimed");
@@ -11321,7 +11399,7 @@ fn rejected_close_and_editor_do_not_persist_claim_intent() {
     );
     let out = as_agent(&env, &dir, "agent-a")
         .env("EDITOR", editor)
-        .args(["edit", &dependency])
+        .args(["edit", &dependency, "--editor"])
         .output()
         .unwrap();
     assert_eq!(err_kind(&out), "concurrent_modification");
@@ -11647,7 +11725,7 @@ fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim()
 
     let mut editing = env.raw(&sci);
     editing
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &script)
         .env("TASKS_SESSION", "agent-a")
         .env("TASKS_SESSION_PID", std::process::id().to_string());
@@ -12009,7 +12087,7 @@ fn halt_editor_status_doing_cannot_bypass_registered_halt() {
     let out = env
         .cmd(&side)
         .env("EDITOR", editor)
-        .args(["edit", &target])
+        .args(["edit", &target, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -13089,7 +13167,7 @@ fn the_editor_does_not_open_on_a_copy_that_is_behind() {
     let out = env
         .cmd(&main)
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -14728,7 +14806,7 @@ fn editor_revalidation_keeps_the_edit_when_the_local_prefix_is_retired() {
     let out = env
         .cmd(&local)
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert!(
@@ -17012,7 +17090,7 @@ fn rename_freeze_covers_all_writers_feedback_and_registry_names() {
             &["block", &current, "Reason"],
             &["note", &current, "Late note"],
             &["edit", &current, "--title", "Late title"],
-            &["edit", &current],
+            &["edit", &current, "--editor"],
             &["dep", &current, "--on", &current],
         ];
         for args in commands {
@@ -17116,7 +17194,7 @@ fn rename_freeze_is_rechecked_when_an_editor_returns() {
     let out = env
         .raw(&dir)
         .env("EDITOR", editor)
-        .args(["edit", &ids[0]])
+        .args(["edit", &ids[0], "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -17843,7 +17921,7 @@ fn deferred_object_rides_show_list_next_and_parked_rows() {
         "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2026-01-01/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &due])
+        .args(["edit", &due, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -18062,7 +18140,7 @@ fn a_goal_is_never_periodic_in_either_direction() {
     let out = env
         .cmd(&sci)
         .env("EDITOR", &reparent)
-        .args(["edit", &child])
+        .args(["edit", &child, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -18078,7 +18156,7 @@ fn a_goal_is_never_periodic_in_either_direction() {
     let out = env
         .cmd(&sci)
         .env("EDITOR", &cadence)
-        .args(["edit", &goal])
+        .args(["edit", &goal, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -19457,7 +19535,7 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
     let out = env
         .cmd(&sci)
         .env("EDITOR", &into)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -19470,7 +19548,7 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
     let out = env
         .cmd(&sci)
         .env("EDITOR", &retitle)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert!(
@@ -19542,7 +19620,7 @@ fn process_round_trips_and_rejects_invalid_edits() {
     let editor = editor_script(&dir, "sed -i '/^priority:/a process: direct' \"$1\"");
     env.cmd(&dir)
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .success();
     assert_eq!(env.json(&dir, &["show", &id])["task"]["process"], "direct");
@@ -19550,7 +19628,7 @@ fn process_round_trips_and_rejects_invalid_edits() {
     let editor = editor_script(&dir, "sed -i 's/process: direct/process: auto/' \"$1\"");
     env.cmd(&dir)
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .assert()
         .failure();
     assert_eq!(std::fs::read(&path).unwrap(), before);
@@ -19907,7 +19985,7 @@ fn edit_never_reads_tasks_agent_and_agent_flags_replace_and_clear() {
     let editor = editor_script(&sci, "sed -i 's|^agent: .*$|agent: \"\"|' \"$1\"");
     let out = env
         .cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &editor)
         .output()
         .unwrap();
@@ -20134,7 +20212,7 @@ fn a_due_deferral_is_back_in_ready_next_and_sample() {
         "sed -i 's/^priority: 0$/priority: 0\\ndefer: 2026-01-01/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &due])
+        .args(["edit", &due, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -20270,7 +20348,7 @@ fn list_deferred_orders_by_date_with_due_first_and_conflicts_with_orderings() {
         "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2026-01-01/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &due])
+        .args(["edit", &due, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -20351,7 +20429,7 @@ fn prime_carries_the_deferred_line_and_aggregate() {
         "sed -i 's/^defer: 2099-01-02$/defer: 2026-01-01/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .env("EDITOR", &editor)
         .assert()
         .success();
@@ -22776,7 +22854,7 @@ fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edi
     let out = env
         .cmd(&main)
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -22785,7 +22863,10 @@ fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edi
     let detail = error["error"]["detail"].as_str().unwrap();
     assert!(detail.contains("fresh editor"), "{detail}");
     let retry = retry_words(detail);
-    assert_eq!(retry, ["-C", side.to_str().unwrap(), "edit", &id]);
+    assert_eq!(
+        retry,
+        ["-C", side.to_str().unwrap(), "edit", &id, "--editor"]
+    );
     let kept = detail
         .split("edit kept at ")
         .nth(1)
@@ -22884,7 +22965,7 @@ fn the_holders_writes_move_its_claim_to_the_checkout_they_land_in() {
             }
             "editor" => {
                 let editor = editor_script(&side, "sed -i 's/^priority: 2$/priority: 1/' \"$1\"");
-                cmd.env("EDITOR", editor).args(["edit", &id]);
+                cmd.env("EDITOR", editor).args(["edit", &id, "--editor"]);
             }
             "dep" => {
                 let dependency = id_of(env.json(&side, &["add", "Dependency"]));
@@ -23061,7 +23142,7 @@ fn writes_missing_worktree_task_offer_retry_for_own_claim_or_park() {
         for args in [
             vec!["note", &id, "it's still here"],
             vec!["edit", &id, "--title", "Changed there"],
-            vec!["edit", &id],
+            vec!["edit", &id, "--editor"],
         ] {
             let out = as_agent(&env, &main, "agent-a")
                 .env("EDITOR", "touch editor-opened")
@@ -23139,7 +23220,7 @@ fn writes_missing_worktree_task_do_not_retry_in_occupied_checkout() {
         for args in [
             vec!["note", &id, "foreign note"],
             vec!["edit", &id, "--title", "New"],
-            vec!["edit", &id],
+            vec!["edit", &id, "--editor"],
         ] {
             let out = as_agent(&env, &main, "agent-b")
                 .args(args)
@@ -23185,7 +23266,7 @@ fn writes_missing_worktree_task_name_unavailable_recorded_checkout() {
         for args in [
             vec!["note", &id, "lost note"],
             vec!["edit", &id, "--title", "New"],
-            vec!["edit", &id],
+            vec!["edit", &id, "--editor"],
         ] {
             let error = error_of(&env, &main, &args);
             assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
@@ -23978,7 +24059,7 @@ fn needs_flags_refuse_an_undeclared_or_malformed_name() {
     );
     let out = env
         .cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &undeclared)
         .output()
         .unwrap();
@@ -23989,7 +24070,7 @@ fn needs_flags_refuse_an_undeclared_or_malformed_name() {
         "sed -i 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &declared)
         .assert()
         .success();
@@ -24064,7 +24145,7 @@ fn needs_status_editor_save_cannot_change_status_and_needs_together() {
     );
     let out = env
         .cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &both)
         .output()
         .unwrap();
@@ -24080,7 +24161,7 @@ fn needs_status_editor_save_cannot_change_status_and_needs_together() {
 
     let status = editor_script(&sci, "sed -i 's/^status: idea$/status: todo/' \"$1\"");
     env.cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &status)
         .assert()
         .success();
@@ -24089,7 +24170,7 @@ fn needs_status_editor_save_cannot_change_status_and_needs_together() {
         "sed -i 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
     );
     env.cmd(&sci)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .env("EDITOR", &needs)
         .assert()
         .success();
@@ -24498,7 +24579,7 @@ fn every_acquire_path_records_the_tasks_exclusive_needs_as_holds() {
     let editor = editor_script(&sci, "sed -i 's/status: todo/status: doing/' \"$1\"");
     let out = as_agent(&env, &sci, "agent-a")
         .env("EDITOR", editor)
-        .args(["edit", &edited])
+        .args(["edit", &edited, "--editor"])
         .output()
         .unwrap();
     assert!(
@@ -24566,7 +24647,7 @@ fn every_acquire_path_refuses_a_need_another_session_holds() {
     let editor = editor_script(&sci, "sed -i 's/status: todo/status: doing/' \"$1\"");
     let out = as_agent(&env, &sci, "agent-b")
         .env("EDITOR", editor)
-        .args(["edit", &edited])
+        .args(["edit", &edited, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -24804,7 +24885,7 @@ fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_ho
     );
     let out = as_agent(&env, &sci, "agent-b")
         .env("EDITOR", editor)
-        .args(["edit", &second])
+        .args(["edit", &second, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -24887,7 +24968,7 @@ fn needs_changes_under_another_sessions_live_claim_are_refused_and_other_edits_a
     );
     let out = as_agent(&env, &sci, "agent-a")
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -25005,7 +25086,7 @@ fn adding_an_exclusive_need_under_ones_own_claim_is_an_acquire() {
     );
     let out = as_agent(&env, &sci, "agent-a")
         .env("EDITOR", editor)
-        .args(["edit", &other])
+        .args(["edit", &other, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
@@ -25569,7 +25650,7 @@ fn nested_lanes_are_refused_on_every_write_path_and_reported_by_check() {
     let out = env
         .cmd(&sci)
         .env("EDITOR", &set)
-        .args(["edit", &child])
+        .args(["edit", &child, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -27207,7 +27288,7 @@ fn retired_write_editor_save_is_refused_after_retirement_lands() {
     let out = env
         .cmd(&old)
         .env("EDITOR", &script)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -27692,7 +27773,7 @@ fn retire_cmd_ignores_a_kept_edit_temp_file() {
     let out = env
         .cmd(&old)
         .env("EDITOR", "false")
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -27789,7 +27870,7 @@ fn retired_write_every_command_is_refused_from_a_worktree_made_before_retirement
     let edited = env
         .cmd(&side)
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .output()
         .unwrap();
     assert_eq!(edited.status.code(), Some(1));

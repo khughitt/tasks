@@ -304,6 +304,12 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
 
 Run `tasks --help` for the full command list.
 
+`tasks edit <id>` without field flags opens `$EDITOR` when stdin is a terminal.
+Without a terminal it refuses before creating an edit copy or running the editor;
+pass field flags (`tasks edit --help`) for automation. Use `tasks edit <id> --editor`
+to explicitly run a scripted or GUI editor even without a terminal. `--editor`
+cannot be combined with field flags.
+
 ### Output and errors
 
 `tasks --help` lists every command and `tasks help <command>` one command's; add

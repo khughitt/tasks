@@ -6,7 +6,7 @@ use crate::format::parse_task;
 use crate::model::{Note, Status, Task, TaskId};
 use crate::output::Output;
 use crate::resolve::{DocKind, Resolver};
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
@@ -156,6 +156,13 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_needs
         || !args.rm_tags.is_empty();
     if !has_flags {
+        if !args.editor && !std::io::stdin().is_terminal() {
+            return Err(Error::Editor(
+                "a flagless edit opens $EDITOR, which needs a terminal; pass field flags \
+                 (`tasks edit --help`), or --editor to open the editor anyway"
+                    .into(),
+            ));
+        }
         return editor(ctx, id);
     }
 

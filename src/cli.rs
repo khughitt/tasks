@@ -289,6 +289,18 @@ pub struct FieldArgs {
 /// The flags `edit` adds to the shared field flags.
 #[derive(Args, Debug)]
 pub struct EditArgs {
+    /// Open $EDITOR even without a terminal; cannot be combined with field flags.
+    #[arg(long, conflicts_with_all = [
+        "title", "status", "force", "reason", "rm_refs", "no_refs", "no_parent",
+        "no_parallel", "no_lane", "reviewed", "no_reviewed", "awaiting_user",
+        "no_awaiting_user", "no_every", "no_defer", "no_source", "no_agent",
+        "no_spec", "no_plan", "no_step", "no_complexity", "no_process", "model",
+        "no_model", "rm_tags", "no_tags", "rm_needs", "no_needs", "no_depends",
+        "refs", "body", "priority", "size", "complexity", "process", "parallel",
+        "lane", "every", "defer", "tags", "needs", "depends", "spec", "plan",
+        "step", "parent", "source", "agent"
+    ])]
+    pub editor: bool,
     /// Remove a reference by handle (repeatable).
     #[arg(long = "rm-ref", value_name = "HANDLE")]
     pub rm_refs: Vec<String>,

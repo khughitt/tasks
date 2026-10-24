@@ -193,7 +193,11 @@ mean those documents were verified.
    or add the children still missing.
 
 Never edit `tasks/*.md` directly. Use `tasks edit --help` for field flags, additive
-and clearing semantics, and editor mode. Notes stay append-only; the editor permits
+and clearing semantics, and editor mode. A flagless `tasks edit <id>` opens `$EDITOR`
+only when stdin is a terminal; otherwise it refuses before creating an edit copy or
+running the editor. Pass field flags for automation, or `tasks edit <id> --editor`
+to explicitly run a scripted or GUI editor without a terminal. `--editor` conflicts
+with every field flag. Notes stay append-only; the editor permits
 only trailing-space/tab cleanup in existing notes.
 Prefer a defined tag (`tasks tags`); add a dictionary entry when a new tag is worth
 keeping. See the [tag dictionary](../../README.md#adopting-in-an-existing-project).

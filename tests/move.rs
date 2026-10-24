@@ -204,7 +204,7 @@ fn every_write_to_a_tombstone_refuses_and_names_the_new_id() {
     let out = env
         .cmd(&dots)
         .env("EDITOR", "true")
-        .args(["edit", &a])
+        .args(["edit", &a, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -269,7 +269,7 @@ fn editor_refuses_a_new_tombstone_dependency_but_saves_an_existing_one() {
     let out = env
         .cmd(&dots)
         .env("EDITOR", format!("sh {}", script.display()))
-        .args(["edit", &b])
+        .args(["edit", &b, "--editor"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -300,7 +300,7 @@ fn editor_refuses_a_new_tombstone_dependency_but_saves_an_existing_one() {
     let out = env
         .cmd(&dots)
         .env("EDITOR", format!("sh {}", script.display()))
-        .args(["edit", &c])
+        .args(["edit", &c, "--editor"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
@@ -1072,7 +1072,7 @@ fn a_pending_journal_freezes_both_ids_in_every_writer() {
     let out = env
         .cmd(&dots)
         .env("EDITOR", "true")
-        .args(["edit", &a])
+        .args(["edit", &a, "--editor"])
         .output()
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();

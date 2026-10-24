@@ -657,7 +657,7 @@ fn editor_saves_validate_added_entries() {
             let out = env
                 .cmd(&dir)
                 .env("EDITOR", editor)
-                .args(["edit", &id])
+                .args(["edit", &id, "--editor"])
                 .timeout(Duration::from_secs(10))
                 .output()
                 .unwrap();
@@ -872,7 +872,7 @@ fn editor_body_audit_keeps_the_edit_and_unrelated_changes_ignore_existing_prose(
     let out = env
         .cmd(&dir)
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .timeout(Duration::from_secs(10))
         .output()
         .unwrap();
@@ -909,7 +909,7 @@ fn editor_body_audit_keeps_the_edit_and_unrelated_changes_ignore_existing_prose(
     );
     env.cmd(&dir)
         .env("EDITOR", editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .timeout(Duration::from_secs(10))
         .assert()
         .success();
@@ -1485,7 +1485,7 @@ fn completion_refuses_missing_outputs_on_every_path() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &editor)
-        .args(["edit", &id])
+        .args(["edit", &id, "--editor"])
         .timeout(Duration::from_secs(10))
         .output()
         .unwrap();
@@ -1532,7 +1532,7 @@ fn completion_refuses_missing_outputs_on_every_path() {
     );
     env.cmd(&dir)
         .env("EDITOR", editor)
-        .args(["edit", &editor_id])
+        .args(["edit", &editor_id, "--editor"])
         .timeout(Duration::from_secs(10))
         .assert()
         .success();

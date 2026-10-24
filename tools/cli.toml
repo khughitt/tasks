@@ -4,9 +4,10 @@
 # Design: ops docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
 # each project vendors it byte-identical as tools/cli.toml and has one conformance test
 # that builds its live parser surface and asserts set equality with its rows here. A new
-# option or command anywhere is an edit here first; then each project runs
-# `python3 bin/vendored adopt cli.toml` in its checkout and commits the copy together
-# with its implementation. Never hand-copy a table.
+# option or command anywhere is an edit here first; then each project runs ops's
+# `bin/vendored adopt cli.toml` in its own checkout (`python3 <ops checkout>/bin/vendored
+# adopt cli.toml`; only ops holds `bin/vendored`) and commits the copy together with
+# its implementation. Never hand-copy a table.
 #
 # Row shapes (spec "The table"):
 #   option: names | shared (+ role), value, values, default, arity, repeatable, required, exception
@@ -523,6 +524,7 @@ verb = "edit"
 summary = "Edit fields, or open the task in $EDITOR when no field flags are given"
 args = [{ name = "id", value = "ref", required = true }]
 options = [
+  { names = ["--editor"], value = "none" },
   { names = ["--title"], value = "string" },
   { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped", "moved"], repeatable = false },
   { shared = "force", value = "none" },
@@ -1545,6 +1547,84 @@ options = [
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { shared = "project", role = "select", value = "string", repeatable = false },
+]
+
+[[cli.science.commands]]
+path = ["publish"]
+summary = "Publish a project's view to a local directory or a git remote, or resume a stranded attempt"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--target"], value = "string", required = true },
+  { names = ["--to"], value = "string", required = true },
+  { names = ["--resume"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["publish-preview"]
+summary = "Show what publishing a project's view would freeze, without writing anything"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--target"], value = "string", required = true },
+  { names = ["--to"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["provider-inspect"]
+summary = "Show the world a publication at a provider's location claims, verifying it and recording nothing"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
+  { names = ["--corpus-id"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["provider-bind"]
+summary = "Bind a provider's location to the world its publication claims, when the given world id matches"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
+  { names = ["--corpus-id"], value = "string", required = true },
+  { names = ["--world"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["adopt"]
+summary = "Fetch, verify and admit a publication from a bound provider's location, and mount it at the next open"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
+  { names = ["--corpus-id"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["fetch"]
+summary = "Hold a mounted dataset's bytes from a local path or an https URL, after checking the declared digest"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--dataset"], value = "string", required = true },
+  { names = ["--source"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["show"]
+summary = "Show one pin: its state, source, kernel status, acceptance and verification picture"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--corpus-id"], value = "string", required = true },
 ]
 
 [[cli.science.commands]]

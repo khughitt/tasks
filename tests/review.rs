@@ -318,7 +318,7 @@ fn an_editor_save_follows_the_idea_only_rule() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &add_line)
-        .args(["edit", &todo])
+        .args(["edit", &todo, "--editor"])
         .output()
         .unwrap();
     assert_eq!(
@@ -333,14 +333,14 @@ fn an_editor_save_follows_the_idea_only_rule() {
     let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
     env.cmd(&dir)
         .env("EDITOR", &add_line)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .assert()
         .success();
     assert!(reviewed(&env, &dir, &idea));
     let drop_line = editor_script(&dir, "sed -i '/^reviewed: /d' \"$1\"");
     env.cmd(&dir)
         .env("EDITOR", &drop_line)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .assert()
         .success();
     assert!(!reviewed(&env, &dir, &idea));
@@ -349,7 +349,7 @@ fn an_editor_save_follows_the_idea_only_rule() {
     let to_todo = editor_script(&dir, "sed -i 's/^status: idea/status: todo/' \"$1\"");
     env.cmd(&dir)
         .env("EDITOR", &to_todo)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .assert()
         .success();
     assert!(!reviewed(&env, &dir, &idea));
@@ -941,7 +941,7 @@ fn the_editor_refuses_to_change_closed_or_reviewed_at() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &script)
-        .args(["edit", &done])
+        .args(["edit", &done, "--editor"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -965,7 +965,7 @@ fn the_editor_refuses_to_change_closed_or_reviewed_at() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &script)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -1091,7 +1091,7 @@ fn the_editor_stamps_reviewed_at_with_reviewed() {
     );
     env.cmd(&dir)
         .env("EDITOR", &add)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .assert()
         .success();
     assert!(task(&env, &dir, &idea)["reviewed_at"].is_string());
@@ -1103,7 +1103,7 @@ fn the_editor_stamps_reviewed_at_with_reviewed() {
     let out = env
         .cmd(&dir)
         .env("EDITOR", &drop_reviewed)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -1115,7 +1115,7 @@ fn the_editor_stamps_reviewed_at_with_reviewed() {
     env.json(&dir, &["edit", &idea, "--no-awaiting-user"]);
     env.cmd(&dir)
         .env("EDITOR", &drop_reviewed)
-        .args(["edit", &idea])
+        .args(["edit", &idea, "--editor"])
         .assert()
         .success();
     assert!(task(&env, &dir, &idea).get("reviewed_at").is_none());
