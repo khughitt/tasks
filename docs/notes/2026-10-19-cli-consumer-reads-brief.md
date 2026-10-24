@@ -60,8 +60,15 @@ trial gate before rollout; this brief does not waive it. No shared needs are dec
 ## Unanswered questions
 
 - Which sections and byte/row budget make session startup useful, how is completeness
-  recovered, and should defaults change? The summary design follow-up answers this
-  with reviewed examples and acceptance checks.
+  recovered, and should defaults change? Resolved by accepted spec `76501bd` and
+  implementation plan `3a264b9` on 2026-10-24: opt-in JSON `prime --summary`,
+  12,288 stdout bytes including LF, exact omission metadata and full-data argv,
+  whole-row eviction and complete warnings/halts. Ordinary prime stays full.
+  Implementation goal tasks-65b733 owns binary delivery, separate approved shared
+  reinstall and gated guide adoption. The real consumer token-budget pilot and
+  trial measurement-scope check remain required before adoption; no no-effect
+  verdict has been issued. The plan inventories thirteen active project guides
+  plus the skill/README, with other-owner records blocked under the same gate.
 - Where does listing time go, and what is the cheapest useful improvement? The
   listing research follow-up measures scan, dependency/claim work, row construction
   and serialization, with host/dataset conditions and repeat timings.
