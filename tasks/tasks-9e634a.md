@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:43:05Z
+updated: 2026-10-24T13:48:15Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -33,3 +33,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:37:12Z (fix/tasks-9e634a): resumed
   provenance: {"harness_session":"codex:01a16e1f-1714-7cb0-8a41-c0e31ca677e2","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T13:43:05Z (fix/tasks-9e634a): Process direct in .worktrees/tasks-9e634a; baseline just test passed 1666 tests. RED: flagless piped edit ran EDITOR and left its failed-edit temp; explicit editor tests fail because --editor is unknown. Scope includes parser, editor dispatch, five integration files, README, tasks skill and ops-678532 option declaration.
+- 2026-10-24T13:48:15Z (fix/tasks-9e634a): GREEN: refusal test 1, explicit editor/conflict tests 2, parser-surface test 1; fixed four caller/expectation migrations found by fast suite and each passed focused. just test-fast passes 1668 tests (one ignored exhaustive test); just check passes. PTY smoke proves flagless edit with terminal stdin still runs EDITOR. Reference skill retrieval failed before wording and passed after. Ops option declaration merged at 1002e3a and adopted byte-identically; other adopted rows belong to already-landed upstream vocabulary.
