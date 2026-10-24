@@ -3,8 +3,10 @@ id: tasks-1b31a4
 title: Support grouping by project in tasks list --pretty --all-projects
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-24T11:23:30Z
 created: 2026-10-24T11:07:36Z
-updated: 2026-10-24T11:23:27Z
+updated: 2026-10-24T11:23:30Z
 depends: [tasks-6fcb58]
 parent: tasks-eceb1c
 tags: [feedback, idea, "from:tasks"]
@@ -18,3 +20,7 @@ Scope handoff: [ref:brief] records verified list/tree behavior and the joint des
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-list-organization-brief.md — evidence and choices for list organization
+
+## Notes
+
+- 2026-10-24T11:23:30Z (main): scope: briefed; checked list/tree selection and ordering at 392155e39d3f48a5b2832d201d1e56d67688eece; preserved the original request; grouped under tasks-eceb1c and waiting on design tasks-6fcb58; brief: docs/notes/2026-10-24-list-organization-brief.md
