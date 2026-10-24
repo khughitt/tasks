@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: design/tasks-e7424b
 created: 2026-10-24T16:09:35Z
-updated: 2026-10-24T16:53:44Z
+updated: 2026-10-24T17:12:19Z
 started: 2026-10-24T16:25:09Z
 completed: 2026-10-24T16:53:44Z
 closed: 2026-10-24T16:53:44Z
@@ -37,3 +37,4 @@ Execute the exact approved plan step inline, with its interfaces, tests, source 
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T16:53:44Z (design/tasks-e7424b): Implemented and independently reviewed bounded JSON prime summaries at 9cfb0bb; 1681 fast tests passed, 4 ignored, checks/build/recovery passed. Shared reinstall required on tasks-72093a; adoption remains gated on tasks-dc696d.
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T17:12:19Z (main): Required post-merge reinstall tasks-72093a completed after explicit user approval: /home/keith/.cargo/bin/tasks rebuilt from main 4ad76fb8e928c61e8dfb4d1d1784b015d71fa4e1, reviewed feature 9cfb0bb/merge 2c1ffb5. Installed SHA256 a2c4635f54b676fec12786b3e024aa6e748e28f27d971b2a4a39c85ad41c85f6 matches main release artifact. Help exposes --summary; isolated installed-binary smoke passed with 11634 summary bytes, 132302 full bytes and matching recovery prefixes/warnings/halts. Shared binary delivery complete; real-consumer adoption remains gated.
