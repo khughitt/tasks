@@ -1258,6 +1258,48 @@ Opt in per project in `tasks/.config.toml`:
     tasks/sci-4f2a9c.md              one task
     ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [records] prefix -> records dir; [groups] name -> prefixes
 
+## Bounded session summaries
+
+For an opt-in JSON overview that fits a smaller response, use:
+
+    tasks --json prime --summary
+
+Ordinary `prime` keeps its complete output. Summary mode requires JSON; the explicit
+`--json` overrides a valid `TASKS_FORMAT=pretty`. Upgrade the binary before adopting
+the option rather than retrying an unsupported option as an unbounded read.
+
+A successful summary is at most 12,288 UTF-8 stdout bytes including the final newline.
+It initially includes up to five ready rows, five doing rows, five lanes, five roadmap
+roots, three parks and three closeout goals. Roadmap descendants are omitted, while
+the roots retain their child and open-descendant counts. If necessary, entire rows
+are removed from roadmap, lanes, closeout, ready, parked, then doing until it fits.
+Included rows, lane guidance, claims, paths and resume instructions are never clipped.
+Counts, scheduling summaries, scope, warnings and halts remain complete.
+
+The additional `summary` object discloses `byte_limit`, `complete` and `sections`.
+Each section gives `total`, `shown`, `omitted` and, when rows are omitted,
+`first_omitted`. Roadmap also gives `descendants_omitted`. These totals describe the
+existing filtered view; `complete` does not establish that all projects were reachable.
+
+`summary.full` is a JSON argument array for a fresh complete prime read through the
+same executable, directory and scope. Execute its first member as the program and
+the remaining members as arguments, keeping the same environment and capturing
+stdout to a file; do not join the array into a shell command. Read large files in
+bounded sections. In particular, recover omitted closeout invitations from full
+prime's `closeout`; `list` and `tree` do not substitute for that invitation. Obtain
+complete doing/parked data before planning parallel work or concluding no task can
+be resumed. `start` still checks current ownership and gates.
+
+If required metadata alone is too large, the command exits 1 with
+`summary_too_large` on stderr and no stdout. Preserve the original invocation: rerun
+that same binary, directory, scope and environment without `--summary`, capture full
+stdout to a persistent file, and visibly report the summary failure and saved path.
+A failed full capture remains an error; blank stdout does not mean there is no work.
+Other errors should be handled directly. No warnings are dropped to force a fit.
+
+The cap bounds bytes, rather than every consumer's token count, runtime or memory.
+Reads are fresh, so claims and records can change between summary and recovery.
+
 ## License
 
 [MIT](LICENSE).
