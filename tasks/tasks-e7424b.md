@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T15:17:22Z
+updated: 2026-10-24T15:18:21Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -72,3 +72,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T15:15:49Z (design/tasks-e7424b): retained: {"host":"titan","kind":"evidence","path":"$WORK_ROOT/tasks/tasks-e7424b/plan-external-review-r1-report.md","state":"kept","verification":"verified","purpose":"Exact raw external plan review of fbb9e6a; preserve for revision review and any attachment layout fallback.","next_owner":"task:tasks-e7424b","cleanup_trigger":"After plan approval, verify transfer to the open implementation owner or verified lossless attachment, then reassess under removal rules; no deletion permission implied.","sha256":"adb0cd3cbac25d6c0b7465fddc22d08469dadbfd2a408cb86fa788f78fd2981c"}
 - 2026-10-24T15:15:50Z (design/tasks-e7424b): attached: plan-external-review-r1-report.md (4482 bytes): Full external plan review round 1 against fbb9e6a; Important 1, Minor 2; raw evidence retained under task ownership
 - 2026-10-24T15:17:22Z (design/tasks-e7424b): detached: plan-external-review-r1-report.md: Layout gate rejected a quoted host path; exact raw bytes are verified in retained evidence; replace this uncommitted attachment with a labelled portable derivative.
+- 2026-10-24T15:18:21Z (design/tasks-e7424b): Raw review attachment layout refusal resolved via retained-item fallback, not a check bypass. Portable derivative mapping for retained $WORK_ROOT/tasks/tasks-e7424b/plan-external-review-r1-report.md (sha256 adb0cd3cbac25d6c0b7465fddc22d08469dadbfd2a408cb86fa788f78fd2981c): <SYNC_ROOT> means /mnt/ssd/Dropbox on titan. Keep exact raw bytes until an executing checker accepts a shipped ledger-backed exemption or ownership is verifiably transferred; design completion does not ship that exemption.
