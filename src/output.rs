@@ -1131,7 +1131,28 @@ pub struct DeferredSummary {
 }
 
 #[derive(Serialize)]
+pub struct PrimeSummary {
+    pub byte_limit: usize,
+    pub complete: bool,
+    pub sections: std::collections::BTreeMap<&'static str, PrimeSection>,
+    pub full: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct PrimeSection {
+    pub total: usize,
+    pub shown: usize,
+    pub omitted: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_omitted: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descendants_omitted: Option<usize>,
+}
+
+#[derive(Serialize)]
 pub struct PrimeOut {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<PrimeSummary>,
     /// The local project; null under --all-projects and --group.
     pub prefix: Option<String>,
     /// The group under --group; absent otherwise. `prefix` is then null.

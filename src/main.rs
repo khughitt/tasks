@@ -29,6 +29,7 @@ mod palette;
 mod periodic;
 mod pidview;
 mod present;
+mod prime_summary;
 mod proposal;
 mod provenance;
 mod query;
@@ -144,6 +145,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if matches!(&cli.command, cli::Command::Prime { summary: true, .. }) && format != Format::Json {
+        to_stderr(&format!(
+            "{}\n",
+            output::render_error(&error::Error::SummaryRequiresJson)
+        ));
+        std::process::exit(1);
+    }
     let tasks_color = match std::env::var("TASKS_COLOR") {
         Ok(value) => Some(value),
         Err(std::env::VarError::NotPresent) => None,

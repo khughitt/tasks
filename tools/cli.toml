@@ -700,6 +700,7 @@ options = [
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
   { names = ["--closed"], value = "none" },
+  { names = ["--summary"], value = "none" },
   { names = ["--without"], value = "string", repeatable = true },
 ]
 
@@ -2834,6 +2835,16 @@ options = [
 ]
 
 [[cli.relay.commands]]
+path = ["inbox", "ask"]
+summary = "Post a detached question from a JSON file"
+options = [{ names = ["--file"], value = "path", required = true }]
+
+[[cli.relay.commands]]
+path = ["inbox", "take"]
+summary = "Receive a detached question answer"
+args = [{ name = "id", value = "string", required = true }]
+
+[[cli.relay.commands]]
 path = ["inbox", "show"]
 verb = "show"
 summary = "One inbox entry in full"
@@ -2845,6 +2856,7 @@ summary = "Answer a pending question from this desk"
 args = [{ name = "id", value = "string", required = true }, { name = "value", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--decline"], value = "none" },
+  { names = ["--surface"], value = "enum", values = ["cli", "terminal"] },
 ]
 
 [[cli.relay.commands]]
@@ -2856,6 +2868,8 @@ args = [{ name = "id", value = "string", required = true }]
 path = ["inbox", "withdraw"]
 summary = "Withdraw a pending question"
 args = [{ name = "id", value = "string", required = true }]
+
+options = [{ names = ["--reason"], value = "enum", values = ["user", "asker"] }]
 
 [[cli.relay.commands]]
 path = ["presence"]
@@ -2889,4 +2903,17 @@ options = [
   {names = ["--purpose"], value = "string", required = true},
   {names = ["--name"], value = "string"},
   {names = ["--explain"], value = "none"},
+]
+
+# Minimal adoption surface; existing doc-review options remain outside this inventory.
+[cli.doc-review]
+project = "ops"
+tier = "automation"
+default_output = "pretty"
+env = "DOC-REVIEW"
+
+[[cli.doc-review.commands]]
+path = []
+options = [
+  {names = ["--acknowledge-only"], value = "none"},
 ]

@@ -2,6 +2,12 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("prime --summary requires JSON; use tasks --json prime --summary")]
+    SummaryRequiresJson,
+    #[error(
+        "prime summary exceeds 12288 bytes with required metadata; rerun the same JSON prime without --summary and capture stdout to a file"
+    )]
+    SummaryTooLarge,
     #[error("no tasks/.config.toml found above {0}")]
     NoProject(PathBuf),
     #[error("{0}")]
@@ -166,12 +172,16 @@ impl Error {
             Error::ClipboardUnavailable(detail) => Error::ClipboardUnavailable(detail + suffix),
             Error::ClipboardNoImage(detail) => Error::ClipboardNoImage(detail + suffix),
             Error::Io(detail) => Error::Io(detail + suffix),
-            error @ Error::NoProject(_) => error,
+            error @ (Error::NoProject(_) | Error::SummaryRequiresJson | Error::SummaryTooLarge) => {
+                error
+            }
         }
     }
 
     pub fn kind(&self) -> &'static str {
         match self {
+            Error::SummaryRequiresJson => "summary_requires_json",
+            Error::SummaryTooLarge => "summary_too_large",
             Error::NoProject(_) => "no_project",
             Error::Config(_) => "config",
             Error::TaskNotFound(_) | Error::TaskNotFoundNext { .. } => "task_not_found",

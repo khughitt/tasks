@@ -5,6 +5,566 @@ use common::{
 };
 
 #[test]
+fn prime_summary_empty_project() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = env
+        .cmd(&dir)
+        .args(["--json", "prime", "--summary"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.len() <= 12_288);
+    let summary: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(summary["summary"]["byte_limit"], 12_288);
+    assert_eq!(summary["summary"]["complete"], true);
+    for section in ["parked", "doing", "ready", "closeout", "lanes", "roadmap"] {
+        assert_eq!(summary[section], serde_json::json!([]));
+        let meta = &summary["summary"]["sections"][section];
+        assert_eq!(meta["total"], 0);
+        assert_eq!(meta["shown"], 0);
+        assert_eq!(meta["omitted"], 0);
+        assert!(meta.get("first_omitted").is_none());
+    }
+    assert_eq!(
+        summary["summary"]["sections"]["roadmap"]["descendants_omitted"],
+        0
+    );
+    let full = env.json(&dir, &["prime"]);
+    assert!(full.get("summary").is_none());
+    for key in ["counts", "periodic", "deferred", "projects", "warnings"] {
+        assert_eq!(summary[key], full[key]);
+    }
+}
+
+#[test]
+fn prime_summary_caps_and_recovery() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for _ in 0..80 {
+        env.json(&dir, &["add", "Work"]);
+    }
+    let full = env.json(&dir, &["prime"]);
+    let out = env
+        .cmd(&dir)
+        .args(["--json", "prime", "--summary"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.len() <= 12_288);
+    let summary: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(summary["summary"]["complete"], false);
+    for name in ["ready", "roadmap"] {
+        assert_eq!(
+            summary[name].as_array().unwrap().as_slice(),
+            &full[name].as_array().unwrap()[..5]
+        );
+        let meta = &summary["summary"]["sections"][name];
+        assert_eq!(meta["total"], 80);
+        assert_eq!(meta["shown"], 5);
+        assert_eq!(meta["omitted"], 75);
+        assert_eq!(meta["first_omitted"], full[name][5]["id"]);
+    }
+    let args: Vec<&str> = summary["summary"]["full"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_str().unwrap())
+        .collect();
+    let mut recovery = env.raw(&dir);
+    assert_eq!(
+        std::fs::canonicalize(recovery.get_program()).unwrap(),
+        std::path::Path::new(args[0])
+    );
+    let replay = recovery.args(&args[1..]).output().unwrap();
+    assert!(
+        replay.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&replay.stdout).unwrap(),
+        full
+    );
+}
+
+#[test]
+fn prime_summary_format_and_errors() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let pretty = env
+        .cmd(&dir)
+        .args(["--pretty", "prime", "--summary"])
+        .output()
+        .unwrap();
+    assert_eq!(pretty.status.code(), Some(1));
+    assert!(pretty.stdout.is_empty());
+    assert_eq!(err_kind(&pretty), "summary_requires_json");
+    assert_eq!(
+        err_detail(&pretty),
+        "prime --summary requires JSON; use tasks --json prime --summary"
+    );
+    let env_pretty = env
+        .cmd(&dir)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["prime", "--summary"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&env_pretty), "summary_requires_json");
+    env.cmd(&dir)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["--json", "prime", "--summary"])
+        .assert()
+        .success();
+    let invalid = env
+        .cmd(&dir)
+        .env("TASKS_FORMAT", "invalid")
+        .args(["prime", "--summary"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&invalid), "config");
+    let unknown = env
+        .cmd(&dir)
+        .args(["prime", "--summary", "--group", "unknown"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&unknown), "unknown_group");
+    for _ in 0..6 {
+        env.json(&dir, &["add", "Normal"]);
+    }
+    std::fs::write(dir.join("tasks/sci-ffffff.md"), "broken record").unwrap();
+    let malformed = env.cmd(&dir).args(["prime", "--summary"]).output().unwrap();
+    assert_eq!(err_kind(&malformed), "parse");
+    assert!(malformed.stdout.is_empty());
+}
+
+#[test]
+fn prime_summary_scopes_and_recovery() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&dir, &["add", "S"]);
+    env.json(&fam, &["add", "F"]);
+    let config = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[needs.quiet]\nmeaning = \"Idle host\"\n[needs.gpu]\nmeaning = \"GPU\"\n");
+    std::fs::write(config, text).unwrap();
+    env.json(&dir, &["group", "set", "batch", "sci", "fam"]);
+    let caller = tempfile::tempdir().unwrap();
+    let alias = caller.path().join("alias root");
+    symlink(&dir, &alias).unwrap();
+    let fake_bin = caller.path().join("bin");
+    std::fs::create_dir(&fake_bin).unwrap();
+    let fake = fake_bin.join("tasks");
+    std::fs::write(&fake, "#!/bin/sh\nexit 99\n").unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(fake_bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    for scope in [
+        vec![],
+        vec!["--project", "sci"],
+        vec!["--group", "batch"],
+        vec!["--all-projects"],
+    ] {
+        let mut args = vec![
+            "--json",
+            "-C",
+            "alias root",
+            "prime",
+            "--summary",
+            "--closed",
+            "--without",
+            "quiet",
+            "--without",
+            "gpu",
+        ];
+        args.extend(scope.iter().copied());
+        let out = env
+            .cmd(caller.path())
+            .env("PATH", &path)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.stdout.len() <= 12_288);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let full: Vec<&str> = v["summary"]["full"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_str().unwrap())
+            .collect();
+        assert_eq!(full[3], alias.to_str().unwrap());
+        assert!(!full.contains(&"--summary"));
+        assert_eq!(&full[5..5 + scope.len()], scope.as_slice());
+        assert_eq!(
+            &full[full.len() - 5..],
+            ["--closed", "--without", "quiet", "--without", "gpu"]
+        );
+        let mut replay = env.raw(caller.path());
+        assert_eq!(
+            std::fs::canonicalize(replay.get_program()).unwrap(),
+            std::path::Path::new(full[0])
+        );
+        let replay = replay.env("PATH", &path).args(&full[1..]).output().unwrap();
+        assert!(
+            replay.status.success(),
+            "{}",
+            String::from_utf8_lossy(&replay.stderr)
+        );
+        let raw: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
+        assert!(raw.get("summary").is_none());
+        for key in ["prefix", "group", "projects", "counts", "warnings", "ready"] {
+            assert_eq!(v[key], raw[key]);
+        }
+    }
+    std::fs::remove_file(dir.join("tasks/.config.toml")).unwrap();
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let empty = env.json(caller.path(), &["prime", "--summary", "--group", "batch"]);
+    assert_eq!(empty["prefix"], serde_json::Value::Null);
+    assert_eq!(empty["projects"], serde_json::json!([]));
+    assert_eq!(empty["summary"]["complete"], true);
+    assert!(!empty["warnings"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn prime_summary_large_roadmap() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for _ in 0..10 {
+        let goal = id_of(env.json(&dir, &["add", "Goal"]));
+        for _ in 0..20 {
+            env.json(&dir, &["add", "Leaf", "--parent", &goal]);
+        }
+    }
+    let full = env.json(&dir, &["prime"]);
+    let v = env.json(&dir, &["prime", "--summary"]);
+    assert_eq!(v["summary"]["sections"]["roadmap"]["total"], 10);
+    assert_eq!(
+        v["summary"]["sections"]["roadmap"]["descendants_omitted"],
+        200
+    );
+    let roots = v["roadmap"].as_array().unwrap();
+    assert!(roots.len() <= 5);
+    for (at, root) in roots.iter().enumerate() {
+        let mut expected = full["roadmap"][at].clone();
+        expected.as_object_mut().unwrap().remove("children");
+        assert_eq!(*root, expected);
+        assert_eq!(root["child_count"], 20);
+        assert_eq!(root["open_descendant_count"], 20);
+    }
+    assert_eq!(
+        v["ready"].as_array().unwrap().as_slice(),
+        &full["ready"].as_array().unwrap()[..5]
+    );
+}
+
+#[test]
+fn prime_summary_overflow_and_compatibility() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Work"]);
+    assert_eq!(
+        env.json(&dir, &["prime"]),
+        env.json(&dir, &["prime", "--closed"])
+    );
+    let mut registry = format!("[projects]\nsci = {:?}\n", dir.to_str().unwrap());
+    let missing = dir.join("missing").join("segment/".repeat(450));
+    for n in 0..4 {
+        registry.push_str(&format!("absent{n} = {:?}\n", missing.to_str().unwrap()));
+    }
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        registry,
+    )
+    .unwrap();
+    let full = env.json(&dir, &["prime", "--all-projects"]);
+    assert!(full["warnings"].as_array().unwrap().len() >= 4);
+    let out = env
+        .cmd(&dir)
+        .args(["prime", "--summary", "--all-projects"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(err_kind(&out), "summary_too_large");
+    assert!(out.stderr.len() < 512);
+    assert!(!err_detail(&out).contains("segment"));
+}
+
+#[test]
+fn prime_summary_claims_and_parks() {
+    let mut env = TestEnv::new();
+    let (side, main) = two_roots(&mut env);
+    let elsewhere = id_of(env.json(&side, &["add", "Elsewhere", "-p", "0"]));
+    as_agent(&env, &side, "worker")
+        .args(["start", &elsewhere])
+        .assert()
+        .success();
+    let copied = id_of(env.json(&side, &["add", "Stale copy", "-p", "1"]));
+    std::fs::copy(
+        side.join(format!("tasks/{copied}.md")),
+        main.join(format!("tasks/{copied}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &side, "worker")
+        .args(["start", &copied])
+        .assert()
+        .success();
+    for _ in 0..5 {
+        let id = id_of(env.json(&main, &["add", "Unverifiable"]));
+        write_claim_in_view(&env, "sci", &id, "unverified", "pidns:[0]");
+    }
+    let stale = id_of(env.json(&main, &["add", "Stale claim"]));
+    write_claim(&env, "sci", &stale, "stale", false);
+    for _ in 0..4 {
+        let id = id_of(env.json(&main, &["add", "Resume"]));
+        write_park(
+            &env,
+            "sci",
+            &id,
+            "parked-worker",
+            "agent",
+            main.to_str().unwrap(),
+        );
+    }
+    write_park(
+        &env,
+        "sci",
+        "bad-park",
+        "parked-worker",
+        "agent",
+        "/unavailable",
+    );
+    let full = env.json(&main, &["prime"]);
+    let v = env.json(&main, &["prime", "--summary"]);
+    assert_eq!(v["summary"]["sections"]["doing"]["total"], 7);
+    assert_eq!(v["summary"]["sections"]["doing"]["shown"], 5);
+    assert_eq!(v["summary"]["sections"]["parked"]["total"], 5);
+    assert_eq!(v["summary"]["sections"]["parked"]["shown"], 3);
+    for name in ["doing", "parked"] {
+        let shown = v[name].as_array().unwrap().len();
+        assert_eq!(
+            v[name].as_array().unwrap().as_slice(),
+            &full[name].as_array().unwrap()[..shown]
+        );
+        assert_eq!(
+            v["summary"]["sections"][name]["first_omitted"],
+            full[name][shown]["id"]
+        );
+    }
+    assert_eq!(v["doing"][0]["id"], elsewhere);
+    assert_eq!(v["doing"][0]["claim"]["worktree"], side.to_str().unwrap());
+    assert!(
+        v["doing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["claim"].get("unverified").is_some())
+    );
+    assert_eq!(v["parked"][0]["id"], "bad-park");
+    assert!(v["parked"][0].get("status").is_none());
+    assert_eq!(v["warnings"], full["warnings"]);
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("stale claim"))
+    );
+}
+
+#[test]
+fn prime_summary_warnings_and_closeout() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for _ in 0..4 {
+        let goal = id_of(env.json(&dir, &["add", "Close goal"]));
+        let child = id_of(env.json(&dir, &["add", "Finish child", "--parent", &goal]));
+        env.json(&dir, &["done", &child]);
+    }
+    let full = env.json(&dir, &["prime"]);
+    let v = env.json(&dir, &["prime", "--summary"]);
+    assert_eq!(v["summary"]["sections"]["closeout"]["total"], 4);
+    assert_eq!(v["summary"]["sections"]["closeout"]["shown"], 3);
+    assert_eq!(v["summary"]["sections"]["closeout"]["omitted"], 1);
+    assert_eq!(
+        v["summary"]["sections"]["closeout"]["first_omitted"],
+        full["closeout"][3]["id"]
+    );
+    let args: Vec<&str> = v["summary"]["full"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_str().unwrap())
+        .collect();
+    let mut replay = env.raw(&dir);
+    assert_eq!(
+        std::fs::canonicalize(replay.get_program()).unwrap(),
+        std::path::Path::new(args[0])
+    );
+    let replay = replay.args(&args[1..]).output().unwrap();
+    assert!(replay.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&replay.stdout).unwrap()["closeout"],
+        full["closeout"]
+    );
+}
+
+#[test]
+fn prime_summary_lane_states_and_selection() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    declare_needs(&dir, &[("quiet", "Idle host", true)]);
+    let first = id_of(env.json(&dir, &["add", "First", "--lane", "-p", "0"]));
+    let second = id_of(env.json(&dir, &["add", "Second", "--lane", "-p", "1"]));
+    for parent in [&first, &second] {
+        env.json(
+            &dir,
+            &[
+                "add",
+                "Exclusive",
+                "--parent",
+                parent,
+                "--need",
+                "quiet",
+                "--complexity",
+                "low",
+            ],
+        );
+    }
+    let waiting = id_of(env.json(&dir, &["add", "Waiting", "--lane", "-p", "2"]));
+    let blocked = id_of(env.json(&dir, &["add", "Blocked", "--parent", &waiting]));
+    env.json(&dir, &["block", &blocked, "Dependency"]);
+    let paused = id_of(env.json(&dir, &["add", "Paused", "--lane", "-p", "3"]));
+    env.json(
+        &dir,
+        &[
+            "add",
+            "Paused child",
+            "--parent",
+            &paused,
+            "--complexity",
+            "low",
+        ],
+    );
+    env.json(&dir, &["block", &paused, "Paused"]);
+    env.json(&dir, &["add", "Empty", "--lane", "-p", "4"]);
+    for _ in 0..2 {
+        let lane = id_of(env.json(&dir, &["add", "Other lane", "--lane", "-p", "4"]));
+        env.json(
+            &dir,
+            &[
+                "add",
+                "High work",
+                "--parent",
+                &lane,
+                "--complexity",
+                "high",
+            ],
+        );
+    }
+    let future = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Future",
+            "--defer",
+            "2099-01-01",
+            "--complexity",
+            "low",
+        ],
+    ));
+    let due = id_of(env.json(
+        &dir,
+        &["add", "Recurring", "--every", "7d", "--complexity", "low"],
+    ));
+    let read = |summary: bool, setting: Option<(&str, &str)>| {
+        let mut cmd = env.cmd(&dir);
+        cmd.arg("prime");
+        if summary {
+            cmd.arg("--summary");
+        }
+        if let Some((key, value)) = setting {
+            cmd.env(key, value);
+        }
+        let out = cmd.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if summary {
+            assert!(out.stdout.len() <= 12_288);
+        }
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()
+    };
+    let initial = read(false, None);
+    let states: std::collections::HashSet<&str> = initial["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        states,
+        ["ready", "held", "waiting", "paused", "empty"].into()
+    );
+    for setting in [
+        None,
+        Some(("TASKS_MAX_COMPLEXITY", "low")),
+        Some(("TASKS_WITHOUT", "quiet")),
+    ] {
+        let full = read(false, setting);
+        let v = read(true, setting);
+        assert_eq!(v["summary"]["sections"]["lanes"]["total"], 7);
+        for name in ["ready", "lanes", "closeout"] {
+            let count = v[name].as_array().unwrap().len();
+            assert_eq!(
+                v[name].as_array().unwrap().as_slice(),
+                &full[name].as_array().unwrap()[..count]
+            );
+        }
+        assert!(
+            full["ready"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == due)
+        );
+        assert!(
+            !full["ready"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == future)
+        );
+        assert_eq!(v["warnings"], full["warnings"]);
+    }
+    let halt = id_of(env.json(&dir, &["add", "Halt", "--tag", "halt", "-p", "0"]));
+    let full = read(false, None);
+    let v = read(true, None);
+    assert_eq!(v["halts"], full["halts"]);
+    assert_eq!(v["halts"][0]["id"], halt);
+    assert_eq!(v["warnings"], full["warnings"]);
+}
+
+#[test]
 fn lifecycle_provenance_survives_claim_and_park_release() {
     for (source, key) in [
         ("CLAUDE_CODE_SESSION_ID", "claude-code:native-a"),

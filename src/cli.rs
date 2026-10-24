@@ -861,6 +861,9 @@ pub enum Command {
         /// Also show the done, dropped, and moved counts.
         #[arg(long)]
         closed: bool,
+        /// Bounded JSON session context with explicit omissions and full-read recovery.
+        #[arg(long)]
+        summary: bool,
         #[command(flatten)]
         without: WithoutArgs,
     },

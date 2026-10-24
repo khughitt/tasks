@@ -2061,8 +2061,22 @@ fn dispatch(cli: Cli) -> Result<Output> {
         Command::Prime {
             scope,
             closed,
+            summary,
             without,
-        } => list::prime(open_read_ctx(dir, &scope)?, closed, without.without),
+        } => {
+            let full = if summary {
+                Some(crate::prime_summary::full_argv(
+                    &std::env::current_exe()?,
+                    &std::path::absolute(start_dir(dir)?)?,
+                    &scope,
+                    closed,
+                    &without.without,
+                )?)
+            } else {
+                None
+            };
+            list::prime(open_read_ctx(dir, &scope)?, closed, without.without, full)
+        }
         Command::Lanes {
             without,
             max_complexity,

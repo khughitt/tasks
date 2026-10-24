@@ -727,7 +727,12 @@ fn claimed_elsewhere(
     found
 }
 
-pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Output> {
+pub fn prime(
+    mut ctx: ReadCtx,
+    closed: bool,
+    without: Vec<String>,
+    full: Option<Vec<String>>,
+) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(None)?;
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
@@ -915,6 +920,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     }
     let colors = ctx.project_colors();
     let mut out = Output::Prime(Box::new(PrimeOut {
+        summary: None,
         prefix: match &ctx.scope {
             Scope::Local(project) => Some(project.prefix.clone()),
             Scope::All { .. } => None,
@@ -951,6 +957,11 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         halts,
         warnings: ctx.warnings,
     }));
+    if let Some(full) = full
+        && let Output::Prime(prime) = &mut out
+    {
+        crate::prime_summary::bound(prime, full)?;
+    }
     out.paint_projects(&colors);
     Ok(out)
 }
