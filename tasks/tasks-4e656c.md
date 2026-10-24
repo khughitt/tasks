@@ -4,8 +4,8 @@ title: "init --records writes the [checkout] table (and [git] commit = true) int
 status: idea
 priority: 2
 created: 2026-10-23T12:39:33Z
-updated: 2026-10-24T11:16:35Z
-depends: []
+updated: 2026-10-24T11:16:38Z
+depends: [tasks-34424b]
 parent: tasks-72e3d7
 tags: [feedback, friction, "from:ops"]
 agent: claude-code/claude-opus-5-5
