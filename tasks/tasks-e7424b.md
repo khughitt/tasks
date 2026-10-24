@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e7424b
 created: 2026-10-20T02:03:05Z
-updated: 2026-10-24T15:07:14Z
+updated: 2026-10-24T15:07:15Z
 started: 2026-10-24T13:59:41Z
 depends: []
 parent: tasks-96c00c
@@ -67,3 +67,4 @@ Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd
 - 2026-10-24T15:07:11Z (design/tasks-e7424b): resumed
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T15:07:14Z (design/tasks-e7424b): review: plan round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: claude-code/claude-opus-5-5
+- 2026-10-24T15:07:15Z (design/tasks-e7424b): Recorded the external plan review with the user's supplied round 1 label. The earlier codex plan round 1 note was the controller's writing-plans self-review, not external acceptance; append-only history is retained. Revise frozen fbb9e6a for project startup instruction coverage, lexical absolute recovery directory, and explicit post-merge shared-binary reinstall approval. No implementation approval yet.
