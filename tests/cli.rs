@@ -5961,7 +5961,7 @@ fn edit_clears_spec_plan_and_step_links() {
         ["--step", "Task 1: all", "--no-step"],
     ] {
         env.cmd(&dir)
-            .args(["edit", &open, "--editor"].iter().copied().chain(pair))
+            .args(["edit", &open].iter().copied().chain(pair))
             .assert()
             .code(2);
     }
