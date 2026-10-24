@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-9e634a
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-24T13:55:52Z
+updated: 2026-10-24T13:55:53Z
 started: 2026-10-24T13:36:42Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
@@ -62,3 +62,4 @@ Original report (preserved): The task CLI launches an interactive editor for a f
 - 2026-10-24T13:54:20Z (fix/tasks-9e634a): attached: check.log (111 bytes): After review correction: hygiene, format, clippy and task validation passed
 - 2026-10-24T13:54:23Z (fix/tasks-9e634a): Review correction 2400a80 restores the original setter/clearer usage-error test by dropping only the accidental --editor argument; focused 1 test, fast 1665 passed/4 ignored, just check passed. cmp confirms tools/cli.toml equals ops main. No production changes or deferred minors.
 - 2026-10-24T13:55:52Z (fix/tasks-9e634a): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-24T13:55:53Z (fix/tasks-9e634a): attached: correction-review-report.md (1123 bytes): Fresh scoped review of 2400a80 by codex/gpt-6.1-sol; zero findings
