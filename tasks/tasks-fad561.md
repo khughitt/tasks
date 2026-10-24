@@ -4,8 +4,8 @@ title: "list --pretty: an option to nest children under their parent"
 status: idea
 priority: 2
 created: 2026-10-23T18:05:10Z
-updated: 2026-10-24T11:23:15Z
-depends: []
+updated: 2026-10-24T11:23:18Z
+depends: [tasks-6fcb58]
 parent: tasks-eceb1c
 tags: [cli, pretty]
 agent: claude-code/claude-fable-5-1
