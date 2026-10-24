@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-171b8b
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-24T12:59:04Z
+updated: 2026-10-24T13:01:38Z
 started: 2026-10-24T12:58:27Z
 depends: []
 tags: [testing]
@@ -35,3 +35,4 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
   provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T12:59:04Z (fix/tasks-171b8b): resumed
   provenance: {"harness_session":"codex:01a16dfd-1969-7e23-8d56-78a452ff6fb4","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T13:01:38Z (fix/tasks-171b8b): Process direct; workspace .worktrees/tasks-171b8b. Hydrated with README cargo install --locked --path . confined by --root and CARGO_TARGET_DIR inside the worktree. Full baseline just test passed; test count recorded next.
