@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-24T16:09:05Z
-updated: 2026-10-24T16:51:31Z
+updated: 2026-10-24T16:52:04Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -46,3 +46,4 @@ Implement approved spec 76501bd and plan 3a264b9. Deliver ops option and tasks b
 - 2026-10-24T16:20:24Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After source-row and binary integration, verify needed evidence preservation and run removal checks before any authorized cleanup; no deletion permission implied.","kind":"evidence","path":"$WORK_ROOT/ops/ops-8d4c5b/prime.json","purpose":"Ops source-row verification/startup evidence retained after ops code completion.","sha256":"f822ffc27c2a5e9899b99f90f8ff9cdab910eb1f39bd0f0901b00af9b3107ef4"}
 - 2026-10-24T16:50:01Z (design/tasks-e7424b): Delivery verification: feature 9cfb0bb; final just test-fast 1681 passed, 4 ignored, 0 failed across 14 binaries; baseline just test 1669 passed. Focused CLI 9, unit 7, parser surface 1; just check and confined release build passed. Independent whole-branch review running. All 21 inherited retained worktree/scratch/evidence identities were inspected and recorded hashes still match. No trial no-effect verdict issued because the unfiltered outcome report includes cross-project comparisons.
 - 2026-10-24T16:51:31Z (design/tasks-e7424b): attached: progress.md (6213 bytes): Inline Tasks 1–2 execution ledger, verification and final review rulings; Task 3 remains gated.
+- 2026-10-24T16:52:04Z (design/tasks-e7424b): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"scratch","path":"$WORK_ROOT/tasks/tasks-65b733","purpose":"Canonical implementation baseline, RED/GREEN, final checks and explicit-path smoke evidence.","manifest":"$WORK_ROOT/tasks/tasks-65b733/retained-manifest.json","sha256":"bfc050a91c1d25952c73360715d389e64691fea7e716cfd0ea0810d068462b5e"}
