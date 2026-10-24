@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: main
 created: 2026-10-24T16:10:36Z
-updated: 2026-10-24T16:56:52Z
+updated: 2026-10-24T17:10:09Z
 started: 2026-10-24T16:54:11Z
 depends: [tasks-7c5a4b]
 parent: tasks-65b733
@@ -29,4 +29,6 @@ After Task 2 is reviewed and merged, resolve current tasks PATH target and Cargo
 - 2026-10-24T16:56:46Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"worktree","path":".worktrees/tasks-e7424b","purpose":"Merged design/tasks-e7424b branch retained with confined verified binary and execution evidence for approved reinstall/adoption; no shared pointer targets it."}
 - 2026-10-24T16:56:48Z (main): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:tasks-65b733","cleanup_trigger":"After verified shared reinstall and gated adoption disposition, recheck evidence preservation and run removal checks before authorized cleanup.","kind":"evidence","path":"$WORK_ROOT/tasks/.worktrees/tasks-e7424b/.superpowers/sdd/2026-10-24-bounded-session-summary","purpose":"Execution ledger, tests and full independent review preserved for reinstall/adoption ownership.","manifest":"$WORK_ROOT/tasks/.worktrees/tasks-e7424b/.superpowers/sdd/2026-10-24-bounded-session-summary/retained-manifest.json","sha256":"8c35bc66c0db840edf341dfd5177ef9dbf19daeaefdd8a75b29c00ad70c4f05b"}
 - 2026-10-24T16:56:52Z (main): parked (waiting on user, approval): After user approves replacing /home/keith/.cargo/bin/tasks, the agent runs cargo install --locked --path . from registered main, verifies PATH/help/bounded read/recovery, and records installed revision on this task and tasks-7c5a4b.
+  provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T17:10:09Z (main): resumed
   provenance: {"harness_session":"codex:01a16e34-fd27-7e51-b10c-c1250b33416d","harness_session_source":"CODEX_THREAD_ID"}
