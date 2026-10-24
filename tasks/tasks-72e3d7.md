@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-24T11:15:05Z
-updated: 2026-10-24T11:15:05Z
+updated: 2026-10-24T11:15:48Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -24,3 +24,7 @@ Where: start with [ref:brief], the approved records-home and record-commit desig
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-detached-migration-recovery-brief.md — incident evidence, contract tensions and research bounds
+
+## Notes
+
+- 2026-10-24T11:15:48Z (main): concerns: tasks-211e28 extension — establish post-rollout relocation, unpaired discovery and init configuration-write recovery contracts before scoping implementation
