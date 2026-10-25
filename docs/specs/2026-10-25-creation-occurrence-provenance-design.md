@@ -1,6 +1,6 @@
 # Creation and occurrence provenance: who filed a task, and whose ask it is
 
-Status: draft for review (2026-10-25)
+Status: draft for review, revision 2 (2026-10-25; revises 506253d after review round 2)
 Task: tasks-a58a90 (wakes tasks-516ab4 and tasks-2e7d03)
 Brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
 
@@ -137,14 +137,22 @@ One optional value, `origin`:
 
 | Value   | Meaning |
 |---------|---------|
-| `user`  | The user's own prompt asked for this work (they described it, asked for it to be filed, or the report relays their words), whoever ran the command and however the agent phrased it. |
-| `agent` | No user prompt asked for it: an agent's observation, follow-up, feedback report, decomposition piece, plan step, dependency or scope filing. |
-| `mixed` | A user's prompt raised it, and the agent decided on its own to file it or added asks of its own (tasks-2e7d03: the user's question raised the gap; the agent filed it under the feedback rule). |
+| `user`  | Every ask in the record comes from the user's own prompt: they described it, asked for it to be filed, or the report relays their words. |
+| `agent` | No ask in the record comes from a user prompt: an agent's observation, follow-up, feedback report, decomposition piece, plan step, dependency or scope filing. |
+| `mixed` | The record holds both: at least one ask from the user's prompt and at least one distinct ask the agent added. |
 | absent  | Unknown. |
 
-Origin refers to the record's own ask. A decomposition child of a user-requested goal
-is `agent` unless the user asked for that piece; its parent link already leads to the
-user's ask.
+Origin classifies the record's asks, not the filing. Who ran the command, whether the
+agent chose to file on its own (for example under the feedback rule), and how the agent
+phrased the asks never change the value. This follows the user's definition in §1,
+which separates whose prompt led to the task from who captured it. A report that
+relays only the user's words is `user`, even when the agent filed it unprompted. It is
+`mixed` only when the agent also added an ask of its own, such as a proposed remedy
+the user did not ask for. The report body marks which ask is whose, as lore-c01bc8
+requires.
+
+A decomposition child of a user-requested goal is `agent` unless the user asked for
+that piece; its parent link already leads to the user's ask.
 
 **Who supplies it.** The filer, from evidence in its own session, with `--origin` on
 `add` and `feedback`. When unsure it omits the flag. The tool never derives it.
@@ -166,18 +174,35 @@ user's ask.
   origin is unknown and this occurrence says X. The occurrence note keeps X, so a
   reader asking "does any occurrence carry the user's words" still finds it.
 
-**Correction.** `tasks edit <id> --origin <value>` and `--no-origin` change the field
-only; occurrence notes stay as evidence. The skill asks a corrector to add a stamped
-note citing its evidence (`tasks note <id> "<evidence>" --stamp`). Anyone with
-evidence may correct: typically a scope pass that has read the origin session.
+**Correction.** `tasks edit <id> --origin <value>` changes the field only; occurrence
+notes stay as history. The skill asks a corrector to add a stamped note citing its
+evidence (`tasks note <id> "<evidence>" --stamp`). Anyone with evidence may correct:
+typically a scope pass that has read the origin session. To overrule a mistaken
+occurrence label, set the right value. Evidence that the user did not ask means
+`agent`, and evidence of a user ask means `user` or `mixed`, so a corrector with
+evidence can always name one. `--no-origin` withdraws the judgment: the field becomes
+absent and the occurrence labels speak again under the rule below.
+
+**The reading rule.** Every consumer reads origin through one rule, which the README
+states once:
+
+1. **When the field is set, it is the record's origin.** It supersedes every
+   occurrence label, including the creation label. Labels written before or after a
+   correction are history; a later recurrence still updates the field by the combine
+   rule above.
+2. **When the field is absent, the origin is unknown, but the occurrence labels are
+   partial evidence.** Any label `user` or `mixed` means the record carries some of
+   the user's words. Otherwise the labels say nothing about the unlabelled
+   occurrences, so the origin stays unknown.
 
 **Consumers.**
 
-- An agent deciding whom to ask about intent reads the field: `user` means the user
-  holds the intent; `agent` or `mixed` means reading the origin first (§4.7).
-- tasks-441019 treats a record as carrying the user's words when the field is `user`
-  or `mixed`, or any occurrence note is. Until this lands it keeps judging from report
-  text.
+- An agent deciding whom to ask about intent applies the rule. `user` means the user
+  holds the intent. `agent`, `mixed` or unknown means reading the origin first (§4.7).
+- tasks-441019 treats a record as carrying the user's words when rule 1 gives `user`
+  or `mixed`, or rule 2 finds a `user` or `mixed` label. So a corrected `agent`
+  overrides a mistaken creation label of `user`. Until this lands, tasks-441019 keeps
+  judging from report text.
 
 Call (mine): three values, not a vocabulary of agent kinds (follow-up, feedback,
 decomposition, scope). The user's distinction is binary with a mixed middle, and the
@@ -243,6 +268,11 @@ only:
 - **JSON.** Task objects gain `origin` (omitted when unset). Notes gain `root_session`,
   `origin` and `origin_session` beside the existing pair, each omitted when absent.
   These are additive.
+- **Write output.** The JSON output of `add` (action `created`) and of `feedback`
+  (actions `created` and `recurred`) gains `at`: the timestamp of the occurrence note
+  that call wrote. A `reused` add has no `at`. The tool result in the filing
+  transcript then names the occurrence it produced, not only the record (§4.7).
+  Additive.
 - **Pretty `show`.** An `origin:` overview line after `agent:` when set. Note rows show
   origin and origin session with the existing provenance column.
 - **Filters.** `list`, `ready` and `search` accept `--origin <user|agent|mixed|none>`,
@@ -260,26 +290,61 @@ The new flags start as rows in ops's `cli.toml`, adopted here with the parser ch
 The procedure, written into the scope skill's evidence step and pointed to from the
 tasks skill's pickup step:
 
-1. Read `origin`, the creation note and the occurrence notes from `tasks show`.
-2. For each relevant occurrence, take its session key: `origin_session` when present,
-   then the stamp; for a Codex worker, also `root_session`.
-3. Locate the transcript with the session-logs tooling: live stores, archived stores
+It has two stages. The filing event always comes first; an older request, when the
+record names one, is found from the filing event's evidence, never searched for
+directly by the record's id or time.
+
+**Stage 1: the filing event, in the filing session.**
+
+1. Read the reading rule's origin (§4.3) and the occurrence notes from `tasks show`.
+   Pick the occurrence wanted, usually the creation; for feedback, each recurrence in
+   turn.
+2. Take that occurrence's filing session from its stamp; for a Codex worker, also
+   `root_session`. With no stamp, the outcome is unavailable.
+3. Locate that transcript with the session-logs tooling: live stores, archived stores
    (`archived_sessions`) and other harness homes on this host. Use hq-c411df's reader
    once obs-d98663 ships.
-4. Anchor on the tool result that prints the record's id. This is an **exact** anchor:
-   the CLI printed that id in that session. Fall back to matching the note's time and
-   the command text, labelled **inferred**. The fallback is needed when the created
-   title differs from the command text, which happened in 9 of 72 audited origins.
-5. Read the request, the action, the tool result and any later correction, not only
-   the nearest human turn. A human turn can contain pasted agent text (the 2026-10-20
-   Codex review was pasted into a human turn), so quote the user's own words apart
-   from pasted text, and say when they cannot be told apart.
-6. Record one outcome:
-   - found (exact or inferred);
-   - unavailable: no stamp, or the session is not in this host's stores, which can
-     mean another host or a pruned store;
-   - lookup failed: a tool error, kept separate from unavailable, as the scope skill
-     already requires.
+4. Bind the occurrence to its call. Candidates are the `tasks add` or `tasks feedback`
+   calls in that session whose result names the record's id with the matching action
+   (`created` for a creation, `recurred` for a recurrence). A `show`, a reused `add` or
+   any other mention of the id is not a candidate.
+   - **matched:** exactly one candidate fits the occurrence, either because its result
+     carries `at` equal to the note's `at`, or because, without `at` (pretty output, or
+     an older binary), the candidate's time and arguments fit this occurrence and no
+     other.
+   - **ambiguous:** more than one candidate fits; for example, two recurrences in one
+     session with equal summaries in the same second, or concurrent subagents under
+     one Claude session. List the candidates; never pick one.
+   - **inferred:** no candidate's result can be read, but the note's time and the
+     command text match a call. This fallback is needed when the created title
+     differs from the command text, as in 9 of 72 audited origins.
+5. Read the request, the action, the tool result and any later correction around the
+   bound call, not only the nearest human turn. A human turn can contain pasted agent
+   text (the 2026-10-20 Codex review was pasted into a human turn), so quote the
+   user's own words apart from pasted text, and say when they cannot be told apart.
+
+**Stage 2: an older request, when the occurrence names `origin_session`.**
+
+6. From the bound filing call in the filing session, collect what points into the
+   older session: transcripts read, the user's words quoted, the record's body and
+   references. Then open the older session and find the request those point to.
+   - **matched:** the filing session's evidence names a specific location in it, such
+     as a session-logs read that printed the turn.
+   - **inferred:** the request is found by content.
+   - **ambiguous:** several turns fit.
+
+   The record's id and the filing time are not anchors here; the request predates
+   both.
+7. When the older session cannot be read, the older request is unavailable. The
+   filing event's outcome stands on its own.
+
+**Outcomes.** Record one per stage:
+
+- matched, ambiguous (with its candidates) or inferred;
+- unavailable: no stamp, or the session is not in this host's stores, which can mean
+  another host or a pruned store;
+- lookup failed: a tool error, kept separate from unavailable, as the scope skill
+  already requires.
 
 Other-host retrieval is an explicit limitation. Records do not name the filing host:
 hostnames in public owner repositories are a disclosure, and lifecycle notes do not
@@ -342,6 +407,15 @@ environment built key by key):
 - Origin: set at creation, absent when omitted, and each row of the recurrence table
   in §4.3, including the absent-field warning. `edit --origin` and `--no-origin`
   change the field and leave notes untouched.
+- Correction supersedes a mistaken label. Create with `--origin user`, then
+  `edit --origin agent`. JSON gives `origin: agent` while the creation note keeps
+  `origin: user`, and the reading rule (§4.3) yields `agent` and "no user words". Then
+  `edit --no-origin`: the field is absent and rule 2 sees the `user` label again. The
+  test asserts the stored JSON the rule reads at each step. The README states the
+  rule with this case as its example, and tasks-441019's design cites it.
+- Write output: `add` and `feedback` JSON carry `at` equal to the occurrence note's
+  `at`, and a `reused` add carries none. Two recurrences of one record under one
+  session identity give two outputs, each `at` naming its own note.
 - `--origin-session` is validated and recorded. A bad key is refused before anything
   is written.
 - JSON and pretty `show` expose the new fields. `list --origin` filters, `none`
@@ -354,8 +428,16 @@ registry (`XDG_CONFIG_HOME` and `XDG_STATE_HOME`), with the worktree's binary in
 by explicit path. They never install it over the tracker on `PATH`. Each outcome is
 recorded on the implementing task:
 
-- A live record filed from a real harness session with the worktree binary: found by
-  exact anchor from its stamp.
+- A live record filed from a real harness session with the worktree binary: stage 1
+  matched from its stamp.
+- Two recurrences of one feedback record in one real session: each occurrence
+  matched to its own call. A second run with `--pretty` and equal summaries in quick
+  succession reports matched only where time and arguments separate the calls, and
+  ambiguous with both candidates otherwise.
+- An older request: a record filed in session B with `--origin-session A`, after B
+  read the request in A. Stage 1 matches the filing in B, and stage 2 finds the
+  request in A from B's evidence. A second record naming an unreadable session
+  reports stage 2 unavailable while stage 1 stands.
 - An archived Codex session (`archived_sessions`): found, or an explicit limitation
   naming the reader gap.
 - A Codex worker: the CLI tests cover the `root_session` stamp with a simulated
@@ -379,8 +461,10 @@ These are the author's calls, not user decisions; review them:
 
 1. The creation note is always written (§4.1).
 2. Three origin values, no agent-kind vocabulary (§4.3).
-3. Origin is a correctable record field plus per-occurrence evidence. Recurrence
-   combines into it, and an absent field is not overwritten (§4.3).
+3. Origin is a correctable record field plus per-occurrence history. Recurrence
+   combines into it, and an absent field is not overwritten. A set field supersedes
+   every occurrence label; an absent field leaves the labels as partial evidence
+   (§4.3).
 4. `root_session` on occurrence notes only (§4.4).
 5. Session stamp on a note, not in frontmatter (§4.5).
 6. Pointer, not captured words. The user's words stay in the body per lore-c01bc8
@@ -395,6 +479,10 @@ These are the author's calls, not user decisions; review them:
     task for the user to approve (§4.8).
 12. Retrieval demonstrations run before merge, by explicit path. The blind pilot runs
     after rollout (§5).
+13. `add` and `feedback` output gains `at`, so a tool result names its occurrence,
+    not only its record (§4.6, §4.7).
+14. Retrieval has two stages, and an older request is reached only through the filing
+    event's evidence (§4.7).
 
 ## 7. Left to the builder
 
