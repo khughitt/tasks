@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T11:31:35Z
+updated: 2026-10-25T11:31:44Z
 started: 2026-10-25T11:15:47Z
 depends: []
 parent: tasks-9b1c2b
@@ -40,4 +40,6 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T11:30:34Z (design/tasks-a58a90): review: spec round 1 — verdict: revise; findings: questions 4; reviewer: claude-code
 - 2026-10-25T11:30:35Z (design/tasks-a58a90): spec drafted in .worktrees/tasks-a58a90 (docs/specs/2026-10-25-creation-occurrence-provenance-design.md): session stamp on an always-written created note and stamped feedback recurrences; origin user|agent|mixed as a correctable frontmatter field plus per-occurrence evidence; origin_session and Codex root_session on occurrence notes; filing sessions recovered: 2e7d03 was agent-filed from the user's own question in claude-code:572ee51e-2f53-4729-96f8-f122a2cc8305 (mixed origin); the 2026-10-25 extension came from a $scope pass with no further user words (codex:01a172c0-9891-77c2-9b4c-b673b0f1633d)
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:31:44Z (design/tasks-a58a90): parked (waiting on user, review): user reviews the spec at design/tasks-a58a90 506253d:docs/specs/2026-10-25-creation-occurrence-provenance-design.md; on approval the agent writes the implementation plan in .worktrees/tasks-a58a90 (worktree hydrated, baseline deferred to execution setup)
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
