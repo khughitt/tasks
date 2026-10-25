@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-25T11:54:58Z
-updated: 2026-10-25T16:48:50Z
+updated: 2026-10-25T16:48:52Z
 depends: []
 tags: [feedback, friction, "from:tasks"]
 agent: codex
@@ -25,3 +25,8 @@ The full-suite baseline passed. A subsequent unchanged-code fast-suite run faile
 ## References
 
 - contract (context, kind=spec): docs/specs/2026-10-11-external-document-references-design.md — existing provider deadline and process cleanup contract
+
+## Notes
+
+- 2026-10-25T16:48:52Z (main): scope: scoped; at 31e12f6 (doc_fetch.rs last changed in 12beab6), confirmed two 150 ms cleanup tests can reach unconditional pid-file reads without parent-side startup confirmation; bounded readiness synchronization and deterministic delayed-start coverage define P2/s/mid/direct work, preserving production deadlines and cleanup guarantees. Original report retained in full; no duplicate task, new brief, or implementation created. origin: filing unavailable because the record has no created occurrence or harness_session stamp; no source, parent, origin_session or other session pointer is recorded, so origin remains unknown. Reported load 135/32 CPUs and failure were not independently reproduced.
+  provenance: {"harness_session":"codex:01a173f4-2451-7342-bfa4-ae5a150adde4","harness_session_source":"CODEX_THREAD_ID"}
