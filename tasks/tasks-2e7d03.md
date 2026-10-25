@@ -4,8 +4,8 @@ title: "tasks add records no creating-session provenance and no requester/origin
 status: idea
 priority: 2
 created: 2026-10-25T11:03:09Z
-updated: 2026-10-25T11:13:05Z
-depends: []
+updated: 2026-10-25T11:13:13Z
+depends: [tasks-a58a90]
 tags: [feedback, gap, "from:obs"]
 agent: claude-code/claude-opus-5-5
 ---
