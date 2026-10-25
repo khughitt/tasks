@@ -3,9 +3,13 @@ id: tasks-e637a1
 title: "Surface and rank blockers: fan-out of open dependents, and how long and how many scope passes each has held work"
 status: idea
 priority: 2
+size: m
+complexity: high
+process: planned
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T21:31:10Z
+updated: 2026-10-25T21:38:02Z
 depends: [tasks-e8d471]
+parent: tasks-6166d6
 tags: [cli]
 agent: claude-code
 origin: mixed
@@ -31,6 +35,10 @@ Agent additions to weigh when scoping:
 - Classify the blocker's own state: unstarted todo, parked on the user (approval, spending), shelved, or idea. A blocker held by a user decision belongs in the person's queue.
 - Exclude or separate goal-closeout edges (a hub goal depending on its cross-project pieces), which inflate fan-out without being real blockage.
 - Surface: a `tasks blockers` view (or `--sort unblocks` on list/ready) plus a short section in `prime`; any CLI change starts in ops's cli.toml.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-25-blocker-ranking-brief.md — originating ask, verified premises and blocker-report design questions
 
 ## Notes
 
