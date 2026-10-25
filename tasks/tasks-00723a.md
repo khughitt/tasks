@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T11:45:19Z
+updated: 2026-10-25T11:46:13Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -26,3 +26,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T11:45:19Z (docs/tasks-00723a): resumed
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T11:46:13Z (docs/tasks-00723a): Direct documentation scope: update shipped tasks/scope/curate skills for landed detached records support; preserve stored docs paths, distinguish checkout evidence from records writes, cover init/JSON/errors/rename, and remove config-walk assumptions. Source: approved records-home design c03869d and original human turn recovered from its session. Workspace .worktrees/tasks-00723a; hydrate with confined README cargo install, then full-suite baseline before edits.
