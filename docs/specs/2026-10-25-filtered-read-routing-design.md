@@ -1,6 +1,7 @@
 # Project routing for filtered reads
 
-Status: proposed; awaiting user review.
+Status: approved for planning by Keith on 2026-10-25 at f03f0b4;
+round-4 wording clarifications applied without changing the approved policy.
 Task: tasks-284d9b.
 
 ## Intent and evidence
@@ -32,8 +33,8 @@ flag, dependency, stored field or JSON shape. It does not change mutation routin
 
 ## Selected contract
 
-These are the author's recommendations, not decisions already approved by the
-user. The existing Rust CLI and registry remain the implementation platform.
+The user approved this contract for planning. The existing Rust CLI and registry
+remain the implementation platform.
 
 ### Routing precedence
 
@@ -41,19 +42,20 @@ Apply these rules to `list`, `search`, `ready`, and `next`:
 
 1. An explicit `--project`, `--group` or `--all-projects` selects the scope as
    today. ID filters narrow that scope; they never enlarge or replace it.
+   A bare suffix outside every project is `invalid_id`, including with explicit
+   scope: explicit scope does not define shorthand's local prefix.
 2. Without explicit scope, use `--parent` and/or `--under` to select the project
    exactly as a positional ID does. A canonical prefix matching the local project
    keeps that checkout, including `-C`, linked records and worktrees; a foreign
    prefix opens its registered project. Outside every project, use the registry.
 3. With neither ID filter, keep the existing current-project lookup. If that
    fails with `no_project`, retain the kind and add guidance naming
-   `--all-projects` and `--project <prefix>` to the detail. The shared opener may
+   `--all-projects` and `--project <prefix>` to the detail. The shared opener does
    give this same guidance on an unfiltered call; no predicate-specific error
    plumbing is needed. Other discovery failures remain errors, not routing hints.
 4. Without explicit scope, parse every supplied ID filter before selecting a
-   destination. Existing trailing ASCII period/comma trimming and retired-prefix canonicalization
-   apply. A bare suffix outside every project is `invalid_id`, including with
-   explicit scope: explicit scope does not define shorthand's local prefix.
+   destination. Existing trailing ASCII period/comma trimming and retired-prefix
+   canonicalization apply.
 5. If both filters name different canonical prefixes without explicit scope,
    fail with existing `validation`, identifying both flags and prefixes and
    advising IDs from one project, or explicit scope when intended. Apply this
