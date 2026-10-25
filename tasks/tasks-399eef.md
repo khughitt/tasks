@@ -4,8 +4,9 @@ title: show reports task_not_found for an unclaimed worktree-only task without l
 status: idea
 priority: 2
 created: 2026-10-24T17:59:59Z
-updated: 2026-10-24T17:59:59Z
+updated: 2026-10-25T16:41:13Z
 depends: []
+parent: tasks-984769
 tags: [feedback, gap, "from:relay"]
 agent: codex
 ---
