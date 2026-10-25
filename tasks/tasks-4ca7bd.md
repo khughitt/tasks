@@ -4,13 +4,13 @@ title: "tasks prime's default JSON runs to ~250 KB on a project with ~230 open t
 status: idea
 priority: 2
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-25T16:03:37Z
+updated: 2026-10-25T16:03:43Z
 depends: [tasks-e7424b, tasks-dc696d]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
 ---
 
-Scope handoff: [ref:brief] records the current code, unresolved contract or measurement question, and the follow-up that must answer it before implementation is scoped.
+Scope handoff: [ref:brief] records current output measurements and the approved opt-in contract. Summary design tasks-e7424b, binary tasks-7c5a4b and reinstall tasks-72093a are complete; ordinary prime stays full. Remaining startup-guidance adoption and the real consumer pilot wait on tasks-dc696d under the recorded flow-trial-1 gate. Reconsider this report after that outcome; do not create another summary implementation task or infer gate release from the installed option.
 
 ## References
 
