@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T23:13:00Z
+updated: 2026-10-25T23:13:02Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -91,3 +91,4 @@ Agent additions to weigh when scoping:
 - 2026-10-25T23:12:04Z (design/tasks-e637a1): Revision d2940d0:docs/specs/2026-10-25-blocker-ranking-design.md addresses all round-3 findings; frozen for fresh builder re-review and user review. Chose explicit partial coverage for unfollowed foreign paths rather than expanding the graph, preserving explicit scan scope/cost at the cost of incomplete local/group impact and possible omitted rows. Added own open/unresolved counts, per-status impact, held claims, distinct task_needs and clarified existing caller/goal/awaiting_user contracts. Internal verdict extraction is permitted here; tasks-e90b4f public delivery is not a dependency. just test-fast with GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM=1 passed 1728 tests with 4 ignored; document checks passed. No product code or plan changes.
 - 2026-10-25T23:12:20Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-revision-2-fast.log", "state": "kept", "verification": "verified", "purpose": "Revision d2940d0 fast-suite output with isolated Git config: 1728 passed, 4 ignored", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup attach needed logs or preserve hashed raw bytes before removal", "sha256": "94ed8fa2f3d1d5b22075d085615544dd71ec9140fa1e23bceb3adde877cb33dd"}
 - 2026-10-25T23:13:00Z (design/tasks-e637a1): review: spec round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T23:13:02Z (design/tasks-e637a1): attached: spec-round-4-report.md (1882 bytes): Full fresh builder re-review of d2940d0: codex/gpt-6.1-sol accepts for planning, no Important or Minor findings; user approval pending.
