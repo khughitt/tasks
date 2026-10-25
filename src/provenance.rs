@@ -16,6 +16,20 @@ pub fn validate(provenance: &HarnessProvenance) -> Result<(), String> {
     }
 }
 
+/// A session key as stored in occurrence keys: a `claude-code:` or `codex:` prefix and a
+/// nonempty, control-free remainder.
+pub fn validate_session_key(key: &str) -> Result<(), String> {
+    match key
+        .strip_prefix("claude-code:")
+        .or_else(|| key.strip_prefix("codex:"))
+    {
+        Some(id) if !id.is_empty() && !id.chars().any(char::is_control) => Ok(()),
+        _ => Err(format!(
+            "session key {key:?} must be claude-code: or codex: followed by a nonempty, control-free ID"
+        )),
+    }
+}
+
 pub fn resolve_from(
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Result<Option<HarnessProvenance>, String> {

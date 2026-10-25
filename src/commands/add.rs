@@ -46,6 +46,7 @@ pub fn blank(
         source: None,
         model: None,
         agent,
+        origin: None,
         spec: None,
         plan: None,
         step: None,

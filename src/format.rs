@@ -1,10 +1,13 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
-use crate::model::{Complexity, HarnessProvenance, Note, Process, Ref, Size, Status, Task, TaskId};
+use crate::model::{
+    Complexity, HarnessProvenance, Note, NoteOccurrence, Origin, Process, Ref, Size, Status, Task,
+    TaskId,
+};
 
 pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 33] = [
+const KEYS: [&str; 34] = [
     "id",
     "title",
     "status",
@@ -33,6 +36,7 @@ const KEYS: [&str; 33] = [
     "source",
     "model",
     "agent",
+    "origin",
     "spec",
     "plan",
     "step",
@@ -167,6 +171,10 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         source: scalar("source")?,
         model: scalar("model")?,
         agent: scalar("agent")?,
+        origin: scalar("origin")?
+            .map(|s| Origin::parse(&s))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
         spec: scalar("spec")?,
         plan: scalar("plan")?,
         step: scalar("step")?,
@@ -223,6 +231,8 @@ fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> 
     let mut in_refs = false;
     let mut notes: Vec<Note> = Vec::new();
     let mut in_notes = false;
+    // Whether the current note has already had a `provenance:` continuation line.
+    let mut continued = false;
     for line in after.lines() {
         if line == REFS_DELIMITER {
             if in_notes {
@@ -257,17 +267,23 @@ fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> 
             let note = notes
                 .last_mut()
                 .ok_or_else(|| perr(file, "orphan provenance line"))?;
-            if note.provenance.is_some() {
+            if continued {
                 return Err(perr(file, "duplicate provenance line"));
             }
+            continued = true;
             // Serde structs also accept positional arrays; the note contract is an object.
             if !json.trim_start().starts_with('{') {
                 return Err(perr(file, "note provenance must be a JSON object"));
             }
-            let provenance: HarnessProvenance = serde_json::from_str(json)
+            let keys: ContinuationKeys = serde_json::from_str(json)
                 .map_err(|error| perr(file, format!("invalid note provenance: {error}")))?;
-            note.provenance = Some(provenance);
+            let (provenance, occurrence) = keys
+                .split()
+                .map_err(|detail| perr(file, format!("invalid note provenance: {detail}")))?;
+            note.provenance = provenance;
+            note.occurrence = occurrence;
         } else if !line.trim().is_empty() {
+            continued = false;
             notes.push(
                 parse_note_line(line)
                     .ok_or_else(|| perr(file, format!("malformed note line {line:?}")))?,
@@ -296,7 +312,83 @@ fn parse_note_line(line: &str) -> Option<Note> {
         by: by.into(),
         text: text.into(),
         provenance: None,
+        occurrence: NoteOccurrence::default(),
     })
+}
+
+/// The five keys a `provenance:` continuation may hold, in serialization order.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationKeys {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    harness_session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    harness_session_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    root_session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin: Option<Origin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_session: Option<String>,
+}
+
+impl ContinuationKeys {
+    fn of(note: &Note) -> Self {
+        Self {
+            harness_session: note.provenance.as_ref().map(|p| p.harness_session.clone()),
+            harness_session_source: note
+                .provenance
+                .as_ref()
+                .map(|p| p.harness_session_source.clone()),
+            root_session: note.occurrence.root_session.clone(),
+            origin: note.occurrence.origin,
+            origin_session: note.occurrence.origin_session.clone(),
+        }
+    }
+
+    fn split(self) -> std::result::Result<(Option<HarnessProvenance>, NoteOccurrence), String> {
+        let provenance = match (self.harness_session, self.harness_session_source) {
+            (Some(harness_session), Some(harness_session_source)) => Some(HarnessProvenance {
+                harness_session,
+                harness_session_source,
+            }),
+            (None, None) => None,
+            _ => return Err("harness_session and harness_session_source go together".into()),
+        };
+        let occurrence = NoteOccurrence {
+            root_session: self.root_session,
+            origin: self.origin,
+            origin_session: self.origin_session,
+        };
+        if provenance.is_none() && occurrence.is_empty() {
+            return Err("empty provenance object".into());
+        }
+        validate_note_keys(provenance.as_ref(), &occurrence)?;
+        Ok((provenance, occurrence))
+    }
+}
+
+fn validate_note_keys(
+    provenance: Option<&HarnessProvenance>,
+    occurrence: &NoteOccurrence,
+) -> std::result::Result<(), String> {
+    if let Some(provenance) = provenance {
+        crate::provenance::validate(provenance)?;
+    }
+    if let Some(key) = &occurrence.origin_session {
+        crate::provenance::validate_session_key(key)?;
+    }
+    if let Some(key) = &occurrence.root_session {
+        crate::provenance::validate_session_key(key)?;
+        let codex_pair = provenance.is_some_and(|p| p.harness_session_source == "CODEX_THREAD_ID");
+        if !key.starts_with("codex:") || !codex_pair {
+            return Err(
+                "root_session is a codex: key and needs a harness pair whose source is CODEX_THREAD_ID"
+                    .into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_body(body: &str) -> Result<()> {
@@ -508,9 +600,7 @@ pub fn validate_task(t: &Task) -> Result<()> {
         crate::time::parse(&n.at)?;
         validate_owner(&n.by)?;
         validate_note_text(&n.text)?;
-        if let Some(provenance) = &n.provenance {
-            crate::provenance::validate(provenance).map_err(Error::Validation)?;
-        }
+        validate_note_keys(n.provenance.as_ref(), &n.occurrence).map_err(Error::Validation)?;
     }
     crate::tombstone::validate(t)?;
     Ok(())
@@ -599,6 +689,9 @@ pub fn serialize_task(t: &Task) -> String {
     if let Some(v) = &t.agent {
         pairs.push(("agent".into(), s(v)));
     }
+    if let Some(v) = t.origin {
+        pairs.push(("origin".into(), s(v.as_str())));
+    }
     if let Some(v) = &t.spec {
         pairs.push(("spec".into(), s(v)));
     }
@@ -639,11 +732,11 @@ pub fn serialize_task(t: &Task) -> String {
         out.push_str("\n\n");
         for n in &t.notes {
             out.push_str(&format!("- {} ({}): {}\n", n.at, n.by, n.text));
-            if let Some(provenance) = &n.provenance {
+            if n.provenance.is_some() || !n.occurrence.is_empty() {
                 out.push_str("  provenance: ");
                 out.push_str(
-                    &serde_json::to_string(provenance)
-                        .expect("a pair of strings serializes as JSON"),
+                    &serde_json::to_string(&ContinuationKeys::of(n))
+                        .expect("optional strings and an enum serialize as JSON"),
                 );
                 out.push('\n');
             }
@@ -894,6 +987,73 @@ mod tests {
             );
             assert!(parse_task(&text, "x").is_err());
         }
+    }
+
+    #[test]
+    fn occurrence_keys_roundtrip_in_fixed_order() {
+        let line = r#"  provenance: {"harness_session":"codex:w","harness_session_source":"CODEX_THREAD_ID","root_session":"codex:r","origin":"mixed","origin_session":"claude-code:old"}"#;
+        let text = format!("{FULL}- 2026-10-25T12:00:00Z (add): created\n{line}\n");
+        let task = parse_task(&text, "t").unwrap();
+        assert_eq!(
+            task.notes.last().unwrap().occurrence.origin,
+            Some(Origin::Mixed)
+        );
+        assert_eq!(serialize_task(&task), text);
+    }
+
+    #[test]
+    fn occurrence_keys_may_stand_without_the_pair() {
+        let text = format!(
+            "{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {{\"origin\":\"user\"}}\n"
+        );
+        let task = parse_task(&text, "t").unwrap();
+        assert!(task.notes.last().unwrap().provenance.is_none());
+        assert_eq!(serialize_task(&task), text);
+    }
+
+    #[test]
+    fn occurrence_keys_reject_bad_forms() {
+        for json in [
+            r#"{"origin":"maybe"}"#,
+            r#"{"origin_session":"slack:abc"}"#,
+            r#"{"origin_session":"codex:"}"#,
+            r#"{"root_session":"codex:r"}"#,
+            r#"{"harness_session":"claude-code:a","harness_session_source":"CLAUDE_CODE_SESSION_ID","root_session":"codex:r"}"#,
+            r#"{"harness_session":"codex:w","harness_session_source":"CODEX_THREAD_ID","root_session":"claude-code:r"}"#,
+            r#"{"harness_session":"codex:w"}"#,
+            r#"{"surprise":1}"#,
+        ] {
+            let text =
+                format!("{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {json}\n");
+            assert!(parse_task(&text, "t").is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn a_second_continuation_is_refused_even_without_a_pair() {
+        let text = format!(
+            "{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {{\"origin\":\"user\"}}\n  provenance: {{\"origin\":\"agent\"}}\n"
+        );
+        let error = parse_task(&text, "t").unwrap_err().to_string();
+        assert!(error.contains("duplicate provenance line"), "{error}");
+    }
+
+    #[test]
+    fn origin_frontmatter_roundtrips_after_agent_and_rejects_unknown_values() {
+        let text = MINIMAL.replace("tags: []\n", "tags: []\nagent: codex/gpt-6\norigin: user\n");
+        let task = parse_task(&text, "x").unwrap();
+        assert_eq!(task.origin, Some(Origin::User));
+        assert_eq!(serialize_task(&task), text);
+        let bad = MINIMAL.replace("tags: []\n", "tags: []\norigin: someone\n");
+        let error = parse_task(&bad, "x").unwrap_err().to_string();
+        assert!(error.contains("unknown origin"), "{error}");
+    }
+
+    #[test]
+    fn origin_combine_follows_the_rule() {
+        assert_eq!(Origin::User.combine(Origin::User), Origin::User);
+        assert_eq!(Origin::Agent.combine(Origin::Mixed), Origin::Mixed);
+        assert_eq!(Origin::User.combine(Origin::Agent), Origin::Mixed);
     }
 
     #[test]

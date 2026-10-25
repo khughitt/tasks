@@ -165,6 +165,7 @@ mod tests {
             source: None,
             model: None,
             agent: None,
+            origin: None,
             spec: spec.map(Into::into),
             plan: plan.map(Into::into),
             step: step.map(Into::into),
@@ -484,6 +485,64 @@ pub struct Note {
     pub text: String,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<HarnessProvenance>,
+    #[serde(flatten)]
+    pub occurrence: NoteOccurrence,
+}
+
+/// Who supplied a task or an occurrence: the user, an agent, or both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    User,
+    Agent,
+    Mixed,
+}
+
+impl Origin {
+    pub const ALL: [Origin; 3] = [Origin::User, Origin::Agent, Origin::Mixed];
+
+    pub fn parse(s: &str) -> Result<Origin> {
+        Self::ALL
+            .into_iter()
+            .find(|origin| origin.as_str() == s)
+            .ok_or_else(|| {
+                Error::Validation(format!(
+                    "unknown origin {s:?}; expected one of user, agent, mixed"
+                ))
+            })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Agent => "agent",
+            Self::Mixed => "mixed",
+        }
+    }
+
+    /// Equal origins stay; anything else is mixed.
+    // First caller lands with the creation-note task; drop the allow then.
+    #[allow(dead_code)]
+    pub fn combine(self, other: Origin) -> Origin {
+        if self == other { self } else { Origin::Mixed }
+    }
+}
+
+/// Occurrence keys of a note's `provenance:` continuation, beyond the session pair.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct NoteOccurrence {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_session: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_session: Option<String>,
+}
+
+impl NoteOccurrence {
+    pub fn is_empty(&self) -> bool {
+        self.root_session.is_none() && self.origin.is_none() && self.origin_session.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -621,6 +680,9 @@ pub struct Task {
     /// completion side. See docs/specs/2026-09-13-creation-provenance-design.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// Who supplied the task: `user`, `agent` or `mixed`; `None` when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

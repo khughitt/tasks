@@ -458,6 +458,7 @@ mod tests {
             source: None,
             model: None,
             agent: None,
+            origin: None,
             spec: None,
             plan: None,
             step: None,

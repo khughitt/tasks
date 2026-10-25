@@ -610,6 +610,7 @@ mod tests {
             by: "tester".into(),
             text: text.into(),
             provenance: None,
+            occurrence: Default::default(),
         }
     }
 

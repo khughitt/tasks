@@ -763,6 +763,7 @@ mod tests {
                 harness_session: session.into(),
                 harness_session_source: "CODEX_SESSION_ID".into(),
             }),
+            occurrence: Default::default(),
         }
     }
 
