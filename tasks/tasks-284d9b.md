@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:49:04Z
+updated: 2026-10-25T10:49:07Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -52,3 +52,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T10:49:04Z (design/tasks-284d9b): resumed
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T10:49:07Z (design/tasks-284d9b): review: spec round 2 — verdict: revise; findings: Important 1, Minor 3; reviewer: claude-code/claude-opus-5-5
