@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T22:43:15Z
+updated: 2026-10-25T22:43:17Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -80,3 +80,4 @@ Agent additions to weigh when scoping:
 - 2026-10-25T22:43:11Z (design/tasks-e637a1): Correction to the preceding verification note: the isolated just test-fast output reports 1728 passed, 0 failed, 4 ignored across 15 test binaries; the earlier 5 ignored was a transcription error.
 - 2026-10-25T22:43:13Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-e637a1", "state": "kept", "verification": "verified", "purpose": "Frozen spec review at c45fc7f, then author the separately reviewed plan; includes attached builder-review copies and isolated install/build outputs. No host pointers changed.", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "After user design and plan reviews and final integration, inspect ignored files, preserve remaining evidence, run tt-report and host-pointer checks before removal"}
 - 2026-10-25T22:43:15Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-move-check.log", "state": "kept", "verification": "verified", "purpose": "Reproduced fixture isolation failure, 87 passed and 3 failed; tracked as tasks-2518ad", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "18697a3fcca8ee985336f163235b0ef7dd7397e60cd603f6f68412699cf69440"}
+- 2026-10-25T22:43:17Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-move-isolated-check.log", "state": "kept", "verification": "verified", "purpose": "Focused isolated Git-config comparison, 90 tests passed", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "935b29cc5be907860c31b05c0dfd8bae3f847bc035a69e72595323dc344a2150"}
