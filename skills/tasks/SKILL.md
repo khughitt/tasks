@@ -238,6 +238,21 @@ call are ignored, not merged — `tasks edit` that id if the record should chang
 Id-taking commands route by prefix, retaining the current checkout for a matching prefix;
 see [Project routing](../../README.md#project-routing).
 
+ID-valued read filters route the same way: list/search/ready `--parent` and
+`--under`, and next `--under`, select the named project inside or outside another
+project. Matching prefixes keep the local checkout/worktree. With both filters,
+their canonical prefixes must agree unless explicit scope is set. `--project`,
+`--group` and `--all-projects` take precedence; filters narrow that scope and a
+target absent from it is `task_not_found`. Cross-project parent/ancestor predicates
+cannot match even in a wide scope. Bare suffixes still mean the original cwd's
+project (or `-C`), never the routed destination.
+
+`--source` stays literal and supplies no scope. Outside every project use
+`tasks list --all-projects --source ops-2fe949 --status todo` to find everything
+filed from that exact reference, including other projects. With no ID filter or
+explicit scope, filtered reads report `no_project` with scope guidance. A foreign
+ID does not bypass malformed local config or broken Git metadata.
+
 A linked project keeps its records outside its code checkout: its `tasks/.config.toml`
 carries `[checkout] path`, and every command run anywhere in that checkout or its
 worktrees opens the linked project (`tasks init --prefix <p> --checkout <path>` in the

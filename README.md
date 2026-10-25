@@ -349,6 +349,26 @@ work from outside every project: the prefix selects the registered root. Inside 
 project, a matching prefix keeps the current checkout, including a worktree selected
 with `-C`. `feedback` works there too and reports as `from:unregistered`.
 
+ID-valued read filters follow the same routing: `--parent` and `--under` on
+`list`, `search` and `ready`, and `next --under`, select the ID's project both
+inside and outside another project. A matching prefix keeps the current checkout
+or worktree. With both filters, their canonical prefixes must agree; retired
+spellings and trailing sentence punctuation are accepted as on positional IDs.
+A bare suffix always names the original cwd's project, including with `-C`;
+routing or an explicit scope never changes that meaning.
+
+An explicit `--project`, `--group` or `--all-projects` takes precedence. Filters
+then narrow that scope: a target outside it is `task_not_found`. A parent and
+ancestor in different projects have an empty intersection even in a wide scope.
+`--source`, `--plan` and `--ref` remain literal filters and never select a project.
+For provenance searches from outside every project, set the scope explicitly:
+
+    tasks list --all-projects --source ops-2fe949 --status todo
+
+Without a scope or an ID filter, these reads report `no_project` and suggest
+`--all-projects` or `--project <prefix>`. Broken local metadata still fails rather
+than being bypassed for a foreign ID.
+
 The registry can also declare project groups (`[groups]`), named sets of live prefixes
 that `--group <name>` reads together. `rename` carries a member to its new prefix.
 `unregister` removes the prefix from every group and deletes, with a warning, any group it

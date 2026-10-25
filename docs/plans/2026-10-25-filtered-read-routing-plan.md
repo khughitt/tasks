@@ -23,7 +23,7 @@
 
 ## Review Focus
 
-1. Both local config and registry corrupt: an ID-filter call reports the registry error first; a healthy registry still exposes local corruption (Task 1, lookup-order test).
+1. Both local config and registry corrupt: an ID-filter call reports the local config error first, matching positional IDs (Task 1, lookup-order test).
 2. Old and live spellings of the local prefix: canonical agreement must retain the local worktree (Task 1, alias and in-tree-worktree tests).
 3. A local bare suffix combined with a foreign full ID: shorthand must not change meaning after routing (Task 1, ID-normalization test).
 4. Explicit scope with a corrupt cwd config: full-ID filtering must still skip cwd discovery; explicit suffixes still use the original cwd (Task 1, explicit-scope test).
@@ -56,10 +56,10 @@ Within the new opener:
 
 1. Explicit scope delegates immediately to `open_id_read_ctx`; no extra registry load, filter parsing or local lookup precedes it.
 2. With neither ID filter, delegate directly with None; preserve current discovery-before-registry order and decorate only a resulting `NoProject`.
-3. With ID filters and no explicit scope, load `Registry`, construct `Shorthand::new(start_dir(dir)?)`, parse/canonicalize every provided filter, and compare canonical prefixes. This deliberately loads the registry before local discovery; bare-suffix parsing may itself locate the original cwd project.
-4. After agreement, pass one original reference (`parent.or(under)`) to `open_id_read_ctx`. Its existing resolver locates the cwd, refuses non-NoProject discovery errors, and selects the local matching checkout or foreign registered project.
+3. With ID filters and no explicit scope, locate the current project first, propagating any error other than `NoProject`. Then load the registry, parse/canonicalize every provided filter using shorthand anchored to the original cwd, and compare canonical prefixes.
+4. After agreement, share the existing positional resolver's local matching checkout or foreign registered-project selection. A small extraction may carry the already discovered context so discovery is not repeated.
 
-Thus dual corruption with full-ID filters reports the registry config path first; local-only corruption still reports the local config path. With no ID filter, an outside cwd and corrupt registry still yield `no_project` with scope guidance. Explicit calls retain existing error precedence. Syntax errors are detected during step 3, before destination opening.
+Thus dual corruption with full-ID filters reports the local config path first, exactly as positional IDs do. With no ID filter, an outside cwd and corrupt registry still yield `no_project` with scope guidance. Explicit calls retain existing error precedence. Syntax errors are detected during step 3, before destination opening. These order changes adopt the accepted plan review's Minor 1.
 
 ### Task 1: Route filtered reads through the shared ID resolver
 
@@ -95,13 +95,13 @@ Also assert conflict details name both flags and canonical prefixes, inside and 
 | ID-shaped, retired-prefix, unregistered-prefix and punctuated sources | Byte-for-byte equality under explicit scope or an ID filter; never canonicalize or resolve source. |
 | Outside source-only or plain list, no ID | `no_project`; detail includes `--all-projects` and `--project <prefix>`; JSON error still contains only kind and detail. |
 | Local malformed config, healthy registry, full-ID filter | `config`; detail identifies local `tasks/.config.toml`. |
-| Registry and local config both malformed, full-ID filter | `config`; detail identifies the temporary registry path, pinning registry-first order. |
+| Registry and local config both malformed, full-ID filter | `config`; detail identifies the local config path, pinning positional-ID order. |
 | Outside cwd, corrupt registry, no ID filter | `no_project` and guidance, preserving `local_read_prefers_no_project_to_a_malformed_registry`. |
 | Registered retired target, inferred single-project read | Preserve the target's retirement warning; compare with the same filtered read in its root. |
 
 For source equality, file matching tasks in both projects and verify `--all-projects --source` finds both; routing by an unrelated parent still filters the raw source string in the parent's project. Include a same-prefix alias pair with both filters supplied, so canonical agreement is exercised before route selection. Restore temporary registry contents before subsequent fixture operations. Keep the existing stale-prefix refusal control.
 
-- [ ] **Step 3: Add safe worktree/linked controls.** In `tests/linked.rs`, add `filtered_read_keeps_in_tree_worktree` using the module's isolated `git`/`code_repo`, and `filtered_read_routes_linked_records` using `layout`. For an in-tree project, commit a goal, branch a real worktree, then add a leaf only there. Assert matching full ID, local suffix, alias, and `-C <worktree>` retain that leaf; explicit `--project` reads the registered main copy and returns no children. For the alias case, add an alias to this test's temporary registry with `toml::Value`, following `alias_registry`'s existing pattern; that CLI-test-private helper is not available here. Foreign full IDs route out of the worktree. For linked records, query parent/under from code, code worktree and outside; assert overlay records are read and code-tree status is unchanged. Extend `a_broken_ancestor_dot_git_is_named_for_inspection_never_removal` with a filtered-read case preserving its existing `io` diagnostic. Do not add the empty-marker attachment experiment owned by tasks-e147b9.
+- [ ] **Step 3: Add safe worktree/linked controls.** In `tests/linked.rs`, add `filtered_read_keeps_in_tree_worktree` using the module's isolated `git`/`code_repo`, and `filtered_read_routes_linked_records` using `layout`. For an in-tree project, commit a goal, branch a real worktree, then use `tasks add` with record auto-commits disabled to add a leaf only there. No Git writes occur in the linked worktree. Enroll both new cases in `linked_git_fixtures_ignore_hostile_environment`. Assert matching full ID, local suffix, alias, and `-C <worktree>` retain that leaf; explicit `--project` reads the registered main copy and returns no children. For the alias case, add an alias to this test's temporary registry with `toml::Value`, following `alias_registry`'s existing pattern; that CLI-test-private helper is not available here. Foreign full IDs route out of the worktree. For linked records, query parent/under from code, code worktree and outside; assert overlay records are read and code-tree status is unchanged. Extend `a_broken_ancestor_dot_git_is_named_for_inspection_never_removal` with a filtered-read case preserving its existing `io` diagnostic. Do not add the empty-marker attachment experiment owned by tasks-e147b9.
 
 - [ ] **Step 4: Prove RED.** Run `just test-one --test cli filtered_read_` and `just test-one --test linked filtered_read_`, then the existing marker test by name. New routing/guidance cases must fail on current code for their intended assertions; no compile errors or zero-test runs count. The existing boundary controls may already pass. Record what failed before implementing.
 
@@ -113,7 +113,7 @@ Wire list/search/ready with their `FilterArgs.parent/under`; next supplies None 
 
 - [ ] **Step 7: Prove GREEN and commit.** Rerun both new-test commands and the marker control. Run `just test-one --test cli bare_suffixes_`, `just test-one --test cli project_scope_`, and `just test-one --test cli id_commands_route_from_outside_every_project`. Then `just test-fast`, `tasks check`, and `git diff --check`; all must exit 0 with nonzero test counts. The pre-commit hook supplies hygiene, formatting and Clippy. Commit the changed files and task record with `feat: route filtered reads by task id`.
 
-- [ ] **Step 8: Verify the installed worktree CLI and close the child.** Rebuild with the confined install command from Setup. Use `target/hydrated/bin/tasks` explicitly for a read-only `list --under tasks-284d9b` and `search routing --parent tasks-284d9b` smoke in this worktree, checking task IDs/prefixes, not assumed titles/order. Do not install or repoint a host launcher at the worktree. Record results and complete this child before Task 2; the parent remains open and owns the retained worktree.
+- [ ] **Step 8: Verify the installed worktree CLI and close the child.** Rebuild with the confined install command from Setup. Use `target/hydrated/bin/tasks` explicitly for read-only local list/search checks and, with `-C` naming a temporary directory outside every project, `list --under tasks-284d9b`, the original `list --source ops-2fe949 --status todo`, and its `--all-projects` recovery. Outside routing reads registered main, so compare descendants with a main-checkout read, not the branch-only children; the source-only call must fail with `no_project` and scope guidance. Use a disposable registry containing only the registered tasks root for the smoke when unrelated projects are held or broken. Remove the temporary cwd/registry afterward. Do not install or repoint a host launcher at the worktree. Record results and complete this child before Task 2; the parent remains open and owns the retained worktree.
 
 ### Task 2: Align shared filter and tree completion
 
