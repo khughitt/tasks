@@ -7,7 +7,7 @@ complexity: mid
 process: direct
 owner: tasks-053e89
 created: 2026-10-25T12:15:43Z
-updated: 2026-10-25T13:41:55Z
+updated: 2026-10-25T13:44:42Z
 started: 2026-10-25T13:25:14Z
 depends: [tasks-b11cfd]
 parent: tasks-053e89
@@ -39,3 +39,4 @@ step: "Task 6: Retrieval demonstrations"
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T13:41:55Z (tasks-053e89): demo doubts for the skill text (no failed expectation): hook-refused calls, telling whether stderr was captured when Claude Code merges it into stdout, Claude Code subagent transcripts under <session>/subagents/ (hq-4d77cc), api-request-blob duplicates, time fit of a same-argument call after the note
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T13:44:42Z (tasks-053e89): scratch released: titan:/mnt/ssd3/work/tasks/tasks-4d39db removed (demo projects, audit extract, retriever scripts: regenerable; the report is attached, sha256 ae3aa727…475f2a matched before removal)
