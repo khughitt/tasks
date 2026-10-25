@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:34:10Z
+updated: 2026-10-25T10:34:13Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -47,3 +47,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T10:31:04Z (design/tasks-284d9b): Process: planned; workspace .worktrees/tasks-284d9b on design/tasks-284d9b. Hydrated with README cargo install --locked --path . confined to this worktree (installed files retained under target/hydrated); shared host binary unchanged. Full-suite baseline deferred to execution Setup under the planned-work rule. Design will retain source's literal semantics and recommend explicit --all-projects for cross-project provenance searches; tasks-e147b9 has no finding yet, so preserve existing NoProject-only fallback and obstruction errors.
 - 2026-10-25T10:34:08Z (design/tasks-284d9b): review: spec round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T10:34:10Z (design/tasks-284d9b): attached: filtered-read-builder-check.md (467 bytes): Full read-only builder check of spec ce08cdc; codex/gpt-6.1-sol accepted with no findings
+- 2026-10-25T10:34:13Z (design/tasks-284d9b): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-284d9b","state":"kept","verification":"verified","purpose":"Frozen spec ce08cdc awaiting user review; branch design/tasks-284d9b includes the full builder report attachment and review ledger under .superpowers/sdd/tasks-284d9b","next_owner":"task:tasks-284d9b","cleanup_trigger":"After user spec approval, prepare and review the implementation plan; after implementation integration, inspect ignored files and run removal checks"}
