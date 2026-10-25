@@ -164,3 +164,7 @@ work equally, with per-status counts making the composition visible. Compact
 pretty rows move explanations below the row. New fixtures cover each change.
 The task notes and next review request name the new frozen revision; c45fc7f is
 superseded. This revision is not approved and no implementation plan was drafted.
+
+Fresh builder review round 4 of frozen d2940d0 by codex/gpt-6.1-sol accepts for
+planning with no Important or Minor findings. Full reviews and the updated ledger
+are attached to tasks-e637a1. The user still reviews the design before planning.
