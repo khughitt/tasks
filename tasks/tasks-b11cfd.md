@@ -1,13 +1,13 @@
 ---
 id: tasks-b11cfd
 title: "Skills: filing, pickup, and retrieval"
-status: todo
+status: doing
 priority: 2
 complexity: mid
 process: direct
 owner: tasks-053e89
 created: 2026-10-25T12:15:41Z
-updated: 2026-10-25T13:56:08Z
+updated: 2026-10-25T13:56:10Z
 started: 2026-10-25T13:16:03Z
 depends: [tasks-58d20b]
 parent: tasks-053e89
@@ -26,4 +26,6 @@ step: "Task 5: Skills: filing, pickup, and retrieval"
 - 2026-10-25T13:25:12Z (tasks-053e89): done
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T13:25:12Z (tasks-053e89): skills: --origin and --origin-session at filing, reading rule at pickup, scope §2 two-stage retrieval of the originating ask with per-stage outcomes, corrections applied in the §6 write phase, stamped scope notes: fed20f9, 8aba3ab
+  provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T13:56:10Z (tasks-053e89): resumed
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
