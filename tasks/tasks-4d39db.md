@@ -7,7 +7,7 @@ complexity: mid
 process: direct
 owner: tasks-053e89
 created: 2026-10-25T12:15:43Z
-updated: 2026-10-25T13:41:47Z
+updated: 2026-10-25T13:41:48Z
 started: 2026-10-25T13:25:14Z
 depends: [tasks-b11cfd]
 parent: tasks-053e89
@@ -28,4 +28,6 @@ step: "Task 6: Retrieval demonstrations"
 - 2026-10-25T13:41:45Z (tasks-053e89): demo: two JSON recurrences in different seconds (own-249b63): creation and both recurrences matched — as expected
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T13:41:47Z (tasks-053e89): demo: two JSON recurrences with equal summaries in one second (own-00f6e1): creation matched, both recurrences ambiguous listing both calls — as expected
+  provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T13:41:48Z (tasks-053e89): demo: pretty recurrences in different seconds (own-c77db0): all matched (only full pretty result fitting time and -b text); pretty same-second pair (own-c44636): both recurrences ambiguous — as expected
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
