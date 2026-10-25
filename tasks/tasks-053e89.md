@@ -7,7 +7,7 @@ size: l
 complexity: mid
 process: planned
 created: 2026-10-25T12:15:14Z
-updated: 2026-10-25T13:59:57Z
+updated: 2026-10-25T13:59:59Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -28,3 +28,4 @@ Why: tasks-a58a90's reviewed design ([spec]) and plan record which session filed
 - 2026-10-25T13:57:47Z (tasks-053e89): review: impl round 2 — verdict: accept; findings: none; reviewer: claude-code/claude-sonnet-5-5
 - 2026-10-25T13:59:36Z (main): attached: sdd-ledger-tasks-053e89.md (14539 bytes): SDD ledger for the provenance plan: pre-flight scan, per-task reviews and fix rounds, rulings R1-R8, deferred minors and where each was filed
 - 2026-10-25T13:59:57Z (main): detached: sdd-ledger-tasks-053e89.md: machine paths refused by the layout hook; replaced by a placeholder copy
+- 2026-10-25T13:59:59Z (main): attached: sdd-ledger.md (14535 bytes): SDD ledger for the provenance plan (machine paths replaced by placeholders): pre-flight scan, per-task reviews and fix rounds, rulings R1-R8, deferred minors and where each was filed
