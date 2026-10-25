@@ -7,7 +7,7 @@ complexity: mid
 process: direct
 owner: tasks-053e89
 created: 2026-10-25T12:15:43Z
-updated: 2026-10-25T13:41:52Z
+updated: 2026-10-25T13:41:54Z
 started: 2026-10-25T13:25:14Z
 depends: [tasks-b11cfd]
 parent: tasks-053e89
@@ -34,4 +34,6 @@ step: "Task 6: Retrieval demonstrations"
 - 2026-10-25T13:41:50Z (tasks-053e89): demo: pretty creation then pretty reuse (own-0465cd): creation inferred, reuse excluded by its warning; stderr-removed variant ambiguous listing both; lone sourced pretty add read without stderr (frs-9a1c41): ambiguous, one candidate, action unsettled; unsourced pretty add (own-2a7ce9): inferred as a creation — as expected
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T13:41:52Z (tasks-053e89): demo: older request (own-fac412, --origin-session claude-code:572ee51e…): stage 1 matched, stage 2 matched (filing session's session-logs read printed line 130, the 10:59:13Z human turn); unreadable codex origin session (own-df3b0c): stage 1 matched, stage 2 unavailable — as expected
+  provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T13:41:54Z (tasks-053e89): demo limits: unstamped tasks-fa3525 unavailable (no stamp); archived Codex sessions not reachable by the session-logs tooling (store table and session-episodes skip archived_sessions; covered by hq-cff824/hq-a60cf5, obs-d98663 still todo); Codex subagent parent-thread path reachable by hand for tasks-ae03ed (thread_spawn.parent_thread_id -> parent spawn_agent -> human turns; no human ask; reader gap filed as hq-34163a); another host: stated limitation
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
