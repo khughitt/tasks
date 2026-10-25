@@ -3,8 +3,10 @@ id: tasks-4ca7bd
 title: "tasks prime's default JSON runs to ~250 KB on a project with ~230 open tasks (every ready row in full), past an agent tool's output limit, so the session-start read lands in an overflow file; a capped or summary default would fit one read"
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-25T16:04:08Z
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-25T16:03:43Z
+updated: 2026-10-25T16:04:08Z
 depends: [tasks-e7424b, tasks-dc696d]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
@@ -48,4 +50,6 @@ Scope handoff: [ref:brief] records current output measurements and the approved 
 - 2026-10-25T16:02:02Z (feedback): feedback from tasks: Session-start prime JSON exceeds the tool output budget
   provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
 - 2026-10-25T16:02:02Z (feedback): detail from tasks: The required full session-start read was truncated. A parsed follow-up measured 140123 stdout bytes, dominated by roadmap (87650 bytes) and ready rows (42868 bytes). The installed opt-in summary produced 12271 bytes against its 12288-byte cap; existing startup-guidance adoption remains gated. This recurrence records current measurements and does not request a default JSON change.
+  provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T16:04:08Z (main): scope: briefed; approved opt-in summary design and binary/reinstall are complete (spec 76501bd, plan 3a264b9, merged 2c1ffb5); local full prime measured 140123 bytes and installed summary 12271/12288 bytes at e792f05; added wait on existing tasks-dc696d for gated startup adoption/pilot and its completion wake instruction; origin: creation unavailable (no occurrence/session stamp), every pre-existing feedback recurrence unavailable (no session stamp), no older origin_session supplied; this pass's 2026-10-25T16:02:02Z recurrence matched to its feedback --recur call and full recur result in this session and is agent-origin only; overall origin remains unknown, no correction; brief: docs/notes/2026-10-19-cli-consumer-reads-brief.md
   provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID"}
