@@ -139,7 +139,7 @@ retained deliverables. This revision approves no design, plan or implementation.
 ## Downstream design review handoff
 
 tasks-e637a1 now has a proposed [ranked blocker design](../specs/2026-10-25-blocker-ranking-design.md),
-frozen for user review at c45fc7f. A read-only builder check by
+initially frozen for user review at c45fc7f. A read-only builder check by
 codex/gpt-6.1-sol returned "nothing important left"; it grants no user approval.
 The design recommends a dedicated impact-ranked read, preserves ready/next, keeps
 dependency relief separate from execution permission, and documents structural-only
@@ -149,5 +149,18 @@ beneficiary policy. No product code or CLI vocabulary changed.
 
 The next step is the user's design review, followed by a separately reviewed
 implementation plan. That plan must sequence the shared incoming scan and canonical
-dependency-verdict work before integration. History collection remains independent
+internal dependency-verdict extraction before integration. History collection remains independent
 under tasks-71c74d. This design task and its coordination goal remain open.
+
+Review round 3 (claude-code/claude-opus-5-5) returned revise with three Important
+and five Minor findings against c45fc7f. Revision 2 addresses all eight: foreign
+paths cut by local/group scope mark coverage partial with named unfollowed targets;
+rows show their own open/unresolved dependencies; shared internal rule extraction
+can ship here without waiting for tasks-e90b4f's public design. It also names the
+review/open_deps callers, explains the goal-child attribution cost, limits
+awaiting_user to reviewed ideas, distinguishes task_needs from park.needs and
+shows observed live/unverifiable claim holders. Ranking still weights all open
+work equally, with per-status counts making the composition visible. Compact
+pretty rows move explanations below the row. New fixtures cover each change.
+The task notes and next review request name the new frozen revision; c45fc7f is
+superseded. This revision is not approved and no implementation plan was drafted.
