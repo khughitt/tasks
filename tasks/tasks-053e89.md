@@ -7,9 +7,9 @@ size: l
 complexity: mid
 process: planned
 created: 2026-10-25T12:15:14Z
-updated: 2026-10-25T12:15:14Z
+updated: 2026-10-25T12:15:32Z
 depends: []
-parent: tasks-a58a90
+parent: tasks-9b1c2b
 tags: []
 agent: claude-code
 spec: docs/specs/2026-10-25-creation-occurrence-provenance-design.md
