@@ -1,15 +1,17 @@
 ---
 id: tasks-00723a
 title: "Agent-docs wording in the tasks, scope and curate skills: documents under the records root"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T11:44:49Z
+updated: 2026-10-25T12:22:25Z
 started: 2026-10-25T11:44:49Z
+completed: 2026-10-25T12:22:25Z
+closed: 2026-10-25T12:22:25Z
 depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
@@ -23,4 +25,43 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-22T20:56:05Z (records-home): Re-scoped 2026-10-22: mindful capture and plan-snapshot wording superseded by tasks-dc16eb's design.
 - 2026-10-23T01:04:43Z (main): Scope note 2026-10-22 from tasks-211e28 (landed, main 85b90f3): the tasks skill should also name tasks init --prefix <p> --records <records-root>, the [records] registry table, the three locations and kind in projects and where (an unreachable projects row carries records but no checkout or kind), records_moved, records_unpaired and records_in_tree with their remedies, that rename moves the records directory and leaves it for the user to commit, and that rename --adopt pairs a directory another host renamed. README.md Linked and detached projects has the wording to draw from.
 - 2026-10-25T11:44:49Z (main): started
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T11:45:19Z (docs/tasks-00723a): resumed
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T11:46:13Z (docs/tasks-00723a): Direct documentation scope: update shipped tasks/scope/curate skills for landed detached records support; preserve stored docs paths, distinguish checkout evidence from records writes, cover init/JSON/errors/rename, and remove config-walk assumptions. Source: approved records-home design c03869d and original human turn recovered from its session. Workspace .worktrees/tasks-00723a; hydrate with confined README cargo install, then full-suite baseline before edits.
+- 2026-10-25T11:48:29Z (docs/tasks-00723a): Worktree hydration succeeded with confined cargo install --locked --path . --root .local and CARGO_TARGET_DIR=target. Baseline just test exited 0; full result counts recorded next. Reference baseline found detached init/locations/errors absent and unscoped scope/curate unable to locate detached code worktrees. Updating existing reference wording, not adding new workflow policy.
+- 2026-10-25T11:49:53Z (docs/tasks-00723a): Baseline just test: 1685 passed, 0 failed, 0 ignored across 14 test targets. Reference-only documentation update reaches skills/tasks/SKILL.md, skills/scope/SKILL.md and skills/curate/SKILL.md; no parser, callers, fixtures or JSON shapes changed.
+- 2026-10-25T11:53:27Z (docs/tasks-00723a): review: impl round 1 — verdict: revise; findings: Important 1, Minor 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T11:54:15Z (docs/tasks-00723a): Reference review round 1 corrections: broaden skill activation to config-free detached/linked checkouts and use init --records --force when recording detached checkout locations. Fast-suite attempt exposed existing doc_fetch 150ms-deadline fixture failures: timeout_cleans_up_child_and_pipe_holder and escaped_pipe_holder_cannot_extend_deadline both lacked pidfiles; full baseline had passed. Investigating scheduling contention with focused rerun; no Rust changes.
+- 2026-10-25T11:55:27Z (docs/tasks-00723a): The doc_fetch unit tests passed on focused serial rerun with unchanged Rust code. The fast-suite failure coincided with host load 135.31 on 32 CPUs and missing pidfiles after 150ms child-start deadlines. Filed tooling friction tasks-16ebe8; rerunning the complete non-ignored suite with RUST_TEST_THREADS=1 (no selection or deadline changes).
+- 2026-10-25T12:00:03Z (docs/tasks-00723a): review: impl round 2 — verdict: revise; findings: Important 2; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:01:30Z (docs/tasks-00723a): Corrective round 1 for final review: unscoped code-worktree passes keep that worktree as tasks -C context, preserving detached retained-doc resolution; scoped passes read code/history from each selected project's checkout. Complete serial just test-fast exited 0: 1681 passed, 0 failed, 4 ignored across 14 targets. Existing focused retained-doc resolver case passed 1/1 after wording corrections. No Rust changes or new workflow policy.
+- 2026-10-25T12:03:34Z (docs/tasks-00723a): review: impl round 3 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:05:19Z (docs/tasks-00723a): attached: verification.txt (4969 bytes): Baseline, focused and fast-suite results; exact startup-timing failures and unchanged-code rerun
+- 2026-10-25T12:07:21Z (docs/tasks-00723a): review: impl round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:07:23Z (docs/tasks-00723a): Final reviewed skill revision d113068. Corrective round 2 keeps where.project.root for in-tree projects, including nested ones; only unscoped detached/linked code-worktree invocations use git top level. All Important findings from the whole-change review and scoped re-review are resolved; no deferred minors. Integration requires user approval because the main-checkout skill directories are the targets of active global skill symlinks. No merge or activation performed.
+- 2026-10-25T12:07:35Z (docs/tasks-00723a): attached: implementation-review-report.md (1974 bytes): Full acceptance report from the fresh scoped corrective reviewer, codex/gpt-6.1-sol
+- 2026-10-25T12:07:37Z (docs/tasks-00723a): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "kept", "verification": "verified", "purpose": "Reviewed documentation branch docs/tasks-00723a awaits user approval before merge activates globally linked skills", "next_owner": "task:tasks-00723a", "cleanup_trigger": "After user-approved local merge, inspect ignored files and host pointers, run tt-report, then remove this task's worktree"}
+- 2026-10-25T12:07:40Z (docs/tasks-00723a): parked (waiting on user, approval): User approves local merge of docs/tasks-00723a (reviewed skill commit d113068); agent then resumes here, marks done on the branch, merges locally into main to activate the skills, and performs the recorded worktree cleanup checks.
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:09:56Z (docs/tasks-00723a): resumed
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:11:42Z (docs/tasks-00723a): User approved local merge and global skill activation; this session owns immediate integration and checked worktree removal. Fresh detached suite: 46 passed; no source code changed since the reviewed verification.
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:12:04Z (docs/tasks-00723a): done
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:12:04Z (docs/tasks-00723a): Updated and reviewed tasks, scope and curate guidance for detached records; preserved nested/worktree routing and document links. User approved local integration and global skill activation.
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:12:30Z (docs/tasks-00723a): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "kept", "verification": "verified", "purpose": "User-approved immediate merge of docs/tasks-00723a, then checked worktree removal; target is regenerable build output, attachments are committed, no plan workspace or host pointers found, tt-report ran", "next_owner": "session:codex:01a172e0-035d-7420-9c13-60fe7e644221", "cleanup_trigger": "After local merge and attachment verification, remove this task's clean worktree this turn"}
+- 2026-10-25T12:13:14Z (docs/tasks-00723a): resumed
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:14:28Z (docs/tasks-00723a): Integration reopened before landing: main concurrently gained filtered-read ID routing. Resolved only the skill paragraph conflict by preserving the approved tasks skill byte-for-byte and inserting main's unchanged routing paragraphs before Project locations; scope/curate remain unchanged. Main checkout restored clean; combined branch fast suite running serially before merge completion.
+- 2026-10-25T12:20:31Z (docs/tasks-00723a): review: impl round 5 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:20:31Z (docs/tasks-00723a): Integration review accepted exact preservation of approved skill bytes plus main's unchanged routing block. Reviewer declined to re-review main's routing implementation and previously approved behavior because those were outside merge integrity; accept that scope because they were already reviewed separately, with combined-suite verification retained here.
+- 2026-10-25T12:21:53Z (docs/tasks-00723a): attached: integration-review-report.md (1232 bytes): Full scoped review accepting the merge conflict resolution, codex/gpt-6.1-sol
+- 2026-10-25T12:21:53Z (docs/tasks-00723a): Ruling: accept round 5's merge-integrity review scope, excluding main's routing implementation and the already-approved skill behavior. Why: those changes already had separate reviews, and the combined branch is checked by the complete fast suite. Cost: not recorded. Revisions: approved d113068; integration task-skill SHA256 444c8c3d8d0d50e516834432d6582f5de167044db4c1c2c2c4df627c15c3a570.
+- 2026-10-25T12:22:04Z (docs/tasks-00723a): Combined branch verification after incoming main: RUST_TEST_THREADS=1 just test-fast exited 0 with 1691 passed, 0 failed, 4 ignored across 14 targets; just check exited 0. Merge-integrity review accepted with no findings; no source/tests differ from incoming main.
+- 2026-10-25T12:22:25Z (docs/tasks-00723a): done
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:22:25Z (docs/tasks-00723a): Reviewed detached-records wording merged with incoming ID-routing guidance; combined fast suite passed 1691 tests with 4 ignored, checks passed, and user approved local integration.
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}

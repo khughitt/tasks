@@ -1,0 +1,77 @@
+tasks-00723a verification
+
+Documentation-only changes; Rust implementation and tests are unchanged.
+
+Command: just test
+Exit status: 0
+test result: ok. 629 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.46s
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+test result: ok. 692 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.63s
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.23s
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.07s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.58s
+test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.49s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.64s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.71s
+
+Command: just test-one --test detached
+Exit status: 0
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.47s
+
+Command: just test-fast
+Exit status: 101
+test result: FAILED. 626 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.84s
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.11s
+test result: ok. 692 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 100.77s
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.77s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.56s
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.77s
+test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.95s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.01s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.31s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.24s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.27s
+
+failures:
+
+---- doc_fetch::tests::timeout_cleans_up_child_and_pipe_holder stdout ----
+
+thread 'doc_fetch::tests::timeout_cleans_up_child_and_pipe_holder' (2800550) panicked at src/doc_fetch.rs:504:57:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- doc_fetch::tests::escaped_pipe_holder_cannot_extend_deadline stdout ----
+
+thread 'doc_fetch::tests::escaped_pipe_holder_cannot_extend_deadline' (2800490) panicked at src/doc_fetch.rs:562:61:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+
+
+failures:
+    doc_fetch::tests::escaped_pipe_holder_cannot_extend_deadline
+    doc_fetch::tests::timeout_cleans_up_child_and_pipe_holder
+
+
+Command: just test-one doc_fetch::tests -- --test-threads=1
+Exit status: 0
+
+Command: RUST_TEST_THREADS=1 just test-fast
+Exit status: 0
+test result: ok. 628 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.76s
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.88s
+test result: ok. 692 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.75s
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.82s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.37s
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.12s
+test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.24s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.84s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.92s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.83s
+
+The failed attempt coincided with host load 135.31 on 32 CPUs. Both tests assume a child publishes a pid file within 150 ms; the files were absent. Unchanged-code serial reruns passed. Follow-up: tasks-16ebe8.
+
+just check: exit 0 (hygiene, format, clippy, tasks check).
+After routing corrections: existing detached retained-document test passed 1/1; existing nested-project test passed 1/1 through just test-one.

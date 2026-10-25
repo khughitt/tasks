@@ -29,15 +29,22 @@ summary; do not open the task).
 worktree you could sample one copy of a task and rewrite another. So, before touching a
 sampled task, fix its root and run **every** later command for it as `tasks -C <root> ...`:
 
-- `sample` ran unscoped: the root is the nearest ancestor of the current directory that
-  contains `tasks/.config.toml`. That is the project an unscoped `tasks` command locates;
-  from a subdirectory it is not the current directory, and running grep there would miss
-  the specs and history the verdict depends on.
+- `sample` ran unscoped: run `tasks where` to discover the project, even without a
+  config in code. For `kind: "in-tree"`, use `.project.root`, including a project
+  nested below the git top level. For `detached` or `linked` invoked in its code
+  worktree, use that worktree's top level (from `git rev-parse --show-toplevel`);
+  otherwise use `.project.root`. Keeping the code worktree as the command context
+  preserves detached document fallback there.
 - `sample` ran with `--project`, `--group`, or `--all-projects`: the root is the path
   that `tasks --pretty root <id>` prints. The default JSON form is an object; its `root`
-  field is the same path. Never pass the JSON to `-C`.
+  field is the same path. Never pass the JSON to `-C`. Run `tasks -C <root> where`.
 
-Grep, `git log`, and every other piece of evidence gathering run in that same root.
+Keep `.project.records` and `.project.checkout` from `where` separately. Grep code
+and run `git log` in each sampled task's `checkout`. For an unscoped sample invoked
+in a detached or linked project's code worktree, use the chosen `<root>` instead.
+Working documents live under `records`; read their resolved paths from
+`show`, or use `tasks -C <root> doc <id> --spec|--plan|<handle>`. A detached project's
+retained reference document may resolve in the code tree instead.
 
 ## 3. Per task
 
@@ -72,7 +79,9 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
      `## Open questions` heading at the end of the body; reuse an existing one. Notes
      are stored apart from the body and survive the rewrite.
    - `--spec`, `--plan <topic> --step "<heading>"`, `--parent`: fix when the linked
-     thing exists and the link is missing or wrong. A missing dependency is added with
+     thing exists and the link is missing or wrong. The document may live under
+     `records`; keep paths such as `docs/specs/<name>.md` and `docs/plans/<name>.md`
+     relative to that directory. A missing dependency is added with
      `--depends`; a wrong one is replaced with `tasks dep <id> --on <right> --rm <wrong>`.
    - `--ref` with `--body`: promote an existing prose path to a reference entry and
      rewrite the prose to cite its handle as `[ref:<handle>]`, preserving why the

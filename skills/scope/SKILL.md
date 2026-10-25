@@ -38,13 +38,25 @@ review-state exclusion; it must still be an unclaimed idea at revalidation, or a
 unclaimed `todo` or `blocked` task, which makes it a re-scope, and the pass still has the
 three-document ceiling.
 
-Fix one root before member reads, and use `tasks -C <root> ...` for every later task
-command and that root for every evidence read and document write:
+Fix one task-command root before member reads, and use `tasks -C <root> ...` for
+every later task command:
 
-- Unscoped: use the nearest ancestor containing `tasks/.config.toml`. Never resolve a
-  registered root for this case; in a worktree it points at the main checkout.
+- Unscoped: run `tasks where` to discover the project, even without a config in code.
+  For `kind: "in-tree"`, use `.project.root`, including a project nested below the
+  git top level. For `detached` or `linked` invoked in its code worktree, use that
+  worktree's top level (from `git rev-parse --show-toplevel`); otherwise use
+  `.project.root`. Keeping the code worktree as the command context preserves
+  detached document fallback there.
 - `--project <prefix>`: resolve a selected id with `tasks --pretty root <id>`, or parse
-  `.root` from the default JSON object.
+  `.root` from the default JSON object; then run `tasks -C <root> where`.
+
+Keep `.project.records` and `.project.checkout` from `where` as separate locations.
+Read code and git history in the selected project's `checkout`. For an unscoped pass
+in a detached or linked project's code worktree, use the chosen `<root>` instead.
+Read working documents under `records`, using `tasks doc` for linked
+references; detached projects also resolve retained documents in the code tree.
+Write new handoffs under `records`. It is already `<records-root>/<prefix>` for a
+detached project; do not append the prefix again.
 
 Foreign ids in an unscoped batch, or no local project for an unscoped pass, require a
 corrected invocation before any write.
@@ -60,7 +72,8 @@ Run `tasks -C <root> show <id>` for each provisional member. Save `task.updated`
 read its body, links, notes, top-level `claim`, and relationships. Read each source,
 parent and relevant `tree`, named code and specs, useful history (`git log -S` or
 `--grep`), open duplicate candidates, and any existing brief or attached draft spec.
-Keep every read in the fixed checkout.
+Keep task reads in the fixed root, code evidence in the chosen code checkout, and
+document reads at their resolved paths.
 
 For a mindful source, confirm the local CLI form, strip only the optional `mindful:`
 wrapper, and pass the full typed reference to `mindful --json show`:
@@ -148,7 +161,7 @@ say.
 ## 4. Write the handoff
 
 For unresolved cluster decisions, write or update one roughly one-page brief at
-`docs/notes/YYYY-MM-DD-<topic>-brief.md` with exactly these sections:
+`<records>/docs/notes/YYYY-MM-DD-<topic>-brief.md` with exactly these sections:
 
 1. **Problem** — the ideas' shared outcome in the reader's terms.
 2. **Current behaviour and evidence** — observed behavior, paths, and commits.
@@ -157,13 +170,15 @@ For unresolved cluster decisions, write or update one roughly one-page brief at
 5. **Unanswered questions** — each question and who or what can answer it.
 6. **Proposed decomposition** — follow-up task ids and the ideas waiting on each.
 
-Use `docs/specs/` with `Status: draft` only when the handoff already presents one
+Use `<records>/docs/specs/` with `Status: draft` only when the handoff already presents one
 reviewable design; attach that document through `--spec`. Write at most three briefs or
 draft specs in one pass. A brief is not attached as a spec. Add a brief the pass
 writes as a reference on each task it scopes, including follow-ups that use it:
 
     tasks -C <root> edit <id> --ref 'brief (input, required, kind=brief): docs/notes/YYYY-MM-DD-<topic>-brief.md — context and questions for this work'
 
+The stored reference stays `docs/notes/...`, relative to `records`, even when the
+file is outside the code checkout. Commit it in the repository holding the records.
 Reuse the existing handle on reruns; mark `required` only when the brief must be read
 first. In a body the pass rewrites, cite `[ref:brief]` and say why it matters.
 
@@ -214,8 +229,8 @@ no longer in the status it had at the first show (an idea, or a `todo` or `block
 task, a re-scope). Documents may name skipped members only as related context; do
 not say they were processed. If every member is skipped, create no goal or document.
 
-Write task records only through the CLI and documents through explicit paths under the
-fixed root. Preserve the exact successful operations when a later command fails, report
+Write task records only through the CLI and handoffs through explicit paths under
+`records`. Preserve the exact successful operations when a later command fails, report
 partial work honestly, and never report skipped or failed writes as complete. The check
 is not a lock; propagate a CLI race failure. There is no per-member approval checkpoint.
 
