@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T11:49:53Z
+updated: 2026-10-25T11:53:27Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -29,3 +29,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T11:46:13Z (docs/tasks-00723a): Direct documentation scope: update shipped tasks/scope/curate skills for landed detached records support; preserve stored docs paths, distinguish checkout evidence from records writes, cover init/JSON/errors/rename, and remove config-walk assumptions. Source: approved records-home design c03869d and original human turn recovered from its session. Workspace .worktrees/tasks-00723a; hydrate with confined README cargo install, then full-suite baseline before edits.
 - 2026-10-25T11:48:29Z (docs/tasks-00723a): Worktree hydration succeeded with confined cargo install --locked --path . --root .local and CARGO_TARGET_DIR=target. Baseline just test exited 0; full result counts recorded next. Reference baseline found detached init/locations/errors absent and unscoped scope/curate unable to locate detached code worktrees. Updating existing reference wording, not adding new workflow policy.
 - 2026-10-25T11:49:53Z (docs/tasks-00723a): Baseline just test: 1685 passed, 0 failed, 0 ignored across 14 test targets. Reference-only documentation update reaches skills/tasks/SKILL.md, skills/scope/SKILL.md and skills/curate/SKILL.md; no parser, callers, fixtures or JSON shapes changed.
+- 2026-10-25T11:53:27Z (docs/tasks-00723a): review: impl round 1 — verdict: revise; findings: Important 1, Minor 1; reviewer: codex/gpt-6.1-sol
