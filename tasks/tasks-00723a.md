@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:00:03Z
+updated: 2026-10-25T12:01:30Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -33,3 +33,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T11:54:15Z (docs/tasks-00723a): Reference review round 1 corrections: broaden skill activation to config-free detached/linked checkouts and use init --records --force when recording detached checkout locations. Fast-suite attempt exposed existing doc_fetch 150ms-deadline fixture failures: timeout_cleans_up_child_and_pipe_holder and escaped_pipe_holder_cannot_extend_deadline both lacked pidfiles; full baseline had passed. Investigating scheduling contention with focused rerun; no Rust changes.
 - 2026-10-25T11:55:27Z (docs/tasks-00723a): The doc_fetch unit tests passed on focused serial rerun with unchanged Rust code. The fast-suite failure coincided with host load 135.31 on 32 CPUs and missing pidfiles after 150ms child-start deadlines. Filed tooling friction tasks-16ebe8; rerunning the complete non-ignored suite with RUST_TEST_THREADS=1 (no selection or deadline changes).
 - 2026-10-25T12:00:03Z (docs/tasks-00723a): review: impl round 2 — verdict: revise; findings: Important 2; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:01:30Z (docs/tasks-00723a): Corrective round 1 for final review: unscoped code-worktree passes keep that worktree as tasks -C context, preserving detached retained-doc resolution; scoped passes read code/history from each selected project's checkout. Complete serial just test-fast exited 0: 1681 passed, 0 failed, 4 ignored across 14 targets. Existing focused retained-doc resolver case passed 1/1 after wording corrections. No Rust changes or new workflow policy.
