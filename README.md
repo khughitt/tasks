@@ -246,6 +246,7 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
     tasks list -p 0 -p 1 --size s --size xs   # P0 or P1, and small or extra-small
     tasks search "claim identity" --all-projects  # title or body contains the phrase; every list option applies
+    tasks docs --kind plan --search "records root"  # working documents and the tasks linking them; also --all-projects
     tasks ready --complexity none             # ready work nobody has rated yet
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
@@ -274,11 +275,11 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
-                                     #   next, tree, tags, sample. Needs no local project.
+                                     #   next, tree, tags, sample, docs. Needs no local project.
     tasks projects                   # the registry: reachable? counts?
     tasks group set vf nodes atoms   # a named set of registered projects (this host only)
     tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
-                                     #   sample, lanes, quiet. Needs no local project.
+                                     #   sample, lanes, quiet, docs. Needs no local project.
     tasks groups                     # each group, its members, and whether they are reachable
     tasks group rm vf                # delete the group; its projects stay registered
     tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project
@@ -737,6 +738,31 @@ links. If the plan is absent from both the record's checkout and its main checko
 `step_found: false` when a step is linked. Available plans still have their steps
 checked; missing local plans for open work and other local read errors still fail.
 External availability follows the contract below.
+
+### Working documents
+
+`tasks docs` lists a project's working documents with the tasks that link them, so a
+document moved out of the code tree stays findable:
+
+```sh
+tasks docs                                   # every working document of this project
+tasks docs --kind plan --kind spec           # repeats widen: spec, plan, brief, handoff, note
+tasks docs --all-projects --search "records root"  # title or body, matched as search matches
+```
+
+The working documents are the Markdown files directly under the project's spec and
+plan directories (`spec_dirs` and `plan_dirs`, which default to `docs/specs`,
+`docs/plans` and the older design-document locations) and `docs/notes`, read from its
+`records` directory. Their kind comes
+from the directory, then the filename (`*-brief.md`, `*-handoff.md`, else `note`); a
+detached project's reference documents in its code tree are not listed. Each row has
+`project`, `kind`, `path` (as a task stores the link), `file` (absolute), `title` (the
+first level-one heading, else the file's stem) and `tasks`: every task, of any status,
+whose `spec`, `plan` or a `--ref` entry stores exactly that path, as
+`{"id","status","via"}` with `via` one of `spec`, `plan` or `ref`, plus `handle` for a
+reference. A file that is not UTF-8 is listed under its stem with a warning and never
+matches `--search`; a `.md` symlink to nothing is a warning, and an unreadable file
+fails the command with an `io` error naming it. `tasks doc <id> --spec|--plan|<handle>` reads one.
 
 ### External documents
 

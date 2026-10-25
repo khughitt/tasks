@@ -692,6 +692,10 @@ Use `tasks doc <id> --plan` or `--spec` to read the selected body through the sa
 resolver, including linked projects and worktree/main-checkout fallback.
 Use `tasks list --plan <stored reference> --status done` to find completed steps
 across parents; list/search compare the stored value exactly and never fetch.
+`tasks docs [--kind spec|plan|brief|handoff|note]... [--search "<phrase>"]` lists the
+project's working documents (its spec and plan directories and `docs/notes`, under
+`records`) with every task that links each one; `--all-projects` widens it. Use it to
+find a moved spec or brief before filing a new one.
 
 `show` and `next` warn and omit `step_found` for an unavailable open external
 plan; absence means unknown, not a missing heading. No step means no external

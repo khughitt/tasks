@@ -269,7 +269,12 @@ impl TextQuery {
     }
 
     pub fn matches(&self, task: &Task) -> bool {
-        task.title.to_lowercase().contains(&self.0) || task.body.to_lowercase().contains(&self.0)
+        self.matches_text(&task.title, &task.body)
+    }
+
+    /// The same match over any title and body: `docs --search` reads documents with it.
+    pub fn matches_text(&self, title: &str, body: &str) -> bool {
+        title.to_lowercase().contains(&self.0) || body.to_lowercase().contains(&self.0)
     }
 }
 

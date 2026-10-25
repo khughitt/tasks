@@ -5,6 +5,7 @@ pub mod claims;
 pub mod commit;
 pub mod dep;
 pub mod doc;
+pub mod docs;
 pub mod edit;
 pub mod feedback;
 pub mod graph;
@@ -2054,6 +2055,18 @@ fn dispatch(cli: Cli) -> Result<Output> {
             },
             fetch(no_fetch),
         ),
+        Command::Docs {
+            kinds,
+            search,
+            scope,
+        } => {
+            // Validated before the scan, so an empty phrase never reads a project.
+            let text = search
+                .as_deref()
+                .map(crate::filter::TextQuery::parse)
+                .transpose()?;
+            docs::run(open_read_ctx(dir, &scope)?, &kinds, text)
+        }
         Command::List { list: args } => list::list(
             open_filtered_read_ctx(
                 dir,
