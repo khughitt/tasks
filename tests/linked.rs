@@ -11,6 +11,8 @@ fn linked_git_fixtures_ignore_hostile_environment() {
     where_answers_no_project_for_a_repository_whose_path_is_not_utf8();
     where_finds_the_linked_project_from_a_worktree_whose_path_is_not_utf8();
     an_unborn_repository_is_discovered_under_git_tracing();
+    filtered_read_keeps_in_tree_worktree();
+    filtered_read_routes_linked_records();
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -137,6 +139,86 @@ fn a_linked_checkout_opens_its_overlay_project_from_every_tree() {
     }
     let listed = env.json(&l.wt, &["list"]);
     assert_eq!(listed["tasks"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        git(&l.code, &["status", "--porcelain", "--ignored"]),
+        before
+    );
+    assert_eq!(
+        git(&l.wt, &["status", "--porcelain", "--ignored"]),
+        wt_before
+    );
+}
+
+#[test]
+fn filtered_read_keeps_in_tree_worktree() {
+    let mut env = TestEnv::new();
+    let base = tempfile::tempdir().unwrap();
+    let main = code_repo(base.path(), "main");
+    env.json(&main, &["init", "--prefix", "sci"]);
+    let goal = common::id_of(env.json(&main, &["add", "Goal"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "goal"]);
+    let wt = base.path().join("worktree");
+    git(
+        &main,
+        &["worktree", "add", "-qb", "side", wt.to_str().unwrap()],
+    );
+    // Default record commits are disabled: tasks add writes only the task file here.
+    let leaf = common::id_of(env.json(&wt, &["add", "Leaf", "--parent", &goal]));
+    assert!(!main.join(format!("tasks/{leaf}.md")).exists());
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["aliases"]
+        .as_table_mut()
+        .unwrap()
+        .insert("old".into(), "sci".into());
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    let alias = goal.replacen("sci-", "old-", 1);
+    for reference in [&goal, goal.split_once('-').unwrap().1, &alias] {
+        for flag in ["--parent", "--under"] {
+            let out = env.json(&wt, &["list", flag, reference]);
+            assert_eq!(out["tasks"].as_array().unwrap().len(), 1);
+            assert_eq!(out["tasks"][0]["id"], leaf);
+        }
+    }
+    assert_eq!(
+        env.json(
+            env.home.path(),
+            &["-C", wt.to_str().unwrap(), "list", "--under", &goal]
+        )["tasks"][0]["id"],
+        leaf
+    );
+    assert!(
+        env.json(&wt, &["list", "--project", "sci", "--under", &goal])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let foreign = env.init("fam");
+    let fgoal = common::id_of(env.json(&foreign, &["add", "Other goal"]));
+    let fleaf = common::id_of(env.json(&foreign, &["add", "Other leaf", "--parent", &fgoal]));
+    assert_eq!(
+        env.json(&wt, &["list", "--under", &fgoal])["tasks"][0]["id"],
+        fleaf
+    );
+}
+
+#[test]
+fn filtered_read_routes_linked_records() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let goal = common::id_of(env.json(&l.wt, &["add", "Goal"]));
+    let leaf = common::id_of(env.json(&l.wt, &["add", "Leaf", "--parent", &goal]));
+    let before = git(&l.code, &["status", "--porcelain", "--ignored"]);
+    let wt_before = git(&l.wt, &["status", "--porcelain", "--ignored"]);
+    for cwd in [&l.code, &l.wt, &env.home.path().to_path_buf()] {
+        for flag in ["--parent", "--under"] {
+            let out = env.json(cwd, &["list", flag, &goal]);
+            assert_eq!(out["tasks"].as_array().unwrap().len(), 1);
+            assert_eq!(out["tasks"][0]["id"], leaf);
+        }
+    }
     assert_eq!(
         git(&l.code, &["status", "--porcelain", "--ignored"]),
         before
@@ -845,6 +927,8 @@ fn a_broken_ancestor_dot_git_is_named_for_inspection_never_removal() {
     let inspect = format!("git -C {} status", base.display());
 
     let detail = io_detail(&env, &child, &["where"]);
+    let filtered = io_detail(&env, &child, &["list", "--under", "sci-000001"]);
+    assert!(filtered.contains(&inspect), "{filtered}");
     assert!(
         detail.contains(&format!(
             "{}, is not a repository git can read",

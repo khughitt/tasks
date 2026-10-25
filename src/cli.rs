@@ -177,10 +177,11 @@ pub struct FilterArgs {
     /// never interpreted, so it answers "what came from here" for any origin.
     #[arg(long)]
     pub source: Option<String>,
-    /// Only direct children of this task.
+    /// Only direct children of this task. Its ID selects the project unless an explicit scope is set.
     #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
     pub parent: Option<String>,
     /// Only descendants of this task, at any depth (`--parent` is direct children only).
+    /// Its ID selects the project unless an explicit scope is set.
     #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
     pub under: Option<String>,
     /// Only tasks marked safe to run beside each other.
@@ -607,7 +608,8 @@ pub enum Command {
         #[command(flatten)]
         without: WithoutArgs,
         /// Pick only among descendants of this task, at any depth: how a session
-        /// committed to one lane takes its next step.
+        /// committed to one lane takes its next step. Its ID selects the project
+        /// unless an explicit scope is set.
         #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
         under: Option<String>,
         /// Never run a host's document provider: external links show as stored and
