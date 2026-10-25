@@ -87,6 +87,7 @@ fn notes_unchanged_or_trimmed(original: &[Note], edited: &[Note]) -> bool {
             old.at == new.at
                 && old.by == new.by
                 && old.provenance == new.provenance
+                && old.occurrence == new.occurrence
                 && (new.text == old.text || new.text == old.text.trim_end_matches([' ', '\t']))
                 && parse_ledger_note(&old.text) == parse_ledger_note(&new.text)
         })
@@ -630,6 +631,41 @@ mod tests {
             &[note("attached: a.png (3 bytes): shot \t")],
             &[note("attached: a.png (3 bytes): shot")],
         ));
+    }
+
+    #[test]
+    fn a_change_to_occurrence_keys_is_refused() {
+        use crate::model::{NoteOccurrence, Origin};
+        let with = |occurrence: NoteOccurrence| Note {
+            occurrence,
+            ..note("created")
+        };
+        let origin = |origin| NoteOccurrence {
+            origin: Some(origin),
+            ..Default::default()
+        };
+        let base = with(origin(Origin::User));
+        assert!(notes_unchanged_or_trimmed(
+            std::slice::from_ref(&base),
+            std::slice::from_ref(&base)
+        ));
+        for changed in [
+            with(NoteOccurrence::default()),
+            with(origin(Origin::Agent)),
+            with(NoteOccurrence {
+                origin_session: Some("codex:x".into()),
+                ..origin(Origin::User)
+            }),
+            with(NoteOccurrence {
+                root_session: Some("codex:r".into()),
+                ..origin(Origin::User)
+            }),
+        ] {
+            assert!(!notes_unchanged_or_trimmed(
+                std::slice::from_ref(&base),
+                &[changed]
+            ));
+        }
     }
 
     #[test]
