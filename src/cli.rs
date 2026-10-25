@@ -551,6 +551,28 @@ pub enum Command {
         #[arg(long)]
         no_fetch: bool,
     },
+    /// Working documents under each project's records, with the tasks that link them.
+    #[command(
+        after_help = "Lists the Markdown files directly under the project's spec and plan directories and\ndocs/notes. Kind comes from the directory, then the filename: *-brief.md, *-handoff.md,\nelse note. A task links a document through its spec, its plan, or a --ref entry.\n\nExamples:\n  tasks docs --kind plan\n  tasks docs --all-projects --search \"records root\""
+    )]
+    Docs {
+        /// Only documents of this kind (repeatable; repeats widen): spec, plan, brief,
+        /// handoff, or note.
+        #[arg(
+            long = "kind",
+            value_name = "KIND",
+            add = ArgValueCandidates::new(crate::complete::doc_kinds),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        kinds: Vec<String>,
+        /// Only documents whose title or body contains this phrase, matched as `search`
+        /// matches tasks: literal and case-insensitive.
+        #[arg(long, value_name = "PHRASE")]
+        search: Option<String>,
+        #[command(flatten)]
+        scope: ScopeArgs,
+    },
     /// List tasks (open by default).
     #[command(
         after_help = "Examples:\n  tasks list --sort updated\n  tasks list --status todo --tag cli\n  tasks list -p 0 -p 1 --size s --size xs"

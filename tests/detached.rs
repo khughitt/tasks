@@ -1844,3 +1844,66 @@ fn a_registered_root_without_config_or_pairing_is_records_unpaired_from_every_en
         "{detail}"
     );
 }
+
+/// Acceptance case 7: `tasks docs --project <p> --kind plan --search <phrase>` lists the
+/// migrated plan with its linking task ids, from anywhere; a reference document kept in
+/// the code tree is not a working document and is not listed.
+#[test]
+fn docs_lists_a_detached_projects_plan_from_its_records_with_the_linking_tasks() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    write_file(
+        &l.project.join("docs/plans/2026-01-01-moved.md"),
+        "# Moved plan\n\nThe records root holds it.\n\n## Task 1: x\n",
+    );
+    write_file(
+        &l.project.join("docs/plans/2026-01-02-other.md"),
+        "# Other\n",
+    );
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "docs"]);
+    write_file(&l.code.join("docs/plans/kept.md"), "# Kept: records root\n");
+    l.git(&l.code, &["add", "-A"]);
+    l.git(&l.code, &["commit", "-qm", "kept"]);
+    let planned = common::id_of(env.json(
+        &l.code,
+        &[
+            "add",
+            "planned",
+            "--plan",
+            "docs/plans/2026-01-01-moved.md",
+            "--step",
+            "Task 1: x",
+        ],
+    ));
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    for dir in [elsewhere.path(), l.wt.as_path(), l.project.as_path()] {
+        let out = env.json(
+            dir,
+            &[
+                "docs",
+                "--project",
+                "det",
+                "--kind",
+                "plan",
+                "--search",
+                "RECORDS ROOT",
+            ],
+        );
+        assert_eq!(
+            out["docs"],
+            serde_json::json!([{
+                "project": "det",
+                "kind": "plan",
+                "path": "docs/plans/2026-01-01-moved.md",
+                "file": l.project.join("docs/plans/2026-01-01-moved.md").to_str().unwrap(),
+                "title": "Moved plan",
+                "tasks": [{"id": planned, "status": "todo", "via": "plan"}],
+            }]),
+            "from {}",
+            dir.display()
+        );
+    }
+}
