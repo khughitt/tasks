@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T11:16:29Z
+updated: 2026-10-25T11:37:16Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -72,4 +72,6 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T11:16:23Z (design/tasks-284d9b): attached: filtered-read-planning-ledger.md (5310 bytes): Spec rounds 1–4, two accepted wording rulings at a92a91a, user planning approval, and plan self-review at 3a9752f; no deferred minors
 - 2026-10-25T11:16:26Z (design/tasks-284d9b): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-284d9b","state":"kept","verification":"verified","purpose":"Frozen implementation plan 3a9752f on design/tasks-284d9b awaits user review; spec is approved for planning, wording clarified at a92a91a; full reports and ledger retained in .superpowers/sdd/tasks-284d9b and attached; two implementation children remain todo, no product changes","next_owner":"task:tasks-284d9b","cleanup_trigger":"After user approves plan 3a9752f, agent starts tasks-3b3f0b here and performs execution Setup; after final integration, inspect ignored files and run removal checks"}
 - 2026-10-25T11:16:29Z (design/tasks-284d9b): parked (waiting on user, review): Keith reviews implementation plan 3a9752f3d0edffb94f2a66a7c8f829fe5fa8756f at docs/plans/2026-10-25-filtered-read-routing-plan.md in .worktrees/tasks-284d9b. After approval, agent executes inline: start tasks-3b3f0b, recheck tasks-e147b9, run just test baseline before code edits, then routing and completion tasks. Plan self-review accepted with no findings; all spec nits resolved. No implementation has begun.
+  provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T11:37:16Z (design/tasks-284d9b): resumed
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
