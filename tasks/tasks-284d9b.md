@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:31:02Z
+updated: 2026-10-25T10:31:04Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -43,3 +43,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T10:31:02Z (design/tasks-284d9b): resumed
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T10:31:04Z (design/tasks-284d9b): Process: planned; workspace .worktrees/tasks-284d9b on design/tasks-284d9b. Hydrated with README cargo install --locked --path . confined to this worktree (installed files retained under target/hydrated); shared host binary unchanged. Full-suite baseline deferred to execution Setup under the planned-work rule. Design will retain source's literal semantics and recommend explicit --all-projects for cross-project provenance searches; tasks-e147b9 has no finding yet, so preserve existing NoProject-only fallback and obstruction errors.
