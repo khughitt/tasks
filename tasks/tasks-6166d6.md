@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-25T21:37:28Z
-updated: 2026-10-25T22:02:00Z
+updated: 2026-10-25T22:02:34Z
 depends: []
 parent: tasks-46d207
 tags: []
@@ -31,3 +31,5 @@ Where to look: [ref:brief], tasks-e637a1, tasks-71c74d, tasks-e8d471, tasks-606d
 
 - 2026-10-25T21:37:28Z (add): created
   provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
+- 2026-10-25T22:02:34Z (main): scope: rescoped; reused the goal and its existing two children without adding records: tasks-e637a1 ranked downstream design, tasks-71c74d early history/confirmed-wait design; P2/m/high/planned unchanged; done now requires shipped impact and persistence reporting plus forward evidence collection, not an idea disposition; collection scheduled first with independent ranking track; withdrew redundant agent-added brief source while retaining the required ref; 7085e03 review minor also addressed by native session/message/tool IDs instead of line-only provenance; brief: docs/notes/2026-10-25-blocker-ranking-brief.md
+  provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID"}
