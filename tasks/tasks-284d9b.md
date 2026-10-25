@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T11:37:21Z
+updated: 2026-10-25T11:41:23Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -77,3 +77,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T11:37:19Z (design/tasks-284d9b): review: plan round 2 — verdict: accept; findings: Minor 3; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T11:37:21Z (design/tasks-284d9b): Keith accepted frozen plan 3a9752f for inline execution. Prior plan self-review is round 1, so incoming review is round 2. Accept all three minors: preserve positional-ID local-before-registry discovery/error precedence; smoke installed binary from an outside cwd against main-visible IDs and literal-source recovery; add worktree-only leaf through tasks add without a Git commit and enroll new safe Git fixture tests in the hostile-environment wrapper. Process planned, workspace .worktrees/tasks-284d9b; no implementation edits before full baseline.
+- 2026-10-25T11:41:23Z (design/tasks-284d9b): attached: filtered-read-plan-round-2-review.md (4553 bytes): Full accepted plan review by claude-code/claude-opus-5-5 and Keith's execution approval; three minor recommendations adopted
