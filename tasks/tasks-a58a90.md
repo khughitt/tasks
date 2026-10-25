@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T11:54:06Z
+updated: 2026-10-25T11:57:10Z
 started: 2026-10-25T11:15:47Z
 depends: []
 parent: tasks-9b1c2b
@@ -46,3 +46,5 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
 - 2026-10-25T11:53:57Z (design/tasks-a58a90): resumed
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T11:54:06Z (design/tasks-a58a90): review: spec round 2 — verdict: revise; findings: P2 4; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T11:57:10Z (design/tasks-a58a90): spec revision 2 at c9f4417 resolves round-2 findings: mixed now means user asks plus distinct agent-added asks (filing choice never changes origin); a set origin field supersedes every occurrence label for all consumers, --no-origin returns labels to partial evidence; retrieval is two-stage (filing event first, older request via the filing session's evidence); occurrences bind to the add/feedback call by id+action+new output 'at', with an ambiguous outcome
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
