@@ -802,7 +802,12 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
             .assert()
             .success();
         let shown = env.json(&dir, &["show", &id]);
-        assert!(shown["task"]["notes"][1].get("harness_session").is_none());
+        let park = &shown["task"]["notes"][2];
+        assert!(
+            park["text"].as_str().unwrap().starts_with("parked"),
+            "{park}"
+        );
+        assert!(park.get("harness_session").is_none(), "{park}");
     }
 }
 
