@@ -7,7 +7,7 @@ size: s
 complexity: high
 process: planned
 created: 2026-10-25T16:02:29Z
-updated: 2026-10-25T16:02:29Z
+updated: 2026-10-25T16:04:12Z
 depends: []
 parent: tasks-96c00c
 tags: []
@@ -32,3 +32,5 @@ Ideas it wakes: On completion, update [ref:brief] and run `tasks note tasks-c750
 
 - 2026-10-25T16:02:29Z (add): created
   provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
+- 2026-10-25T16:04:12Z (main): brief: docs/notes/2026-10-19-cli-consumer-reads-brief.md; scope follow-up from tasks-c750e1; agent-origin design/decomposition choice in this session, not a recovered user requirement; planned because safe history selection, byte budget and recovery need written design and plan reviews; high complexity reflects unresolved interacting provenance/retention/ownership constraints, size s covers design work only; no implementation or guidance adoption authorized by this filing.
+  provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID"}
