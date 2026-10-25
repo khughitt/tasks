@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-24T16:09:37Z
-updated: 2026-10-24T17:36:47Z
+updated: 2026-10-25T16:03:40Z
 depends: [tasks-7c5a4b, tasks-72093a, fam-70cf4f, forge-8b1006, forge2-0473c4, material-292de8, mind6-40ee7d, mm-b90315, nrp-8fcbd5, prism-9f2087, relay-e6c38f, sun-5a4acf, tui-cb7a3d, wali-143e8f]
 parent: tasks-65b733
 tags: []
@@ -19,6 +19,12 @@ step: "Task 3: Adopt bounded reads in agent guidance after the trial gate"
 ---
 
 After binary delivery and verified reinstall, coordinate all inventoried project startup guides and the skill under the flow-trial-1 gate. No source edits before readout or specific owner no-effect verdict. The skill remains gated even if individual unenrolled guides are released earlier.
+
+[ref:brief] records the refreshed output evidence and the idea waiting on this existing adoption task. Ideas it wakes: On completion, update the brief and run `tasks note tasks-4ca7bd --no-reviewed "<adoption/pilot outcome and remaining limits>"` before this result's branch merges.
+
+## References
+
+- brief (context, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — refreshed output evidence and waiting idea
 
 ## Notes
 
