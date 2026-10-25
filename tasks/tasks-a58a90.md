@@ -1,13 +1,13 @@
 ---
 id: tasks-a58a90
-title: Design feedback occurrence provenance from the brief
+title: Design task creation and feedback occurrence provenance from the brief
 status: todo
 priority: 2
 size: m
 complexity: high
 process: planned
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-20T14:40:20Z
+updated: 2026-10-25T11:13:03Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -21,7 +21,9 @@ Done: produce a user-reviewed design and implementation plan that (1) stamps eac
 
 Where to look: [ref:brief]; tasks-516ab4 notes (retrieval workarounds from the audit: 9 origins found only through the CLI's created output, 6 Codex subagents through their parent thread, 1 unrecoverable); src/commands/feedback.rs, src/commands/mod.rs::append_stamped_note, src/provenance.rs; skills/scope/SKILL.md's evidence step; the owner records named above. No implementation before written design and plan reviews.
 
-Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<finding>"` before this result branch merges.
+Additional acceptance from tasks-2e7d03 (2026-10-25): include ordinary tasks add in the same creation/session and requester/origin contract, retaining all feedback requirements above. At 79b8253, add::blank is the shared constructor with empty notes, add::run and commands::create add no native provenance, and a sourced duplicate returns reused without writing. Reuse the native resolver; compare a creation note with dedicated metadata rather than assuming storage. Specify an optional origin indication that distinguishes an explicit user request from agent-originated follow-ups, feedback, decomposition and scope filings, with mixed/unknown evidence preserved. A session stamp identifies the filer, not the requester; never derive user intent from agent, parent, source or commit time alone. Settle who supplies/corrects the indication and how an older request is linked. Preserve source and existing attribution; no speculative backfill; reused adds must not stamp the later caller as creator. Acceptance must include ordinary creation with known/unknown/conflicting native identity, idempotent reuse, and a later agent recovering the originating ask or an explicit unavailable result without relying on commit time. Relevant surfaces: src/commands/add.rs, the shared constructor used by feedback, src/commands/mod.rs, src/provenance.rs, record serialization and JSON/pretty readers, tests/cli.rs, README.md and skills/tasks/SKILL.md; any new flags require ops CLI rows first. [ref:brief] records these additions and open storage/vocabulary choices. The task remains P2/m/high/planned; design and plan review precede implementation.
+
+Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<finding>"` and `tasks note tasks-2e7d03 --no-reviewed "<finding>"` before this result branch merges.
 
 ## References
 
