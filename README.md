@@ -275,11 +275,11 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
-                                     #   next, tree, tags, sample. Needs no local project.
+                                     #   next, tree, tags, sample, docs. Needs no local project.
     tasks projects                   # the registry: reachable? counts?
     tasks group set vf nodes atoms   # a named set of registered projects (this host only)
     tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
-                                     #   sample, lanes, quiet. Needs no local project.
+                                     #   sample, lanes, quiet, docs. Needs no local project.
     tasks groups                     # each group, its members, and whether they are reachable
     tasks group rm vf                # delete the group; its projects stay registered
     tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project
@@ -736,7 +736,8 @@ first level-one heading, else the file's stem) and `tasks`: every task, of any s
 whose `spec`, `plan` or a `--ref` entry stores exactly that path, as
 `{"id","status","via"}` with `via` one of `spec`, `plan` or `ref`, plus `handle` for a
 reference. A file that is not UTF-8 is listed under its stem with a warning and never
-matches `--search`. `tasks doc <id> --spec|--plan|<handle>` reads one.
+matches `--search`; a `.md` symlink to nothing is a warning, and an unreadable file
+fails the command with an `io` error naming it. `tasks doc <id> --spec|--plan|<handle>` reads one.
 
 ### External documents
 

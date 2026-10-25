@@ -296,3 +296,64 @@ fn docs_lists_nothing_for_a_project_without_docs_directories() {
     let out = env.json(&dir, &["docs"]);
     assert_eq!(out, json!({"docs": [], "warnings": []}));
 }
+
+#[test]
+fn docs_names_the_unreadable_file_in_its_io_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let dir = env.init("pf");
+    write_doc(&dir, "docs/notes/locked.md", "# Locked\n");
+    let path = dir.join("docs/notes/locked.md");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&path).is_ok() {
+        // Running as root: permissions do not bind, so there is nothing to observe.
+        return;
+    }
+    let out = env.cmd(&dir).args(["docs"]).output().unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "io", "{err}");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(path.to_str().unwrap()),
+        "{err}"
+    );
+}
+
+#[test]
+fn docs_search_says_a_non_utf8_document_was_left_out() {
+    let mut env = TestEnv::new();
+    let dir = env.init("pg");
+    let path = dir.join("docs/notes/binary.md");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, [0xff, 0xfe, b'#']).unwrap();
+    let out = env.json(&dir, &["docs", "--search", "binary"]);
+    assert_eq!(out["docs"], json!([]));
+    let warning = out["warnings"][0].as_str().unwrap();
+    assert!(
+        warning.contains("docs/notes/binary.md") && warning.contains("not listed"),
+        "{out}"
+    );
+}
+
+#[test]
+fn docs_warns_about_a_dangling_markdown_symlink() {
+    let mut env = TestEnv::new();
+    let dir = env.init("ph");
+    std::fs::create_dir_all(dir.join("docs/plans")).unwrap();
+    std::os::unix::fs::symlink("gone.md", dir.join("docs/plans/broken.md")).unwrap();
+    let out = env.json(&dir, &["docs"]);
+    assert_eq!(out["docs"], json!([]));
+    let warnings = out["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{out}");
+    assert!(
+        warnings[0]
+            .as_str()
+            .unwrap()
+            .contains("docs/plans/broken.md"),
+        "{out}"
+    );
+}

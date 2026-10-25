@@ -82,7 +82,7 @@ pub fn run(ctx: ReadCtx, kinds: &[String], text: Option<TextQuery>) -> Result<Ou
     let mut docs = Vec::new();
     for (project, mut tasks) in ctx.scope.scan_each()? {
         tasks.sort_by(|a, b| a.id.cmp(&b.id));
-        for (path, kind) in documents(project)? {
+        for (path, kind) in documents(project, &mut warnings)? {
             if !kinds.is_empty() && !kinds.contains(&kind) {
                 continue;
             }
@@ -92,12 +92,17 @@ pub fn run(ctx: ReadCtx, kinds: &[String], text: Option<TextQuery>) -> Result<Ou
                 .and_then(|stem| stem.to_str())
                 .unwrap_or(&path)
                 .to_string();
-            let (title, body) = match String::from_utf8(std::fs::read(&file)?) {
+            let bytes = std::fs::read(&file).map_err(io_at(&file))?;
+            let (title, body) = match String::from_utf8(bytes) {
                 Ok(body) => (title_of(&body).unwrap_or(stem), Some(body)),
                 Err(_) => {
+                    let fate = if text.is_some() {
+                        "not listed, since --search cannot match it"
+                    } else {
+                        "listed under its file name"
+                    };
                     warnings.push(format!(
-                        "{}: {path} is not UTF-8 text; listed under its file name, never matched \
-                         by --search",
+                        "{}: {path} is not UTF-8 text; {fate}",
                         project.prefix
                     ));
                     (stem, None)
@@ -130,7 +135,7 @@ pub fn run(ctx: ReadCtx, kinds: &[String], text: Option<TextQuery>) -> Result<Ou
 /// Every working document of `project`, path -> kind, in path order. Directories are read
 /// flat, as bare spec and plan names are searched. A path under two directories (a spec
 /// directory that is also a plan directory) takes the first kind: spec, plan, then notes.
-fn documents(project: &Project) -> Result<BTreeMap<String, Kind>> {
+fn documents(project: &Project, warnings: &mut Vec<String>) -> Result<BTreeMap<String, Kind>> {
     let mut found = BTreeMap::new();
     let dirs = project
         .spec_dirs
@@ -144,31 +149,53 @@ fn documents(project: &Project) -> Result<BTreeMap<String, Kind>> {
         )
         .chain([(NOTES_DIR, None)]);
     for (dir, kind) in dirs {
-        for file in markdown_files(&project.records.join(dir))? {
+        let (files, dangling) = markdown_files(&project.records.join(dir))?;
+        for file in files {
             let kind = kind.unwrap_or_else(|| Kind::of_note(&file));
             found.entry(format!("{dir}/{file}")).or_insert(kind);
+        }
+        for file in dangling {
+            let line = format!(
+                "{}: {dir}/{file} is a symlink to nothing; not listed",
+                project.prefix
+            );
+            if !warnings.contains(&line) {
+                warnings.push(line);
+            }
         }
     }
     Ok(found)
 }
 
-/// The names of the regular `.md` files directly in `dir`; none when `dir` is not a
-/// directory. A name that is not UTF-8 cannot be a stored link and is skipped.
-fn markdown_files(dir: &Path) -> Result<Vec<String>> {
+/// The names of the regular `.md` files directly in `dir`, and of the `.md` symlinks there
+/// whose target is missing; none when `dir` is not a directory. A name that is not UTF-8
+/// cannot be a stored link and is skipped, as are directories and special files.
+fn markdown_files(dir: &Path) -> Result<(Vec<String>, Vec<String>)> {
+    let (mut files, mut dangling) = (Vec::new(), Vec::new());
     if !dir.is_dir() {
-        return Ok(Vec::new());
+        return Ok((files, dangling));
     }
-    let mut files = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
+    for entry in std::fs::read_dir(dir).map_err(io_at(dir))? {
+        let path = entry.map_err(io_at(dir))?.path();
         let Some(file) = path.file_name().and_then(|file| file.to_str()) else {
             continue;
         };
-        if file.ends_with(".md") && path.is_file() {
+        if !file.ends_with(".md") {
+            continue;
+        }
+        if path.is_file() {
             files.push(file.to_string());
+        } else if path.is_symlink() && !path.exists() {
+            dangling.push(file.to_string());
         }
     }
-    Ok(files)
+    Ok((files, dangling))
+}
+
+/// An io error that names the path it happened at, so a failure in one of many projects
+/// says which file to fix.
+fn io_at(path: &Path) -> impl Fn(std::io::Error) -> Error + '_ {
+    move |error| Error::Io(format!("{}: {error}", path.display()))
 }
 
 /// The first level-one ATX heading's text.
