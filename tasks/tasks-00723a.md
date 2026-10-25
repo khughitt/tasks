@@ -1,14 +1,14 @@
 ---
 id: tasks-00723a
 title: "Agent-docs wording in the tasks, scope and curate skills: documents under the records root"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:13:12Z
+updated: 2026-10-25T12:13:14Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -51,3 +51,5 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:12:04Z (docs/tasks-00723a): Updated and reviewed tasks, scope and curate guidance for detached records; preserved nested/worktree routing and document links. User approved local integration and global skill activation.
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T12:12:30Z (docs/tasks-00723a): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "kept", "verification": "verified", "purpose": "User-approved immediate merge of docs/tasks-00723a, then checked worktree removal; target is regenerable build output, attachments are committed, no plan workspace or host pointers found, tt-report ran", "next_owner": "session:codex:01a172e0-035d-7420-9c13-60fe7e644221", "cleanup_trigger": "After local merge and attachment verification, remove this task's clean worktree this turn"}
+- 2026-10-25T12:13:14Z (docs/tasks-00723a): resumed
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
