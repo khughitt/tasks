@@ -135,3 +135,19 @@ Both design tasks retain accepted implementation steps as children. Replace the
 obsolete Ideas it wakes instruction: there is no waiting idea after promotion.
 Keep findings on the tasks and in this brief; goal closeout requires the actual
 retained deliverables. This revision approves no design, plan or implementation.
+
+## Downstream design review handoff
+
+tasks-e637a1 now has a proposed [ranked blocker design](../specs/2026-10-25-blocker-ranking-design.md),
+frozen for user review at c45fc7f. A read-only builder check by
+codex/gpt-6.1-sol returned "nothing important left"; it grants no user approval.
+The design recommends a dedicated impact-ranked read, preserves ready/next, keeps
+dependency relief separate from execution permission, and documents structural-only
+goal detection, local coverage and host-local approval evidence. Display-only
+inherited urgency remains an explicit deferred alternative, under crew's active
+beneficiary policy. No product code or CLI vocabulary changed.
+
+The next step is the user's design review, followed by a separately reviewed
+implementation plan. That plan must sequence the shared incoming scan and canonical
+dependency-verdict work before integration. History collection remains independent
+under tasks-71c74d. This design task and its coordination goal remain open.
