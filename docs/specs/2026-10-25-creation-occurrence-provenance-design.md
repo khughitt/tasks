@@ -1,6 +1,6 @@
 # Creation and occurrence provenance: who filed a task, and whose ask it is
 
-Status: approved for planning (2026-10-25, user, conditional on the round-3 P2 fix in this revision 3; reviewed rounds 2-3 by codex/gpt-6.1-sol)
+Status: approved (2026-10-25, user); revision 4 clarifies that a lone candidate with an unsettled action is ambiguous (plan review round 1, codex/gpt-6.1-sol)
 Task: tasks-a58a90 (wakes tasks-516ab4 and tasks-2e7d03)
 Brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
 
@@ -333,12 +333,13 @@ directly by the record's id or time.
      an id-only result whose action the rest of the call settled, or an unreadable
      result whose time and command text match. This also covers a created title that
      differs from the command text, as in 9 of 72 audited origins.
-   - **ambiguous:** more than one candidate remains. This includes a creation that
-     cannot be told from a reuse (an id-only sourced add without captured stderr,
-     beside another call with the same source and title). Other examples: two
-     recurrences in one session with equal summaries in the same second, or
-     concurrent subagents under one Claude session. List the candidates; never pick
-     one.
+   - **ambiguous:** more than one candidate remains, or the only one left has an
+     unsettled action. An id-only sourced add without captured stderr is ambiguous
+     between creation and reuse even when it is the session's only candidate; beside
+     another call with the same source and title, both are listed. Other examples:
+     two recurrences in one session with equal summaries in the same second (in JSON
+     too, since `at` has whole-second precision), or concurrent subagents under one
+     Claude session. List the candidates and any unsettled action; never pick one.
    - **unavailable:** no candidate remains although the transcript was read. Record
      what was searched.
 5. Read the request, the action, the tool result and any later correction around the
