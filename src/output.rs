@@ -1034,6 +1034,41 @@ pub struct TagsOut {
     pub warnings: Vec<String>,
 }
 
+/// One task's link to a document: through its `spec`, its `plan`, or a `--ref` entry,
+/// which names its handle.
+#[derive(Serialize)]
+pub struct DocLink {
+    pub id: String,
+    pub status: String,
+    pub via: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DocRow {
+    pub project: String,
+    /// spec, plan, brief, handoff, or note.
+    pub kind: &'static str,
+    /// Relative to the project's records directory, as a task stores the link.
+    pub path: String,
+    /// The absolute path, to open the document.
+    pub file: String,
+    /// The first level-one heading, else the file's stem.
+    pub title: String,
+    /// Tasks of every status, in id order.
+    pub tasks: Vec<DocLink>,
+}
+
+#[derive(Serialize)]
+pub struct DocsOut {
+    pub docs: Vec<DocRow>,
+    pub warnings: Vec<String>,
+    /// A registry-wide scope: pretty paths then name their project.
+    #[serde(skip)]
+    pub wide: bool,
+}
+
 #[derive(Serialize, Default)]
 pub struct Counts {
     pub idea: usize,
@@ -1264,6 +1299,7 @@ pub enum Output {
     Check(CheckOut),
     Tree(TreeOut),
     Tags(TagsOut),
+    Docs(DocsOut),
     Feedback(FeedbackOut),
     Attach(AttachOut),
     Detach(DetachOut),
@@ -1707,6 +1743,39 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                 ));
             }
             rendered
+        }
+        Output::Docs(o) => {
+            use crate::table::{Column, Detail, Row};
+            let columns = [
+                Column::fixed("kind"),
+                Column::fixed("path"),
+                Column::wrap("title", 20, None),
+            ];
+            let rows: Vec<Row> = o
+                .docs
+                .iter()
+                .map(|doc| {
+                    let path = if o.wide {
+                        format!("{}:{}", doc.project, doc.path)
+                    } else {
+                        doc.path.clone()
+                    };
+                    let mut row = Row::new(vec![doc.kind.to_string(), path, doc.title.clone()]);
+                    if !doc.tasks.is_empty() {
+                        let links: Vec<String> = doc
+                            .tasks
+                            .iter()
+                            .map(|link| match &link.handle {
+                                Some(handle) => format!("{} {} {handle}", link.id, link.via),
+                                None => format!("{} {}", link.id, link.via),
+                            })
+                            .collect();
+                        row.details.push(("tasks", Detail::Wrap(links.join(", "))));
+                    }
+                    row
+                })
+                .collect();
+            crate::table::render(&columns, &rows, layout, None, painter)
         }
         Output::Feedback(o) => format!("{} {}", o.action, o.id),
         Output::Attach(o) => o.file.path.clone(),
@@ -2295,6 +2364,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
             .collect(),
         Output::Tree(o) => o.warnings.clone(),
         Output::Tags(o) => o.warnings.clone(),
+        Output::Docs(o) => o.warnings.clone(),
         Output::Feedback(o) => o.warnings.clone(),
         Output::Attach(o) => o.warnings.clone(),
         Output::Detach(o) => o.warnings.clone(),

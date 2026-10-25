@@ -21408,6 +21408,7 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             vec!["search", "x", "--parked", "--waiting-on", "user"],
         ),
         ((vec!["tags"], "--status"), vec!["tags", "--status", "todo"]),
+        ((vec!["docs"], "--kind"), vec!["docs", "--kind", "plan"]),
         (
             (vec!["projects"], "--sort"),
             vec!["projects", "--sort", "size"],

@@ -232,6 +232,7 @@ fn main() {
                 | cli::Command::Resolve { .. }
                 | cli::Command::Show { .. }
                 | cli::Command::Doc { .. }
+                | cli::Command::Docs { .. }
                 | cli::Command::List { .. }
                 | cli::Command::Search { .. }
                 | cli::Command::Ready { .. }

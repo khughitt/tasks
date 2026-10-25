@@ -180,6 +180,15 @@ pub fn needs() -> Vec<CompletionCandidate> {
     plain(crate::claims::Needs::ALL.iter().map(|needs| needs.as_str()))
 }
 
+/// The five `docs --kind` accepts.
+pub fn doc_kinds() -> Vec<CompletionCandidate> {
+    plain(
+        crate::commands::docs::Kind::ALL
+            .iter()
+            .map(|kind| kind.as_str()),
+    )
+}
+
 /// The keys `query::SortKey::parse` accepts.
 pub fn sorts() -> Vec<CompletionCandidate> {
     plain(["priority", "updated", "created"])
