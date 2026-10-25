@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T22:42:43Z
+updated: 2026-10-25T22:42:45Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -75,3 +75,4 @@ Agent additions to weigh when scoping:
 - 2026-10-25T22:40:50Z (design/tasks-e637a1): Frozen design revision c45fc7f:docs/specs/2026-10-25-blocker-ranking-design.md sent to a read-only builder check; user approval is pending. just test-fast ran 1728 tests and exited 101 with the move integration target failing; no product code changed. Focused move rerun is capturing diagnostics in target/blocker-design-move-check.log. Document pre-commit checks passed.
 - 2026-10-25T22:41:40Z (design/tasks-e637a1): review: spec round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T22:42:43Z (design/tasks-e637a1): attached: spec-builder-check-report.md (609 bytes): Full read-only builder review of frozen spec c45fc7f; codex/gpt-6.1-sol found nothing important left; user approval pending.
+- 2026-10-25T22:42:45Z (design/tasks-e637a1): attached: review-ledger.md (403 bytes): Builder review ledger: accept, no findings or rulings; user design gate remains.
