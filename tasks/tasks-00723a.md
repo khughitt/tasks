@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T11:53:27Z
+updated: 2026-10-25T11:54:15Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -30,3 +30,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T11:48:29Z (docs/tasks-00723a): Worktree hydration succeeded with confined cargo install --locked --path . --root .local and CARGO_TARGET_DIR=target. Baseline just test exited 0; full result counts recorded next. Reference baseline found detached init/locations/errors absent and unscoped scope/curate unable to locate detached code worktrees. Updating existing reference wording, not adding new workflow policy.
 - 2026-10-25T11:49:53Z (docs/tasks-00723a): Baseline just test: 1685 passed, 0 failed, 0 ignored across 14 test targets. Reference-only documentation update reaches skills/tasks/SKILL.md, skills/scope/SKILL.md and skills/curate/SKILL.md; no parser, callers, fixtures or JSON shapes changed.
 - 2026-10-25T11:53:27Z (docs/tasks-00723a): review: impl round 1 — verdict: revise; findings: Important 1, Minor 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T11:54:15Z (docs/tasks-00723a): Reference review round 1 corrections: broaden skill activation to config-free detached/linked checkouts and use init --records --force when recording detached checkout locations. Fast-suite attempt exposed existing doc_fetch 150ms-deadline fixture failures: timeout_cleans_up_child_and_pipe_holder and escaped_pipe_holder_cannot_extend_deadline both lacked pidfiles; full baseline had passed. Investigating scheduling contention with focused rerun; no Rust changes.
