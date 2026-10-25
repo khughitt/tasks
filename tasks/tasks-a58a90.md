@@ -1,13 +1,15 @@
 ---
 id: tasks-a58a90
 title: Design task creation and feedback occurrence provenance from the brief
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T11:13:03Z
+updated: 2026-10-25T11:15:47Z
+started: 2026-10-25T11:15:47Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -28,3 +30,8 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-20-feedback-ask-preservation-brief.md — evidence, distinct asks, alternatives and ownership boundaries
+
+## Notes
+
+- 2026-10-25T11:15:47Z (main): started
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
