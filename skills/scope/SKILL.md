@@ -229,14 +229,14 @@ test the premises, not to do the task. Choose one verdict:
 | `confirmed` | Premises hold and nothing narrows | No body edit; set `--process` if it is missing |
 | `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply, including the `--reviewed` audit note |
 | `shelved` | As for an idea | As for an idea; `unshelve` returns it as an idea, so the wake condition says it was scoped |
-| `drop` | As for an idea | Status unchanged; proposal in a plain note |
+| `drop` | As for an idea | Status unchanged; proposal in a `--stamp` note |
 
 When the evidence answers the whole task (common for research), the verdict is still
 `rescoped`: record the finding in the body and narrow the remaining work to recording the
 result and running its `Ideas it wakes` notes, so the task closes through `done`.
 
 The audit note for every verdict except `briefed` and `question` is
-`tasks -C <root> note <id> --stamp "scope: <verdict>; <what changed>[; proposal: <text>]"`
+`tasks -C <root> note <id> --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>][; proposal: <text>]"`
 without `--reviewed` (refused on a non-idea), naming the evidence (versions, commits) the
 premises were checked against. A re-scoped task's priority changes only with the user's
 say.
