@@ -1,15 +1,17 @@
 ---
 id: tasks-00723a
 title: "Agent-docs wording in the tasks, scope and curate skills: documents under the records root"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:22:04Z
+updated: 2026-10-25T12:22:25Z
 started: 2026-10-25T11:44:49Z
+completed: 2026-10-25T12:22:25Z
+closed: 2026-10-25T12:22:25Z
 depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
@@ -59,3 +61,7 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:21:53Z (docs/tasks-00723a): attached: integration-review-report.md (1232 bytes): Full scoped review accepting the merge conflict resolution, codex/gpt-6.1-sol
 - 2026-10-25T12:21:53Z (docs/tasks-00723a): Ruling: accept round 5's merge-integrity review scope, excluding main's routing implementation and the already-approved skill behavior. Why: those changes already had separate reviews, and the combined branch is checked by the complete fast suite. Cost: not recorded. Revisions: approved d113068; integration task-skill SHA256 444c8c3d8d0d50e516834432d6582f5de167044db4c1c2c2c4df627c15c3a570.
 - 2026-10-25T12:22:04Z (docs/tasks-00723a): Combined branch verification after incoming main: RUST_TEST_THREADS=1 just test-fast exited 0 with 1691 passed, 0 failed, 4 ignored across 14 targets; just check exited 0. Merge-integrity review accepted with no findings; no source/tests differ from incoming main.
+- 2026-10-25T12:22:25Z (docs/tasks-00723a): done
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:22:25Z (docs/tasks-00723a): Reviewed detached-records wording merged with incoming ID-routing guidance; combined fast suite passed 1691 tests with 4 ignored, checks passed, and user approved local integration.
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
