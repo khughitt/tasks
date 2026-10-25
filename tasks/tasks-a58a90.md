@@ -1,15 +1,17 @@
 ---
 id: tasks-a58a90
 title: Design task creation and feedback occurrence provenance from the brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T12:25:54Z
+updated: 2026-10-25T12:27:28Z
 started: 2026-10-25T11:15:47Z
+completed: 2026-10-25T12:27:28Z
+closed: 2026-10-25T12:27:28Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -63,3 +65,7 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
 - 2026-10-25T12:25:52Z (design/tasks-a58a90): resumed
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T12:25:54Z (design/tasks-a58a90): review: plan round 1 — verdict: revise; findings: P2 4; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:27:28Z (design/tasks-a58a90): done
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:27:28Z (design/tasks-a58a90): design (spec rev 4, 00f58ea) and plan (f8c97a0) user-approved after review rounds by codex/gpt-6.1-sol; implementation goal tasks-053e89 with seven step children; wake notes written on tasks-516ab4 and tasks-2e7d03
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
