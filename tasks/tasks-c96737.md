@@ -7,7 +7,7 @@ complexity: low
 process: direct
 owner: main
 created: 2026-10-25T13:43:25Z
-updated: 2026-10-25T15:07:49Z
+updated: 2026-10-25T15:09:51Z
 started: 2026-10-25T14:00:27Z
 depends: []
 parent: tasks-053e89
@@ -25,3 +25,4 @@ After the implementation branch merges: on this host, run cargo install --path .
   provenance: {"harness_session":"claude-code:0f11453f-b2c1-4b7e-949d-cb12a26ba1da","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T15:07:49Z (main): resumed
   provenance: {"harness_session":"claude-code:f5a5b2af-aae8-4252-99e0-46dedc11650b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T15:09:51Z (main): host titan updated: cargo install --locked --path . from main eb24f8e (includes merge 7c3b9d2), sha256 3b3b5c57; scratch add and feedback each show a stamped created note (claude-code session via CLAUDE_CODE_SESSION_ID)
