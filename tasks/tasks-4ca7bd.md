@@ -4,7 +4,7 @@ title: "tasks prime's default JSON runs to ~250 KB on a project with ~230 open t
 status: idea
 priority: 2
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-24T16:16:32Z
+updated: 2026-10-25T16:02:02Z
 depends: [tasks-e7424b]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
@@ -45,3 +45,7 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 - 2026-10-24T14:02:03Z (feedback): feedback from tasks: Session-start prime JSON exceeds the tool response budget
 - 2026-10-24T14:02:03Z (feedback): detail from tasks: The required session-start prime read was truncated at a 6,000-token tool budget. A subsequent capture measured 133,228 bytes, including about 81.5 KB of roadmap and 40.4 KB of ready rows. A bounded summary needs to cover every growing section and preserve warnings plus an explicit complete-data route.
 - 2026-10-24T16:16:32Z (design/tasks-e7424b): Approved summary design 76501bd and plan 3a264b9: opt-in JSON prime --summary, 12288-byte stdout cap, whole-row eviction, complete warnings/halts, exact omissions and same-binary full recovery. Default remains full. Implementation goal tasks-65b733 tracks binary tasks-7c5a4b, required reinstall tasks-72093a and gated guide adoption tasks-dc696d; no no-effect verdict yet.
+- 2026-10-25T16:02:02Z (feedback): feedback from tasks: Session-start prime JSON exceeds the tool output budget
+  provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
+- 2026-10-25T16:02:02Z (feedback): detail from tasks: The required full session-start read was truncated. A parsed follow-up measured 140123 stdout bytes, dominated by roadmap (87650 bytes) and ready rows (42868 bytes). The installed opt-in summary produced 12271 bytes against its 12288-byte cap; existing startup-guidance adoption remains gated. This recurrence records current measurements and does not request a default JSON change.
+  provenance: {"harness_session":"codex:01a173c9-06d1-7b71-8e1d-5e90cc4839ab","harness_session_source":"CODEX_THREAD_ID"}
