@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T22:42:55Z
+updated: 2026-10-25T22:43:11Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -77,3 +77,4 @@ Agent additions to weigh when scoping:
 - 2026-10-25T22:42:43Z (design/tasks-e637a1): attached: spec-builder-check-report.md (609 bytes): Full read-only builder review of frozen spec c45fc7f; codex/gpt-6.1-sol found nothing important left; user approval pending.
 - 2026-10-25T22:42:45Z (design/tasks-e637a1): attached: review-ledger.md (403 bytes): Builder review ledger: accept, no findings or rulings; user design gate remains.
 - 2026-10-25T22:42:55Z (design/tasks-e637a1): Verification: focused move target reproduced 87 passed/3 failed from the fixture git helper inheriting host Git configuration; filed tasks-2518ad. With GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM=1, the same target passed 90/90, and just test-fast passed 1728 tests (5 ignored). No fixture code was changed and the normal environment remains affected. tasks check and document pre-commit checks passed. Full-suite baseline remains deferred to execution Setup; no new report runtime exists.
+- 2026-10-25T22:43:11Z (design/tasks-e637a1): Correction to the preceding verification note: the isolated just test-fast output reports 1728 passed, 0 failed, 4 ignored across 15 test binaries; the earlier 5 ignored was a transcription error.
