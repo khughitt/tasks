@@ -6,10 +6,16 @@ Files prepared off the synced tree need a disposition before a task closes. Two
 reports from the same source describe adjacent obstacles: `attach` failed from a
 scratch directory beneath an empty `.git`, and `done` left a reproduction script
 and verification output in per-task scratch without any record naming them.
+The later report tasks-a7a8ce describes `show` failing beneath an empty `.git`
+too; it joins the existing routing investigation rather than creating another.
 
 ## Current behaviour and evidence
 
 Checked at `89e0371` on 2026-10-24; these are code findings, not a reproduced incident.
+The routing paths below were rechecked at `220bb14` on 2026-10-25. The record
+tasks-a7a8ce has no stamped creation occurrence, so its
+originating ask is unavailable and its origin remains unset. This is missing
+provenance, not a failed transcript lookup.
 
 - `src/commands/mod.rs::open_id_ctx_unwarned` uses the registry only after
   `Error::NoProject`. Both `show` and `open_id_write_ctx` use this function; `attach`
@@ -76,7 +82,12 @@ needed for the warning. This project declares no shared resource needs.
 - `tasks-4b68c8`: keep as an idea pending a bounded P2 / s / mid / direct routing
   investigation `tasks-e147b9`. Record the wait with a dependency and carry findings back using
   `--no-reviewed`. Do not duplicate the existing attachment-filing or park research.
+- `tasks-a7a8ce`: briefed under the same goal, waiting on tasks-e147b9. Its
+  show-only report fits the existing fixture matrix; preserve its original body
+  and add it to the investigation's completion wake list. The separate missing
+  checkout research tasks-7b1b22 concerns absence classification, not full-ID
+  routing past a confirmed empty ancestor marker.
 
 The routing investigation is a child of the cluster goal. Its `Ideas it wakes`
-requires a finding note on `tasks-4b68c8` before integration. Neither the original
-source reports nor their provenance is replaced.
+requires finding notes on `tasks-4b68c8` and `tasks-a7a8ce` before integration.
+Neither the original source reports nor their provenance is replaced.
