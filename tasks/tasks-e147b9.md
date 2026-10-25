@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-24T11:32:20Z
-updated: 2026-10-25T16:42:45Z
+updated: 2026-10-25T16:42:47Z
 depends: []
 parent: tasks-b34076
 tags: []
@@ -28,3 +28,8 @@ Ideas it wakes: On completion, run `tasks note tasks-4b68c8 --no-reviewed "<find
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-24-scratch-evidence-brief.md — evidence, close-time scope and routing questions
+
+## Notes
+
+- 2026-10-25T16:42:47Z (main): scope follow-up reuse: tasks-a7a8ce reports the show failure already covered by this matrix; added its completion wake note, preserving the original question, bound, priority and direct process. No duplicate investigation filed; brief updated at docs/notes/2026-10-24-scratch-evidence-brief.md.
+  provenance: {"harness_session":"codex:01a173ed-fd7b-7fc3-8372-3ad7eca32e70","harness_session_source":"CODEX_THREAD_ID"}
