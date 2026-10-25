@@ -4,7 +4,7 @@ title: "A read of a full task id fails with an io error when the cwd sits under 
 status: idea
 priority: 2
 created: 2026-10-25T11:26:06Z
-updated: 2026-10-25T16:41:16Z
+updated: 2026-10-25T16:43:17Z
 depends: []
 parent: tasks-b34076
 tags: [feedback, friction, "from:hq"]
@@ -12,3 +12,7 @@ agent: claude-code
 ---
 
 Running 'tasks show <prefix>-<hex> --json' from a non-repository directory works, but from a directory whose ancestor holds an empty .git directory it exits 1 with kind io (git rev-parse failed, not a git repository). Expected: the id's prefix routes to its registered project regardless of cwd, as it does when no .git ancestor exists; the empty directory is not a repository. The error does name the empty directory and suggests removing it, which helped diagnosis.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-24-scratch-evidence-brief.md — shared routing evidence and existing investigation
