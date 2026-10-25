@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:52:09Z
+updated: 2026-10-25T10:52:11Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -57,3 +57,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T10:50:41Z (design/tasks-284d9b): attached: filtered-read-spec-round-2-review.md (4430 bytes): Full relayed claude-code/claude-opus-5-5 review of ce08cdc; Important 1 and Minor 3, all accepted for spec revision
 - 2026-10-25T10:52:06Z (design/tasks-284d9b): review: spec round 3 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T10:52:09Z (design/tasks-284d9b): attached: filtered-read-spec-round-3-review.md (1536 bytes): Full fresh codex/gpt-6.1-sol builder check of f03f0b4; accept, no findings, all four prior findings addressed
+- 2026-10-25T10:52:11Z (design/tasks-284d9b): attached: filtered-read-spec-review-ledger.md (3126 bytes): Spec review rounds 1–3 and four accepted rulings; f03f0b4 awaits user review, no deferred minors
