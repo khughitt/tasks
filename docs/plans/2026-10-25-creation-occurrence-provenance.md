@@ -1,5 +1,7 @@
 # Creation and occurrence provenance Implementation Plan
 
+**Status:** approved (2026-10-25, user, after plan review round 1 by codex/gpt-6.1-sol). Execution: subagent-driven, with sequential implementers and a fresh reviewer per task.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every new task records the session that filed it and, optionally, whose ask it is (`user`, `agent`, `mixed`); each feedback occurrence is stamped separately; the skills say how to follow a record back to its originating ask.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Rust 2024 crate, clap, serde/serde_json; tests in `tests/cli.rs` against the built binary via `tests/common::TestEnv`.
 
-**Spec:** `docs/specs/2026-10-25-creation-occurrence-provenance-design.md` (revision 3, `98f1a3c`). Section references below (§n) are to it.
+**Spec:** `docs/specs/2026-10-25-creation-occurrence-provenance-design.md` (revision 4, `00f58ea`). Section references below (§n) are to it.
 
 ## Global Constraints
 
@@ -107,6 +109,15 @@ fn occurrence_keys_reject_bad_forms() {
 }
 
 #[test]
+fn a_second_continuation_is_refused_even_without_a_pair() {
+    let text = format!(
+        "{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {{\"origin\":\"user\"}}\n  provenance: {{\"origin\":\"agent\"}}\n"
+    );
+    let error = parse_task(&text, "t").unwrap_err().to_string();
+    assert!(error.contains("duplicate provenance line"), "{error}");
+}
+
+#[test]
 fn origin_frontmatter_roundtrips_after_agent_and_rejects_unknown_values() {
     // `origin: user` placed directly after `agent:` survives parse+serialize unchanged;
     // `origin: someone` fails to parse with "unknown origin".
@@ -115,8 +126,8 @@ fn origin_frontmatter_roundtrips_after_agent_and_rejects_unknown_values() {
 
 `FULL` and `serialize_task` stand for the module's existing fixture and serializer; use their actual names.
 
-- [ ] **Step 2: Run `just test-one occurrence_keys` and `just test-one origin_frontmatter`.** Expected: FAIL to compile (no `Origin`).
-- [ ] **Step 3: Implement.** Parse the continuation into one private struct holding all five keys (`deny_unknown_fields`), then split it into `provenance` (both pair keys or neither, else `invalid note provenance`) and `occurrence`; validate `origin_session`/`root_session` with `validate_session_key` and the `root_session` source rule. Serialize the same struct so key order follows the Global Constraint. Add `"origin"` after `"agent"` in the key list, parse it with `Origin::parse`, and serialize it after `agent`. `validate_task` re-checks the note keys, so `check` reports invalid values.
+- [ ] **Step 2: Run `just test-one occurrence_keys`, `just test-one origin_frontmatter` and `just test-one second_continuation`.** Expected: FAIL to compile (no `Origin`).
+- [ ] **Step 3: Implement.** Parse the continuation into one private struct holding all five keys (`deny_unknown_fields`), then split it into `provenance` (both pair keys or neither, else `invalid note provenance`) and `occurrence`; validate `origin_session`/`root_session` with `validate_session_key` and the `root_session` source rule. The duplicate guard tracks whether the current note has already had a continuation line, independent of which keys it held: today's `note.provenance.is_some()` check misses an origin-only first line, so replace it with that per-note flag (`duplicate provenance line` stays the error). Serialize the same struct so key order follows the Global Constraint. Add `"origin"` after `"agent"` in the key list, parse it with `Origin::parse`, and serialize it after `agent`. `validate_task` re-checks the note keys, so `check` reports invalid values.
 - [ ] **Step 4: Run `just test-one format::` and `just test-fast`.** Expected: PASS, with no other test changed.
 - [ ] **Step 5: Commit** `feat(format): origin field and note occurrence keys`.
 
@@ -272,7 +283,7 @@ Also add `origin_survives_unknown_identity`, `editor_preserves_occurrence_keys` 
 
 **Files:**
 - Modify: `skills/tasks/SKILL.md`. Under "A scoped task" / filing, pass `--origin` when the filer knows whose ask it is, with the three definitions and the "classifies asks, not the filing" sentence from §4.3, and `--origin-session` for an older ask. In the pickup step (Session protocol 3), read origin by the reading rule before asking the user about intent, and follow the scope skill's retrieval procedure for a non-`user` origin.
-- Modify: `skills/scope/SKILL.md`, §2 Gather evidence. Add the §4.7 procedure in its two stages: candidate rules, the full / id-only / unreadable result classes, and the outcomes matched, inferred, ambiguous (with candidates), unavailable and lookup failed, recorded per stage. Scope and brief notes are written with `--stamp`. Correct `origin` with `tasks edit --origin` plus a stamped evidence note.
+- Modify: `skills/scope/SKILL.md`, §2 Gather evidence. Add the §4.7 procedure in its two stages: candidate rules, the full / id-only / unreadable result classes, and the outcomes matched, inferred, ambiguous (with candidates), unavailable and lookup failed, recorded per stage. Ambiguous includes a single candidate whose creation-or-reuse action stays unsettled. Scope and brief notes are written with `--stamp`. Correct `origin` with `tasks edit --origin` plus a stamped evidence note.
 - Test: none in Rust. `tasks check` and `just check` (hygiene) must stay green.
 
 - [ ] **Step 1:** Write the scope-skill text by condensing §4.7 without changing any rule. Every outcome name and candidate rule matches the spec's words.
@@ -289,8 +300,11 @@ Runs after Tasks 2–5, before merge, from a real Claude Code session (the imple
 **Files:** none committed; the report is attached with `tasks attach`.
 
 - [ ] **Step 1: Live creation.** `add` a task in the scratch project with JSON output. Retrieve it through the session-logs tooling from this session's transcript. Expected: stage 1 matched.
-- [ ] **Step 2: Two recurrences.** Make the scratch project accept feedback; file one report, then two JSON recurrences of it. Each binds to its own call by `at`. Expected: matched twice. Repeat with `--pretty` and equal summaries in the same second. Expected: matched where time and arguments separate the calls, otherwise ambiguous, listing both.
-- [ ] **Step 3: Pretty creation, then pretty reuse.** Run `add --pretty --source S` twice. Expected: the first binds as inferred and the second is excluded by its reuse warning. For the no-stderr variant, reason over a transcript excerpt with stderr removed. Expected: ambiguous.
+- [ ] **Step 2: Two recurrences.** Make the scratch project accept feedback and file one report. Then:
+  - Two JSON recurrences in different seconds (`sleep 2` between them, and check that the two outputs' `at` differ). Each binds to its own call by `at`. Expected: matched twice.
+  - Two JSON recurrences with equal summaries in the same second (one shell line, and check that the two `at` values are equal; if they are not, retry). Expected: ambiguous, listing both: `at` has whole-second precision.
+  - The same pair of cases with `--pretty`. Expected: matched where time and arguments separate the calls, otherwise ambiguous.
+- [ ] **Step 3: Pretty creation, then pretty reuse.** Run `add --pretty --source S` twice. Expected: the first binds as inferred and the second is excluded by its reuse warning. For the no-stderr variant, reason over a transcript excerpt with stderr removed. Expected: ambiguous, listing both calls. Then a lone sourced `add --pretty --source S2` in a fresh scratch project, read from an excerpt with stderr removed. Expected: ambiguous with one candidate and the action unsettled (spec §4.7).
 - [ ] **Step 4: Older request.** File in this session (B) with `--origin-session claude-code:572ee51e-2f53-4729-96f8-f122a2cc8305`, after reading that session's 10:59:13Z human turn (the user's "Are you able to tell who created the task?"). Expected: stage 1 matched in B; stage 2 matched (B's session-logs read printed the turn) or inferred. Then file a second record naming a nonexistent `codex:` key. Expected: stage 2 unavailable, stage 1 still matched.
 - [ ] **Step 5: Limits.** Record one case for each:
   - An unstamped older record (any pre-change task): unavailable.
@@ -311,8 +325,16 @@ tasks add "Pass --origin in the feedback rule and cite origin in the intent clau
   -b "tasks now records origin (user|agent|mixed). The global Feedback rule passes --origin user or --origin mixed when a report relays the user's words, beside lore-c01bc8's body rule; the Decisions clause on intent may read origin before asking. Spec: tasks docs/specs/2026-10-25-creation-occurrence-provenance-design.md §4.8."
 ```
 
-- [ ] **Step 2:** File the blind pilot as a child of this plan's goal, to run after rollout. Copy its body from §5 "Blind at-filing pilot", and set `--process direct --complexity mid`.
-- [ ] **Step 3:** Before the branch merges, write the wake notes the source tasks ask for:
+- [ ] **Step 2:** File the post-merge rollout as an open child of this plan's goal, owned by the agent that merges the branch:
+
+```bash
+tasks add "Roll out the provenance binary to every host" --parent tasks-053e89 --status todo \
+  --process direct --complexity low \
+  -b "After the implementation branch merges: on this host, run cargo install --path . from main and verify end to end (one add and one feedback show a stamped created note). Every other host that reads synced task records installs a current binary before records carrying origin or the new note keys reach it; older binaries reject them (spec §4.9). Done when each such host is named in a note as updated."
+```
+
+- [ ] **Step 3:** File the blind pilot as a child of this plan's goal that depends on the rollout task. Copy its body from §5 "Blind at-filing pilot", and set `--process direct --complexity mid`.
+- [ ] **Step 4:** Before the branch merges, write the wake notes the source tasks ask for:
   - `tasks note tasks-516ab4 --no-reviewed "<what landed and how a scope pass now finds a report's origin>"`
   - `tasks note tasks-2e7d03 --no-reviewed "<what landed: creation note, origin field, retrieval procedure>"`
-- [ ] **Step 4:** After merge, run `cargo install --path .` on this host, as AGENTS.md says. Other hosts update before records with the new keys sync to them (§4.9); name that in the done message.
+- [ ] **Step 5:** Close this step with `tasks done` on the branch, before merge. Installation is not part of it: it belongs to the rollout task filed in Step 2.
