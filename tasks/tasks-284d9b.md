@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T11:14:04Z
+updated: 2026-10-25T11:16:15Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -67,3 +67,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T11:06:34Z (design/tasks-284d9b): review: spec round 4 — verdict: accept; findings: Minor 2; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T11:06:38Z (design/tasks-284d9b): Keith approved spec f03f0b4 for planning in the current turn. Accept both round-4 wording nits without another spec-review round: separate explicit-scope shorthand rule from rule 4 and make rule 3 guidance unconditional. Record registry-before-discovery ordering and dual-corrupt-config behavior in the implementation plan. Process remains planned; workspace .worktrees/tasks-284d9b. No implementation until plan review.
 - 2026-10-25T11:08:28Z (design/tasks-284d9b): attached: filtered-read-spec-round-4-review.md (2981 bytes): Full round-4 acceptance by claude-code/claude-opus-5-5, two wording nits, and Keith's approval for planning
+- 2026-10-25T11:16:15Z (design/tasks-284d9b): review: plan round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
