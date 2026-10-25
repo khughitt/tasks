@@ -208,20 +208,30 @@ pub fn run(
             }
         }
     };
-    let (task, action) = match existing {
+    let (task, action, at) = match existing {
         Some((id, automatic)) => {
-            let task = recur_into(
+            let (task, at) = recur_into(
                 &mut ctx, &id, automatic, &summary, &body, &category, &from, &reporter,
             )?;
             // Record-home spec §4: a holder's recurrence follows the owner's registered
             // root, where it landed. `recur_into` saved its own pruned store first.
             super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
-            (task, "recurred")
+            (task, "recurred", at)
         }
-        None => (
-            create(&ctx.project, &ctx.registry, summary, body, &category, &from)?,
-            "created",
-        ),
+        None => {
+            let stamp = super::occurrence_stamp(&mut ctx.warnings);
+            let task = create(
+                &ctx.project,
+                &ctx.registry,
+                summary,
+                body,
+                &category,
+                &from,
+                &stamp,
+            )?;
+            let at = task.created.clone();
+            (task, "created", at)
+        }
     };
     let path = ctx.project.task_path(&task.id);
     let committed = super::finish(&mut ctx);
@@ -242,6 +252,7 @@ pub fn run(
         id: task.id.to_string(),
         action: action.into(),
         path: path.display().to_string(),
+        at: Some(at),
         warnings: ctx.warnings,
     }))
 }
@@ -253,11 +264,14 @@ fn create(
     body: String,
     category: &str,
     from: &str,
+    stamp: &super::Stamp,
 ) -> Result<Task> {
     let agent = super::creation_agent(None)?;
     let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
+    let at = task.created.clone();
+    super::append_occurrence_note(&mut task, &at, NOTE_AUTHOR, "created", stamp, None, None)?;
     super::create(target, registry, &mut task)?;
     Ok(task)
 }
@@ -272,7 +286,7 @@ fn recur_into(
     category: &str,
     from: &str,
     prefix: &str,
-) -> Result<Task> {
+) -> Result<(Task, String)> {
     if !body.is_empty() && body.contains(['\n', '\r']) {
         return Err(Error::Validation(
             "--body must be a single line: recurring feedback appends the body as a single-line detail note; provide one line"
@@ -305,17 +319,26 @@ fn recur_into(
         }
         Ok(())
     };
+    let stamp = super::occurrence_stamp(&mut ctx.warnings);
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
+    let mut occurrence_at = String::new();
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the owner's public file. The reporting project is already in the note text.
     let task = guarded_update(&ctx.project, &ctx.registry, id, eligible, |task| {
-        append_note(
+        let at = crate::time::now();
+        super::append_occurrence_note(
             task,
+            &at,
             NOTE_AUTHOR,
             &format!("feedback from {prefix}: {summary}"),
+            &stamp,
+            None,
+            None,
         )?;
+        occurrence_at = at;
         if !body.is_empty() {
             append_note(task, NOTE_AUTHOR, &format!("detail from {prefix}: {body}"))?;
+            task.notes.last_mut().expect("just appended").provenance = stamp.provenance.clone();
         }
         for tag in [from, category] {
             if !task.tags.iter().any(|existing| existing == tag) {
@@ -331,7 +354,7 @@ fn recur_into(
             task.id
         ));
     }
-    Ok(task)
+    Ok((task, occurrence_at))
 }
 
 /// Read, check `eligible`, mutate, and replace `id` in `target`, retrying from the read
@@ -382,6 +405,7 @@ mod tests {
             String::new(),
             "gap",
             "from:tst",
+            &super::super::Stamp::default(),
         )
         .unwrap();
         let id = seed.id.clone();

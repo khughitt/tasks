@@ -426,7 +426,7 @@ fn note_sets_and_clears_reviewed_in_the_same_write() {
     env.json(&dir, &["note", &id, "--reviewed", "scope: briefed; x"]);
     let shown = env.json(&dir, &["show", &id]);
     assert_eq!(shown["task"]["reviewed"], true);
-    assert_eq!(shown["task"]["notes"][0]["text"], "scope: briefed; x");
+    assert_eq!(shown["task"]["notes"][1]["text"], "scope: briefed; x");
     env.json(&dir, &["note", &id, "--no-reviewed", "finding"]);
     assert!(!reviewed(&env, &dir, &id));
     // A second pass sets it again with a second audit note.
@@ -438,7 +438,15 @@ fn note_sets_and_clears_reviewed_in_the_same_write() {
         .iter()
         .map(|n| n["text"].as_str().unwrap())
         .collect();
-    assert_eq!(texts, ["scope: briefed; x", "finding", "scope: briefed; y"]);
+    assert_eq!(
+        texts,
+        [
+            "created",
+            "scope: briefed; x",
+            "finding",
+            "scope: briefed; y"
+        ]
+    );
     assert!(reviewed(&env, &dir, &id));
 }
 

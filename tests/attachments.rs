@@ -12,8 +12,9 @@ fn write(path: &Path, bytes: &[u8]) -> PathBuf {
     path.to_path_buf()
 }
 
+/// The note texts after the leading `created` note every `add` writes.
 fn notes(env: &TestEnv, dir: &Path, id: &str) -> Vec<String> {
-    env.json(dir, &["show", id])["task"]["notes"]
+    let all: Vec<String> = env.json(dir, &["show", id])["task"]["notes"]
         .as_array()
         .map(|notes| {
             notes
@@ -21,7 +22,9 @@ fn notes(env: &TestEnv, dir: &Path, id: &str) -> Vec<String> {
                 .map(|note| note["text"].as_str().unwrap().to_string())
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    assert_eq!(all.first().map(String::as_str), Some("created"), "{all:?}");
+    all[1..].to_vec()
 }
 
 fn set_cap(dir: &Path, bytes: u64) {

@@ -648,11 +648,8 @@ fn editor_saves_validate_added_entries() {
             ("x (input): docs/b.md", None),
         ] {
             let section = format!("## References\\n\\n- {entry}\\n\\n");
-            let body = if notes {
-                format!("sed -i '/^## Notes/i {section}' \"$1\"")
-            } else {
-                format!("printf '\\n{section}' >> \"$1\"")
-            };
+            // Every record carries a creation note, so the section goes before `## Notes`.
+            let body = format!("sed -i '/^## Notes/i {section}' \"$1\"");
             let editor = common::editor_script(env.home.path(), &body);
             let out = env
                 .cmd(&dir)

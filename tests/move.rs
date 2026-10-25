@@ -414,7 +414,7 @@ fn tombstone_retry_preserves_multiword_arguments() {
     let args: Vec<_> = words.iter().map(String::as_str).collect();
     env.json(&dots, &args);
     assert_eq!(
-        env.json(&wali, &["show", &n])["task"]["notes"][0]["text"],
+        env.json(&wali, &["show", &n])["task"]["notes"][1]["text"],
         "two words"
     );
 }
@@ -515,9 +515,10 @@ fn feedback_retry_retargets_the_owner_for_plain_alias_and_equals_selectors() {
     }
     let destination = env.json(&wali, &["show", &n]);
     let notes = destination["task"]["notes"].as_array().unwrap();
-    assert_eq!(notes.len(), 4);
+    assert_eq!(notes.len(), 5);
+    assert_eq!(notes[0]["text"], "created");
     assert!(
-        notes.iter().all(|note| note["by"] == "feedback"
+        notes[1..].iter().all(|note| note["by"] == "feedback"
             && note["text"] == "feedback from dots: it's still broken")
     );
 }
@@ -561,7 +562,7 @@ fn feedback_retry_offers_an_ordinary_note_when_destination_is_not_an_owner() {
     let retry: Vec<_> = words.iter().map(String::as_str).collect();
     env.json(&dots, &retry);
     assert_eq!(
-        env.json(&wali, &["show", &n])["task"]["notes"][0]["text"],
+        env.json(&wali, &["show", &n])["task"]["notes"][1]["text"],
         summary
     );
 }
@@ -2976,4 +2977,29 @@ fn move_clears_review_stamps_on_the_tombstone_and_keeps_them_on_the_target() {
     assert_eq!(target["reviewed"], true);
     assert_eq!(target["reviewed_at"], "2026-10-17T09:00:00Z");
     assert_eq!(target["awaiting_user"], true);
+}
+
+#[test]
+fn move_preserves_creation_note_and_occurrence_keys() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let mut cmd = env.cmd(&source);
+    let out = cmd
+        .env("CODEX_THREAD_ID", "w")
+        .env("CODEX_SESSION_ID", "r")
+        .args(["add", "Travels"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let id = id_of(serde_json::from_slice(&out.stdout).unwrap());
+    let before = env.json(&source, &["show", &id])["task"].clone();
+    let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
+    let after = env.json(&destination, &["show", &moved])["task"].clone();
+    assert_eq!(after["notes"][0], before["notes"][0]);
+    assert_eq!(after["notes"][0]["text"], "created");
+    assert_eq!(after["notes"][0]["root_session"], "codex:r");
+    assert_eq!(after["notes"][0]["harness_session"], "codex:w");
+    assert_eq!(after["created"], before["created"]);
+    assert_eq!(after["notes"][0]["at"], after["created"]);
 }

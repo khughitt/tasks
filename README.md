@@ -433,7 +433,7 @@ A same-owner refresh without root data retains the recorded root; conflicting
 known roots refuse before mutation, including same-owner `start --force`. Inspect
 `tasks show` and the exports, restore incorrect exports, or intentionally release
 with `park` before starting under the new root. Takeovers record the new owner's
-root, including absence. Release removes the metadata; notes and parks gain no
+root, including absence. Release removes the metadata; lifecycle notes and parks gain no
 root field. Old claims still load, but older writers may discard this field when
 rewriting a store; participating sessions need the updated binary for retention.
 
@@ -443,6 +443,9 @@ The generated lifecycle texts are the consumer contract (including status edits)
 - `parked (waiting on …): <next step>`, using the existing park reason vocabulary.
 - `done` or `dropped` on a genuine close transition.
 - `completed; next due <YYYY-MM-DD>` instead of `done` for a recurring completion.
+- `created` as the first note of every task `add` or `feedback` creates (author `add` or
+  `feedback`); see Creation notes below. `feedback` recurrences write
+  `feedback from <prefix>: <summary>` (and `detail from <prefix>: <body>`).
 
 These notes persist after claims and parks are released. Close-message notes are also
 stamped, but user messages are **not lifecycle markers**. Consumers such as obs derive
@@ -450,12 +453,35 @@ transition kinds from generated texts, not simply from the presence of provenanc
 There is no serialized marker kind: arbitrary user text can equal a generated text
 (for example, a close message of `resumed`). Text matching alone cannot disambiguate
 that collision; consumers must retain that uncertainty.
-Plain `tasks note`, shelf notes, feedback and takeover commentary remain unstamped.
+Plain `tasks note`, shelf notes and takeover commentary remain unstamped.
 `tasks note <id> "<text>" --stamp` opts one note in: it carries the same pair under the
 same rules (a missing source leaves it off; a conflict warns without values and the note
 still lands), and changes nothing else about `note`. Its text is not interpreted, so a
 stamped note is no more a lifecycle marker than a close message is; flow's gate notes
 use it to name the session at each stage boundary.
+
+#### Creation notes
+
+`add` and `feedback` write one note, text `created`, when they create a task (author
+`add` or `feedback`). Its `at` equals the record's `created`, and it carries the same
+native pair as other stamped notes under the same rules. When the pair comes from
+`CODEX_THREAD_ID` and a valid `CODEX_SESSION_ID` differs from it, the note also carries
+`root_session` (`codex:<root>`), the Codex tree root. Identity never blocks creation:
+conflicting or invalid variables warn, naming variables and never values, and leave the
+note unstamped. `TASKS_SESSION` is never a source. An `add` that reuses an existing
+task via `--source` writes nothing.
+
+A `feedback` recurrence stamps its `feedback from <prefix>: <summary>` note the same
+way (pair and `root_session`); the following `detail from <prefix>: <body>` note
+carries the pair alone. Each occurrence note's `at` is its own time, so a task that
+recurs holds one stamped occurrence note per filing. Note texts are unchanged.
+
+`add` and `feedback` JSON output gains `at`: the `at` of the occurrence note the
+command wrote (absent for a `reused` add, which writes nothing). `add --pretty` still
+prints only the id, and `feedback --pretty` still prints `<action> <id>`. Existing
+records are not backfilled. A reader identifies the creation note as the first note
+whose text is `created` and whose `at` equals the record's `created`; user text
+equal to `created` elsewhere does not qualify.
 
 Binaries older than the provenance writer reject a stamped file outright, so every host
 that reads synced task files needs a current `tasks`. The contract and its rollout are

@@ -596,7 +596,7 @@ fn lifecycle_provenance_survives_claim_and_park_release() {
             claim["session"], "native-a",
             "{source} is a claim identity level"
         );
-        assert_eq!(first["task"]["notes"][0]["text"], "started");
+        assert_eq!(first["task"]["notes"][1]["text"], "started");
         run(&["start", &id]);
         let refreshed = env.json(&dir, &["show", &id]);
         assert_eq!(refreshed["task"]["started"], first["task"]["started"]);
@@ -618,6 +618,7 @@ fn lifecycle_provenance_survives_claim_and_park_release() {
                 .map(|n| n["text"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             [
+                "created",
                 "started",
                 "resumed",
                 "parked (waiting on agent): continue here",
@@ -626,7 +627,7 @@ fn lifecycle_provenance_survives_claim_and_park_release() {
                 "landed"
             ]
         );
-        for note in notes {
+        for note in &notes[1..] {
             assert_eq!(note["harness_session"], key);
             assert_eq!(note["harness_session_source"], source);
         }
@@ -659,7 +660,7 @@ fn a_codex_claim_outlives_the_command_that_made_it() {
     assert_eq!(shown["claim"]["live"], true);
     assert!(shown["claim"]["pid"].is_null(), "{}", shown["claim"]);
     assert_eq!(
-        shown["task"]["notes"][0]["harness_session"], "codex:thread-a",
+        shown["task"]["notes"][1]["harness_session"], "codex:thread-a",
         "provenance and the claim name the same thread"
     );
 
@@ -733,11 +734,12 @@ fn lifecycle_provenance_covers_editor_and_flag_transitions() {
         .success();
     let shown = env.json(&dir, &["show", &id]);
     let notes = shown["task"]["notes"].as_array().unwrap();
-    assert_eq!(notes.len(), 3);
-    assert_eq!(notes[0]["text"], "started");
-    assert_eq!(notes[2]["text"], "done");
+    assert_eq!(notes.len(), 4);
+    assert_eq!(notes[0]["text"], "created");
+    assert_eq!(notes[1]["text"], "started");
+    assert_eq!(notes[3]["text"], "done");
     assert!(
-        notes
+        notes[1..]
             .iter()
             .all(|n| n["harness_session"] == "codex:native-a")
     );
@@ -758,9 +760,9 @@ fn lifecycle_provenance_covers_editor_and_flag_transitions() {
             .success();
         let shown = env.json(&dir, &["show", &id]);
         let notes = shown["task"]["notes"].as_array().unwrap();
-        assert_eq!(notes.len(), 1);
-        assert!(notes[0]["text"].as_str().unwrap().starts_with(marker));
-        assert_eq!(notes[0]["harness_session"], "codex:native-a");
+        assert_eq!(notes.len(), 2);
+        assert!(notes[1]["text"].as_str().unwrap().starts_with(marker));
+        assert_eq!(notes[1]["harness_session"], "codex:native-a");
     }
 }
 
@@ -791,9 +793,9 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
         assert!(!combined.contains("secret-a") && !combined.contains("secret-b"));
         let shown = env.json(&dir, &["show", &id]);
         let notes = shown["task"]["notes"].as_array().unwrap();
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0]["text"], "started");
-        assert!(notes[0].get("harness_session").is_none());
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[1]["text"], "started");
+        assert!(notes[1].get("harness_session").is_none());
         env.cmd(&dir)
             .env("TASKS_SESSION", "codex:secret-a")
             .args(["park", &id, "unknown still works"])
@@ -867,11 +869,11 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
         assert_eq!(shown["task"]["status"], "doing");
         assert_eq!(shown["claim"]["live"], true);
         let notes = shown["task"]["notes"].as_array().unwrap();
-        assert_eq!(notes.len(), 3, "started, plain, stamped");
-        assert_eq!(notes[1]["text"], gate);
+        assert_eq!(notes.len(), 4, "created, started, plain, stamped");
         assert_eq!(notes[2]["text"], gate);
-        assert!(notes[1].get("harness_session").is_none(), "{vars:?}");
-        let keys: Vec<&str> = notes[2]
+        assert_eq!(notes[3]["text"], gate);
+        assert!(notes[2].get("harness_session").is_none(), "{vars:?}");
+        let keys: Vec<&str> = notes[3]
             .as_object()
             .unwrap()
             .keys()
@@ -879,8 +881,8 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
             .collect();
         match expected {
             Some((key, source)) => {
-                assert_eq!(notes[2]["harness_session"], key);
-                assert_eq!(notes[2]["harness_session_source"], source);
+                assert_eq!(notes[3]["harness_session"], key);
+                assert_eq!(notes[3]["harness_session_source"], source);
                 assert_eq!(
                     keys,
                     [
@@ -934,9 +936,9 @@ fn note_stamp_conflicts_warn_without_values_and_still_land() {
     assert!(!combined.contains("secret-a") && !combined.contains("secret-b"));
     let shown = env.json(&dir, &["show", &id]);
     let notes = shown["task"]["notes"].as_array().unwrap();
-    assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0]["text"], "gate: x");
-    assert!(notes[0].get("harness_session").is_none());
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[1]["text"], "gate: x");
+    assert!(notes[1].get("harness_session").is_none());
     assert_eq!(shown["task"]["status"], "todo");
 }
 
@@ -980,9 +982,9 @@ fn lifecycle_provenance_does_not_change_override_claims_or_plain_notes() {
         }
         let shown = env.json(&dir, &["show", &id]);
         let notes = shown["task"]["notes"].as_array().unwrap();
-        assert_eq!(notes[1]["harness_session"], "codex:native-a");
+        assert_eq!(notes[2]["harness_session"], "codex:native-a");
         assert!(
-            notes[2..]
+            notes[3..]
                 .iter()
                 .all(|n| n.get("harness_session").is_none())
         );
@@ -1809,7 +1811,7 @@ fn park_records_the_entry_and_a_note_and_re_parking_replaces() {
     assert_eq!(v["park"]["waiting_on"], "user");
     assert_eq!(
         v["task"]["notes"].as_array().unwrap().len(),
-        2,
+        3,
         "the notes accumulate"
     );
 }
@@ -3139,13 +3141,15 @@ fn add_writes_a_valid_file_and_show_reads_it_back() {
         "{raw}"
     );
     assert!(raw.contains("tags: [ledger, cut-12]\n"));
-    assert!(raw.ends_with("---\n\nBody text\n"));
+    assert!(raw.contains("---\n\nBody text\n\n## Notes\n\n- "), "{raw}");
+    assert!(raw.ends_with("(add): created\n"), "{raw}");
     let s = env.json(&dir, &["show", &id]);
     assert_eq!(s["task"]["title"], "Bank the ledger");
     assert_eq!(s["task"]["body"], "Body text");
     assert_eq!(s["task"]["size"], "m");
     assert_eq!(s["task"]["owner"], serde_json::Value::Null);
-    assert!(s["task"].get("notes").is_none());
+    assert_eq!(s["task"]["notes"].as_array().unwrap().len(), 1);
+    assert_eq!(s["task"]["notes"][0]["text"], "created");
     assert_eq!(s["spec_path"], serde_json::Value::Null);
     assert_eq!(s["step_found"], serde_json::Value::Null);
     assert!(s.get("depends_on").is_none());
@@ -3737,7 +3741,7 @@ fn bare_suffixes_name_tasks_in_the_current_project() {
     assert_eq!(env.json(&sci, &["root", &hex])["prefix"], "sci");
     env.json(&sci, &["note", &hex, "via shorthand"]);
     assert_eq!(
-        env.json(&sci, &["show", &id])["task"]["notes"][0]["text"],
+        env.json(&sci, &["show", &id])["task"]["notes"][1]["text"],
         "via shorthand"
     );
 
@@ -4221,8 +4225,8 @@ fn note_appends_single_line_entries() {
     assert!(raw.contains("(tester): first\n- 20"), "{raw}");
     assert!(raw.ends_with("(agent-7): second\n"), "{raw}");
     let s = env.json(&dir, &["show", &id]);
-    assert_eq!(s["task"]["notes"].as_array().unwrap().len(), 2);
-    assert_eq!(s["task"]["notes"][1]["by"], "agent-7");
+    assert_eq!(s["task"]["notes"].as_array().unwrap().len(), 3);
+    assert_eq!(s["task"]["notes"][2]["by"], "agent-7");
 }
 
 #[test]
@@ -4240,7 +4244,10 @@ fn new_notes_lose_trailing_spaces_and_tabs() {
         .iter()
         .map(|note| note["text"].as_str().unwrap())
         .collect();
-    assert_eq!(texts, ["  keep  inner", "started", "done", "landed"]);
+    assert_eq!(
+        texts,
+        ["created", "  keep  inner", "started", "done", "landed"]
+    );
     let raw = env.read(&dir, &format!("tasks/{id}.md"));
     assert!(
         raw.lines().all(|line| !line.ends_with([' ', '\t'])),
@@ -4273,8 +4280,9 @@ fn the_editor_may_only_strip_trailing_whitespace_from_notes() {
         .replace("):   n1\n", "):   n1  \n");
     std::fs::write(&path, &seeded).unwrap();
     let before = env.json(&dir, &["show", &id])["task"]["notes"].clone();
-    assert_eq!(before[0]["text"], "started \t");
-    assert_eq!(before[1]["text"], "  n1  ");
+    assert_eq!(before[0]["text"], "created");
+    assert_eq!(before[1]["text"], "started \t");
+    assert_eq!(before[2]["text"], "  n1  ");
 
     let edit = |script: &str| {
         let editor = editor_script(&dir, script);
@@ -4326,9 +4334,10 @@ fn the_editor_may_only_strip_trailing_whitespace_from_notes() {
         String::from_utf8_lossy(&out.stderr)
     );
     let after = env.json(&dir, &["show", &id])["task"]["notes"].clone();
-    assert_eq!(after.as_array().unwrap().len(), 2);
-    assert_eq!(after[0]["text"], "started");
-    assert_eq!(after[1]["text"], "  n1");
+    assert_eq!(after.as_array().unwrap().len(), 3);
+    assert_eq!(after[0]["text"], "created");
+    assert_eq!(after[1]["text"], "started");
+    assert_eq!(after[2]["text"], "  n1");
     for (old, new) in before
         .as_array()
         .unwrap()
@@ -4339,7 +4348,7 @@ fn the_editor_may_only_strip_trailing_whitespace_from_notes() {
             assert_eq!(old[key], new[key], "{key}");
         }
     }
-    assert_eq!(after[0]["harness_session"], "claude-code:native-a");
+    assert_eq!(after[1]["harness_session"], "claude-code:native-a");
 }
 
 #[test]
@@ -7276,7 +7285,7 @@ fn show_resolves_a_foreign_id_read_only() {
     env.json(&fam, &["note", &f, "seen from afar"]);
     let shown = env.json(&sci, &["show", &f]);
     assert_eq!(shown["task"]["id"], f);
-    assert_eq!(shown["task"]["notes"][0]["text"], "seen from afar");
+    assert_eq!(shown["task"]["notes"][1]["text"], "seen from afar");
     let spec_path = shown["spec_path"].as_str().unwrap();
     assert!(spec_path.starts_with(fam.to_str().unwrap()), "{spec_path}");
     assert_eq!(env.fail(&sci, &["show", "zzz-000001"]), "unresolvable_id");
@@ -7575,17 +7584,18 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
     assert_eq!(again["id"], id);
     let shown = env.json(&target, &["show", &id]);
     let notes = shown["task"]["notes"].as_array().unwrap();
-    assert_eq!(notes.len(), 2, "{shown}");
+    assert_eq!(notes.len(), 3, "{shown}");
+    assert_eq!(notes[0]["text"], "created");
     assert_eq!(
-        notes[0]["text"],
+        notes[1]["text"],
         "feedback from mnd: Check rejects MISSING spec!"
     );
-    assert_eq!(notes[1]["text"], "detail from mnd: same here");
+    assert_eq!(notes[2]["text"], "detail from mnd: same here");
     assert_eq!(
-        notes[0]["by"], "feedback",
+        notes[1]["by"], "feedback",
         "never the reporter's owner name"
     );
-    assert_eq!(notes[1]["by"], "feedback");
+    assert_eq!(notes[2]["by"], "feedback");
     assert_eq!(
         shown["task"]["tags"],
         serde_json::json!(["feedback", "friction", "from:sci", "from:mnd", "gap"])
@@ -9444,7 +9454,7 @@ fn a_retired_id_is_one_task_for_routing_dedup_and_removal() {
     );
     let shown = env.json(&sci, &["show", &a]);
     assert_eq!(
-        shown["task"]["notes"][0]["text"],
+        shown["task"]["notes"][1]["text"],
         "written through the retired name"
     );
 
@@ -13777,7 +13787,7 @@ fn a_failure_to_inspect_other_checkouts_is_a_warning_not_a_refusal() {
             .as_array()
             .unwrap()
             .len(),
-        1
+        2
     );
 }
 
@@ -13874,7 +13884,7 @@ fn write_commands_follow_the_id_prefix_across_projects() {
     let shown = env.json(&fam, &["show", &piece]);
     assert_eq!(shown["task"]["tags"][0], "audit");
     assert_eq!(shown["task"]["depends"][0], groundwork);
-    assert_eq!(shown["task"]["notes"][0]["text"], "from the hub");
+    assert_eq!(shown["task"]["notes"][1]["text"], "from the hub");
     assert_eq!(shown["task"]["status"], "todo");
 
     // the claim landed in the target project's store, not the caller's
@@ -21185,9 +21195,14 @@ fn sparse_json_omits_unset_task_fields_but_preserves_values_and_envelopes() {
     let tree = env.json(&dir, &["tree"]);
     assert!(tree["nodes"][0].get("children").is_none());
     let show = env.json(&dir, &["show", &id]);
-    for key in ["size", "tags", "depends", "notes"] {
+    for key in ["size", "tags", "depends"] {
         assert!(show["task"].get(key).is_none(), "{key}: {show}");
     }
+    assert_eq!(
+        show["task"]["notes"].as_array().unwrap().len(),
+        1,
+        "only the creation note: {show}"
+    );
     for key in [
         "claim",
         "parent",
@@ -31266,4 +31281,252 @@ fn rename_explain_refuses_a_retired_project_as_the_run_does() {
         let out = env.cmd(&old).args(args).output().unwrap();
         assert_eq!(err_kind(&out), "retired_project", "{args:?}");
     }
+}
+
+fn add_with_env(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    vars: &[(&str, &str)],
+    args: &[&str],
+) -> serde_json::Value {
+    let mut cmd = env.cmd(dir);
+    for (key, value) in vars {
+        cmd.env(key, value);
+    }
+    let out = cmd.args(args).output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+#[test]
+fn add_writes_one_stamped_creation_note() {
+    type Case<'a> = (
+        &'a [(&'a str, &'a str)],
+        Option<(&'a str, &'a str)>,
+        Option<&'a str>,
+    );
+    let cases: &[Case<'_>] = &[
+        (
+            &[("CLAUDE_CODE_SESSION_ID", "native-a")],
+            Some(("claude-code:native-a", "CLAUDE_CODE_SESSION_ID")),
+            None,
+        ),
+        (
+            &[("CODEX_THREAD_ID", "native-a")],
+            Some(("codex:native-a", "CODEX_THREAD_ID")),
+            None,
+        ),
+        (
+            &[("CODEX_THREAD_ID", "w"), ("CODEX_SESSION_ID", "r")],
+            Some(("codex:w", "CODEX_THREAD_ID")),
+            Some("codex:r"),
+        ),
+        (&[], None, None),
+        (
+            &[
+                ("CLAUDE_CODE_SESSION_ID", "secret-claude"),
+                ("CODEX_THREAD_ID", "secret-codex"),
+            ],
+            None,
+            None,
+        ),
+    ];
+    for (vars, pair, root) in cases {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let out = add_with_env(&env, &dir, vars, &["add", "Created"]);
+        let id = out["id"].as_str().unwrap();
+        let shown = env.json(&dir, &["show", id])["task"].clone();
+        let notes = shown["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 1, "{vars:?}: {notes:?}");
+        let note = &notes[0];
+        assert_eq!(note["text"], "created");
+        assert_eq!(note["by"], "add");
+        assert_eq!(note["at"], shown["created"]);
+        assert_eq!(note["at"], out["at"]);
+        match pair {
+            Some((session, source)) => {
+                assert_eq!(note["harness_session"], *session, "{vars:?}");
+                assert_eq!(note["harness_session_source"], *source);
+            }
+            None => assert!(note.get("harness_session").is_none(), "{note}"),
+        }
+        match root {
+            Some(root) => assert_eq!(note["root_session"], *root),
+            None => assert!(note.get("root_session").is_none(), "{note}"),
+        }
+        let warnings = out["warnings"].as_array().unwrap();
+        if vars.len() == 2 && pair.is_none() {
+            let text = serde_json::to_string(warnings).unwrap();
+            assert!(text.contains("CLAUDE_CODE_SESSION_ID") && text.contains("CODEX_THREAD_ID"));
+            assert!(!text.contains("secret"), "{text}");
+        } else {
+            assert!(warnings.is_empty(), "{warnings:?}");
+        }
+    }
+}
+
+#[test]
+fn reused_add_writes_nothing_and_has_no_at() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let args = ["add", "Once", "--source", "S"];
+    let first = add_with_env(&env, &dir, &[("CLAUDE_CODE_SESSION_ID", "A")], &args);
+    assert_eq!(first["action"], "created");
+    let path = dir.join(format!("tasks/{}.md", first["id"].as_str().unwrap()));
+    let before = std::fs::read(&path).unwrap();
+    let second = add_with_env(&env, &dir, &[("CLAUDE_CODE_SESSION_ID", "B")], &args);
+    assert_eq!(second["action"], "reused");
+    assert!(second.get("at").is_none(), "{second}");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let shown = env.json(&dir, &["show", first["id"].as_str().unwrap()])["task"].clone();
+    let notes = shown["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["harness_session"], "claude-code:A");
+}
+
+#[test]
+fn feedback_creation_and_recurrence_are_stamped_per_occurrence() {
+    let (env, target, reporter) = feedback_env();
+    let file = |session: &str, extra: &[&str]| {
+        let mut args = vec![
+            "feedback",
+            "--project",
+            "tasks",
+            "recurring gap in output",
+            "--category",
+            "gap",
+        ];
+        args.extend_from_slice(extra);
+        add_with_env(
+            &env,
+            &reporter,
+            &[("CLAUDE_CODE_SESSION_ID", session)],
+            &args,
+        )
+    };
+    let created = file("A", &[]);
+    assert_eq!(created["action"], "created");
+    let id = created["id"].as_str().unwrap().to_string();
+    let task = env.json(&target, &["show", &id])["task"].clone();
+    let notes = task["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["text"], "created");
+    assert_eq!(notes[0]["by"], "feedback");
+    assert_eq!(notes[0]["harness_session"], "claude-code:A");
+    assert_eq!(notes[0]["at"], created["at"]);
+    assert_eq!(notes[0]["at"], task["created"]);
+
+    let mut outs = Vec::new();
+    for body in ["first detail", "second detail"] {
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let out = file("B", &["--recur", &id, "-b", body]);
+        assert_eq!(out["action"], "recurred");
+        outs.push(out);
+    }
+    let task = env.json(&target, &["show", &id])["task"].clone();
+    let notes = task["notes"].as_array().unwrap();
+    let texts: Vec<&str> = notes.iter().map(|n| n["text"].as_str().unwrap()).collect();
+    assert_eq!(
+        texts,
+        [
+            "created",
+            "feedback from sci: recurring gap in output",
+            "detail from sci: first detail",
+            "feedback from sci: recurring gap in output",
+            "detail from sci: second detail",
+        ]
+    );
+    let occurrences: Vec<_> = notes
+        .iter()
+        .filter(|n| n["text"].as_str().unwrap().starts_with("feedback from"))
+        .collect();
+    assert_eq!(occurrences.len(), outs.len());
+    for (note, out) in occurrences.iter().zip(&outs) {
+        assert_eq!(note["at"], out["at"]);
+        assert_eq!(note["harness_session"], "claude-code:B");
+    }
+    assert_ne!(outs[0]["at"], outs[1]["at"]);
+    for note in notes
+        .iter()
+        .filter(|n| n["text"].as_str().unwrap().starts_with("detail"))
+    {
+        assert_eq!(note["harness_session"], "claude-code:B");
+        for key in ["root_session", "origin", "origin_session"] {
+            assert!(note.get(key).is_none(), "{note}");
+        }
+    }
+}
+
+#[test]
+fn feedback_outside_projects_writes_creation_note() {
+    let (env, target, _reporter) = feedback_env();
+    let nowhere = tempfile::tempdir().unwrap();
+    let out = add_with_env(
+        &env,
+        nowhere.path(),
+        &[("CODEX_THREAD_ID", "w"), ("CODEX_SESSION_ID", "r")],
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "scratch gap",
+            "--category",
+            "gap",
+        ],
+    );
+    let task = env.json(&target, &["show", out["id"].as_str().unwrap()])["task"].clone();
+    let notes = task["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["text"], "created");
+    assert_eq!(notes[0]["by"], "feedback");
+    assert_eq!(notes[0]["harness_session"], "codex:w");
+    assert_eq!(notes[0]["root_session"], "codex:r");
+    assert_eq!(notes[0]["at"], out["at"]);
+}
+
+#[test]
+fn add_into_other_project_writes_creation_note() {
+    let mut env = TestEnv::new();
+    let here = env.init("sci");
+    let other = env.init("oth");
+    let out = add_with_env(
+        &env,
+        &here,
+        &[("CLAUDE_CODE_SESSION_ID", "A")],
+        &["add", "Elsewhere", "--project", "oth"],
+    );
+    let task = env.json(&other, &["show", out["id"].as_str().unwrap()])["task"].clone();
+    let notes = task["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["text"], "created");
+    assert_eq!(notes[0]["by"], "add");
+    assert_eq!(notes[0]["harness_session"], "claude-code:A");
+    assert_eq!(notes[0]["at"], out["at"]);
+}
+
+#[test]
+fn pretty_add_still_prints_the_bare_id() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = env
+        .cmd(&dir)
+        .args(["add", "Pretty", "--pretty"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let id = text.strip_suffix('\n').unwrap();
+    assert!(
+        id.starts_with("sci-") && !id.contains(char::is_whitespace),
+        "{text:?}"
+    );
+    assert!(
+        !text.contains("created") && !text.contains("at"),
+        "{text:?}"
+    );
 }

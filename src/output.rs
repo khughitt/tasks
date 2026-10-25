@@ -104,6 +104,9 @@ pub struct AddOut {
     pub id: String,
     /// `created`, or `reused` when `--source` matched an existing task.
     pub action: String,
+    /// The creation note's timestamp; absent when `reused` wrote nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -1213,6 +1216,9 @@ pub struct FeedbackOut {
     pub id: String,
     pub action: String,
     pub path: String,
+    /// The `at` of the occurrence note this run wrote (`created` or `feedback from`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
     pub warnings: Vec<String>,
 }
 
