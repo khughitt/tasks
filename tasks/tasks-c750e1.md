@@ -4,8 +4,8 @@ title: Large task-show note histories can overflow an agent read
 status: idea
 priority: 2
 created: 2026-10-24T17:36:29Z
-updated: 2026-10-25T16:03:33Z
-depends: []
+updated: 2026-10-25T16:03:35Z
+depends: [tasks-608d02]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:tasks"]
 agent: codex
