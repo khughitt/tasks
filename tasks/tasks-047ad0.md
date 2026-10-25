@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-25T12:30:00Z
+updated: 2026-10-25T12:31:46Z
 depends: []
 tags: [testing]
 source: "tasks-284d9b:shared-git-fixture-follow-up"
@@ -25,3 +25,7 @@ Done: common::git cannot inherit repository selectors or host environment/config
 ## References
 
 - prior-review (input, required, kind=review): tasks/files/tasks-171b8b/fixture-isolation-review-report.md — earlier hardening deliberately excluded other integration Git helpers
+
+## Notes
+
+- 2026-10-25T12:31:46Z (main): concerns: tasks-171b8b extension — Extend the completed linked/record-commit fixture hardening to the shared CLI/refs Git helper that its review deliberately excluded.
