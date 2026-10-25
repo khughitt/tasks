@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T11:16:20Z
+updated: 2026-10-25T11:16:23Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -69,3 +69,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T11:08:28Z (design/tasks-284d9b): attached: filtered-read-spec-round-4-review.md (2981 bytes): Full round-4 acceptance by claude-code/claude-opus-5-5, two wording nits, and Keith's approval for planning
 - 2026-10-25T11:16:15Z (design/tasks-284d9b): review: plan round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T11:16:20Z (design/tasks-284d9b): attached: filtered-read-plan-self-review.md (2834 bytes): Controller writing-plans self-review of frozen plan 3a9752f; accept, no findings; product code unchanged
+- 2026-10-25T11:16:23Z (design/tasks-284d9b): attached: filtered-read-planning-ledger.md (5310 bytes): Spec rounds 1–4, two accepted wording rulings at a92a91a, user planning approval, and plan self-review at 3a9752f; no deferred minors
