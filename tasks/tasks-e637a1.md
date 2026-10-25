@@ -4,8 +4,8 @@ title: "Surface and rank blockers: fan-out of open dependents, and how long and 
 status: idea
 priority: 2
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T21:31:04Z
-depends: []
+updated: 2026-10-25T21:31:10Z
+depends: [tasks-e8d471]
 tags: [cli]
 agent: claude-code
 origin: mixed
