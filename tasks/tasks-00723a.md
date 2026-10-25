@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:07:21Z
+updated: 2026-10-25T12:07:23Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -37,3 +37,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:03:34Z (docs/tasks-00723a): review: impl round 3 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T12:05:19Z (docs/tasks-00723a): attached: verification.txt (4969 bytes): Baseline, focused and fast-suite results; exact startup-timing failures and unchanged-code rerun
 - 2026-10-25T12:07:21Z (docs/tasks-00723a): review: impl round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:07:23Z (docs/tasks-00723a): Final reviewed skill revision d113068. Corrective round 2 keeps where.project.root for in-tree projects, including nested ones; only unscoped detached/linked code-worktree invocations use git top level. All Important findings from the whole-change review and scoped re-review are resolved; no deferred minors. Integration requires user approval because the main-checkout skill directories are the targets of active global skill symlinks. No merge or activation performed.
