@@ -31765,8 +31765,28 @@ fn origin_filter_spans_projects() {
     run_ok(&env, &a, &[], &["add", "A one", "--origin", "user"]);
     run_ok(&env, &b, &[], &["add", "B one", "--origin", "user"]);
     run_ok(&env, &b, &[], &["add", "B two", "--origin", "agent"]);
+    let c = env.init("ccc");
+    let c1 = run_ok(&env, &c, &[], &["add", "C one"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let c2 = run_ok(&env, &c, &[], &["add", "C two"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let listed = env.json(&a, &["list", "--all-projects", "--origin", "user"]);
     assert_eq!(listed["tasks"].as_array().unwrap().len(), 2, "{listed}");
+    let none = env.json(&a, &["list", "--all-projects", "--origin", "none"]);
+    let mut ids: Vec<&str> = none["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    ids.sort();
+    let mut expected = vec![c1.as_str(), c2.as_str()];
+    expected.sort();
+    assert_eq!(ids, expected, "{none}");
 }
 
 #[test]
@@ -31852,6 +31872,13 @@ fn editor_preserves_occurrence_keys() {
         .unwrap()
         .to_string();
     let before = shown_task(&env, &dir, &id)["notes"].clone();
+    let notes_bytes = || {
+        let raw = std::fs::read_to_string(dir.join(format!("tasks/{id}.md"))).unwrap();
+        let at = raw.find("\n## Notes\n").expect(&raw);
+        assert!(raw[at..].contains("provenance:"), "{raw}");
+        raw[at..].to_string()
+    };
+    let bytes_before = notes_bytes();
     let editor = editor_script(&dir, "sed -i 's/^priority: 2/priority: 1/' \"$1\"");
     env.cmd(&dir)
         .env("EDITOR", &editor)
@@ -31861,6 +31888,7 @@ fn editor_preserves_occurrence_keys() {
     let task = shown_task(&env, &dir, &id);
     assert_eq!(task["priority"], 1);
     assert_eq!(task["notes"], before);
+    assert_eq!(notes_bytes(), bytes_before);
 
     let tamper = editor_script(
         &dir,
@@ -31877,5 +31905,15 @@ fn editor_preserves_occurrence_keys() {
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "validation", "{err}");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("notes are append-only"),
+        "{err}"
+    );
     assert_eq!(shown_task(&env, &dir, &id)["notes"], before);
+    assert_eq!(notes_bytes(), bytes_before);
 }
