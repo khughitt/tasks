@@ -1,17 +1,15 @@
 ---
 id: tasks-00723a
 title: "Agent-docs wording in the tasks, scope and curate skills: documents under the records root"
-status: done
+status: todo
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:12:30Z
+updated: 2026-10-25T12:13:12Z
 started: 2026-10-25T11:44:49Z
-completed: 2026-10-25T12:12:04Z
-closed: 2026-10-25T12:12:04Z
 depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
