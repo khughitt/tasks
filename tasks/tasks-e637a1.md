@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T22:43:34Z
+updated: 2026-10-25T23:07:57Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -83,4 +83,6 @@ Agent additions to weigh when scoping:
 - 2026-10-25T22:43:17Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-move-isolated-check.log", "state": "kept", "verification": "verified", "purpose": "Focused isolated Git-config comparison, 90 tests passed", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "935b29cc5be907860c31b05c0dfd8bae3f847bc035a69e72595323dc344a2150"}
 - 2026-10-25T22:43:19Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-fast-isolated-check.log", "state": "kept", "verification": "verified", "purpose": "Fast-suite verification with isolated Git config, 1728 passed and 4 ignored", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "3a5aa386968ebb3d32507c08cbc5f94a43316b91e1911ab0510c939ff4b9d5c5"}
 - 2026-10-25T22:43:34Z (design/tasks-e637a1): parked (waiting on user, review): User reviews repository tasks frozen spec c45fc7f:docs/specs/2026-10-25-blocker-ranking-design.md; agent then records the verdict and, on approval, drafts the implementation plan for separate user review in .worktrees/tasks-e637a1.
+  provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T23:07:57Z (design/tasks-e637a1): resumed
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
