@@ -4,8 +4,8 @@ title: Large evidence manifests require manual multipart attachment and reconstr
 status: idea
 priority: 2
 created: 2026-10-24T19:19:16Z
-updated: 2026-10-25T15:49:57Z
-depends: []
+updated: 2026-10-25T15:50:00Z
+depends: [tasks-b81063]
 parent: tasks-bbfc3c
 tags: [feedback, gap, "from:ops"]
 agent: codex
