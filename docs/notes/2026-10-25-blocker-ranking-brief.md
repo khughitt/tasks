@@ -2,100 +2,136 @@
 
 ## Problem
 
-tasks-e637a1 asks which prerequisites hold up the most work and which have held it
-up longest or through repeated scope passes. This is one blocker-discovery effort
-inside Work discovery and resumption (tasks-46d207), not a new execution lane.
+The user asks to surface and prioritize blockers by direct/indirect downstream
+impact and by how long or through how many scope passes they have blocked work.
+These are two deliverables: a ranked downstream report, and evidence collection
+for persistent blocking. The report reads data; prospective history and scope
+confirmation require writes. Collection should ship early because its coverage
+starts only at deployment. Neither design waits for the other or for git backfill.
 
-Origin is **mixed**, unchanged. In filing session
-claude-code:75e5d0a1-29d8-4f5c-8267-a25b055879ed, the user's own turn (JSONL line 17)
-asks for downstream impact, direct or indirect, and prolonged or repeated blocking.
-The add call at line 115 and its result at line 116 uniquely match the creation:
-tasks-e637a1, action created, 2026-10-25T21:31:04Z. The later response at line 132
-labels inherited urgency, edge events, goal exclusions and CLI placement as agent
-proposals. No older origin session is named; no intent question remains for this pass.
+Revision 2 addresses the review of 7085e03 (verdict: revise; reviewer identity
+supplied as claude-opus-5.5, harness unspecified). One existing goal now has two
+substantive children; no additional records are needed.
 
 ## Current behaviour and evidence
 
-Checked against code at c8de557 on 2026-10-25; no implementation or runtime pilot.
+Code checked at 7085e03, unchanged by this revision; no runtime pilot was run.
 
 - `src/commands/show.rs::describe` exposes outgoing dependencies and children.
-  Existing tasks-e8d471 (P2/s/mid/direct) adds incoming dependents, locally by
-  default and across registered projects on request. Reuse it; design can proceed
-  before it lands. `src/moving/mod.rs::inbound` already scans registered projects
-  with `Scope::open_all` and canonicalizes dependency IDs.
-- `src/commands/graph.rs` draws one project's graph. `src/query.rs::ready_order`
-  orders by declared priority, size, creation and ID; neither ranks blocker impact.
+  tasks-e8d471 adds incoming dependents using local or explicit cross-project scans;
+  `src/moving/mod.rs::inbound` already uses `Scope::open_all` and canonical IDs.
+  Reuse that work. Its implementation is not a prerequisite for either design.
+- `src/query.rs::ready_order` uses declared priority, size, creation and ID.
+  `src/commands/graph.rs` draws one project's edges; neither ranks blocker impact.
 - `Task.depends` is an ID list. `src/commands/dep.rs::add_dependencies` serves
-  `dep --on`, `add --depends` and `edit --depends`; none records an edge timestamp.
-  Removal, clearing, replacement and re-addition also matter to any event design.
-  Current task creation/update dates cannot establish uninterrupted blocking age.
-- Current records confirm the motivating waits: crew-1c3624's October 25 scope
-  note still names crew-8b52fb and autonomy-1aac03; crew-9b4b47's scope notes on
-  October 15, 19 and 25 name crew-ba0a02. Its latest note calls the probe unstarted
-  and spending-gated. These are observations, not a verified continuous edge history.
-- Related crew-a0952b already records allocator-owned inherited urgency, separate
-  from stored task priority and admission. tasks-298107 examines priority meanings;
-  tasks-606dd3/tasks-1bbe49 address dependency satisfaction. No existing blocker
-  brief, attached draft spec or overlapping open research was found in this pass's
-  document, attachment and cross-project task searches.
+  `dep --on`, `add --depends` and `edit --depends`; no edge timestamp is recorded.
+  Current task dates cannot prove continuously unmet age. Removal, clearing,
+  replacement, re-addition and later lifecycle changes affect history semantics.
+- crew-1c3624 still names crew-8b52fb and autonomy-1aac03. crew-9b4b47 has four
+  scope notes naming crew-ba0a02: two on October 15, one on October 19 and one on
+  October 25. These prove observations, not continuous edge history or necessarily
+  four distinct passes. The scope skill has no fixed confirmed-wait record yet.
+- crew-ba0a02 is an unstarted todo with authorization requirements in its body,
+  no declared need and no observed user-wait park. A status-only report cannot
+  recognize that prose-only gate. This pass changes no foreign task or host park.
+- crew-a0952b records allocator-owned inherited urgency and active beneficiaries.
+  tasks-298107 examines priority meanings; tasks-606dd3/tasks-1bbe49 address
+  dependency satisfaction. No overlapping blocker-history research or handoff was
+  found in the original document, attachment and cross-project task searches.
+
+Origin remains **mixed**. Filing session
+claude-code:75e5d0a1-29d8-4f5c-8267-a25b055879ed contains the user's own request at
+2026-10-25T21:29:33.202Z, message UUID e6c8baae-a7c8-4416-a6d1-bbd718fd15ca.
+The uniquely matching add call is toolu_019n9n6vmJWzyw3xEcaaa8Xy; its result names
+tasks-e637a1, action created, at 2026-10-25T21:31:04Z. The filing response labels
+urgency inheritance, edge events, exclusions and CLI placement as agent proposals.
+These native IDs and content/time anchors replace fragile line-number locators.
+Stage 1 is matched; no older origin_session is named (stage 2 not applicable).
+The full original capture remains in tasks-e637a1 under Original capture.
 
 ## Constraints
 
-Preserve stored priorities, existing picker ordering and admission gates. Reuse
-dependency satisfaction, alias/move resolution and registered-checkout authority;
-`show.resolved` means found, not satisfied. Missing or unreachable evidence must
-stay explicit, and an incomplete project scan cannot imply a complete ranking.
-Cross-project scans stay explicit; tasks-e8d471 records their prior measured cost,
-which this pass did not remeasure. Changes to JSON need an explicit implementation
-task; new CLI vocabulary lands in ops before adoption here. No shared needs are
-declared. A brief authorizes neither implementation nor spending or live calls.
+“Prioritize” means an explicitly ranked report of blockers, not just an unsorted
+count. The recommended first version leaves ready/next ordering unchanged; this
+is a design choice the user can override, not a settled narrowing of the ask.
+Keep declared priorities and admission gates intact. Inherited urgency must name
+its active beneficiary and cause rather than treating every inactive P1 idea as
+an urgency source; coordinate with crew's existing rule.
+
+Reuse dependency satisfaction, alias/move resolution and checkout authority;
+`show.resolved` means found, not satisfied. Incomplete scans and historical gaps
+must be explicit. Cross-project scans stay explicit; prior cost measurements in
+tasks-e8d471 were not repeated. JSON changes need an implementation task, and new
+CLI vocabulary lands in ops before adoption. No shared needs are declared here.
+A need describes a required resource, not authorization to spend or execute.
+
+For user-only blockers, prefer an owner-recorded park with --waiting-on user
+--reason approval when approval is actually needed. A declared need is an
+alternative only with an agreed vocabulary and explicit meaning. Parks are
+host-local: missing park evidence, including on another host, cannot prove the
+work is agent-actionable. The report must expose metadata limits instead of
+classifying authorization from prose. This brief grants no spending or live calls.
 
 ## Alternatives
 
-1. **Current lean, controller's recommendation:** a read-only blocker report with
-   separate impact and persistence measures, evidence coverage and the blocker's
-   state/next action. Start with one explicit read surface; defer automatic `prime`
-   expansion and scheduler changes. Keep unknown history visible. This satisfies
-   discovery without redefining which work an agent may start.
-2. Add blocker sorting to `list`/`ready` and a `prime` section immediately. This
-   couples observation to selection and scan/payload costs before the measures are
-   defined; defer it pending the report design and a bounded verification case.
-3. Reuse crew's allocator as the only surface. It owns execution allocation and
-   inherited urgency, but does not replace general blocker discovery or historical
-   reporting. Coordinate its consumption rather than build another scheduler.
+1. **Current recommendation:** rank downstream impact in a focused report and
+   independently design/ship forward dependency events plus scope-confirmed waits.
+   Define deterministic order/ties; distinguish unique impacted work from work
+   immediately made ready. Keep age unknown until evidence supports it. Git
+   reconstruction is optional backfill, not a gate on either first delivery.
+2. **Middle option to assess in the report design:** also display inherited
+   urgency and its cause in ready, without changing its sorting or eligibility.
+   This makes a P2 prerequisite holding up active P1 work visible. It expands the
+   read surface and needs explicit active-beneficiary/coverage semantics.
+3. Reorder ready/next by inherited urgency, or require a combined ranking/history
+   design before shipping either half. Defer these choices: scheduler changes
+   need explicit approval, and combined delivery delays both the cheap report
+   and the start of historical coverage. They remain choices the user can revisit.
 
 ## Unanswered questions
 
-The design author resolves these in a written spec for user review; no separate
-research task is needed to rediscover the established code paths.
-
-- Define unique direct/transitive open dependents, diamond deduplication, cycles,
-  cross-project scope and ordering/ties. Reachable work is not necessarily work
-  made ready by completing one prerequisite when other blockers remain.
-- How should goals and closeout edges contribute? Organizational links are not
-  dependencies; the stored edge has no intent field that safely identifies a
-  closeout-only wait. Choose an explicit presentation without guessing intent.
-- Define edge age versus continuously unmet age and which scope passes count.
-  Compare prospective lifecycle evidence with optional git reconstruction; cover
-  all dependency writers, removal/re-addition, reopen/recurrence and aliases/moves.
-  Do not count unrelated passes as proven repeated blocking or substitute task age.
-- Choose one JSON/pretty read contract, ranking criteria and unavailable-history
-  representation. Explain lifecycle/user-held blockers without overriding them.
-  Verification needs a small cross-project graph with diamonds, mixed priorities,
-  multiple blockers, closed/moved targets and unknown or discontinuous history.
+- **Downstream design, tasks-e637a1:** settle unique direct/transitive counts,
+  diamond deduplication, deterministic ranking, goals/closeout edges, cycles,
+  aliases/moves, incomplete scope and the first JSON/pretty read contract.
+  Count impacted work separately from work made ready when multiple blockers
+  remain. Decide on display-only urgency explicitly; do not silently reorder.
+- **Evidence design, tasks-71c74d:** settle prospective event schema, coverage
+  start, atomic persistence and every add/edit/dep/clear/replace path. Cover
+  failed/no-op writes, removal/re-addition, reopen/recurrence and aliases/moves.
+  Separate edge age from continuous unmet intervals. Design optional git backfill
+  without making pre-deployment history appear known or delaying collection.
+- The same evidence track considers a fixed scope observation, for example
+  waits: crew-ba0a02. Record only waits actually reconfirmed; identify distinct
+  passes, deduplicate repeated notes, and report “reconfirmed N times since D”
+  with first/last observation. This can start without reconstructing edge age;
+  it does not establish uninterrupted duration. Define changing/closed waits too.
+- **Verification:** the downstream design includes a cross-project diamond,
+  mixed priorities, multiple blockers, goals, moved/closed/missing targets and
+  unknown history. Include crew-ba0a02's prose-only approval gate, then its
+  explicitly user-held park and a declared-need variant, plus unavailable park
+  evidence. The evidence design tests all mutation paths, interval changes and
+  distinct versus duplicate/unrelated scope confirmations. Design authors bring
+  specs and plans to user review; no new research-only task is required.
 
 ## Proposed decomposition
 
-Goal tasks-6166d6 (P2/m/high/planned) is an ordinary child of tasks-46d207,
-holding tasks-e637a1 and tasks-71c74d, **Design blocker impact and persistence
-reporting from the brief** (P2/s/high/planned). The design task develops the spec
-and subsequent plan through their user review gates. It reads tasks-e8d471 and
-the related contracts above;
-the existing reverse-dependency implementation need not finish before design.
+- tasks-6166d6 remains the P2/m/high/planned coordination goal under Work
+  discovery and resumption (tasks-46d207). Done means a usable ranked downstream
+  report, shipped event/confirmation collection and a persistence report of
+  supported intervals/reconfirmed passes with honest coverage. Only git backfill
+  is optional and gets an explicit disposition. An idea's disposition is
+  not a completion criterion. Remove its redundant brief source; keep the ref.
+- tasks-e637a1 is now **scoped**, P2/s/high/planned, **Design ranked downstream
+  blocker reporting**. Preserve its full original capture. Remove its waits on
+  tasks-71c74d and tasks-e8d471 so this design is independent; retain the latter
+  as an implementation input and establish implementation ordering in the plan.
+- tasks-71c74d is **rescoped**, P2/m/high/planned, **Design early dependency events
+  and confirmed-wait recording**. Start this track early; its first shipping
+  milestone is collection, independently of the ranked report and optional
+  historical reconstruction; its later report surfaces supported duration and
+  confirmed-pass measures. Scope-skill changes are explicit work in this track.
 
-tasks-e637a1 is **briefed**, retaining its full capture and existing dependency on
-tasks-e8d471, with an additional dependency on tasks-71c74d. The design's result
-must reach this brief and `tasks note tasks-e637a1 --no-reviewed "<finding>"`
-before its result branch merges. The dependency also wakes the idea on completion.
-No implementation was started; neither this brief nor its task filings approve a
-design or implementation plan.
+Both design tasks retain accepted implementation steps as children. Replace the
+obsolete Ideas it wakes instruction: there is no waiting idea after promotion.
+Keep findings on the tasks and in this brief; goal closeout requires the actual
+retained deliverables. This revision approves no design, plan or implementation.
