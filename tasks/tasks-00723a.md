@@ -1,15 +1,17 @@
 ---
 id: tasks-00723a
 title: "Agent-docs wording in the tasks, scope and curate skills: documents under the records root"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:11:42Z
+updated: 2026-10-25T12:12:04Z
 started: 2026-10-25T11:44:49Z
+completed: 2026-10-25T12:12:04Z
+closed: 2026-10-25T12:12:04Z
 depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
@@ -45,4 +47,8 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:09:56Z (docs/tasks-00723a): resumed
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T12:11:42Z (docs/tasks-00723a): User approved local merge and global skill activation; this session owns immediate integration and checked worktree removal. Fresh detached suite: 46 passed; no source code changed since the reviewed verification.
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:12:04Z (docs/tasks-00723a): done
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:12:04Z (docs/tasks-00723a): Updated and reviewed tasks, scope and curate guidance for detached records; preserved nested/worktree routing and document links. User approved local integration and global skill activation.
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
