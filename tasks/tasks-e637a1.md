@@ -6,8 +6,10 @@ priority: 2
 size: m
 complexity: high
 process: planned
+reviewed: true
+reviewed_at: 2026-10-25T21:38:18Z
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T21:38:07Z
+updated: 2026-10-25T21:38:18Z
 depends: [tasks-e8d471, tasks-71c74d]
 parent: tasks-6166d6
 tags: [cli]
@@ -44,3 +46,5 @@ Agent additions to weigh when scoping:
 
 - 2026-10-25T21:31:04Z (add): created
   provenance: {"harness_session":"claude-code:75e5d0a1-29d8-4f5c-8267-a25b055879ed","harness_session_source":"CLAUDE_CODE_SESSION_ID","origin":"mixed"}
+- 2026-10-25T21:38:18Z (main): scope: briefed; checked c8de557: incoming dependents still tasks-e8d471, ready orders by declared priority/size, dependency writers share add_dependencies but record no edge timestamps; full capture retained; advisory report recommended over picker reordering or duplicate allocator urgency (crew-a0952b); parented under tasks-6166d6 inside tasks-46d207, P2/m/high/planned; filed tasks-71c74d (P2/s/high/planned) for graph, age/pass evidence and read-contract design, with wait edge and completion wake; existing tasks-e8d471 wait retained, design need not await it; origin: stage 1 matched creation in claude-code:75e5d0a1-29d8-4f5c-8267-a25b055879ed, user ask line 17, unique add call/result lines 115-116 with created at 2026-10-25T21:31:04Z, proposals distinguished by line 132; mixed unchanged; stage 2 not applicable (no origin_session); brief: docs/notes/2026-10-25-blocker-ranking-brief.md
+  provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID"}
