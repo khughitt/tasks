@@ -6,9 +6,9 @@ priority: 2
 complexity: mid
 process: direct
 created: 2026-10-25T13:43:32Z
-updated: 2026-10-25T13:43:32Z
+updated: 2026-10-25T15:40:37Z
 depends: [tasks-c96737]
-parent: tasks-053e89
+parent: tasks-9b1c2b
 tags: []
 agent: claude-code
 ---
