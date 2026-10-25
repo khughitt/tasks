@@ -4,8 +4,9 @@ title: "A read of a full task id fails with an io error when the cwd sits under 
 status: idea
 priority: 2
 created: 2026-10-25T11:26:06Z
-updated: 2026-10-25T11:26:06Z
+updated: 2026-10-25T16:41:16Z
 depends: []
+parent: tasks-b34076
 tags: [feedback, friction, "from:hq"]
 agent: claude-code
 ---
