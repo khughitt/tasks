@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: design/tasks-284d9b
 created: 2026-10-25T11:14:07Z
-updated: 2026-10-25T11:38:48Z
+updated: 2026-10-25T11:41:21Z
 started: 2026-10-25T11:38:48Z
 depends: []
 parent: tasks-284d9b
@@ -25,3 +25,4 @@ Implement the approved filtered-read routing contract with canonical prefix agre
 
 - 2026-10-25T11:38:48Z (design/tasks-284d9b): started
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T11:41:21Z (design/tasks-284d9b): Baseline: just test passed, 1685 tests across 14 binaries, 0 failed, 0 ignored (full suite, exhaustive enumeration included). Existing worktree hydrated and hooks installed. tasks-e147b9 remains open with no finding. Accepted plan review adjustments preserve local-before-registry error order and add outside installed-binary smoke plus hostile-parent fixture coverage.
