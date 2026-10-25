@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T12:17:17Z
+updated: 2026-10-25T12:19:04Z
 started: 2026-10-25T10:29:37Z
 completed: 2026-10-25T12:11:29Z
 closed: 2026-10-25T12:11:29Z
@@ -92,3 +92,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T12:11:29Z (design/tasks-284d9b): Implemented ID-filter routing and shared completion in 634cf8d/d8c147a; independent codex/gpt-6-astra review accepted bde3079 with no findings. Full baseline 1685 passed; final fast suite 1691 passed, 4 ignored; installed outside-project smoke passed. Reports, six execution rulings and verification attached. Closing session owns immediate approved local merge, main reinstall and checked worktree cleanup.
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T12:17:17Z (main): Integrated locally into main as d5c4ec9 (conventional merge message); main working tree clean and source/tests/tooling identical to independently reviewed bde3079. Reinstalled tasks 0.4.0 from merged main with confined build target and verified the host PATH binary's outside-project source-only no_project guidance. No additional suite rerun: tested product tree unchanged by integration; main tasks check passed. Both implementation children are done. Cleanup checks follow; no push or PR.
+- 2026-10-25T12:19:04Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-284d9b","state":"released","verification":"verified","purpose":"Reviewed branch merged into main, installed main binary verified, timing harvest complete; needed reports and ledgers byte-matched task attachments, ignored regenerable output discarded, no host pointers found, worktree and merged branch removed","next_owner":"none","cleanup_trigger":"none"}
