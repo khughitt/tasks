@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:07:40Z
+updated: 2026-10-25T12:09:56Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -41,4 +41,6 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:07:35Z (docs/tasks-00723a): attached: implementation-review-report.md (1974 bytes): Full acceptance report from the fresh scoped corrective reviewer, codex/gpt-6.1-sol
 - 2026-10-25T12:07:37Z (docs/tasks-00723a): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "kept", "verification": "verified", "purpose": "Reviewed documentation branch docs/tasks-00723a awaits user approval before merge activates globally linked skills", "next_owner": "task:tasks-00723a", "cleanup_trigger": "After user-approved local merge, inspect ignored files and host pointers, run tt-report, then remove this task's worktree"}
 - 2026-10-25T12:07:40Z (docs/tasks-00723a): parked (waiting on user, approval): User approves local merge of docs/tasks-00723a (reviewed skill commit d113068); agent then resumes here, marks done on the branch, merges locally into main to activate the skills, and performs the recorded worktree cleanup checks.
+  provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:09:56Z (docs/tasks-00723a): resumed
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
