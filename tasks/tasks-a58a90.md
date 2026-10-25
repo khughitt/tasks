@@ -8,13 +8,14 @@ complexity: high
 process: planned
 owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T11:30:35Z
+updated: 2026-10-25T11:31:35Z
 started: 2026-10-25T11:15:47Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
 source: "tasks-516ab4:provenance-design"
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-25-creation-occurrence-provenance-design.md
 ---
 
 Why: [ref:brief] establishes that feedback creation and recurrence are unstamped and that a scope pass reconstructs a report's origin by hand; occurrence records, origin distinctions and retrieval need one design. Split from tasks-441019 on 2026-10-20 so the drop-step fix, which the audit shows carries most of the losses, does not wait on retrieval work.
