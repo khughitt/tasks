@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:52:15Z
+updated: 2026-10-25T11:06:29Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -60,4 +60,6 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T10:52:11Z (design/tasks-284d9b): attached: filtered-read-spec-review-ledger.md (3126 bytes): Spec review rounds 1–3 and four accepted rulings; f03f0b4 awaits user review, no deferred minors
 - 2026-10-25T10:52:13Z (design/tasks-284d9b): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-284d9b","state":"kept","verification":"verified","purpose":"Revised spec f03f0b4 on design/tasks-284d9b awaits user review; full rounds 1–3 reports and four accepted rulings are retained in .superpowers/sdd/tasks-284d9b and attached to the task; no product changes","next_owner":"task:tasks-284d9b","cleanup_trigger":"After user approves f03f0b4, agent prepares the implementation plan here; after implementation integration, inspect ignored files and run removal checks"}
 - 2026-10-25T10:52:15Z (design/tasks-284d9b): parked (waiting on user, review): User reviews revised spec f03f0b400c5cbcaea64ed5273da0949f85bb7616 at docs/specs/2026-10-25-filtered-read-routing-design.md in .worktrees/tasks-284d9b; after approval, agent resumes here and writes the implementation plan. Fresh spec round 3 accepted with no findings; all four round-2 findings addressed. Product code unchanged; execution baseline and tasks-e147b9 recheck remain for implementation Setup.
+  provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T11:06:29Z (design/tasks-284d9b): resumed
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
