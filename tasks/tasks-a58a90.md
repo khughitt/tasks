@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T12:08:26Z
+updated: 2026-10-25T12:09:53Z
 started: 2026-10-25T11:15:47Z
 depends: []
 parent: tasks-9b1c2b
@@ -53,3 +53,5 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
 - 2026-10-25T12:08:24Z (design/tasks-a58a90): resumed
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T12:08:26Z (design/tasks-a58a90): review: spec round 3 — verdict: revise; findings: P2 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:09:53Z (design/tasks-a58a90): spec revision 3 at 98f1a3c fixes round-3 P2 (add --pretty id-only results bind as inferred via --source/arguments/reuse warning; creation-vs-reuse ambiguity preserved); user approved the spec for planning conditional on that fix
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
