@@ -158,12 +158,12 @@ transcript was read and no candidate remains); or lookup failed (a tool error, r
 separately from unavailable evidence, as for a source above). Records do not name the
 filing host, so a session filed on another host is a stated limitation, not a search.
 
-When the evidence settles whose ask it is and the field does not already say so, set the
-field with `tasks -C <root> edit <id> --origin <user|agent|mixed>` and a stamped note
-citing the evidence: `tasks -C <root> note <id> "<evidence>" --stamp`. Evidence that the
-user did not ask means `agent`; evidence of a user ask means `user` or `mixed`.
-`--no-origin` withdraws a judgment so the occurrence labels speak again. Notes keep their
-labels as history.
+When the evidence settles whose ask it is and the field does not already say so, plan a
+correction: `--origin <user|agent|mixed>`, or `--no-origin` to withdraw a judgment so the
+occurrence labels speak again. Evidence that the user did not ask means `agent`; evidence
+of a user ask means `user` or `mixed`. Write nothing here: §6 applies it after
+revalidation, and the stamped audit note's `origin:` segment cites the evidence. Notes
+keep their labels as history.
 
 Confirm the cluster from this evidence. Leave unrelated provisional members untouched.
 Before authoring, search for both an existing brief and an attached draft spec so a
@@ -311,6 +311,12 @@ Skip the member without any write or audit note if it changed, has a live claim,
 no longer in the status it had at the first show (an idea, or a `todo` or `blocked`
 task, a re-scope). Documents may name skipped members only as related context; do
 not say they were processed. If every member is skipped, create no goal or document.
+
+Revalidation comes once, before all of a member's writes, so its own writes cannot trip
+the comparison. An origin correction planned in §2 is one of them:
+`tasks -C <root> edit <id> --origin <value>` (or `--no-origin`), in the same edit as the
+verdict's other field changes when it has them, and always before the audit note, whose
+`origin:` segment names the stage outcomes and the evidence for the correction.
 
 Write task records only through the CLI and handoffs through explicit paths under
 `records`. Preserve the exact successful operations when a later command fails, report
