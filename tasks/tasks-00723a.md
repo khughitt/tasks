@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:22:25Z
+updated: 2026-10-25T12:24:08Z
 started: 2026-10-25T11:44:49Z
 completed: 2026-10-25T12:22:25Z
 closed: 2026-10-25T12:22:25Z
@@ -65,3 +65,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T12:22:25Z (docs/tasks-00723a): Reviewed detached-records wording merged with incoming ID-routing guidance; combined fast suite passed 1691 tests with 4 ignored, checks passed, and user approved local integration.
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:24:08Z (main): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "released", "verification": "verified", "purpose": "Merged locally into main after user approval; verified all three attachments in main by matching SHA-256, removed clean worktree with only regenerable target output and no host pointers, deleted merged task branch", "next_owner": "none", "cleanup_trigger": "none"}
