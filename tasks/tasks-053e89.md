@@ -1,15 +1,17 @@
 ---
 id: tasks-053e89
 title: Implement creation and occurrence provenance
-status: doing
+status: done
 priority: 2
 size: l
 complexity: mid
 process: planned
 owner: main
 created: 2026-10-25T12:15:14Z
-updated: 2026-10-25T15:40:41Z
+updated: 2026-10-25T15:40:42Z
 started: 2026-10-25T15:40:41Z
+completed: 2026-10-25T15:40:42Z
+closed: 2026-10-25T15:40:42Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -32,4 +34,8 @@ Why: tasks-a58a90's reviewed design ([spec]) and plan record which session filed
 - 2026-10-25T13:59:57Z (main): detached: sdd-ledger-tasks-053e89.md: machine paths refused by the layout hook; replaced by a placeholder copy
 - 2026-10-25T13:59:59Z (main): attached: sdd-ledger.md (14535 bytes): SDD ledger for the provenance plan (machine paths replaced by placeholders): pre-flight scan, per-task reviews and fix rounds, rulings R1-R8, deferred minors and where each was filed
 - 2026-10-25T15:40:41Z (main): started
+  provenance: {"harness_session":"claude-code:f5a5b2af-aae8-4252-99e0-46dedc11650b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T15:40:42Z (main): done
+  provenance: {"harness_session":"claude-code:f5a5b2af-aae8-4252-99e0-46dedc11650b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T15:40:42Z (main): provenance implemented (merge 7c3b9d2), reviewed (impl round 2 accept), retrieval demonstrations attached, rolled out to titan and europa (tasks-c96737); blind pilot tasks-e407a1 moved to tasks-9b1c2b
   provenance: {"harness_session":"claude-code:f5a5b2af-aae8-4252-99e0-46dedc11650b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
