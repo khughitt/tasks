@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:52:06Z
+updated: 2026-10-25T10:52:09Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -56,3 +56,4 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T10:49:10Z (design/tasks-284d9b): Review numbering: the builder acceptance was recorded at 2026-10-25T10:34:08Z as spec round 1, so the relayed ce08cdc review is round 2. Verified hierarchy::validate_parent rejects foreign parents. Accept Important routing correction: without explicit scope, filters follow positional-ID routing inside or outside a project; same-prefix filters retain the local checkout. Accept all three minors: actionable no_project filter guidance, shared tree/filter completion using local_or_foreign, and an explicit statement that cross-project hierarchy predicates intersect to empty even in a wide scope. Process remains planned; revise only the spec in .worktrees/tasks-284d9b before a new frozen review.
 - 2026-10-25T10:50:41Z (design/tasks-284d9b): attached: filtered-read-spec-round-2-review.md (4430 bytes): Full relayed claude-code/claude-opus-5-5 review of ce08cdc; Important 1 and Minor 3, all accepted for spec revision
 - 2026-10-25T10:52:06Z (design/tasks-284d9b): review: spec round 3 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T10:52:09Z (design/tasks-284d9b): attached: filtered-read-spec-round-3-review.md (1536 bytes): Full fresh codex/gpt-6.1-sol builder check of f03f0b4; accept, no findings, all four prior findings addressed
