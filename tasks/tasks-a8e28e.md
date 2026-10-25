@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: tasks-a8e28e
 created: 2026-10-22T20:54:25Z
-updated: 2026-10-25T12:03:26Z
+updated: 2026-10-25T12:06:11Z
 started: 2026-10-25T12:03:08Z
 depends: [tasks-211e28]
 tags: []
@@ -25,3 +25,4 @@ tasks:docs/specs/2026-10-22-records-home-design.md §5.5 and §12 case 7: tasks 
   provenance: {"harness_session":"claude-code:55c55d6b-a1e9-4f80-9ac8-9cd52d047e88","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T12:03:26Z (tasks-a8e28e): resumed
   provenance: {"harness_session":"claude-code:55c55d6b-a1e9-4f80-9ac8-9cd52d047e88","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:06:11Z (tasks-a8e28e): baseline: just test in .worktrees/tasks-a8e28e ran 1685 tests, 0 failed; no setup route declared (cargo builds into the worktree's own target)
