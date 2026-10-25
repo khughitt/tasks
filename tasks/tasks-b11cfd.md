@@ -1,16 +1,14 @@
 ---
 id: tasks-b11cfd
 title: "Skills: filing, pickup, and retrieval"
-status: done
+status: todo
 priority: 2
 complexity: mid
 process: direct
 owner: tasks-053e89
 created: 2026-10-25T12:15:41Z
-updated: 2026-10-25T13:25:12Z
+updated: 2026-10-25T13:56:08Z
 started: 2026-10-25T13:16:03Z
-completed: 2026-10-25T13:25:12Z
-closed: 2026-10-25T13:25:12Z
 depends: [tasks-58d20b]
 parent: tasks-053e89
 tags: []
