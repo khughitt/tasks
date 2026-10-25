@@ -1,20 +1,24 @@
 ---
 id: tasks-a58a90
 title: Design task creation and feedback occurrence provenance from the brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
-owner: main
+owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T11:15:47Z
+updated: 2026-10-25T12:27:28Z
 started: 2026-10-25T11:15:47Z
+completed: 2026-10-25T12:27:28Z
+closed: 2026-10-25T12:27:28Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
 source: "tasks-516ab4:provenance-design"
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-25-creation-occurrence-provenance-design.md
+plan: docs/plans/2026-10-25-creation-occurrence-provenance.md
 ---
 
 Why: [ref:brief] establishes that feedback creation and recurrence are unstamped and that a scope pass reconstructs a report's origin by hand; occurrence records, origin distinctions and retrieval need one design. Split from tasks-441019 on 2026-10-20 so the drop-step fix, which the audit shows carries most of the losses, does not wait on retrieval work.
@@ -34,4 +38,34 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
 ## Notes
 
 - 2026-10-25T11:15:47Z (main): started
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:16:18Z (design/tasks-a58a90): resumed
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:30:34Z (design/tasks-a58a90): review: spec round 1 — verdict: revise; findings: questions 4; reviewer: claude-code
+- 2026-10-25T11:30:35Z (design/tasks-a58a90): spec drafted in .worktrees/tasks-a58a90 (docs/specs/2026-10-25-creation-occurrence-provenance-design.md): session stamp on an always-written created note and stamped feedback recurrences; origin user|agent|mixed as a correctable frontmatter field plus per-occurrence evidence; origin_session and Codex root_session on occurrence notes; filing sessions recovered: 2e7d03 was agent-filed from the user's own question in claude-code:572ee51e-2f53-4729-96f8-f122a2cc8305 (mixed origin); the 2026-10-25 extension came from a $scope pass with no further user words (codex:01a172c0-9891-77c2-9b4c-b673b0f1633d)
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:31:44Z (design/tasks-a58a90): parked (waiting on user, review): user reviews the spec at design/tasks-a58a90 506253d:docs/specs/2026-10-25-creation-occurrence-provenance-design.md; on approval the agent writes the implementation plan in .worktrees/tasks-a58a90 (worktree hydrated, baseline deferred to execution setup)
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:53:57Z (design/tasks-a58a90): resumed
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:54:06Z (design/tasks-a58a90): review: spec round 2 — verdict: revise; findings: P2 4; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T11:57:10Z (design/tasks-a58a90): spec revision 2 at c9f4417 resolves round-2 findings: mixed now means user asks plus distinct agent-added asks (filing choice never changes origin); a set origin field supersedes every occurrence label for all consumers, --no-origin returns labels to partial evidence; retrieval is two-stage (filing event first, older request via the filing session's evidence); occurrences bind to the add/feedback call by id+action+new output 'at', with an ambiguous outcome
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T11:57:12Z (design/tasks-a58a90): parked (waiting on user, review): user (or their reviewer) reviews spec revision 2 at design/tasks-a58a90 c9f4417:docs/specs/2026-10-25-creation-occurrence-provenance-design.md; on approval the agent writes the implementation plan in .worktrees/tasks-a58a90
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:08:24Z (design/tasks-a58a90): resumed
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:08:26Z (design/tasks-a58a90): review: spec round 3 — verdict: revise; findings: P2 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:09:53Z (design/tasks-a58a90): spec revision 3 at 98f1a3c fixes round-3 P2 (add --pretty id-only results bind as inferred via --source/arguments/reuse warning; creation-vs-reuse ambiguity preserved); user approved the spec for planning conditional on that fix
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:16:24Z (design/tasks-a58a90): plan written at 65061f8 (docs/plans/2026-10-25-creation-occurrence-provenance.md); implementation goal tasks-053e89 under tasks-9b1c2b with steps tasks-2170ff (ops rows) tasks-48cd3b tasks-3f2fe2 tasks-58d20b tasks-b11cfd tasks-4d39db tasks-f42413, ordered by deps; a58a90 closes once the plan is reviewed
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:16:29Z (design/tasks-a58a90): parked (waiting on user, review): user reviews the plan at design/tasks-a58a90 65061f8:docs/plans/2026-10-25-creation-occurrence-provenance.md and picks subagent-driven or native execution; then the agent closes tasks-a58a90 with its wake notes, merges design/tasks-a58a90 into main, and starts tasks-053e89 in a fresh worktree
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:25:52Z (design/tasks-a58a90): resumed
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:25:54Z (design/tasks-a58a90): review: plan round 1 — verdict: revise; findings: P2 4; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:27:28Z (design/tasks-a58a90): done
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:27:28Z (design/tasks-a58a90): design (spec rev 4, 00f58ea) and plan (f8c97a0) user-approved after review rounds by codex/gpt-6.1-sol; implementation goal tasks-053e89 with seven step children; wake notes written on tasks-516ab4 and tasks-2e7d03
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
