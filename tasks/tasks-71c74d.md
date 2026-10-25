@@ -1,13 +1,13 @@
 ---
 id: tasks-71c74d
-title: Design blocker impact and persistence reporting from the brief
+title: Design early dependency events and confirmed-wait recording
 status: todo
 priority: 2
-size: s
+size: m
 complexity: high
 process: planned
 created: 2026-10-25T21:37:44Z
-updated: 2026-10-25T21:37:44Z
+updated: 2026-10-25T21:59:36Z
 depends: []
 parent: tasks-6166d6
 tags: []
@@ -16,13 +16,17 @@ agent: codex
 origin: agent
 ---
 
-Why: tasks-e637a1 asks for downstream impact and persistent blocking, but graph-counting, historical-evidence and presentation decisions remain. [ref:brief] establishes the current code, originating request and recommended advisory-report boundary; do not repeat that discovery as a separate research task.
+Why: blocking duration needs persisted dependency history or reconstruction, while repeated scope confirmation can be collected independently of edge age. [ref:brief] separates these evidence writes from the downstream report. Prospective coverage begins only when collection ships, so design and ship collection early without waiting for fan-out reporting or optional backfill.
 
-Done: produce a written design spec for user review, then an implementation plan for user review before any implementation. Settle unique direct/transitive counts versus immediately released work, goals/closeout edges, cross-project and unavailable coverage, deterministic ranking, and evidence-backed age/scope-pass meanings. Cover all dependency mutation paths and removal/re-addition, reopening/recurrence, aliases and moves. Unknown history stays explicit. Choose one initial JSON/pretty read surface and concrete verification cases; do not silently change stored priorities, ready/next ordering or admission gates. Reconcile tasks-e8d471 and canonical dependency-satisfaction work; any CLI vocabulary lands in ops before parser implementation. No implementation or paid runtime probe is authorized by this scope pass.
+Done: prepare a written design spec for user review, then an implementation plan for user review. The first shipping milestone records forward dependency additions/removals and scope-confirmed waits; git reconstruction and a duration-report surface are later, optional work that must not delay collection. Define versioned evidence, coverage start, atomicity with edge writes, no-op/failed writes, every add/edit/dep/clear/replace path, removal/re-addition, reopening/recurrence, and alias/move continuity. Separate edge age from continuously unmet age; leave unobserved history unknown.
 
-Where to look: [ref:brief]; src/commands/dep.rs (add_dependencies, shared by dep/add/edit), src/commands/show.rs, src/commands/list.rs (resolve_dependency, ready, prime), src/moving/mod.rs (inbound), src/scope.rs, src/query.rs, src/model.rs, src/review.rs; tasks-e8d471, tasks-1bbe49/tasks-606dd3, tasks-298107 and crew-a0952b. Design can proceed before reverse dependents land.
+Define a fixed scope-note observation such as waits: <canonical blocker ids>, recorded only for waits that the pass actually checked. Count distinct confirmed passes and their first/last observation; do not equate them with uninterrupted blocking duration or count repeated notes as separate passes. Settle pass identity/deduplication and changing or closed waits. Scope observations can ship without historical edge reconstruction. Keep changes to skills/scope/SKILL.md and any required parser/model contract explicit in the plan.
 
-Ideas it wakes: On completion, record the design outcome in the brief and run tasks note tasks-e637a1 --no-reviewed "<finding>" before the result branch merges. The idea must also depend on this task.
+Verification: additions through add/edit/dep, removals/clear/replace, failed and no-op mutations, re-add and reopen intervals, recurrence, aliases/moves, absent pre-deployment evidence, and two distinct scope confirmations plus a duplicate/unrelated note. Confirm count/coverage survives normal persistence. No implementation is authorized by this scope revision.
+
+Where to look: [ref:brief]; src/commands/dep.rs (add_dependencies), src/commands/mod.rs (shared field changes), src/commands/add.rs, src/commands/edit.rs, src/model.rs, src/frontmatter.rs, src/format.rs, src/rename/, src/moving/, src/review.rs, skills/scope/SKILL.md and tests/cli.rs. Coordinate the later report with tasks-e637a1, without a dependency between the two design tracks.
+
+Closeout: record the design/plan result on this task and in the brief. File accepted implementation steps under this task so tasks-6166d6 closes only after the actual history/observation deliverables are shipped. There is no waiting idea to wake after this revision.
 
 ## References
 
