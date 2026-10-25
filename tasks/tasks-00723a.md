@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:07:35Z
+updated: 2026-10-25T12:07:37Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -39,3 +39,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:07:21Z (docs/tasks-00723a): review: impl round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T12:07:23Z (docs/tasks-00723a): Final reviewed skill revision d113068. Corrective round 2 keeps where.project.root for in-tree projects, including nested ones; only unscoped detached/linked code-worktree invocations use git top level. All Important findings from the whole-change review and scoped re-review are resolved; no deferred minors. Integration requires user approval because the main-checkout skill directories are the targets of active global skill symlinks. No merge or activation performed.
 - 2026-10-25T12:07:35Z (docs/tasks-00723a): attached: implementation-review-report.md (1974 bytes): Full acceptance report from the fresh scoped corrective reviewer, codex/gpt-6.1-sol
+- 2026-10-25T12:07:37Z (docs/tasks-00723a): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "kept", "verification": "verified", "purpose": "Reviewed documentation branch docs/tasks-00723a awaits user approval before merge activates globally linked skills", "next_owner": "task:tasks-00723a", "cleanup_trigger": "After user-approved local merge, inspect ignored files and host pointers, run tt-report, then remove this task's worktree"}
