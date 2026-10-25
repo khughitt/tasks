@@ -7,8 +7,8 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T21:38:02Z
-depends: [tasks-e8d471]
+updated: 2026-10-25T21:38:07Z
+depends: [tasks-e8d471, tasks-71c74d]
 parent: tasks-6166d6
 tags: [cli]
 agent: claude-code
