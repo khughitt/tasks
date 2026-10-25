@@ -124,7 +124,7 @@ Wire list/search/ready with their `FilterArgs.parent/under`; next supplies None 
 - Keeps `pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate>` and `fn local_or_foreign(registry: &Registry, base: Option<Project>, current: &str) -> Vec<Task>` unchanged in signature.
 - Produces foreign-prefix candidates for unscoped filters/tree while retaining existing explicit scopes, local suffixes and silent failure behavior.
 
-- [ ] **Step 1: Write completion regressions.** Add `filtered_completion_routes_filters_and_tree` and `filtered_completion_keeps_local_and_explicit_scopes` in `tests/cli.rs`, using `TestEnv::complete`/`complete_values`. Table over list parent/under, search parent/under, ready parent/under, next under and positional tree. With a typed `fam-` fragment, assert `[foreign_id]` both from `sci` and outside. Empty outside fragment and outside bare-suffix fragments return no candidates. Empty local fragment and local suffix return only local IDs.
+- [x] **Step 1: Write completion regressions.** Add `filtered_completion_routes_filters_and_tree` and `filtered_completion_keeps_local_and_explicit_scopes` in `tests/cli.rs`, using `TestEnv::complete`/`complete_values`. Table over list parent/under, search parent/under, ready parent/under, next under and positional tree. With a typed `fam-` fragment, assert `[foreign_id]` both from `sci` and outside. Empty outside fragment and outside bare-suffix fragments return no candidates. Empty local fragment and local suffix return only local IDs.
 
 ```rust
 assert_eq!(env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", "fam-"]), [foreign.as_str()]);
@@ -134,11 +134,11 @@ assert!(env.complete(outside, "bash", 3, &["tasks", "next", "--under", ""]).is_e
 
 Use the existing second-root fixture pattern to assert matching-prefix and `-C` completion retain the current checkout over the registered copy. Explicit `--project sci` with fragment `fam-` returns none; `--project fam`, a group containing fam and `--all-projects` offer the fam candidate. A group excluding fam returns none. Unknown/unreachable typed prefixes and malformed registries offer nothing without stderr. Update `completion_scopes_ids_to_what_each_argument_accepts`' old assertion that tree's foreign completion is empty: it must now offer the foreign ID. Leave destination/write completion assertions unchanged.
 
-- [ ] **Step 2: Prove RED.** Run `just test-one --test cli filtered_completion_` and `just test-one --test cli completion_scopes_ids_to_what_each_argument_accepts`. Expect the new foreign-candidate assertions to fail with empty candidates before the implementation change.
+- [x] **Step 2: Prove RED.** Run `just test-one --test cli filtered_completion_` and `just test-one --test cli completion_scopes_ids_to_what_each_argument_accepts`. Expect the new foreign-candidate assertions to fail with empty candidates before the implementation change.
 
-- [ ] **Step 3: Implement shared completion.** In `complete::scoped`, keep all-projects/group and explicit-project arms as they are. In the unscoped arm, feed `open_local(&line)` and the fragment to `local_or_foreign`, then use existing `candidates` and `local_prefix`. Do not split tree from filters or introduce error-reporting on the completion path. Update the function comment and reference prose to describe typed foreign prefixes, local/worktree precedence, and no outside enumeration for empty fragments.
+- [x] **Step 3: Implement shared completion.** In `complete::scoped`, keep all-projects/group and explicit-project arms as they are. In the unscoped arm, feed `open_local(&line)` and the fragment to `local_or_foreign`, then use existing `candidates` and `local_prefix`. Do not split tree from filters or introduce error-reporting on the completion path. Update the function comment and reference prose to describe typed foreign prefixes, local/worktree precedence, and no outside enumeration for empty fragments.
 
-- [ ] **Step 4: Prove GREEN and commit.** Rerun both focused commands, then `just test-one --test cli completion_` to cover unchanged explicit/destination completion behavior. Run `just test-fast`, `tasks check` and `git diff --check`; all must pass with nonzero test counts. Commit with `fix: align read completion with id routing` and complete the implementation child with recorded results.
+- [x] **Step 4: Prove GREEN and commit.** Rerun both focused commands, then `just test-one --test cli completion_` to cover unchanged explicit/destination completion behavior. Run `just test-fast`, `tasks check` and `git diff --check`; all must pass with nonzero test counts. Commit with `fix: align read completion with id routing` and complete the implementation child with recorded results.
 
 ## Final verification and integration
 
