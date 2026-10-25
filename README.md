@@ -434,7 +434,7 @@ A same-owner refresh without root data retains the recorded root; conflicting
 known roots refuse before mutation, including same-owner `start --force`. Inspect
 `tasks show` and the exports, restore incorrect exports, or intentionally release
 with `park` before starting under the new root. Takeovers record the new owner's
-root, including absence. Release removes the metadata; notes and parks gain no
+root, including absence. Release removes the metadata; lifecycle notes and parks gain no
 root field. Old claims still load, but older writers may discard this field when
 rewriting a store; participating sessions need the updated binary for retention.
 
@@ -444,6 +444,9 @@ The generated lifecycle texts are the consumer contract (including status edits)
 - `parked (waiting on …): <next step>`, using the existing park reason vocabulary.
 - `done` or `dropped` on a genuine close transition.
 - `completed; next due <YYYY-MM-DD>` instead of `done` for a recurring completion.
+- `created` as the first note of every task `add` or `feedback` creates (author `add` or
+  `feedback`); see Creation notes below. `feedback` recurrences write
+  `feedback from <prefix>: <summary>` (and `detail from <prefix>: <body>`).
 
 These notes persist after claims and parks are released. Close-message notes are also
 stamped, but user messages are **not lifecycle markers**. Consumers such as obs derive
@@ -451,16 +454,96 @@ transition kinds from generated texts, not simply from the presence of provenanc
 There is no serialized marker kind: arbitrary user text can equal a generated text
 (for example, a close message of `resumed`). Text matching alone cannot disambiguate
 that collision; consumers must retain that uncertainty.
-Plain `tasks note`, shelf notes, feedback and takeover commentary remain unstamped.
+Plain `tasks note`, shelf notes and takeover commentary remain unstamped.
 `tasks note <id> "<text>" --stamp` opts one note in: it carries the same pair under the
 same rules (a missing source leaves it off; a conflict warns without values and the note
 still lands), and changes nothing else about `note`. Its text is not interpreted, so a
 stamped note is no more a lifecycle marker than a close message is; flow's gate notes
 use it to name the session at each stage boundary.
 
+#### Creation notes
+
+`add` and `feedback` write one note, text `created`, when they create a task (author
+`add` or `feedback`). Its `at` equals the record's `created`, and it carries the same
+native pair as other stamped notes under the same rules. When the pair comes from
+`CODEX_THREAD_ID` and a valid `CODEX_SESSION_ID` differs from it, the note also carries
+`root_session` (`codex:<root>`), the Codex tree root. Identity never blocks creation:
+conflicting or invalid variables warn, naming variables and never values, and leave the
+note unstamped. `TASKS_SESSION` is never a source. An `add` that reuses an existing
+task via `--source` writes nothing.
+
+A `feedback` recurrence stamps its `feedback from <prefix>: <summary>` note the same
+way (pair and `root_session`); the following `detail from <prefix>: <body>` note
+carries the pair alone. Each occurrence note's `at` is its own time, so a task that
+recurs holds one stamped occurrence note per filing. Note texts are unchanged.
+
+`add` and `feedback` JSON output gains `at`: the `at` of the occurrence note the
+command wrote (absent for a `reused` add, which writes nothing). `add --pretty` still
+prints only the id, and `feedback --pretty` still prints `<action> <id>`. Existing
+records are not backfilled. A reader identifies the creation note as the first note
+whose text is `created` and whose `at` equals the record's `created`; user text
+equal to `created` elsewhere does not qualify.
+
 Binaries older than the provenance writer reject a stamped file outright, so every host
 that reads synced task files needs a current `tasks`. The contract and its rollout are
 recorded in `docs/plans/2026-09-17-lifecycle-provenance.md`.
+
+### Origin: whose ask a task is
+
+`origin` records whose ask the record holds. It classifies the record's asks, not the
+filing: who ran the command, or whether the agent filed on its own, never changes it.
+A report that relays only the user's words is `user` even when the agent filed it
+unprompted; it is `mixed` only when the agent also added an ask of its own.
+
+| Value   | Meaning |
+|---------|---------|
+| `user`  | Every ask in the record comes from the user's own prompt: they described it, asked for it to be filed, or the report relays their words. |
+| `agent` | No ask in the record comes from a user prompt: an agent's observation, follow-up, feedback report, decomposition piece, plan step, dependency or scope filing. |
+| `mixed` | The record holds both: at least one ask from the user's prompt and at least one distinct ask the agent added. |
+| absent  | Unknown. |
+
+The filer supplies it from evidence in its own session, with `--origin <user|agent|mixed>`
+on `add` and `feedback`; when unsure it omits the flag. The tool never derives it from
+`agent`, `parent`, `source`, tags, session presence or commit time. `--origin-session
+<key>` (`claude-code:<id>` or `codex:<id>`) names the session where the ask was made when
+that is not the filing session; it is recorded on that occurrence's note only, says where
+to look, and is not a claim that the user asked. A bad key is refused before anything is
+written.
+
+It lives in two places. Each occurrence note (the creation note and each `feedback from`
+note) records the origin and origin session supplied at that occurrence; these never
+change. The frontmatter field `origin` is the record's current judgment: set at creation,
+combined on recurrence, corrected with `edit`.
+
+A feedback recurrence labelled X updates the field: unchanged when the field equals X or
+X is absent, or when the field is `mixed`; `mixed` when the field and X are different
+known values. When the field is absent and X is known, the field stays absent and the
+command warns that the record's origin is unknown and the occurrence says X; the note
+keeps X.
+
+`tasks edit <id> --origin <value>` corrects the field and `--no-origin` withdraws it;
+notes are never touched. A corrector adds a stamped note citing evidence
+(`tasks note <id> "<evidence>" --stamp`).
+
+**Reading rule.** Every consumer reads origin one way:
+
+1. When the field is set, it is the record's origin. It supersedes every occurrence
+   label, including the creation label.
+2. When the field is absent, the origin is unknown, but the occurrence labels are
+   partial evidence: a label `user` or `mixed` means the record carries some of the
+   user's words; otherwise the origin stays unknown.
+
+Example: a task created with `--origin user` is corrected with `edit --origin agent`.
+The field says `agent` while the creation note still says `user`; rule 1 gives `agent`,
+and no user words. After `edit --no-origin` the field is absent and rule 2 sees the
+`user` label again.
+
+`list`, `search` and `ready` take `--origin <user|agent|mixed|none>`, repeatable and
+widening; `none` selects tasks whose field is absent. Task JSON gains `origin` (omitted
+when unset) and notes gain `origin` and `origin_session`, all additive. Existing records
+are not backfilled. Rollout: binaries older than this reject records carrying the new
+keys, so install the new `tasks` on every host that reads synced records before records
+filed by it sync.
 
 ### Relay identity (opt-in)
 

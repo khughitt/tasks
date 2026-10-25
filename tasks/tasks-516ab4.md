@@ -4,7 +4,7 @@ title: "Feedback entries record no session provenance, so a scope pass must reco
 status: idea
 priority: 2
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-25T12:27:23Z
+updated: 2026-10-25T13:43:34Z
 depends: [tasks-a58a90]
 parent: tasks-9b1c2b
 tags: [feedback, idea, "from:lore"]
@@ -34,3 +34,4 @@ A pilot recovered the user's original request behind a title-only report only by
 - 2026-10-20T14:27:21Z (main): scope: briefed; checked 88c242e: feedback creation and recurrence are unstamped, while native append_stamped_note exists. tasks-441019 retains occurrence/origin distinctions, short summaries, user-relayed marker, inferred anchors, live/archive/parent/other-host retrieval and blind pilot. Reuse hq-c411df, lore-c01bc8 and obs-c5c599 ownership; no duplicate reader or trace task; brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
 - 2026-10-20T14:41:20Z (main): wait moved 2026-10-20: tasks-441019 was split; this idea now waits on tasks-a58a90 (occurrence provenance design), which carries every requirement the 14:27 scope note listed for it.
 - 2026-10-25T12:27:23Z (design/tasks-a58a90): tasks-a58a90 finished its design and plan (docs/specs/2026-10-25-creation-occurrence-provenance-design.md, docs/plans/2026-10-25-creation-occurrence-provenance.md): feedback creation gets a stamped 'created' note and each recurrence is stamped; origin user|agent|mixed is a correctable field with per-occurrence labels; the scope skill gains a two-stage retrieval procedure with matched/inferred/ambiguous/unavailable/lookup-failed outcomes. Implementation is goal tasks-053e89; this idea's proposal is covered there once it lands.
+- 2026-10-25T13:43:34Z (tasks-053e89): Landed on tasks-053e89 (spec docs/specs/2026-10-25-creation-occurrence-provenance-design.md): tasks feedback now writes a stamped created note and stamps each recurrence, and a scope pass finds a report's origin from the record's origin field and stamped notes, then follows the scope skill's two-stage retrieval (§2) to the filing session's human turns, reporting unavailable context when the lookup fails.

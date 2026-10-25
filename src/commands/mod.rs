@@ -1057,6 +1057,9 @@ pub fn apply_fields(
     if let Some(process) = &fields.process {
         task.process = Some(Process::parse(process)?);
     }
+    if let Some(origin) = &fields.origin {
+        task.origin = Some(crate::model::Origin::parse(origin)?);
+    }
     if let Some(every) = &fields.every {
         task.every = Some(crate::periodic::Interval::parse(every)?);
     }
@@ -1422,6 +1425,7 @@ pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
         by: by.to_string(),
         text: text.to_string(),
         provenance: None,
+        occurrence: Default::default(),
     });
     Ok(())
 }
@@ -1433,6 +1437,70 @@ pub fn append_stamped_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str)
         Ok(provenance) => task.notes.last_mut().expect("just appended").provenance = provenance,
         Err(diagnostic) => ctx.warnings.push(diagnostic),
     }
+    Ok(())
+}
+
+/// The origin and origin session a filer supplied, validated before any write.
+#[derive(Clone, Copy, Default)]
+pub struct Attribution<'a> {
+    pub origin: Option<crate::model::Origin>,
+    pub session: Option<&'a str>,
+}
+
+impl<'a> Attribution<'a> {
+    pub fn parse(origin: Option<&str>, session: Option<&'a str>) -> Result<Self> {
+        let origin = origin.map(crate::model::Origin::parse).transpose()?;
+        if let Some(key) = session {
+            crate::provenance::validate_session_key(key)
+                .map_err(|reason| Error::Validation(format!("--origin-session: {reason}")))?;
+        }
+        Ok(Attribution { origin, session })
+    }
+}
+
+/// The harness identity of one command run, resolved once from the process environment.
+#[derive(Default)]
+pub struct Stamp {
+    pub provenance: Option<crate::model::HarnessProvenance>,
+    pub root_session: Option<String>,
+}
+
+/// Resolves the stamp for this run. A resolver error pushes its diagnostic (which names
+/// variables, never values) and yields an empty stamp: identity never blocks a write.
+pub fn occurrence_stamp(warnings: &mut Vec<String>) -> Stamp {
+    let get = |name: &str| std::env::var_os(name);
+    match crate::provenance::resolve_from(get) {
+        Ok(provenance) => Stamp {
+            provenance,
+            root_session: crate::provenance::resolve_root_from(get),
+        },
+        Err(diagnostic) => {
+            warnings.push(diagnostic);
+            Stamp::default()
+        }
+    }
+}
+
+/// Appends an occurrence note: the stamp's native pair and `root_session`, plus the
+/// given origin and origin session.
+pub fn append_occurrence_note(
+    task: &mut Task,
+    at: &str,
+    by: &str,
+    text: &str,
+    stamp: &Stamp,
+    origin: Option<crate::model::Origin>,
+    origin_session: Option<&str>,
+) -> Result<()> {
+    append_note(task, by, text)?;
+    let note = task.notes.last_mut().expect("just appended");
+    note.at = at.to_string();
+    note.provenance = stamp.provenance.clone();
+    note.occurrence = crate::model::NoteOccurrence {
+        root_session: stamp.root_session.clone(),
+        origin,
+        origin_session: origin_session.map(str::to_string),
+    };
     Ok(())
 }
 
@@ -2020,6 +2088,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             title,
             status,
             project,
+            origin_session,
             fields,
         } => {
             // An explicit target replaces the lookup, and `add` validates
@@ -2036,7 +2105,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 None => open_ctx(dir)?,
             };
             lock_and_revalidate(&mut ctx, &routing)?;
-            add::run(ctx, title, status, fields)
+            add::run(ctx, title, status, origin_session, fields)
         }
         Command::Show { id, no_fetch } => show::run(open_id_ctx(dir, &id)?, id, fetch(no_fetch)),
         Command::Doc {
@@ -2270,11 +2339,24 @@ fn dispatch(cli: Cli) -> Result<Output> {
             body,
             recur,
             new,
+            origin,
+            origin_session,
         } => {
             let body = body.unwrap_or_default();
             feedback::validate(&summary, &category, &body)?;
+            let attribution = Attribution::parse(origin.as_deref(), origin_session.as_deref())?;
             let (ctx, reporter) = feedback::open(dir, &project)?;
-            feedback::run(ctx, reporter, project, summary, category, body, recur, new)
+            feedback::run(
+                ctx,
+                reporter,
+                project,
+                summary,
+                category,
+                body,
+                recur,
+                new,
+                attribution,
+            )
         }
     }
 }

@@ -16,6 +16,20 @@ pub fn validate(provenance: &HarnessProvenance) -> Result<(), String> {
     }
 }
 
+/// A session key as stored in occurrence keys: a `claude-code:` or `codex:` prefix and a
+/// nonempty, control-free remainder.
+pub fn validate_session_key(key: &str) -> Result<(), String> {
+    match key
+        .strip_prefix("claude-code:")
+        .or_else(|| key.strip_prefix("codex:"))
+    {
+        Some(id) if !id.is_empty() && !id.chars().any(char::is_control) => Ok(()),
+        _ => Err(format!(
+            "session key {key:?} must be claude-code: or codex: followed by a nonempty, control-free ID"
+        )),
+    }
+}
+
 pub fn resolve_from(
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Result<Option<HarnessProvenance>, String> {
@@ -52,6 +66,20 @@ pub fn resolve_from(
         harness_session: key,
         harness_session_source: source.into(),
     }))
+}
+
+/// The Codex root session of a worker: `codex:<CODEX_SESSION_ID>`, only when the selected
+/// pair comes from `CODEX_THREAD_ID` and a valid `CODEX_SESSION_ID` differs from it.
+pub fn resolve_root_from(get: impl Fn(&str) -> Option<OsString>) -> Option<String> {
+    let selected = resolve_from(&get).ok().flatten()?;
+    if selected.harness_session_source != "CODEX_THREAD_ID" {
+        return None;
+    }
+    let root = crate::native::value(&get, "CODEX_SESSION_ID")
+        .ok()
+        .flatten()?;
+    let key = format!("codex:{root}");
+    (key != selected.harness_session).then_some(key)
 }
 
 #[cfg(test)]

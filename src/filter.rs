@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use crate::claims::ClaimSnapshot;
 use crate::cli::FilterArgs;
 use crate::error::{Error, Result};
-use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
+use crate::model::{Complexity, Origin, Process, Size, Status, Task, TaskId};
 use crate::output::ParkedRow;
 use crate::registry::Registry;
 use crate::shorthand::Shorthand;
@@ -25,6 +25,7 @@ pub struct TaskFilter {
     sizes: Vec<Option<Size>>,
     complexities: Vec<Option<Complexity>>,
     processes: Vec<Option<Process>>,
+    origins: Vec<Option<Origin>>,
     tags: Vec<String>,
     needs: Vec<String>,
     owner: Option<String>,
@@ -47,6 +48,7 @@ pub struct Fields<'a> {
     /// The effective rating: the record's or a shared escalation's, whichever is higher.
     pub complexity: Option<Complexity>,
     pub process: Option<Process>,
+    pub origin: Option<Origin>,
     pub tags: &'a [String],
     pub needs: &'a [String],
     pub owner: Option<&'a str>,
@@ -99,6 +101,11 @@ impl TaskFilter {
                 .iter()
                 .map(|value| optional(value, Process::parse))
                 .collect::<Result<_>>()?,
+            origins: args
+                .origins
+                .iter()
+                .map(|value| optional(value, Origin::parse))
+                .collect::<Result<_>>()?,
             tags: args.tags.clone(),
             needs: args.needs.clone(),
             owner: args.owner.clone(),
@@ -150,6 +157,7 @@ impl TaskFilter {
             && self.sizes.is_empty()
             && self.complexities.is_empty()
             && self.processes.is_empty()
+            && self.origins.is_empty()
             && self.tags.is_empty()
             && self.needs.is_empty()
             && self.owner.is_none()
@@ -166,6 +174,7 @@ impl TaskFilter {
             && any_of(&self.sizes, &fields.size)
             && any_of(&self.complexities, &fields.complexity)
             && any_of(&self.processes, &fields.process)
+            && any_of(&self.origins, &fields.origin)
             && self.tags.iter().all(|tag| fields.tags.contains(tag))
             && self.needs.iter().all(|need| fields.needs.contains(need))
             && self
@@ -208,6 +217,7 @@ impl<'a> Fields<'a> {
             size: task.size,
             complexity: crate::complexity::effective(task, claims),
             process: task.process,
+            origin: task.origin,
             tags: &task.tags,
             needs: &task.needs,
             owner: task.owner.as_deref(),
@@ -239,6 +249,7 @@ impl<'a> Fields<'a> {
                 row.escalation.as_ref().map(|escalation| escalation.level),
             ),
             process: row.process,
+            origin: row.origin,
             tags: &row.tags,
             needs: &row.needs,
             owner: row.owner.as_deref(),
@@ -307,6 +318,7 @@ mod tests {
             size: Some(Size::S),
             complexity: Some(Complexity::Mid),
             process: None,
+            origin: None,
             tags: NO_TAGS,
             needs: &[],
             owner: None,

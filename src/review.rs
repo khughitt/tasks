@@ -450,6 +450,7 @@ mod tests {
             by: "scope".into(),
             text: "scope: drop; landed; proposal: drop it".into(),
             provenance: None,
+            occurrence: Default::default(),
         });
         assert_eq!(state(&proposed, 0, &none, now), None);
         proposed.notes.push(crate::model::Note {
@@ -457,6 +458,7 @@ mod tests {
             by: "keith".into(),
             text: "keep it".into(),
             provenance: None,
+            occurrence: Default::default(),
         });
         assert_eq!(state(&proposed, 0, &none, now), Some(Stranded));
     }

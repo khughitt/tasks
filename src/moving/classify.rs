@@ -125,6 +125,7 @@ mod tests {
             by: "owner".into(),
             text: crate::attachments::attached_note("shot.png", 3, None),
             provenance: None,
+            occurrence: Default::default(),
         };
         for (text, id, tombstone) in [
             (&mut s.journal.source_text, "dots-00000a", false),

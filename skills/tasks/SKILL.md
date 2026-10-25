@@ -85,6 +85,13 @@ mean those documents were verified.
    and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
+   Before asking the user about a task's intent, read its origin by the
+   [reading rule](../../README.md#origin-whose-ask-a-task-is): a set `origin` field is
+   the record's origin, superseding every occurrence label; an absent one is unknown, though an occurrence note labelled
+   `user` or `mixed` means it carries some of the user's words. `user` means the user
+   holds the intent. For `agent`, `mixed` or unknown, first follow the record to its
+   originating ask with the scope skill's procedure (§2, "Find the originating ask"),
+   and ask only what that evidence leaves to the user.
    `ready` and `next` omit live claims; see the [claim and checkout contract](../../README.md#claims-and-checkouts)
    and `tasks start --help` / `tasks release --help` for ownership and recovery.
    `tasks start --force <id>` deliberately takes over another session's claim and records it;
@@ -497,7 +504,21 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--origin <user|agent|mixed>] [--origin-session <key>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
+  Pass `--origin` on any `add` or `feedback` when your own session shows whose ask it
+  is: `user` when every ask in the record comes from the user's prompt (they described
+  it, asked for it to be filed, or it relays their words); `agent` when none does (your
+  observation, follow-up, feedback report, decomposition piece, plan step, dependency
+  or scope filing); `mixed` when it holds at least one ask from the user's prompt and at
+  least one distinct ask you added. Origin classifies the record's asks, not the
+  filing: who ran the command, whether you chose to file on your own, and how you
+  phrased the asks never change it. A decomposition child of a user-requested goal is
+  `agent` unless the user asked for that piece. When unsure, omit the flag; the tool
+  never infers it. When the ask was made in an earlier session, not this one, add
+  `--origin-session <key>` (`claude-code:<id>` or `codex:<id>`) to say where to look; it does not
+  claim that the user asked. Correct a record later with `tasks edit <id> --origin
+  <value>` (or `--no-origin`) plus `tasks note <id> "<evidence>" --stamp`; see
+  [Origin](../../README.md#origin-whose-ask-a-task-is).
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or
@@ -743,7 +764,9 @@ report and list the owners; the refusal lists them either way. The report lands 
 `[git] commit`), tagged `feedback`, the category,
 and `from:<your prefix>` (`from:unregistered` outside every project; a linked checkout
 reports its project's prefix). Describe the tool, not the project: no repository names, file
-paths, people, or project content. Do not
+paths, people, or project content. Pass `--origin` and `--origin-session` as for `add`
+(**Task operations**): a report that relays only the user's words is `user` even when
+you filed it unprompted, and `mixed` only when you also added an ask of your own. Do not
 manually commit in the owner's repository and do not triage your own report. If `ambiguous` comes
 back, rerun with `--recur <id>` to join the listed entry or `--new` to insist. `--body`
 detail is kept verbatim on a new entry; recurrence appends it as a single-line note, so

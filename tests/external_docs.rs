@@ -733,7 +733,7 @@ fn external_doc_editor_skips_unchanged_links_and_canonicalizes_changes() {
     );
     let calls = docs.calls();
     docs.disconnect();
-    std::fs::write(&editor, "printf '\\nBody edit\\n' >> \"$1\"\n").unwrap();
+    std::fs::write(&editor, "sed -i '/^## Notes/i Body edit\\n' \"$1\"\n").unwrap();
     let out = env
         .cmd(&dir)
         .env("EDITOR", &command)

@@ -104,6 +104,9 @@ pub struct AddOut {
     pub id: String,
     /// `created`, or `reused` when `--source` matched an existing task.
     pub action: String,
+    /// The creation note's timestamp; absent when `reused` wrote nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -565,6 +568,8 @@ pub struct TaskSummary {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<crate::model::Origin>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -792,6 +797,7 @@ impl TaskSummary {
             step: task.step.clone(),
             model: task.model.clone(),
             agent: task.agent.clone(),
+            origin: task.origin,
             depends: task.depends.iter().map(ToString::to_string).collect(),
             parent: task.parent.as_ref().map(ToString::to_string),
             in_lane: crate::hierarchy::lane_of(all, task, registry),
@@ -862,6 +868,8 @@ pub struct ParkedRow {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<crate::model::Origin>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -911,6 +919,7 @@ impl ParkedRow {
             step: summary.step,
             model: summary.model,
             agent: summary.agent,
+            origin: summary.origin,
             depends: summary.depends,
             parent: summary.parent,
             in_lane: summary.in_lane,
@@ -949,6 +958,7 @@ impl ParkedRow {
             step: None,
             model: None,
             agent: None,
+            origin: None,
             depends: Vec::new(),
             parent: None,
             in_lane: None,
@@ -1248,6 +1258,9 @@ pub struct FeedbackOut {
     pub id: String,
     pub action: String,
     pub path: String,
+    /// The `at` of the occurrence note this run wrote (`created` or `feedback from`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -2406,6 +2419,7 @@ mod tests {
             step: None,
             model: None,
             agent: None,
+            origin: None,
             depends: vec![],
             parent: None,
             in_lane: None,
