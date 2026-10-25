@@ -869,6 +869,41 @@ pub fn open_id_read_ctx(
     })
 }
 
+fn open_filtered_read_ctx(
+    dir: Option<&Path>,
+    scope: &ScopeArgs,
+    parent: Option<&str>,
+    under: Option<&str>,
+) -> Result<ReadCtx> {
+    if scope.project.is_none()
+        && !scope.all_projects
+        && scope.group.is_none()
+        && let (Some(parent), Some(under)) = (parent, under)
+    {
+        // Agree before routing, retaining the original checkout's shorthand and errors.
+        let (registry, shorthand) = match open_ctx(dir) {
+            Ok(ctx) => (ctx.registry, ctx.shorthand),
+            Err(Error::NoProject(_)) => (Registry::load()?, Shorthand::new(start_dir(dir)?)),
+            Err(error) => return Err(error),
+        };
+        let parent = parse_id(&registry, &shorthand, parent)?;
+        let under = parse_id(&registry, &shorthand, under)?;
+        if parent.prefix != under.prefix {
+            return Err(Error::Validation(format!(
+                "--parent {parent} and --under {under} name different projects; \
+                 use IDs from one project or select an explicit scope"
+            )));
+        }
+    }
+    open_id_read_ctx(dir, scope, parent.or(under)).map_err(|error| match error {
+        Error::NoProject(dir) => Error::NoProjectNext {
+            dir,
+            next: "choose --all-projects or --project <prefix> to set the read scope".into(),
+        },
+        error => error,
+    })
+}
+
 pub struct ReadCtx {
     pub scope: Scope,
     pub registry: Registry,
@@ -2032,11 +2067,29 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 .transpose()?;
             docs::run(open_read_ctx(dir, &scope)?, &kinds, text)
         }
-        Command::List { list: args } => list::list(open_read_ctx(dir, &args.scope)?, args, None),
+        Command::List { list: args } => list::list(
+            open_filtered_read_ctx(
+                dir,
+                &args.scope,
+                args.filter.parent.as_deref(),
+                args.filter.under.as_deref(),
+            )?,
+            args,
+            None,
+        ),
         Command::Search { query, list: args } => {
             // Validated before the scan, so an empty query never reads a project.
             let text = crate::filter::TextQuery::parse(&query)?;
-            list::list(open_read_ctx(dir, &args.scope)?, args, Some(text))
+            list::list(
+                open_filtered_read_ctx(
+                    dir,
+                    &args.scope,
+                    args.filter.parent.as_deref(),
+                    args.filter.under.as_deref(),
+                )?,
+                args,
+                Some(text),
+            )
         }
         Command::Ready {
             filter,
@@ -2045,7 +2098,12 @@ fn dispatch(cli: Cli) -> Result<Output> {
             without,
             scope,
         } => list::ready(
-            open_read_ctx(dir, &scope)?,
+            open_filtered_read_ctx(
+                dir,
+                &scope,
+                filter.parent.as_deref(),
+                filter.under.as_deref(),
+            )?,
             filter,
             limit,
             max_complexity,
@@ -2058,7 +2116,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             no_fetch,
             scope,
         } => list::next(
-            open_read_ctx(dir, &scope)?,
+            open_filtered_read_ctx(dir, &scope, None, under.as_deref())?,
             max_complexity,
             without.without,
             under,

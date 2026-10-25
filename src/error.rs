@@ -10,6 +10,8 @@ pub enum Error {
     SummaryTooLarge,
     #[error("no tasks/.config.toml found above {0}")]
     NoProject(PathBuf),
+    #[error("no tasks/.config.toml found above {dir}; {next}")]
+    NoProjectNext { dir: PathBuf, next: String },
     #[error("{0}")]
     Config(String),
     #[error("task {0} not found")]
@@ -115,6 +117,10 @@ impl Error {
     /// Appends `suffix` to the human-readable detail; the kind is unchanged.
     pub fn with_suffix(self, suffix: &str) -> Error {
         match self {
+            Error::NoProjectNext { dir, next } => Error::NoProjectNext {
+                dir,
+                next: next + suffix,
+            },
             Error::Config(detail) => Error::Config(detail + suffix),
             Error::TaskNotFound(detail) => Error::TaskNotFound(detail + suffix),
             Error::TaskNotFoundNext { id, next } => Error::TaskNotFoundNext {
@@ -182,7 +188,7 @@ impl Error {
         match self {
             Error::SummaryRequiresJson => "summary_requires_json",
             Error::SummaryTooLarge => "summary_too_large",
-            Error::NoProject(_) => "no_project",
+            Error::NoProject(_) | Error::NoProjectNext { .. } => "no_project",
             Error::Config(_) => "config",
             Error::TaskNotFound(_) | Error::TaskNotFoundNext { .. } => "task_not_found",
             Error::UnresolvableId(_) => "unresolvable_id",

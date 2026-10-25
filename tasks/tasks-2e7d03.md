@@ -3,10 +3,8 @@ id: tasks-2e7d03
 title: "tasks add records no creating-session provenance and no requester/origin marker, so an agent picking up a task cannot find the session or ask that led to it"
 status: idea
 priority: 2
-reviewed: true
-reviewed_at: 2026-10-25T11:13:25Z
 created: 2026-10-25T11:03:09Z
-updated: 2026-10-25T11:13:25Z
+updated: 2026-10-25T12:27:25Z
 depends: [tasks-a58a90]
 tags: [feedback, gap, "from:obs"]
 agent: claude-code/claude-opus-5-5
@@ -23,3 +21,4 @@ Scope evidence (2026-10-25, 79b8253): the creation/session gap is confirmed in s
 ## Notes
 
 - 2026-10-25T11:13:25Z (main): scope: briefed; at 79b8253 confirmed add and feedback share an unstamped constructor and native stamped-note provenance already exists; extended existing tasks-a58a90 with ordinary-add session provenance and explicit requester/origin distinctions, retained all feedback requirements and original report, and recorded its dependency and wake note; storage, optional origin vocabulary and correction semantics require design review; brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md (8350622); no duplicate design or research task
+- 2026-10-25T12:27:25Z (design/tasks-a58a90): tasks-a58a90 finished its design and plan (same spec/plan as tasks-516ab4's note): add writes a stamped 'created' note naming the filing session (absent-but-explicit when unknown), add/feedback take --origin user|agent|mixed (user = the user's prompt led to the asks, not who ran the command) and --origin-session for an older ask, edit corrects origin, and the tasks/scope skills say how to follow a record to its originating ask. Implementation is goal tasks-053e89.

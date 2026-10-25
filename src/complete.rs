@@ -555,11 +555,8 @@ fn destination(registry: &Registry, line: &Line) -> Option<Project> {
     open_prefix(registry, &subject.prefix)
 }
 
-/// `tree <id>` and `list --parent`: the scope the command itself scans, which
-/// `--all-projects` widens to the registry (`list.rs` validates the parent against it),
-/// `--group` narrows it to the group's members, and `--project` moves to one registered
-/// root. The three arms mirror `open_read_ctx`; unlike `destination`, a named project
-/// wins over a worktree of the same prefix, because the read scope is the registered root.
+/// Read IDs follow typed prefixes, retaining matching local checkouts. Explicit
+/// scopes win: a registered project root, a group's members, or every reachable project.
 pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
@@ -582,14 +579,12 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
                 tasks.extend(project.scan_lenient().0);
             }
         }
-    } else {
-        let project = match &line.project {
-            Some(prefix) => open_prefix(&registry, prefix),
-            None => open_local(&line),
-        };
-        if let Some(project) = project {
+    } else if let Some(prefix) = &line.project {
+        if let Some(project) = open_prefix(&registry, prefix) {
             tasks.extend(project.scan_lenient().0);
         }
+    } else {
+        tasks = local_or_foreign(&registry, open_local(&line), current);
     }
     candidates(tasks, current, local_prefix(&line).as_deref())
 }

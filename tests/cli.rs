@@ -14537,6 +14537,138 @@ fn completion_stub_is_emitted_and_the_hook_is_otherwise_inert() {
 }
 
 #[test]
+fn filtered_completion_routes_filters_and_tree() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "Local"]);
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+    for cwd in [env.home.path(), sci.as_path()] {
+        for words in [
+            vec!["tasks", "list", "--parent", "fam-"],
+            vec!["tasks", "list", "--under", "fam-"],
+            vec!["tasks", "search", "x", "--parent", "fam-"],
+            vec!["tasks", "search", "x", "--under", "fam-"],
+            vec!["tasks", "ready", "--parent", "fam-"],
+            vec!["tasks", "ready", "--under", "fam-"],
+            vec!["tasks", "next", "--under", "fam-"],
+            vec!["tasks", "tree", "fam-"],
+        ] {
+            assert_eq!(
+                env.complete_values(cwd, "bash", words.len() - 1, &words),
+                [foreign.as_str()]
+            );
+        }
+    }
+    for fragment in ["", foreign.split_once('-').unwrap().1, "zzz-"] {
+        assert!(
+            env.complete_values(
+                env.home.path(),
+                "bash",
+                3,
+                &["tasks", "list", "--parent", fragment]
+            )
+            .is_empty()
+        );
+        assert!(
+            env.complete_values(env.home.path(), "bash", 2, &["tasks", "tree", fragment])
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn filtered_completion_keeps_local_and_explicit_scopes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+    env.json(&sci, &["group", "set", "both", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "one", "sci"]);
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--under", ""]),
+        [local.as_str()]
+    );
+    let suffix = local.split_once('-').unwrap().1;
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "next", "--under", suffix]),
+        [suffix]
+    );
+    let (_keep, wt) = unregistered_checkout("sci");
+    let only_here = id_of(env.json(&wt, &["add", "Worktree"]));
+    assert_eq!(
+        env.complete(&wt, "bash", 3, &["tasks", "list", "--under", "sci-"]),
+        [only_here.as_str()]
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            5,
+            &[
+                "tasks",
+                "-C",
+                wt.to_str().unwrap(),
+                "list",
+                "--under",
+                "sci-"
+            ]
+        ),
+        [only_here.as_str()]
+    );
+    assert_eq!(
+        env.complete(
+            &wt,
+            "bash",
+            5,
+            &["tasks", "list", "--project", "sci", "--under", "sci-"]
+        ),
+        [local.as_str()]
+    );
+    for scope in [
+        vec!["--project", "fam"],
+        vec!["--group", "both"],
+        vec!["--all-projects"],
+    ] {
+        let mut words = vec!["tasks", "list"];
+        words.extend(scope);
+        words.extend(["--under", "fam-"]);
+        assert_eq!(
+            env.complete(&sci, "bash", words.len() - 1, &words),
+            [foreign.as_str()]
+        );
+    }
+    for scope in [vec!["--project", "sci"], vec!["--group", "one"]] {
+        let mut words = vec!["tasks", "list"];
+        words.extend(scope);
+        words.extend(["--parent", "fam-"]);
+        assert!(
+            env.complete(&sci, "bash", words.len() - 1, &words)
+                .is_empty()
+        );
+    }
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "ready", "--parent", "zzz-"])
+            .is_empty()
+    );
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "next", "--under", "fam-"])
+            .is_empty()
+    );
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        "broken = [",
+    )
+    .unwrap();
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", "sci-"])
+            .is_empty()
+    );
+}
+
+#[test]
 fn completion_scopes_ids_to_what_each_argument_accepts() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -14544,10 +14676,10 @@ fn completion_scopes_ids_to_what_each_argument_accepts() {
     let local = id_of(env.json(&sci, &["add", "Local"]));
     let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
 
-    // Scoped: tree and list --parent are local, until --all-projects widens list
-    assert!(
-        env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"])
-            .is_empty()
+    // Typed IDs route; an empty word stays local unless an explicit scope widens it.
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"]),
+        [foreign.as_str()]
     );
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", ""]),
@@ -24222,6 +24354,238 @@ fn list_parent_filter_keeps_its_errors() {
     assert_eq!(
         env.fail(&sci, &["list", "--parked", "--parent", "sci-abcdef"]),
         "task_not_found"
+    );
+}
+
+#[test]
+fn filtered_read_routes_by_full_id() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let goal = id_of(env.json(&fam, &["add", "Goal"]));
+    let leaf = id_of(env.json(&fam, &["add", "Leaf", "--parent", &goal]));
+    env.json(&sci, &["add", "Unrelated", "-p", "0"]);
+    for cwd in [env.home.path(), sci.as_path()] {
+        for command in [vec!["list"], vec!["search", "Leaf"], vec!["ready"]] {
+            for flag in ["--parent", "--under"] {
+                let mut args = command.clone();
+                args.extend([flag, &goal]);
+                assert_eq!(list_ids(&env.json(cwd, &args)), std::slice::from_ref(&leaf));
+            }
+        }
+        assert_eq!(
+            env.json(cwd, &["next", "--under", &goal])["next"]["task"]["id"],
+            leaf
+        );
+    }
+    as_agent(&env, &fam, "agent-a")
+        .args(["park", &leaf, "resume"])
+        .assert()
+        .success();
+    for flag in ["--parent", "--under"] {
+        let out = env.json(env.home.path(), &["list", "--parked", flag, &goal]);
+        assert_eq!(list_ids(&out), std::slice::from_ref(&leaf));
+    }
+}
+
+#[test]
+fn filtered_read_conflicts_and_explicit_scopes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let s = id_of(env.json(&sci, &["add", "S"]));
+    let f = id_of(env.json(&fam, &["add", "F"]));
+    let leaf = id_of(env.json(&fam, &["add", "Leaf", "--parent", &f]));
+    env.json(&sci, &["group", "set", "both", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "one", "sci"]);
+    for cwd in [env.home.path(), sci.as_path()] {
+        for command in [vec!["list"], vec!["search", "Leaf"], vec!["ready"]] {
+            let mut args = command;
+            args.extend(["--parent", &s, "--under", &f]);
+            let out = error_of(&env, cwd, &args);
+            assert_eq!(out["error"]["kind"], "validation");
+            let detail = out["error"]["detail"].as_str().unwrap();
+            for token in ["--parent", "--under", "sci", "fam"] {
+                assert!(detail.contains(token), "{out}");
+            }
+        }
+        for scope in [vec!["--all-projects"], vec!["--group", "both"]] {
+            let mut args = vec!["list", "--parent", &s, "--under", &f];
+            args.extend(scope);
+            assert!(list_ids(&env.json(cwd, &args)).is_empty());
+        }
+        for scope in [
+            vec!["--project", "fam"],
+            vec!["--group", "both"],
+            vec!["--all-projects"],
+        ] {
+            let mut args = vec!["list", "--parent", &f, "--under", &f];
+            args.extend(scope);
+            assert_eq!(list_ids(&env.json(cwd, &args)), std::slice::from_ref(&leaf));
+        }
+        assert_eq!(
+            env.fail(cwd, &["list", "--group", "one", "--under", &f]),
+            "task_not_found"
+        );
+        assert_eq!(
+            env.fail(cwd, &["list", "--project", "sci", "--parent", &f]),
+            "task_not_found"
+        );
+        assert_eq!(
+            env.fail(cwd, &["list", "--project", "zzz", "--parent", &f]),
+            "config"
+        );
+    }
+    std::fs::write(sci.join("tasks/.config.toml"), "broken = [").unwrap();
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--project", "fam", "--under", &f])),
+        [leaf]
+    );
+}
+
+#[test]
+fn filtered_read_normalizes_ids() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let goal = id_of(env.json(&fam, &["add", "Goal"]));
+    let leaf = id_of(env.json(&fam, &["add", "Leaf", "--parent", &goal]));
+    alias_registry(&env, "old", "fam");
+    let alias = goal.replacen("fam-", "old-", 1);
+    let punctuated = format!("{alias}.,");
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--parent", &punctuated, "--under", &goal])),
+        [leaf]
+    );
+    let hex = local.split_once('-').unwrap().1;
+    assert_eq!(
+        env.fail(&sci, &["list", "--parent", hex, "--under", &goal]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["list", "--project", "fam", "--parent", hex]),
+        "task_not_found"
+    );
+    for scope in [vec![], vec!["--project", "fam"], vec!["--all-projects"]] {
+        let mut args = vec!["list", "--parent", hex];
+        args.extend(scope);
+        let out = error_of(&env, env.home.path(), &args);
+        assert_eq!(out["error"]["kind"], "invalid_id");
+        assert!(out["error"]["detail"].as_str().unwrap().contains("full id"));
+    }
+    for flag in ["--parent", "--under"] {
+        assert_eq!(
+            env.fail(&sci, &["list", flag, "zzz-000001"]),
+            "unresolvable_id"
+        );
+        assert_eq!(
+            env.fail(env.home.path(), &["list", flag, "fam-000001"]),
+            "task_not_found"
+        );
+        assert_eq!(env.fail(&sci, &["list", flag, "not-an-id"]), "invalid_id");
+    }
+}
+
+#[test]
+fn filtered_read_source_stays_literal() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let goal = id_of(env.json(&fam, &["add", "Goal"]));
+    alias_registry(&env, "old", "fam");
+    for source in ["sci-000001", "sci-000001.", "old-000001", "zzz-000001"] {
+        let one = id_of(env.json(
+            &fam,
+            &["add", source, "--parent", &goal, "--source", source],
+        ));
+        let two = id_of(env.json(&sci, &["add", source, "--source", source]));
+        assert_eq!(
+            list_ids(&env.json(
+                env.home.path(),
+                &["list", "--under", &goal, "--source", source]
+            )),
+            std::slice::from_ref(&one)
+        );
+        let mut got = list_ids(&env.json(
+            env.home.path(),
+            &["list", "--all-projects", "--source", source],
+        ));
+        got.sort();
+        let mut expected = vec![one, two];
+        expected.sort();
+        assert_eq!(got, expected);
+    }
+    for args in [
+        vec!["list"],
+        vec!["list", "--source", "ops-2fe949", "--status", "todo"],
+        vec!["search", "Leaf", "--source", "ops-2fe949"],
+        vec!["ready", "--source", "ops-2fe949"],
+        vec!["next"],
+    ] {
+        let out = error_of(&env, env.home.path(), &args);
+        assert_eq!(out["error"]["kind"], "no_project");
+        assert_eq!(out["error"].as_object().unwrap().len(), 2);
+        for hint in ["--all-projects", "--project <prefix>"] {
+            assert!(
+                out["error"]["detail"].as_str().unwrap().contains(hint),
+                "{out}"
+            );
+        }
+    }
+}
+
+#[test]
+fn filtered_read_lookup_order_and_errors() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let goal = id_of(env.json(&fam, &["add", "Goal"]));
+    std::fs::write(sci.join("tasks/.config.toml"), "broken = [").unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    for corrupt_registry in [false, true] {
+        if corrupt_registry {
+            std::fs::write(&registry, "broken = [").unwrap();
+        }
+        for args in [
+            vec!["list", "--parent", &goal],
+            vec!["list", "--under", &goal],
+            vec!["list", "--parent", &goal, "--under", &goal],
+        ] {
+            let out = error_of(&env, &sci, &args);
+            assert_eq!(out["error"]["kind"], "config");
+            assert!(
+                out["error"]["detail"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("tasks/.config.toml:"),
+                "{out}"
+            );
+        }
+    }
+    let out = error_of(&env, env.home.path(), &["list", "--source", "x"]);
+    assert_eq!(out["error"]["kind"], "no_project");
+    assert!(
+        out["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--all-projects")
+    );
+}
+
+#[test]
+fn filtered_read_keeps_retirement_warning() {
+    let mut env = TestEnv::new();
+    let fam = env.init("fam");
+    let goal = id_of(env.json(&fam, &["add", "Goal"]));
+    env.json(&fam, &["drop", &goal, "finished"]);
+    env.json(&fam, &["retire", "--reason", "finished"]);
+    let out = env.json(env.home.path(), &["list", "--under", &goal]);
+    assert!(list_ids(&out).is_empty());
+    assert!(
+        warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("fam is retired"))
     );
 }
 
