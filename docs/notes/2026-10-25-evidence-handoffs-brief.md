@@ -69,11 +69,17 @@ implementation-plan approval.
 
 ## Proposed decomposition
 
-Create one ordinary goal under tasks-0e432f, with these three previously unparented
-ideas. File one P2/s/mid/direct multipart investigation waking tasks-9a7ac8 and one
-P2/s/high/direct commit-isolation investigation waking tasks-056222. Reuse
-tasks-d09e87 (P3/m/high/planned, under tasks-7102c1), preserving its existing inputs
-and adding tasks-041759 to its wake list. Record every wait as a dependency.
+tasks-bbfc3c is an ordinary goal under tasks-0e432f, holding the three previously
+unparented ideas; it creates no new lane.
+
+- tasks-b81063: P2/s/mid/direct multipart investigation; tasks-9a7ac8 waits on it.
+- tasks-553c8e: P2/s/high/direct commit-isolation investigation; tasks-056222
+  waits on it. Concurrency and hook/index interactions justify the high rating.
+- tasks-d09e87: reused P3/m/high/planned cross-project reference design under
+  tasks-7102c1, preserving its original inputs, source and priority. Its wake list
+  now includes tasks-041759 alongside tasks-b841bc. tasks-041759 waits on it.
+
+All three waits are dependency edges, and every idea has one stamped scope audit.
 Each follow-up updates this brief and wakes its named ideas with `--no-reviewed`
 before integration. No duplicate design or research task is needed.
 

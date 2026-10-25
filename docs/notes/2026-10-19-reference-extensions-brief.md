@@ -30,6 +30,13 @@ Checked against the main checkout on 2026-10-19:
 - No existing brief, attached draft, or open follow-up covers these three extensions.
   Related open work was checked across the local goal tree before filing follow-ups.
 
+Additional evidence checked at 3813d1d on 2026-10-25: tasks-041759 reports a
+cross-project scope follow-up unable to declare the authoritative brief as required
+input; a dated attachment snapshot was the workaround. The current resolver still
+rejects absolute paths and reserves `@`. This adds an acceptance case to tasks-d09e87,
+not a separate design. See docs/notes/2026-10-25-evidence-handoffs-brief.md for the
+report's provenance limitation and adjacent attachment/commit questions.
+
 ## Constraints
 
 Keep handles stable and preserve strict input validation, attachment safety/caps,
@@ -77,7 +84,10 @@ Goal **tasks-7102c1** is an ordinary child of the existing Record authority and 
 lane (`tasks-0e432f`). It holds the three briefed ideas and their follow-ups:
 
 - **tasks-d09e87** — design cross-project reference resolution, P3/m/high/planned;
-  **tasks-b841bc** waits on it. Review the written spec and plan before implementation.
+  **tasks-b841bc** and **tasks-041759** wait on it. The latter stays under
+  tasks-bbfc3c; the design retains this brief and also reads the evidence-handoff
+  brief. Cover authoritative required inputs on reused foreign follow-ups without
+  duplicate snapshots. Review the written spec and plan before implementation.
 - **tasks-c8ad5b** — establish the smallest reliable way to retain reviewed evidence
   versions, P3/s/mid/direct; **tasks-d4cf54** waits on it. A separate pinning design is
   filed only if the investigation establishes the need and boundary.
