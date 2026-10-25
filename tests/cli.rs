@@ -31535,3 +31535,313 @@ fn pretty_add_still_prints_the_bare_id() {
         "{text:?}"
     );
 }
+
+fn run_ok(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    vars: &[(&str, &str)],
+    args: &[&str],
+) -> serde_json::Value {
+    add_with_env(env, dir, vars, args)
+}
+
+fn shown_task(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value {
+    env.json(dir, &["show", id])["task"].clone()
+}
+
+#[test]
+fn add_records_origin_on_field_and_creation_note() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = run_ok(
+        &env,
+        &dir,
+        &[],
+        &[
+            "add",
+            "Asked",
+            "--origin",
+            "user",
+            "--origin-session",
+            "claude-code:old",
+        ],
+    );
+    let task = shown_task(&env, &dir, out["id"].as_str().unwrap());
+    assert_eq!(task["origin"], "user");
+    assert_eq!(task["notes"][0]["origin"], "user");
+    assert_eq!(task["notes"][0]["origin_session"], "claude-code:old");
+
+    let out = run_ok(&env, &dir, &[], &["add", "Plain"]);
+    let task = shown_task(&env, &dir, out["id"].as_str().unwrap());
+    assert!(!task.to_string().contains("origin"), "{task}");
+}
+
+#[test]
+fn bad_origin_inputs_are_refused_before_writing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let err = env.usage(&dir, &["add", "T", "--origin", "maybe"]);
+    assert!(err.contains("--origin") && err.contains("maybe"), "{err}");
+    assert_eq!(
+        env.fail(&dir, &["add", "T", "--origin-session", "slack:x"]),
+        "validation"
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.join("tasks"))
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|x| x == "md")
+            })
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn recurrence_combines_origin_per_rule() {
+    let (env, target, reporter) = feedback_env();
+    let file = |extra: &[&str]| {
+        let mut args = vec![
+            "feedback",
+            "--project",
+            "tasks",
+            "combine me",
+            "--category",
+            "gap",
+        ];
+        args.extend_from_slice(extra);
+        run_ok(&env, &reporter, &[], &args)
+    };
+    let origin_of = |id: &str| shown_task(&env, &target, id).get("origin").cloned();
+    let id = file(&["--origin", "user"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(origin_of(&id), Some("user".into()));
+    let out = file(&["--recur", &id]);
+    assert_eq!(
+        origin_of(&id),
+        Some("user".into()),
+        "absent occurrence keeps the field"
+    );
+    assert!(
+        !out["warnings"].to_string().contains("origin unchanged"),
+        "{out}"
+    );
+    file(&["--recur", &id, "--origin", "agent"]);
+    assert_eq!(origin_of(&id), Some("mixed".into()));
+    file(&["--recur", &id, "--origin", "user"]);
+    assert_eq!(origin_of(&id), Some("mixed".into()));
+
+    let same = file(&["--new", "--origin", "agent"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    file(&["--recur", &same, "--origin", "agent"]);
+    assert_eq!(origin_of(&same), Some("agent".into()));
+
+    let bare = file(&["--new"])["id"].as_str().unwrap().to_string();
+    let out = file(&[
+        "--recur",
+        &bare,
+        "--origin",
+        "user",
+        "--origin-session",
+        "codex:old",
+    ]);
+    assert_eq!(origin_of(&bare), None);
+    let expected = format!(
+        "origin unchanged: {bare} has no recorded origin and this occurrence says user; set it with `tasks edit {bare} --origin` once its occurrences are read"
+    );
+    let warnings: Vec<&str> = out["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .filter(|w| w.starts_with("origin unchanged"))
+        .collect();
+    assert_eq!(warnings, [expected.as_str()], "{out}");
+    let task = shown_task(&env, &target, &bare);
+    let note = task["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["text"].as_str().unwrap().starts_with("feedback from"))
+        .unwrap();
+    assert_eq!(note["origin"], "user");
+    assert_eq!(note["origin_session"], "codex:old");
+}
+
+#[test]
+fn correction_supersedes_a_mistaken_label() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = run_ok(&env, &dir, &[], &["add", "Mislabelled", "--origin", "user"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["edit", &id, "--origin", "agent"]);
+    let task = shown_task(&env, &dir, &id);
+    assert_eq!(task["origin"], "agent");
+    assert_eq!(task["notes"][0]["origin"], "user");
+    env.json(&dir, &["edit", &id, "--no-origin"]);
+    let task = shown_task(&env, &dir, &id);
+    assert!(task.get("origin").is_none(), "{task}");
+    assert_eq!(task["notes"][0]["origin"], "user");
+    assert_eq!(task["notes"].as_array().unwrap().len(), 1);
+    let err = env.usage(&dir, &["edit", &id, "--origin", "user", "--no-origin"]);
+    assert!(err.contains("origin"), "{err}");
+}
+
+#[test]
+fn origin_filter_selects_and_none_means_unknown() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for (title, origin) in [("U", Some("user")), ("M", Some("mixed")), ("N", None)] {
+        let mut args = vec!["add", title];
+        if let Some(origin) = origin {
+            args.extend(["--origin", origin]);
+        }
+        run_ok(&env, &dir, &[], &args);
+    }
+    let count = |cmd: &str, extra: &[&str]| {
+        let mut args = vec![cmd];
+        args.extend_from_slice(extra);
+        let value = env.json(&dir, &args);
+        value["tasks"].as_array().expect("tasks array").len()
+    };
+    assert_eq!(count("list", &["--origin", "user"]), 1);
+    assert_eq!(count("list", &["--origin", "user", "--origin", "mixed"]), 2);
+    assert_eq!(count("list", &["--origin", "none"]), 1);
+    assert_eq!(count("list", &["--origin", "agent"]), 0);
+    assert_eq!(count("ready", &["--origin", "mixed"]), 1);
+    assert_eq!(count("search", &["U", "--origin", "user"]), 1);
+    assert_eq!(count("search", &["U", "--origin", "mixed"]), 0);
+}
+
+#[test]
+fn origin_filter_spans_projects() {
+    let mut env = TestEnv::new();
+    let a = env.init("aaa");
+    let b = env.init("bbb");
+    run_ok(&env, &a, &[], &["add", "A one", "--origin", "user"]);
+    run_ok(&env, &b, &[], &["add", "B one", "--origin", "user"]);
+    run_ok(&env, &b, &[], &["add", "B two", "--origin", "agent"]);
+    let listed = env.json(&a, &["list", "--all-projects", "--origin", "user"]);
+    assert_eq!(listed["tasks"].as_array().unwrap().len(), 2, "{listed}");
+}
+
+#[test]
+fn pretty_show_prints_origin_after_agent() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = run_ok(
+        &env,
+        &dir,
+        &[],
+        &[
+            "add",
+            "Shown",
+            "--origin",
+            "mixed",
+            "--agent",
+            "codex/gpt-6",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let text = env.pretty(&dir, &["show", &id]);
+    let lines: Vec<&str> = text.lines().collect();
+    let agent = lines
+        .iter()
+        .position(|l| l.starts_with("agent:"))
+        .expect(&text);
+    assert!(lines[agent + 1].starts_with("origin:"), "{text}");
+    assert!(lines[agent + 1].ends_with("mixed"), "{text}");
+}
+
+#[test]
+fn origin_survives_unknown_identity() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = run_ok(
+        &env,
+        &dir,
+        &[
+            ("CLAUDE_CODE_SESSION_ID", "secret-a"),
+            ("CODEX_THREAD_ID", "secret-b"),
+        ],
+        &[
+            "add",
+            "Conflicted",
+            "--origin",
+            "agent",
+            "--origin-session",
+            "codex:old",
+        ],
+    );
+    assert!(
+        out["warnings"].to_string().contains("CODEX_THREAD_ID"),
+        "{out}"
+    );
+    assert!(!out["warnings"].to_string().contains("secret"), "{out}");
+    let task = shown_task(&env, &dir, out["id"].as_str().unwrap());
+    assert_eq!(task["origin"], "agent");
+    assert_eq!(task["notes"][0]["origin"], "agent");
+    assert_eq!(task["notes"][0]["origin_session"], "codex:old");
+    assert!(task["notes"][0].get("harness_session").is_none());
+}
+
+#[test]
+fn editor_preserves_occurrence_keys() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = run_ok(
+        &env,
+        &dir,
+        &[("CLAUDE_CODE_SESSION_ID", "A")],
+        &[
+            "add",
+            "Edited",
+            "--origin",
+            "user",
+            "--origin-session",
+            "codex:old",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let before = shown_task(&env, &dir, &id)["notes"].clone();
+    let editor = editor_script(&dir, "sed -i 's/^priority: 2/priority: 1/' \"$1\"");
+    env.cmd(&dir)
+        .env("EDITOR", &editor)
+        .args(["edit", &id, "--editor"])
+        .assert()
+        .success();
+    let task = shown_task(&env, &dir, &id);
+    assert_eq!(task["priority"], 1);
+    assert_eq!(task["notes"], before);
+
+    let tamper = editor_script(
+        &dir,
+        "sed -i 's/\"origin\":\"user\"/\"origin\":\"agent\"/; s/codex:old/codex:new/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &tamper)
+        .args(["edit", &id, "--editor"])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(shown_task(&env, &dir, &id)["notes"], before);
+}

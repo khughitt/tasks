@@ -521,8 +521,6 @@ impl Origin {
     }
 
     /// Equal origins stay; anything else is mixed.
-    // First caller lands with the creation-note task; drop the allow then.
-    #[allow(dead_code)]
     pub fn combine(self, other: Origin) -> Origin {
         if self == other { self } else { Origin::Mixed }
     }

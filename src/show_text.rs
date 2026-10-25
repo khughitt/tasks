@@ -308,14 +308,16 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         }
         rows.push(("deferred", value));
     }
-    for (key, value) in [
-        ("source", &t.source),
-        ("agent", &t.agent),
-        ("model", &t.model),
-    ] {
+    for (key, value) in [("source", &t.source), ("agent", &t.agent)] {
         if let Some(value) = value {
             rows.push((key, vec![present::owner(value)]));
         }
+    }
+    if let Some(origin) = t.origin {
+        rows.push(("origin", vec![present::owner(origin.as_str())]));
+    }
+    if let Some(model) = &t.model {
+        rows.push(("model", vec![present::owner(model)]));
     }
     if let Some(spec) = &t.spec {
         rows.push((
@@ -605,6 +607,26 @@ fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
                 Span::plain("  "),
                 Span {
                     text: provenance.harness_session.clone(),
+                    style: Some(Style::Chrome),
+                },
+            ]);
+        }
+        for label in [
+            note.occurrence
+                .origin
+                .map(|origin| format!("origin {}", origin.as_str())),
+            note.occurrence
+                .origin_session
+                .as_ref()
+                .map(|session| format!("origin session {session}")),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            header.extend([
+                Span::plain("  "),
+                Span {
+                    text: label,
                     style: Some(Style::Chrome),
                 },
             ]);

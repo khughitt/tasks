@@ -72,7 +72,16 @@ fn duplicates_of(project: &Project, source: &str, title: &str) -> Result<Vec<Tas
     Ok(found)
 }
 
-pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Result<Output> {
+pub fn run(
+    mut ctx: Ctx,
+    title: String,
+    status: String,
+    origin_session: Option<String>,
+    fields: FieldArgs,
+) -> Result<Output> {
+    // Validated before anything is read or written.
+    let attribution =
+        super::Attribution::parse(fields.origin.as_deref(), origin_session.as_deref())?;
     let status = Status::parse(&status)?;
     if !matches!(status, Status::Idea | Status::Todo) {
         return Err(Error::Validation(
@@ -113,7 +122,15 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
     apply_fields(&mut ctx, &mut task, &fields, None)?;
     let stamp = super::occurrence_stamp(&mut ctx.warnings);
     let at = task.created.clone();
-    super::append_occurrence_note(&mut task, &at, "add", "created", &stamp, None, None)?;
+    super::append_occurrence_note(
+        &mut task,
+        &at,
+        "add",
+        "created",
+        &stamp,
+        attribution.origin,
+        attribution.session,
+    )?;
     create(&ctx.project, &ctx.registry, &mut task)?;
     super::finish(&mut ctx);
     Ok(Output::Add(AddOut {

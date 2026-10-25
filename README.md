@@ -487,6 +487,63 @@ Binaries older than the provenance writer reject a stamped file outright, so eve
 that reads synced task files needs a current `tasks`. The contract and its rollout are
 recorded in `docs/plans/2026-09-17-lifecycle-provenance.md`.
 
+### Origin: whose ask a task is
+
+`origin` records whose ask the record holds. It classifies the record's asks, not the
+filing: who ran the command, or whether the agent filed on its own, never changes it.
+A report that relays only the user's words is `user` even when the agent filed it
+unprompted; it is `mixed` only when the agent also added an ask of its own.
+
+| Value   | Meaning |
+|---------|---------|
+| `user`  | Every ask in the record comes from the user's own prompt: they described it, asked for it to be filed, or the report relays their words. |
+| `agent` | No ask in the record comes from a user prompt: an agent's observation, follow-up, feedback report, decomposition piece, plan step, dependency or scope filing. |
+| `mixed` | The record holds both: at least one ask from the user's prompt and at least one distinct ask the agent added. |
+| absent  | Unknown. |
+
+The filer supplies it from evidence in its own session, with `--origin <user|agent|mixed>`
+on `add` and `feedback`; when unsure it omits the flag. The tool never derives it from
+`agent`, `parent`, `source`, tags, session presence or commit time. `--origin-session
+<key>` (`claude-code:<id>` or `codex:<id>`) names the session where the ask was made when
+that is not the filing session; it is recorded on that occurrence's note only, says where
+to look, and is not a claim that the user asked. A bad key is refused before anything is
+written.
+
+It lives in two places. Each occurrence note (the creation note and each `feedback from`
+note) records the origin and origin session supplied at that occurrence; these never
+change. The frontmatter field `origin` is the record's current judgment: set at creation,
+combined on recurrence, corrected with `edit`.
+
+A feedback recurrence labelled X updates the field: unchanged when the field equals X or
+X is absent, or when the field is `mixed`; `mixed` when the field and X are different
+known values. When the field is absent and X is known, the field stays absent and the
+command warns that the record's origin is unknown and the occurrence says X; the note
+keeps X.
+
+`tasks edit <id> --origin <value>` corrects the field and `--no-origin` withdraws it;
+notes are never touched. A corrector adds a stamped note citing evidence
+(`tasks note <id> "<evidence>" --stamp`).
+
+**Reading rule.** Every consumer reads origin one way:
+
+1. When the field is set, it is the record's origin. It supersedes every occurrence
+   label, including the creation label.
+2. When the field is absent, the origin is unknown, but the occurrence labels are
+   partial evidence: a label `user` or `mixed` means the record carries some of the
+   user's words; otherwise the origin stays unknown.
+
+Example: a task created with `--origin user` is corrected with `edit --origin agent`.
+The field says `agent` while the creation note still says `user`; rule 1 gives `agent`,
+and no user words. After `edit --no-origin` the field is absent and rule 2 sees the
+`user` label again.
+
+`list`, `search` and `ready` take `--origin <user|agent|mixed|none>`, repeatable and
+widening; `none` selects tasks whose field is absent. Task JSON gains `origin` (omitted
+when unset) and notes gain `origin` and `origin_session`, all additive. Existing records
+are not backfilled. Rollout: binaries older than this reject records carrying the new
+keys, so install the new `tasks` on every host that reads synced records before records
+filed by it sync.
+
 ### Relay identity (opt-in)
 
 A host that runs the relay agent registry can key claims by the harness

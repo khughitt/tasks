@@ -164,6 +164,15 @@ pub struct FilterArgs {
         value_parser = ValueSet
     )]
     pub processes: Vec<String>,
+    /// Only tasks with this origin (repeatable); `none` selects tasks of unknown origin.
+    #[arg(
+        long = "origin",
+        value_name = "ORIGIN",
+        add = ArgValueCandidates::new(crate::complete::filter_origins),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub origins: Vec<String>,
     /// Filter by tag (repeatable); a task must carry every one.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
@@ -242,6 +251,15 @@ pub struct FieldArgs {
         value_parser = ValueSet
     )]
     pub process: Option<String>,
+    /// Whose ask the task is: user, agent or mixed. Absent is unknown. On `add` it also
+    /// labels the creation note; on `edit` it corrects the field and leaves notes alone.
+    #[arg(
+        long,
+        add = ArgValueCandidates::new(crate::complete::origins),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub origin: Option<String>,
     /// Mark as safe to run beside other tasks marked parallel. On `edit` this sets the
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
@@ -295,9 +313,9 @@ pub struct EditArgs {
         "title", "status", "force", "reason", "rm_refs", "no_refs", "no_parent",
         "no_parallel", "no_lane", "reviewed", "no_reviewed", "awaiting_user",
         "no_awaiting_user", "no_every", "no_defer", "no_source", "no_agent",
-        "no_spec", "no_plan", "no_step", "no_complexity", "no_process", "model",
+        "no_spec", "no_plan", "no_step", "no_complexity", "no_process", "no_origin", "model",
         "no_model", "rm_tags", "no_tags", "rm_needs", "no_needs", "no_depends",
-        "refs", "body", "priority", "size", "complexity", "process", "parallel",
+        "refs", "body", "priority", "size", "complexity", "process", "origin", "parallel",
         "lane", "every", "defer", "tags", "needs", "depends", "spec", "plan",
         "step", "parent", "source", "agent"
     ])]
@@ -375,6 +393,9 @@ pub struct EditArgs {
     /// Clear the process decision (back to unassessed).
     #[arg(long, conflicts_with = "process")]
     pub no_process: bool,
+    /// Clear the origin (back to unknown). Notes keep their labels.
+    #[arg(long, conflicts_with = "origin")]
+    pub no_origin: bool,
     /// Replace the model stamp recorded at completion; see `--no-model`.
     #[arg(long)]
     pub model: Option<String>,
@@ -524,6 +545,10 @@ pub enum Command {
         /// local project. Every field is validated against that project.
         #[arg(long, add = ArgValueCandidates::new(crate::complete::prefixes))]
         project: Option<String>,
+        /// The session where the ask was made, when that is not this one
+        /// (`claude-code:<id>` or `codex:<id>`); recorded on the creation note.
+        #[arg(long, value_name = "KEY")]
+        origin_session: Option<String>,
         #[command(flatten)]
         fields: FieldArgs,
     },
@@ -915,6 +940,19 @@ pub enum Command {
         /// Create a new entry even if a similar one exists.
         #[arg(long)]
         new: bool,
+        /// Whose ask the report is: user, agent or mixed. Labels this occurrence's note
+        /// and updates the record's origin.
+        #[arg(
+            long,
+            add = ArgValueCandidates::new(crate::complete::origins),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        origin: Option<String>,
+        /// The session where the ask was made, when that is not this one; recorded on
+        /// this occurrence's note.
+        #[arg(long, value_name = "KEY")]
+        origin_session: Option<String>,
     },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {

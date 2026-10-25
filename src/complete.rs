@@ -113,6 +113,24 @@ pub fn processes() -> Vec<CompletionCandidate> {
     plain(Process::ALL.iter().map(|process| process.as_str()))
 }
 
+pub fn origins() -> Vec<CompletionCandidate> {
+    plain(
+        crate::model::Origin::ALL
+            .iter()
+            .map(|origin| origin.as_str()),
+    )
+}
+
+/// `--origin` as a filter: the origins, then `none` for unknown.
+pub fn filter_origins() -> Vec<CompletionCandidate> {
+    plain(
+        crate::model::Origin::ALL
+            .iter()
+            .map(|origin| origin.as_str())
+            .chain([crate::filter::NONE]),
+    )
+}
+
 /// `--size` as a filter: the sizes, then `none` for unsized.
 pub fn filter_sizes() -> Vec<CompletionCandidate> {
     plain(

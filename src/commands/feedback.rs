@@ -1,6 +1,7 @@
-use super::{Ctx, append_note};
+use super::{Attribution, Ctx, append_note};
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_line, validate_task};
+use crate::model::Origin as Asker;
 use crate::model::{Status, Task, TaskId};
 use crate::output::{FeedbackOut, Output};
 use crate::registry::Registry;
@@ -155,6 +156,7 @@ pub fn run(
     body: String,
     recur: Option<String>,
     new: bool,
+    attribution: Attribution<'_>,
 ) -> Result<Output> {
     let from = format!("from:{reporter}");
     ctx.project = locate_target(&ctx.registry, &project)?;
@@ -211,7 +213,15 @@ pub fn run(
     let (task, action, at) = match existing {
         Some((id, automatic)) => {
             let (task, at) = recur_into(
-                &mut ctx, &id, automatic, &summary, &body, &category, &from, &reporter,
+                &mut ctx,
+                &id,
+                automatic,
+                &summary,
+                &body,
+                &category,
+                &from,
+                &reporter,
+                attribution,
             )?;
             // Record-home spec §4: a holder's recurrence follows the owner's registered
             // root, where it landed. `recur_into` saved its own pruned store first.
@@ -228,6 +238,7 @@ pub fn run(
                 &category,
                 &from,
                 &stamp,
+                attribution,
             )?;
             let at = task.created.clone();
             (task, "created", at)
@@ -257,6 +268,7 @@ pub fn run(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create(
     target: &Project,
     registry: &Registry,
@@ -265,13 +277,23 @@ fn create(
     category: &str,
     from: &str,
     stamp: &super::Stamp,
+    attribution: Attribution<'_>,
 ) -> Result<Task> {
     let agent = super::creation_agent(None)?;
     let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
+    task.origin = attribution.origin;
     let at = task.created.clone();
-    super::append_occurrence_note(&mut task, &at, NOTE_AUTHOR, "created", stamp, None, None)?;
+    super::append_occurrence_note(
+        &mut task,
+        &at,
+        NOTE_AUTHOR,
+        "created",
+        stamp,
+        attribution.origin,
+        attribution.session,
+    )?;
     super::create(target, registry, &mut task)?;
     Ok(task)
 }
@@ -286,6 +308,7 @@ fn recur_into(
     category: &str,
     from: &str,
     prefix: &str,
+    attribution: Attribution<'_>,
 ) -> Result<(Task, String)> {
     if !body.is_empty() && body.contains(['\n', '\r']) {
         return Err(Error::Validation(
@@ -322,6 +345,8 @@ fn recur_into(
     let stamp = super::occurrence_stamp(&mut ctx.warnings);
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     let mut occurrence_at = String::new();
+    // Pushed after the update, once, so a `guarded_update` retry cannot repeat it.
+    let mut unchanged_for: Option<Asker> = None;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the owner's public file. The reporting project is already in the note text.
     let task = guarded_update(&ctx.project, &ctx.registry, id, eligible, |task| {
@@ -332,9 +357,12 @@ fn recur_into(
             NOTE_AUTHOR,
             &format!("feedback from {prefix}: {summary}"),
             &stamp,
-            None,
-            None,
+            attribution.origin,
+            attribution.session,
         )?;
+        let (origin, warn) = recur_origin(task.origin, attribution.origin);
+        task.origin = origin;
+        unchanged_for = attribution.origin.filter(|_| warn);
         occurrence_at = at;
         if !body.is_empty() {
             append_note(task, NOTE_AUTHOR, &format!("detail from {prefix}: {body}"))?;
@@ -347,6 +375,12 @@ fn recur_into(
         }
         Ok(())
     })?;
+    if let Some(said) = unchanged_for {
+        ctx.warnings.push(format!(
+            "origin unchanged: {id} has no recorded origin and this occurrence says {}; set it with `tasks edit {id} --origin` once its occurrences are read",
+            said.as_str()
+        ));
+    }
     claims.prune_dead();
     if let Err(error) = claims.save() {
         ctx.warnings.push(format!(
@@ -355,6 +389,17 @@ fn recur_into(
         ));
     }
     Ok((task, occurrence_at))
+}
+
+/// The record's origin after a recurrence labelled `occurrence`, and whether to warn that
+/// an unknown origin was left unknown (design §4.3). An absent label changes nothing, a
+/// known field combines, and an absent field is never set from a label.
+pub fn recur_origin(field: Option<Asker>, occurrence: Option<Asker>) -> (Option<Asker>, bool) {
+    match (field, occurrence) {
+        (field, None) => (field, false),
+        (None, Some(_)) => (None, true),
+        (Some(field), Some(said)) => (Some(field.combine(said)), false),
+    }
 }
 
 /// Read, check `eligible`, mutate, and replace `id` in `target`, retrying from the read
@@ -394,6 +439,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recur_origin_follows_the_table() {
+        use Asker::{Agent, Mixed, User};
+        assert_eq!(recur_origin(Some(User), None), (Some(User), false));
+        assert_eq!(recur_origin(None, None), (None, false));
+        assert_eq!(recur_origin(None, Some(User)), (None, true));
+        assert_eq!(recur_origin(Some(User), Some(User)), (Some(User), false));
+        assert_eq!(recur_origin(Some(User), Some(Agent)), (Some(Mixed), false));
+        assert_eq!(recur_origin(Some(Mixed), Some(User)), (Some(Mixed), false));
+    }
+
+    #[test]
     fn guarded_update_retries_after_a_concurrent_write_and_gives_up_eventually() {
         let dir = tempfile::tempdir().unwrap();
         let project = Project::init(dir.path(), "tst", None).unwrap();
@@ -406,6 +462,7 @@ mod tests {
             "gap",
             "from:tst",
             &super::super::Stamp::default(),
+            Attribution::default(),
         )
         .unwrap();
         let id = seed.id.clone();

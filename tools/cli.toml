@@ -370,6 +370,8 @@ options = [
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
   { names = ["--process"], value = "enum", values = ["direct", "planned"] },
+  { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed"] },
+  { names = ["--origin-session"], value = "string" },
   { names = ["--parallel"], value = "none" },
   { names = ["--lane"], value = "none" },
   { names = ["--every"], value = "age", role = "set" },
@@ -408,6 +410,17 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["docs"]
+summary = "Working documents under each project's records, with the tasks that link them"
+options = [
+  { names = ["--kind"], value = "enum", values = ["spec", "plan", "brief", "handoff", "note"], repeatable = true },
+  { names = ["--search"], value = "string" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
+]
+
+[[cli.tasks.commands]]
 path = ["list"]
 verb = "list"
 summary = "List tasks (open by default)"
@@ -417,6 +430,7 @@ options = [
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
+  { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
   { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
@@ -448,6 +462,7 @@ options = [
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
+  { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
   { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
@@ -477,6 +492,7 @@ options = [
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
+  { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
   { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
@@ -543,6 +559,8 @@ options = [
   { names = ["--no-step"], value = "none" },
   { names = ["--no-complexity"], value = "none" },
   { names = ["--no-process"], value = "none" },
+  { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed"] },
+  { names = ["--no-origin"], value = "none" },
   { names = ["--model"], value = "string" },
   { names = ["--no-model"], value = "none" },
   { names = ["--rm-tag"], value = "string", repeatable = true },
@@ -725,6 +743,8 @@ options = [
   { names = ["--body", "-b"], value = "string" },
   { names = ["--recur"], value = "ref" },
   { names = ["--new"], value = "none" },
+  { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed"] },
+  { names = ["--origin-session"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -949,8 +969,8 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks or tests"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences or doc_findings"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
@@ -2715,6 +2735,36 @@ summary = "Project relay's registry into presentation state"
 [[cli.familiar.commands]]
 path = ["reap"]
 summary = "Prune relay's registry and reconcile presentation"
+
+[[cli.familiar.commands]]
+path = ["attention"]
+summary = "Desktop attention: status, dismiss, popup"
+
+[[cli.familiar.commands]]
+path = ["attention", "status"]
+protocol = "attention view: stdout is one schema-1 attention view JSON document in any mode"
+summary = "Print the desktop attention view"
+
+[[cli.familiar.commands]]
+path = ["attention", "dismiss"]
+protocol = "attention dismissal: stdout is one JSON result naming dismissed and missing IDs in any mode"
+summary = "Dismiss attention episodes and diagnostics by ID"
+args = [{ name = "id", value = "string", required = true, variadic = true }]
+
+[[cli.familiar.commands]]
+path = ["attention", "popup"]
+protocol = "popup control: reads one JSON request on stdin and writes one JSON reply on stdout"
+summary = "Serve one familiar popup control request"
+
+[[cli.familiar.commands]]
+path = ["niri"]
+summary = "Niri desktop actions"
+
+[[cli.familiar.commands]]
+path = ["niri", "focus"]
+output = "none"
+summary = "Focus a Niri workspace by its stable ID"
+args = [{ name = "id", value = "string", required = true }]
 
 # ---- forge
 

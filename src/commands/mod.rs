@@ -1056,6 +1056,9 @@ pub fn apply_fields(
     if let Some(process) = &fields.process {
         task.process = Some(Process::parse(process)?);
     }
+    if let Some(origin) = &fields.origin {
+        task.origin = Some(crate::model::Origin::parse(origin)?);
+    }
     if let Some(every) = &fields.every {
         task.every = Some(crate::periodic::Interval::parse(every)?);
     }
@@ -1434,6 +1437,24 @@ pub fn append_stamped_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str)
         Err(diagnostic) => ctx.warnings.push(diagnostic),
     }
     Ok(())
+}
+
+/// The origin and origin session a filer supplied, validated before any write.
+#[derive(Clone, Copy, Default)]
+pub struct Attribution<'a> {
+    pub origin: Option<crate::model::Origin>,
+    pub session: Option<&'a str>,
+}
+
+impl<'a> Attribution<'a> {
+    pub fn parse(origin: Option<&str>, session: Option<&'a str>) -> Result<Self> {
+        let origin = origin.map(crate::model::Origin::parse).transpose()?;
+        if let Some(key) = session {
+            crate::provenance::validate_session_key(key)
+                .map_err(|reason| Error::Validation(format!("--origin-session: {reason}")))?;
+        }
+        Ok(Attribution { origin, session })
+    }
 }
 
 /// The harness identity of one command run, resolved once from the process environment.
@@ -2066,6 +2087,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             title,
             status,
             project,
+            origin_session,
             fields,
         } => {
             // An explicit target replaces the lookup, and `add` validates
@@ -2082,7 +2104,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 None => open_ctx(dir)?,
             };
             lock_and_revalidate(&mut ctx, &routing)?;
-            add::run(ctx, title, status, fields)
+            add::run(ctx, title, status, origin_session, fields)
         }
         Command::Show { id, no_fetch } => show::run(open_id_ctx(dir, &id)?, id, fetch(no_fetch)),
         Command::Doc {
@@ -2304,11 +2326,24 @@ fn dispatch(cli: Cli) -> Result<Output> {
             body,
             recur,
             new,
+            origin,
+            origin_session,
         } => {
             let body = body.unwrap_or_default();
             feedback::validate(&summary, &category, &body)?;
+            let attribution = Attribution::parse(origin.as_deref(), origin_session.as_deref())?;
             let (ctx, reporter) = feedback::open(dir, &project)?;
-            feedback::run(ctx, reporter, project, summary, category, body, recur, new)
+            feedback::run(
+                ctx,
+                reporter,
+                project,
+                summary,
+                category,
+                body,
+                recur,
+                new,
+                attribution,
+            )
         }
     }
 }
