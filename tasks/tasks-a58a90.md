@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a58a90
 created: 2026-10-20T14:40:20Z
-updated: 2026-10-25T12:16:29Z
+updated: 2026-10-25T12:25:52Z
 started: 2026-10-25T11:15:47Z
 depends: []
 parent: tasks-9b1c2b
@@ -59,4 +59,6 @@ Ideas it wakes: On completion, run `tasks note tasks-516ab4 --no-reviewed "<find
 - 2026-10-25T12:16:24Z (design/tasks-a58a90): plan written at 65061f8 (docs/plans/2026-10-25-creation-occurrence-provenance.md); implementation goal tasks-053e89 under tasks-9b1c2b with steps tasks-2170ff (ops rows) tasks-48cd3b tasks-3f2fe2 tasks-58d20b tasks-b11cfd tasks-4d39db tasks-f42413, ordered by deps; a58a90 closes once the plan is reviewed
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T12:16:29Z (design/tasks-a58a90): parked (waiting on user, review): user reviews the plan at design/tasks-a58a90 65061f8:docs/plans/2026-10-25-creation-occurrence-provenance.md and picks subagent-driven or native execution; then the agent closes tasks-a58a90 with its wake notes, merges design/tasks-a58a90 into main, and starts tasks-053e89 in a fresh worktree
+  provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T12:25:52Z (design/tasks-a58a90): resumed
   provenance: {"harness_session":"claude-code:900c1161-c4b1-4ba6-8bca-efadba4b94c9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
