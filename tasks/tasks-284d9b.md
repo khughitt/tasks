@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:34:13Z
+updated: 2026-10-25T10:34:15Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
@@ -48,3 +48,5 @@ Related: tasks-e147b9 investigates full-id routing for attach from scratch direc
 - 2026-10-25T10:34:08Z (design/tasks-284d9b): review: spec round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T10:34:10Z (design/tasks-284d9b): attached: filtered-read-builder-check.md (467 bytes): Full read-only builder check of spec ce08cdc; codex/gpt-6.1-sol accepted with no findings
 - 2026-10-25T10:34:13Z (design/tasks-284d9b): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-284d9b","state":"kept","verification":"verified","purpose":"Frozen spec ce08cdc awaiting user review; branch design/tasks-284d9b includes the full builder report attachment and review ledger under .superpowers/sdd/tasks-284d9b","next_owner":"task:tasks-284d9b","cleanup_trigger":"After user spec approval, prepare and review the implementation plan; after implementation integration, inspect ignored files and run removal checks"}
+- 2026-10-25T10:34:15Z (design/tasks-284d9b): parked (waiting on user, review): User reviews spec ce08cdc6be0068351729c6e0b94ab63dd84a0394 at docs/specs/2026-10-25-filtered-read-routing-design.md in .worktrees/tasks-284d9b; after approval, agent resumes here and writes the implementation plan. Builder check accepted with no findings; --source remains literal and requires explicit scope outside every project.
+  provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
