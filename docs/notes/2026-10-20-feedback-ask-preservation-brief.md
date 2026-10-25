@@ -8,6 +8,11 @@ asks; tasks-516ab4 concerns reporting context and provenance; tasks-fb861e conce
 finding existing work before filing. These are related safeguards, not substitutes
 for one another. This effort belongs inside the work-discovery lane tasks-46d207.
 
+Added on 2026-10-25: tasks-2e7d03 extends the provenance question to ordinary
+`tasks add` records: which session filed the task, and whether its outcome was
+requested by the user or originated with an agent. Reuse tasks-a58a90 for this
+shared contract; a feedback-only marker would leave this ask unanswered.
+
 ## Current behaviour and evidence
 
 Checked against checkout `88c242e` on 2026-10-20:
@@ -51,7 +56,23 @@ Checked against checkout `88c242e` on 2026-10-20:
   remaining historical declined/pending/moot judgments. Their records were read;
   their code, original transcripts and private evidence packets were not re-audited.
 
+Additional code evidence at `79b8253` (2026-10-25):
+`src/commands/add.rs::blank` initializes empty notes and is shared by `add` and
+feedback creation. `add::run` and `commands::create` add no provenance; sourced
+duplicate adds return `reused` without writing. The existing `agent` stamp names
+the filer, not the requester. `append_stamped_note` and `src/provenance.rs` already
+provide native session resolution, with absence or warnings for unknown/conflicting
+identity. The README's lifecycle contract agrees. These are code-reading findings;
+the reported one-minute transcript workaround was not independently timed.
+
 ## Constraints
+
+Keep creator attribution distinct from requester/origin evidence. A native session,
+an `agent` stamp, a parent task, or a commit timestamp cannot establish a human ask.
+Preserve `source` and existing records; no speculative historical backfill. Keep
+idempotent `add` reuse from attributing creation to a later caller. The implemented
+creation-provenance spec describes `agent`, not session identity; its old JSON-null
+wording is superseded by the current omission contract.
 
 Keep tool-level summaries useful when transcripts disappear; retain source pointers
 without copying unrelated private context. Separate reporting session, origin session,
@@ -81,6 +102,11 @@ this project's `[needs]`; a design needing one must propose its vocabulary.
 
 ## Alternatives
 
+For ordinary creation, the current lean is to reuse native provenance primitives
+and the feedback origin vocabulary in one design. Compare a creation note with
+dedicated creation metadata before choosing storage. Do not infer requester from
+the native session or introduce an independent origin vocabulary for `add`.
+
 1. **Verified workflow plus existing provenance primitives — current lean.** Map every
    ask to a quoted commitment and distinguish delivered, retained, declined and still
    undecided. Write and verify a necessary carry before an approved drop; on failure
@@ -100,6 +126,13 @@ this project's `[needs]`; a design needing one must propose its vocabulary.
    has already happened, and how a filer safely records an ask on ordinary work.
 
 ## Unanswered questions
+
+- What shared creation representation and optional origin vocabulary cover both
+  ordinary adds and feedback? tasks-a58a90 must distinguish explicit user requests,
+  agent-originated follow-ups/decomposition/scope filings, mixed or unknown evidence,
+  and an older originating request. The design must specify who supplies the marker,
+  correction behavior, and a check showing a later agent can find the ask without
+  relying on commit time. A user review settles this contract; this brief does not.
 
 - Which carry mechanism gives a checkable no-loss guarantee with the least machinery,
   and how is a user-relayed ask held for a ruling? tasks-441019 must settle this,
@@ -128,8 +161,11 @@ this project's `[needs]`; a design needing one must propose its vocabulary.
 - tasks-441019 — P2/m/high/planned: design per-ask drop verification and carry.
   Wakes tasks-fa3525.
 - tasks-a58a90 — P2/m/high/planned: design feedback occurrence provenance. Wakes
-  tasks-516ab4. Split from tasks-441019 on 2026-10-20 so the drop-step fix does not
-  wait on cross-host retrieval.
+  tasks-516ab4 and tasks-2e7d03. Split from tasks-441019 on 2026-10-20 so the drop-step
+  fix does not wait on cross-host retrieval. Extended on 2026-10-25 to ordinary task
+  creation and its requester/origin distinction, retaining every feedback requirement.
+- tasks-2e7d03 — briefed, waiting on tasks-a58a90; associated here with the existing
+  effort without changing the feedback goal's original three-member acceptance.
 - tasks-a9744c — P2/s/mid/direct: evaluate candidate search on at most 12 historical
   cases, with known distinct-ask and no-match controls. Wakes tasks-fb861e.
 
