@@ -1,6 +1,6 @@
 # Creation and occurrence provenance: who filed a task, and whose ask it is
 
-Status: draft for review, revision 2 (2026-10-25; revises 506253d after review round 2)
+Status: approved for planning (2026-10-25, user, conditional on the round-3 P2 fix in this revision 3; reviewed rounds 2-3 by codex/gpt-6.1-sol)
 Task: tasks-a58a90 (wakes tasks-516ab4 and tasks-2e7d03)
 Brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
 
@@ -272,7 +272,9 @@ only:
   (actions `created` and `recurred`) gains `at`: the timestamp of the occurrence note
   that call wrote. A `reused` add has no `at`. The tool result in the filing
   transcript then names the occurrence it produced, not only the record (§4.7).
-  Additive.
+  Additive. Pretty output is unchanged: `add --pretty` keeps printing the bare id,
+  because scripts capture it, and `feedback --pretty` keeps `<action> <id>`. §4.7
+  handles the action that `add --pretty` omits.
 - **Pretty `show`.** An `origin:` overview line after `agent:` when set. Note rows show
   origin and origin session with the existing provenance column.
 - **Filters.** `list`, `ready` and `search` accept `--origin <user|agent|mixed|none>`,
@@ -305,19 +307,40 @@ directly by the record's id or time.
    (`archived_sessions`) and other harness homes on this host. Use hq-c411df's reader
    once obs-d98663 ships.
 4. Bind the occurrence to its call. Candidates are the `tasks add` or `tasks feedback`
-   calls in that session whose result names the record's id with the matching action
-   (`created` for a creation, `recurred` for a recurrence). A `show`, a reused `add` or
-   any other mention of the id is not a candidate.
-   - **matched:** exactly one candidate fits the occurrence, either because its result
-     carries `at` equal to the note's `at`, or because, without `at` (pretty output, or
-     an older binary), the candidate's time and arguments fit this occurrence and no
-     other.
-   - **ambiguous:** more than one candidate fits; for example, two recurrences in one
-     session with equal summaries in the same second, or concurrent subagents under
-     one Claude session. List the candidates; never pick one.
-   - **inferred:** no candidate's result can be read, but the note's time and the
-     command text match a call. This fallback is needed when the created title
+   calls in that session whose arguments fit the occurrence (title or summary, flags)
+   and whose time fits the note's `at`. A `show` or any other mention of the id is not
+   a candidate. What a candidate's result shows decides how strongly it binds:
+   - **Full result.** JSON output names the id and an action. `feedback --pretty`
+     prints `<action> <id>`, so it is full except for `at`.
+     - A `reused` action excludes the candidate.
+     - A matching action (`created` for a creation, `recurred` for a recurrence) keeps
+       it.
+   - **Id-only result.** `add --pretty` prints only the id. On reuse it adds a
+     stderr warning, "<id> already carries this source and title; reused it, wrote
+     nothing". The action is settled from the rest of the call:
+     - The reuse warning is in the captured result: excluded as a reuse.
+     - The call has no `--source`: a creation, since only a sourced add can reuse.
+     - A sourced call without that warning, where the transcript captured stderr: a
+       creation.
+     - Otherwise it is unsettled: still a candidate, but either a creation or a reuse.
+   - **Unreadable result:** a candidate on arguments and time alone.
+
+   Outcomes:
+   - **matched:** exactly one candidate remains, and its result is full and either
+     carries `at` equal to the note's `at` or is the only full-result candidate whose
+     time and arguments fit this occurrence.
+   - **inferred:** exactly one candidate remains, and it binds without a full result:
+     an id-only result whose action the rest of the call settled, or an unreadable
+     result whose time and command text match. This also covers a created title that
      differs from the command text, as in 9 of 72 audited origins.
+   - **ambiguous:** more than one candidate remains. This includes a creation that
+     cannot be told from a reuse (an id-only sourced add without captured stderr,
+     beside another call with the same source and title). Other examples: two
+     recurrences in one session with equal summaries in the same second, or
+     concurrent subagents under one Claude session. List the candidates; never pick
+     one.
+   - **unavailable:** no candidate remains although the transcript was read. Record
+     what was searched.
 5. Read the request, the action, the tool result and any later correction around the
    bound call, not only the nearest human turn. A human turn can contain pasted agent
    text (the 2026-10-20 Codex review was pasted into a human turn), so quote the
@@ -341,8 +364,9 @@ directly by the record's id or time.
 **Outcomes.** Record one per stage:
 
 - matched, ambiguous (with its candidates) or inferred;
-- unavailable: no stamp, or the session is not in this host's stores, which can mean
-  another host or a pruned store;
+- unavailable: no stamp; the session is not in this host's stores, which can mean
+  another host or a pruned store; or the transcript was read and no candidate
+  remains;
 - lookup failed: a tool error, kept separate from unavailable, as the scope skill
   already requires.
 
@@ -434,6 +458,12 @@ recorded on the implementing task:
   matched to its own call. A second run with `--pretty` and equal summaries in quick
   succession reports matched only where time and arguments separate the calls, and
   ambiguous with both candidates otherwise.
+- Pretty creation, then pretty reuse: in one real session, `add --pretty --source S`
+  creates a record, and the same command again reuses it. The creation binds as
+  inferred: an id-only result, with its creation settled by the absence of the reuse
+  warning in the captured stderr. The second call is excluded by its reuse warning. A
+  variant where the transcript did not capture stderr reports ambiguous between the
+  two calls. An unsourced `add --pretty` binds as inferred, as a creation.
 - An older request: a record filed in session B with `--origin-session A`, after B
   read the request in A. Stage 1 matches the filing in B, and stage 2 finds the
   request in A from B's evidence. A second record naming an unreadable session
@@ -483,6 +513,9 @@ These are the author's calls, not user decisions; review them:
     not only its record (§4.6, §4.7).
 14. Retrieval has two stages, and an older request is reached only through the filing
     event's evidence (§4.7).
+15. `add --pretty` output stays the bare id. Retrieval settles its action from the
+    call's `--source`, its arguments and the reuse warning, rather than changing
+    output that scripts capture (§4.6, §4.7).
 
 ## 7. Left to the builder
 
