@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-25T21:37:44Z
-updated: 2026-10-25T21:59:36Z
+updated: 2026-10-25T22:01:58Z
 depends: []
 parent: tasks-6166d6
 tags: []
@@ -18,7 +18,7 @@ origin: agent
 
 Why: blocking duration needs persisted dependency history or reconstruction, while repeated scope confirmation can be collected independently of edge age. [ref:brief] separates these evidence writes from the downstream report. Prospective coverage begins only when collection ships, so design and ship collection early without waiting for fan-out reporting or optional backfill.
 
-Done: prepare a written design spec for user review, then an implementation plan for user review. The first shipping milestone records forward dependency additions/removals and scope-confirmed waits; git reconstruction and a duration-report surface are later, optional work that must not delay collection. Define versioned evidence, coverage start, atomicity with edge writes, no-op/failed writes, every add/edit/dep/clear/replace path, removal/re-addition, reopening/recurrence, and alias/move continuity. Separate edge age from continuously unmet age; leave unobserved history unknown.
+Done: prepare a written design spec for user review, then an implementation plan for user review. The first shipping milestone records forward dependency additions/removals and scope-confirmed waits; a persistence-report milestone then surfaces supported blocking intervals and confirmed-pass counts with explicit coverage. Only git reconstruction is optional backfill; neither it nor the later report may delay collection. Define versioned evidence, coverage start, atomicity with edge writes, no-op/failed writes, every add/edit/dep/clear/replace path, removal/re-addition, reopening/recurrence, and alias/move continuity. Separate edge age from continuously unmet age; leave unobserved history unknown.
 
 Define a fixed scope-note observation such as waits: <canonical blocker ids>, recorded only for waits that the pass actually checked. Count distinct confirmed passes and their first/last observation; do not equate them with uninterrupted blocking duration or count repeated notes as separate passes. Settle pass identity/deduplication and changing or closed waits. Scope observations can ship without historical edge reconstruction. Keep changes to skills/scope/SKILL.md and any required parser/model contract explicit in the plan.
 
