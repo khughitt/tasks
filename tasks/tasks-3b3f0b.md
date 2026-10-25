@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: design/tasks-284d9b
 created: 2026-10-25T11:14:07Z
-updated: 2026-10-25T11:48:43Z
+updated: 2026-10-25T11:55:58Z
 started: 2026-10-25T11:38:48Z
 depends: []
 parent: tasks-284d9b
@@ -27,3 +27,4 @@ Implement the approved filtered-read routing contract with canonical prefix agre
   provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T11:41:21Z (design/tasks-284d9b): Baseline: just test passed, 1685 tests across 14 binaries, 0 failed, 0 ignored (full suite, exhaustive enumeration included). Existing worktree hydrated and hooks installed. tasks-e147b9 remains open with no finding. Accepted plan review adjustments preserve local-before-registry error order and add outside installed-binary smoke plus hostile-parent fixture coverage.
 - 2026-10-25T11:48:43Z (design/tasks-284d9b): Routing verification: RED 6 CLI + 2 linked cases on missing outside/foreign routing; GREEN 8/8. Broken-marker and hostile-parent controls 1 each passed; existing bare suffix 2, project scope 4, positional outside route 1 passed. just test-fast passed 1689 tests, 0 failed, 4 ignored across 14 binaries. Positional resolver unchanged; only combined filters prevalidate against original context. Parent owns worktree/evidence.
+- 2026-10-25T11:55:58Z (design/tasks-284d9b): Final Task 1 checks passed: fast suite 1689 passed, 0 failed, 4 ignored; configured commit hook hygiene/fmt/Clippy/tasks checks passed after replacing test clones with borrowed slices. Confined installed binary smoke: outside list --under tasks-284d9b equals registered main (0 descendants); source-only returned no_project with guidance; live --all-projects recovery returned 0 matches, 0 warnings; local list/search succeeded. Parent tasks-284d9b owns .worktrees/tasks-284d9b and both .superpowers/sdd evidence directories; this child owns no separate retained resources.
