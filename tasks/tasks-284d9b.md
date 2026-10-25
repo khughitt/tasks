@@ -1,13 +1,15 @@
 ---
 id: tasks-284d9b
 title: Route list and other filtered reads to the project an id-valued flag names when run outside every project
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: mid
 process: planned
+owner: main
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T10:22:14Z
+updated: 2026-10-25T10:29:37Z
+started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
 source: "user:2026-10-25 list outside project"
@@ -34,3 +36,8 @@ Decisions the design must settle:
 Constraints: no silent fallback; a prefix not in the registry stays a typed error; preserve checkout and worktree precedence for the local prefix; any new option starts on ops's cli.toml (AGENTS.md Rules), though this should need none.
 
 Related: tasks-e147b9 investigates full-id routing for attach from scratch directories (broken ancestor .git markers); keep this design consistent with its finding and do not duplicate it.
+
+## Notes
+
+- 2026-10-25T10:29:37Z (main): started
+  provenance: {"harness_session":"codex:01a1729a-f51f-74f3-85e6-4695b73e5254","harness_session_source":"CODEX_THREAD_ID"}
