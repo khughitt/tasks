@@ -253,6 +253,11 @@ filed from that exact reference, including other projects. With no ID filter or
 explicit scope, filtered reads report `no_project` with scope guidance. A foreign
 ID does not bypass malformed local config or broken Git metadata.
 
+Completion for these read filters and `tree <id>` follows a typed foreign prefix,
+keeps local/worktree IDs for a matching prefix, and honors explicit scopes. With
+an empty fragment it offers local IDs only; outside a project it offers neither
+registry-wide enumeration nor bare suffixes. Completion errors remain silent.
+
 A linked project keeps its records outside its code checkout: its `tasks/.config.toml`
 carries `[checkout] path`, and every command run anywhere in that checkout or its
 worktrees opens the linked project (`tasks init --prefix <p> --checkout <path>` in the

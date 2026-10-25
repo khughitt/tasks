@@ -14537,6 +14537,138 @@ fn completion_stub_is_emitted_and_the_hook_is_otherwise_inert() {
 }
 
 #[test]
+fn filtered_completion_routes_filters_and_tree() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "Local"]);
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+    for cwd in [env.home.path(), sci.as_path()] {
+        for words in [
+            vec!["tasks", "list", "--parent", "fam-"],
+            vec!["tasks", "list", "--under", "fam-"],
+            vec!["tasks", "search", "x", "--parent", "fam-"],
+            vec!["tasks", "search", "x", "--under", "fam-"],
+            vec!["tasks", "ready", "--parent", "fam-"],
+            vec!["tasks", "ready", "--under", "fam-"],
+            vec!["tasks", "next", "--under", "fam-"],
+            vec!["tasks", "tree", "fam-"],
+        ] {
+            assert_eq!(
+                env.complete_values(cwd, "bash", words.len() - 1, &words),
+                [foreign.as_str()]
+            );
+        }
+    }
+    for fragment in ["", foreign.split_once('-').unwrap().1, "zzz-"] {
+        assert!(
+            env.complete_values(
+                env.home.path(),
+                "bash",
+                3,
+                &["tasks", "list", "--parent", fragment]
+            )
+            .is_empty()
+        );
+        assert!(
+            env.complete_values(env.home.path(), "bash", 2, &["tasks", "tree", fragment])
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn filtered_completion_keeps_local_and_explicit_scopes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+    env.json(&sci, &["group", "set", "both", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "one", "sci"]);
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--under", ""]),
+        [local.as_str()]
+    );
+    let suffix = local.split_once('-').unwrap().1;
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "next", "--under", suffix]),
+        [suffix]
+    );
+    let (_keep, wt) = unregistered_checkout("sci");
+    let only_here = id_of(env.json(&wt, &["add", "Worktree"]));
+    assert_eq!(
+        env.complete(&wt, "bash", 3, &["tasks", "list", "--under", "sci-"]),
+        [only_here.as_str()]
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            5,
+            &[
+                "tasks",
+                "-C",
+                wt.to_str().unwrap(),
+                "list",
+                "--under",
+                "sci-"
+            ]
+        ),
+        [only_here.as_str()]
+    );
+    assert_eq!(
+        env.complete(
+            &wt,
+            "bash",
+            5,
+            &["tasks", "list", "--project", "sci", "--under", "sci-"]
+        ),
+        [local.as_str()]
+    );
+    for scope in [
+        vec!["--project", "fam"],
+        vec!["--group", "both"],
+        vec!["--all-projects"],
+    ] {
+        let mut words = vec!["tasks", "list"];
+        words.extend(scope);
+        words.extend(["--under", "fam-"]);
+        assert_eq!(
+            env.complete(&sci, "bash", words.len() - 1, &words),
+            [foreign.as_str()]
+        );
+    }
+    for scope in [vec!["--project", "sci"], vec!["--group", "one"]] {
+        let mut words = vec!["tasks", "list"];
+        words.extend(scope);
+        words.extend(["--parent", "fam-"]);
+        assert!(
+            env.complete(&sci, "bash", words.len() - 1, &words)
+                .is_empty()
+        );
+    }
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "ready", "--parent", "zzz-"])
+            .is_empty()
+    );
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "next", "--under", "fam-"])
+            .is_empty()
+    );
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        "broken = [",
+    )
+    .unwrap();
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", "sci-"])
+            .is_empty()
+    );
+}
+
+#[test]
 fn completion_scopes_ids_to_what_each_argument_accepts() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -14544,10 +14676,10 @@ fn completion_scopes_ids_to_what_each_argument_accepts() {
     let local = id_of(env.json(&sci, &["add", "Local"]));
     let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
 
-    // Scoped: tree and list --parent are local, until --all-projects widens list
-    assert!(
-        env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"])
-            .is_empty()
+    // Typed IDs route; an empty word stays local unless an explicit scope widens it.
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"]),
+        [foreign.as_str()]
     );
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", ""]),

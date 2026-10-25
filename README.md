@@ -369,6 +369,11 @@ Without a scope or an ID filter, these reads report `no_project` and suggest
 `--all-projects` or `--project <prefix>`. Broken local metadata still fails rather
 than being bypassed for a foreign ID.
 
+Completion for these ID filters and `tree <id>` follows a typed foreign prefix
+such as `ops-`, while a matching prefix keeps local/worktree candidates. Explicit
+scopes still limit candidates. An empty fragment offers local IDs only; outside
+every project it neither enumerates the registry nor offers bare suffixes.
+
 The registry can also declare project groups (`[groups]`), named sets of live prefixes
 that `--group <name>` reads together. `rename` carries a member to its new prefix.
 `unregister` removes the prefix from every group and deletes, with a warning, any group it
