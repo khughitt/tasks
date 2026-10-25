@@ -1,6 +1,6 @@
 # Where task records and working documents live — design
 
-Task: tasks-dc16eb. Status: approved 2026-10-22 at revision 3, amended by plan review round 2 (§5.2) and by obs-7348a9 (§4, §8, §10); the tasks CLI part implemented by docs/plans/2026-10-22-records-detached.md (tasks-211e28).
+Task: tasks-dc16eb. Status: approved 2026-10-22 at revision 3, amended by plan review round 2 (§5.2) and by obs-7348a9 (§4, §8, §10); the tasks CLI part implemented by docs/plans/2026-10-22-records-detached.md (tasks-211e28), and §5.5 `tasks docs` by tasks-a8e28e.
 
 Amendment (2026-10-23, tasks-f36fb8): obs's historical authorship no longer follows
 `flow-state` by `kind`. obs-7348a9's approved spec (obs
