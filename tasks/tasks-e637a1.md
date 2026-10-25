@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T22:34:56Z
+updated: 2026-10-25T22:35:50Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -70,3 +70,4 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T22:34:56Z (design/tasks-e637a1): resumed
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T22:35:50Z (design/tasks-e637a1): Process: planned; design in .worktrees/tasks-e637a1 on design/tasks-e637a1. Hydrated with README cargo install --locked --path . confined by --root target/local-install and CARGO_TARGET_DIR=target; no host launcher changed. Full-suite baseline deferred to execution Setup as required for planned work. Origin recovered from the named filing session: user asked for downstream and persistent blocking measures; urgency inheritance and picker changes were agent proposals. Draft will recommend impact-ranked read without scheduler changes and make goal/approval metadata limits explicit.
