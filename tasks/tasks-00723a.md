@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:13:14Z
+updated: 2026-10-25T12:22:04Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -53,3 +53,9 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:12:30Z (docs/tasks-00723a): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-00723a", "state": "kept", "verification": "verified", "purpose": "User-approved immediate merge of docs/tasks-00723a, then checked worktree removal; target is regenerable build output, attachments are committed, no plan workspace or host pointers found, tt-report ran", "next_owner": "session:codex:01a172e0-035d-7420-9c13-60fe7e644221", "cleanup_trigger": "After local merge and attachment verification, remove this task's clean worktree this turn"}
 - 2026-10-25T12:13:14Z (docs/tasks-00723a): resumed
   provenance: {"harness_session":"codex:01a172e0-035d-7420-9c13-60fe7e644221","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T12:14:28Z (docs/tasks-00723a): Integration reopened before landing: main concurrently gained filtered-read ID routing. Resolved only the skill paragraph conflict by preserving the approved tasks skill byte-for-byte and inserting main's unchanged routing paragraphs before Project locations; scope/curate remain unchanged. Main checkout restored clean; combined branch fast suite running serially before merge completion.
+- 2026-10-25T12:20:31Z (docs/tasks-00723a): review: impl round 5 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T12:20:31Z (docs/tasks-00723a): Integration review accepted exact preservation of approved skill bytes plus main's unchanged routing block. Reviewer declined to re-review main's routing implementation and previously approved behavior because those were outside merge integrity; accept that scope because they were already reviewed separately, with combined-suite verification retained here.
+- 2026-10-25T12:21:53Z (docs/tasks-00723a): attached: integration-review-report.md (1232 bytes): Full scoped review accepting the merge conflict resolution, codex/gpt-6.1-sol
+- 2026-10-25T12:21:53Z (docs/tasks-00723a): Ruling: accept round 5's merge-integrity review scope, excluding main's routing implementation and the already-approved skill behavior. Why: those changes already had separate reviews, and the combined branch is checked by the complete fast suite. Cost: not recorded. Revisions: approved d113068; integration task-skill SHA256 444c8c3d8d0d50e516834432d6582f5de167044db4c1c2c2c4df627c15c3a570.
+- 2026-10-25T12:22:04Z (docs/tasks-00723a): Combined branch verification after incoming main: RUST_TEST_THREADS=1 just test-fast exited 0 with 1691 passed, 0 failed, 4 ignored across 14 targets; just check exited 0. Merge-integrity review accepted with no findings; no source/tests differ from incoming main.
