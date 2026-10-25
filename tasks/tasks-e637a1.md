@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T23:12:03Z
+updated: 2026-10-25T23:12:04Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -88,3 +88,4 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T23:07:59Z (design/tasks-e637a1): review: spec round 3 — verdict: revise; findings: Important 3, Minor 5; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T23:12:03Z (design/tasks-e637a1): attached: spec-round-3-report.md (6235 bytes): Full supplied round-3 review of c45fc7f by claude-code/claude-opus-5-5: revise, Important 3 and Minor 5; all addressed in revision d2940d0.
+- 2026-10-25T23:12:04Z (design/tasks-e637a1): Revision d2940d0:docs/specs/2026-10-25-blocker-ranking-design.md addresses all round-3 findings; frozen for fresh builder re-review and user review. Chose explicit partial coverage for unfollowed foreign paths rather than expanding the graph, preserving explicit scan scope/cost at the cost of incomplete local/group impact and possible omitted rows. Added own open/unresolved counts, per-status impact, held claims, distinct task_needs and clarified existing caller/goal/awaiting_user contracts. Internal verdict extraction is permitted here; tasks-e90b4f public delivery is not a dependency. just test-fast with GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM=1 passed 1728 tests with 4 ignored; document checks passed. No product code or plan changes.
