@@ -1,13 +1,15 @@
 ---
 id: tasks-e637a1
 title: Design ranked downstream blocker reporting
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: high
 process: planned
+owner: main
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T22:02:30Z
+updated: 2026-10-25T22:34:30Z
+started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
 tags: [cli]
@@ -64,3 +66,5 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T22:02:30Z (main): scope: scoped; revised the 7085e03 handoff after review round 1; promoted to P2/s/high/planned downstream-ranking design under tasks-6166d6, preserving the entire original capture; removed waits on history tasks-71c74d and reverse-scan tasks-e8d471 so design can proceed independently, with implementation sequencing left to its plan; prioritize explicitly means ranked blockers, unchanged ready order is an overridable recommendation and display-only inherited urgency is an alternative; prose-only approval gate and explicit/unknown park cases required; origin: stage 1 matched claude-code:75e5d0a1-29d8-4f5c-8267-a25b055879ed, user UUID e6c8baae-a7c8-4416-a6d1-bbd718fd15ca and add/result toolu_019n9n6vmJWzyw3xEcaaa8Xy (created 2026-10-25T21:31:04Z); mixed unchanged; stage 2 not applicable; brief: docs/notes/2026-10-25-blocker-ranking-brief.md
   provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T22:34:30Z (main): started
+  provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
