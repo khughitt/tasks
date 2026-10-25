@@ -1,6 +1,6 @@
 ---
 name: tasks
-description: Use when working in a repository that contains tasks/.config.toml or tasks/*.md task records.
+description: Use when working in a project tracked by tasks, including detached or linked code checkouts with no task records in-tree.
 ---
 
 # tasks
@@ -238,20 +238,61 @@ call are ignored, not merged — `tasks edit` that id if the record should chang
 Id-taking commands route by prefix, retaining the current checkout for a matching prefix;
 see [Project routing](../../README.md#project-routing).
 
-A linked project keeps its records outside its code checkout: its `tasks/.config.toml`
-carries `[checkout] path`, and every command run anywhere in that checkout or its
-worktrees opens the linked project (`tasks init --prefix <p> --checkout <path>` in the
-overlay directory makes one). Claims and parks name the code worktree, so resume there;
-records, specs and plans are read and written in the project root, never in the code
-tree. `tasks where [PATH]` prints which project a path opens (`linked` says whether
-through the link) and whether its repository keeps records; two projects declaring one
-checkout is `checkout_conflict`. The rules that tie a record to the code read through the
-overlay there: records commit in `<prefix>/tasks/` in the overlay repository after the
-code commit (under `[git] commit` the CLI makes that commit), and the record committed
-before `git worktree add` is committed there; the worktree itself is added in
-the code checkout, and `tasks start <id>` in it moves the claim. Task ids never appear in
-the code repository: its commits, branches, pull requests and docs cite the repository's
-own issue key when there is one, which the task records with `--source`.
+## Project locations
+
+Use `tasks where [PATH]` to find the project a path opens, including from a code
+worktree with no `tasks/.config.toml`. Its `project` object names three locations:
+
+| field | in-tree | detached | linked |
+| --- | --- | --- | --- |
+| `root` (what `tasks root <id>` prints for the registered project) | code checkout | code checkout | overlay project directory |
+| `checkout` (code) | = root | = root | foreign code checkout |
+| `records` (task records and working documents) | = root | `<records-root>/<prefix>` | = root |
+
+`where` reports `kind: "in-tree" | "detached" | "linked"`; `linked` is true only
+for `kind: "linked"`. An in-tree worktree reports its own locations. `holds_records`
+says whether the repository keeps records; a detached code checkout normally reports
+false, but true while HEAD still tracks the old config. `projects` rows always carry
+`records`; an unreachable row omits `checkout` and `kind`. Two projects declaring one
+checkout is `checkout_conflict`.
+
+To create or pair a detached project, run in its main code checkout:
+
+    tasks init --prefix <p> --records <records-root>
+
+The records root must already exist. Init creates or adopts `<records-root>/<p>`,
+with `tasks/.config.toml`, `[checkout] path` and `kind = "detached"`, and
+`[git] commit = true`. The host registry keeps `[projects]` pointing at the code
+checkout and a separate `[records]` table mapping the prefix to its records directory.
+Nothing is written in the code checkout. Repeat the command on each host after sync;
+`--records` excludes `--checkout`. Upgrade each host's binary before pairing: older
+binaries cannot parse the detached config and drop `[records]` on their next save.
+
+- `records_in_tree`: the checkout's working tree or index still has
+  `tasks/.config.toml`. Preserve the records in the records repository first, then
+  stage their removal with `git rm -r tasks` and rerun `init --records`; HEAD may
+  still track the config while the index deletes it.
+- `records_moved`: an old code branch still holds a config whose prefix is paired
+  elsewhere. Rebase or merge the main branch; its old `tasks/` is read-only history.
+  Plain `init` in a paired checkout also refuses this way: use the named
+  `init --prefix <p> --records <records-root> --force` to pair it again.
+- `records_unpaired`: a registered code root has neither config nor a `[records]`
+  pairing. Run `init --prefix <p> --records <records-root>` there on this host;
+  plain `init` is for a root that keeps no records elsewhere.
+
+A linked project is created instead by running
+`tasks init --prefix <p> --checkout <path>` in its overlay project directory. Its
+config carries `[checkout] path`; its records and working documents stay in the
+overlay. Commands in either kind's code checkout or worktrees open its records;
+claims and parks name the code worktree, so resume there. `check` warns
+`checkout_missing` when the code checkout is absent on this host.
+
+For detached and linked projects, commit records in the records repository (under
+`[git] commit` the CLI makes those commits), including before `git worktree add`.
+Record completion after the code commit. Create worktrees only in the code checkout;
+the shared records stay on the records repository's branch. For linked projects,
+task ids never appear in the foreign code repository: its commits, branches, pull
+requests and docs cite its own issue key when there is one, recorded with `--source`.
 
 For read scopes, consult the command's `--help`: `--project <prefix>` reads the registered
 root (including from a worktree), `--group <name>` a group, and `--all-projects` every
@@ -539,9 +580,15 @@ Tools map ids and paths through renames and moves with
 `tasks resolve <id|prefix|path>...` (or `--stdin`), never by parsing `projects.toml`
 by hand. Before moving a checkout, run `tasks init --prefix <p> --force` there
 on every host while the old root and storage still exist, so storage is recorded.
+For a detached project, use `tasks init --prefix <p> --records <records-root> --force`
+instead, preserving its records pairing.
 
 Adopt a rename already synced from another host with `tasks rename <old> <new> --adopt`
-before starting work there. Rehearsals must isolate both `XDG_CONFIG_HOME` and
+before starting work there. For a detached project, rename moves
+`<records-root>/<old>` to `<records-root>/<new>` and updates the registry pairing;
+the directory rename is left for you to commit in the records repository.
+On the second host, `--adopt` pairs the directory already renamed by sync.
+Rehearsals must isolate both `XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
 not an undo; follow the [manual rollback procedure](../../docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
 
@@ -580,7 +627,7 @@ the body when explaining which question the report must answer:
     --ref 'brief (input, required, kind=brief): docs/notes/topic-brief.md — question and constraints'
     --ref 'report (output, kind=report): docs/notes/topic-report.md — findings and recommendation'
 
-References accept normalized repo-relative file or directory paths (no trailing
+References accept normalized records-relative file or directory paths (no trailing
 slash), `files:<name>` for an attachment, or an external `<scheme>:<rest>`.
 Quote the reference inside the entry when it contains whitespace, a double quote
 or a backslash; inside those double quotes only `\"` and `\\` are escapes.
@@ -614,6 +661,13 @@ External outputs are not checked.
 reference `<scheme>:<opaque remainder>`. Successful changed-link writes store the
 provider's canonical reference. Unrelated edits preserve existing external links
 without fetching; changing the plan or step requires step verification.
+Keep local links such as `--spec docs/specs/<name>.md`,
+`--plan docs/plans/<name>.md`, and `--ref` paths relative to the project's `records`
+directory; it already includes the prefix. Write new specs, plans, briefs and handoffs
+in the destination the project's profile and instructions name. Under the records
+root that is `<records-root>/<prefix>/docs/`, committed in the records repository.
+For detached projects, local document reads try `records`, then the invoking code
+worktree, then the code main checkout, so retained reference documents still resolve.
 Use `tasks doc <id> --plan` or `--spec` to read the selected body through the same
 resolver, including linked projects and worktree/main-checkout fallback.
 Use `tasks list --plan <stored reference> --status done` to find completed steps
