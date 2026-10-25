@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/tasks-00723a
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-25T12:05:19Z
+updated: 2026-10-25T12:07:21Z
 started: 2026-10-25T11:44:49Z
 depends: []
 tags: []
@@ -36,3 +36,4 @@ Re-scoped 2026-10-22 by tasks-dc16eb (tasks:docs/specs/2026-10-22-records-home-d
 - 2026-10-25T12:01:30Z (docs/tasks-00723a): Corrective round 1 for final review: unscoped code-worktree passes keep that worktree as tasks -C context, preserving detached retained-doc resolution; scoped passes read code/history from each selected project's checkout. Complete serial just test-fast exited 0: 1681 passed, 0 failed, 4 ignored across 14 targets. Existing focused retained-doc resolver case passed 1/1 after wording corrections. No Rust changes or new workflow policy.
 - 2026-10-25T12:03:34Z (docs/tasks-00723a): review: impl round 3 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T12:05:19Z (docs/tasks-00723a): attached: verification.txt (4969 bytes): Baseline, focused and fast-suite results; exact startup-timing failures and unchanged-code rerun
+- 2026-10-25T12:07:21Z (docs/tasks-00723a): review: impl round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
