@@ -1,21 +1,33 @@
 ---
 id: tasks-e637a1
-title: "Surface and rank blockers: fan-out of open dependents, and how long and how many scope passes each has held work"
-status: idea
+title: Design ranked downstream blocker reporting
+status: todo
 priority: 2
-size: m
+size: s
 complexity: high
 process: planned
-reviewed: true
-reviewed_at: 2026-10-25T21:38:18Z
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-25T21:58:22Z
-depends: [tasks-e8d471, tasks-71c74d]
+updated: 2026-10-25T21:59:58Z
+depends: []
 parent: tasks-6166d6
 tags: [cli]
 agent: claude-code
 origin: mixed
 ---
+
+Why: the user asks to surface and prioritize prerequisites by their direct and indirect downstream impact. [ref:brief] now separates downstream ranking from dependency-history collection (tasks-71c74d). This task designs a ranked report, with existing ready/next order unchanged as the recommended default; the user may override that choice at design review.
+
+Done: produce a focused written design spec for user review, then an implementation plan for user review. Define unique direct/transitive open dependent counts, deterministic report ranking and tie-breaks, goals/closeout presentation, aliases/moves, incomplete/unreachable project coverage and one initial JSON/pretty read surface. Distinguish impacted work from work made ready by completing one blocker when others remain. Reuse tasks-e8d471 and canonical dependency-satisfaction work; design does not require their implementations to have landed. Declare the necessary implementation dependency in the reviewed plan rather than blocking this design.
+
+Prioritize means an explicitly ordered list of blockers, initially by downstream impact with the exact order and tie-breaks stated in the design. Keep a middle alternative visible: show inherited urgency and its beneficiary/cause in ready without re-sorting or changing eligibility. Reuse crew-a0952b's active-beneficiary semantics if that option is adopted; do not invent a second allocator or mutate stored priority. Any picker reordering requires an explicit reviewed choice. Historical age and confirmed-pass counts are not prerequisites for the first ranking report; absent evidence stays unknown and is added only after the collection contract lands.
+
+Verification: a small cross-project graph with a diamond, mixed priorities, multiple blockers, closed/moved/missing targets, a goal-closeout edge and incomplete coverage. Include an unstarted todo with an approval gate only in prose, matching crew-ba0a02: do not report it as definitely agent-actionable. Compare its explicit user-held park (--waiting-on user --reason approval) and a declared-need alternative, including the absence of shared host-local park evidence. Explain that an owner must record the gate before the report can classify it reliably; a need is a resource requirement, not approval. Include the resulting user-only blocker in ranking/explanation tests. No paid calls or changes to that foreign task are part of this work.
+
+Where to look: [ref:brief]; src/commands/show.rs, src/commands/list.rs (resolve_dependency, ready, prime), src/moving/mod.rs (inbound), src/scope.rs, src/query.rs, src/output.rs, src/claims.rs, src/commands/parked.rs and tests/cli.rs; tasks-e8d471, tasks-1bbe49/tasks-606dd3, tasks-298107 and crew-a0952b. New CLI vocabulary still lands in ops before parser changes.
+
+Closeout: record the design/plan result on this task and in the brief; retain accepted report implementation steps as children. Goal tasks-6166d6 closes on shipped report and evidence collection, not this task merely receiving a disposition. The full original capture below is historical input; this revised scope governs the work.
+
+## Original capture (2026-10-25)
 
 Why: nothing surfaces which open tasks are holding up the most work, or which have held work up longest. A crew scope pass on 2026-10-25 re-briefed crew-1c3624 (waits on crew-8b52fb, autonomy-1aac03) and crew-9b4b47 (waits on crew-ba0a02) and changed nothing; the blockers themselves were never surfaced for action.
 
