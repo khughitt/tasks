@@ -8,13 +8,14 @@ complexity: mid
 process: planned
 owner: design/tasks-284d9b
 created: 2026-10-25T10:22:14Z
-updated: 2026-10-25T11:08:28Z
+updated: 2026-10-25T11:14:04Z
 started: 2026-10-25T10:29:37Z
 depends: []
 tags: [cli]
 source: "user:2026-10-25 list outside project"
 agent: claude-code
 spec: docs/specs/2026-10-25-filtered-read-routing-design.md
+plan: docs/plans/2026-10-25-filtered-read-routing-plan.md
 ---
 
 Motivation: commands that take a task id positionally (show, tree <id>, note, start) work from anywhere on the host: the id's prefix selects the registered root (README "Routing across projects"; src/commands/mod.rs::open_id_ctx_unwarned falls back to the registry on NoProject). Filtered reads do not. From a directory outside every project:
