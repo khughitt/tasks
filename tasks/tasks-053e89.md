@@ -7,7 +7,7 @@ size: l
 complexity: mid
 process: planned
 created: 2026-10-25T12:15:14Z
-updated: 2026-10-25T13:57:47Z
+updated: 2026-10-25T13:59:57Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -26,3 +26,5 @@ Why: tasks-a58a90's reviewed design ([spec]) and plan record which session filed
 - 2026-10-25T12:38:44Z (tasks-053e89): Task 1 landed in ops: rows commit acd8bb8, merged to ops main as c3f2294 (ops-a82d6e, not pushed)
 - 2026-10-25T13:55:40Z (tasks-053e89): review: impl round 1 — verdict: revise; findings: Minor 5, re-grade proposals 2; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T13:57:47Z (tasks-053e89): review: impl round 2 — verdict: accept; findings: none; reviewer: claude-code/claude-sonnet-5-5
+- 2026-10-25T13:59:36Z (main): attached: sdd-ledger-tasks-053e89.md (14539 bytes): SDD ledger for the provenance plan: pre-flight scan, per-task reviews and fix rounds, rulings R1-R8, deferred minors and where each was filed
+- 2026-10-25T13:59:57Z (main): detached: sdd-ledger-tasks-053e89.md: machine paths refused by the layout hook; replaced by a placeholder copy
