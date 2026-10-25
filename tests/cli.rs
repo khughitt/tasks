@@ -21360,6 +21360,39 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             (vec!["edit"], "--priority"),
             vec!["edit", i, "--priority", "2"],
         ),
+        (
+            (vec!["add"], "--origin"),
+            vec!["add", "B6", "--origin", "user"],
+        ),
+        (
+            (vec!["edit"], "--origin"),
+            vec!["edit", i, "--origin", "agent"],
+        ),
+        (
+            (vec!["list"], "--origin"),
+            vec!["list", "--origin", "agent"],
+        ),
+        (
+            (vec!["ready"], "--origin"),
+            vec!["ready", "--origin", "agent"],
+        ),
+        (
+            (vec!["search"], "--origin"),
+            vec!["search", "Baseline", "--origin", "agent"],
+        ),
+        (
+            (vec!["feedback"], "--origin"),
+            vec![
+                "feedback",
+                "--project",
+                "tasks",
+                "the tool works",
+                "--category",
+                "positive",
+                "--origin",
+                "user",
+            ],
+        ),
         ((vec!["list"], "--status"), vec!["list", "--status", "todo"]),
         ((vec!["list"], "--sort"), vec!["list", "--sort", "updated"]),
         (
