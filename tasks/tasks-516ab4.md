@@ -4,7 +4,7 @@ title: "Feedback entries record no session provenance, so a scope pass must reco
 status: idea
 priority: 2
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-25T13:43:34Z
+updated: 2026-10-25T15:43:27Z
 depends: [tasks-a58a90]
 parent: tasks-9b1c2b
 tags: [feedback, idea, "from:lore"]
@@ -35,3 +35,4 @@ A pilot recovered the user's original request behind a title-only report only by
 - 2026-10-20T14:41:20Z (main): wait moved 2026-10-20: tasks-441019 was split; this idea now waits on tasks-a58a90 (occurrence provenance design), which carries every requirement the 14:27 scope note listed for it.
 - 2026-10-25T12:27:23Z (design/tasks-a58a90): tasks-a58a90 finished its design and plan (docs/specs/2026-10-25-creation-occurrence-provenance-design.md, docs/plans/2026-10-25-creation-occurrence-provenance.md): feedback creation gets a stamped 'created' note and each recurrence is stamped; origin user|agent|mixed is a correctable field with per-occurrence labels; the scope skill gains a two-stage retrieval procedure with matched/inferred/ambiguous/unavailable/lookup-failed outcomes. Implementation is goal tasks-053e89; this idea's proposal is covered there once it lands.
 - 2026-10-25T13:43:34Z (tasks-053e89): Landed on tasks-053e89 (spec docs/specs/2026-10-25-creation-occurrence-provenance-design.md): tasks feedback now writes a stamped created note and stamps each recurrence, and a scope pass finds a report's origin from the record's origin field and stamped notes, then follows the scope skill's two-stage retrieval (§2) to the filing session's human turns, reporting unavailable context when the lookup fails.
+- 2026-10-25T15:43:27Z (main): coverage checked on main 78b1dbf: tasks feedback stamps a created note on new reports and stamps each recurrence (src/commands/feedback.rs occurrence_stamp; verified live on titan and europa in tasks-c96737); skills/scope/SKILL.md 'Find the originating ask' reads the filing session through session-logs, binds the filing call, reads the user's words around it, and records unavailable apart from lookup failed; tasks-4d39db demonstrated every outcome. Remaining parts are carried elsewhere: archived-store reachability obs-d98663 (hq-cff824, hq-a60cf5); blind at-filing pilot tasks-e407a1; trace view obs-c5c599; per-ask drop check tasks-441019 and tasks-fa3525; user's words in report bodies lore-c01bc8 (done); retrieval edge cases tasks-87eb2c, hq-4d77cc, hq-34163a
