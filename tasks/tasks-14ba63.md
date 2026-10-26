@@ -4,8 +4,8 @@ title: Surface the top blockers in prime
 status: idea
 priority: 2
 created: 2026-10-26T01:55:31Z
-updated: 2026-10-26T15:00:42Z
-depends: []
+updated: 2026-10-26T15:00:45Z
+depends: [tasks-7903ff]
 parent: tasks-46d207
 tags: [cli]
 source: tasks-e637a1
