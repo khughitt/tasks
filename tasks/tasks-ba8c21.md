@@ -1,13 +1,15 @@
 ---
 id: tasks-ba8c21
 title: Explain the idea-to-ready lifecycle in the README
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-25T18:15:24Z
-updated: 2026-10-26T21:21:32Z
+updated: 2026-10-26T23:26:17Z
+started: 2026-10-26T23:26:17Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, gap, "from:lore"]
@@ -33,3 +35,5 @@ A user asked how scoping differs from research, what decides when a brief or a r
 - 2026-10-26T15:34:19Z (main): scope: scoped; 0845def README Statuses/Agent skills and current scope/tasks skills establish a bounded reader-facing overview, P2/s/low/direct in tasks-6ed79b; original report preserved; origin: filing matched, claude-code:96139a24-901e-4b9f-9dd9-fc2e1d277366 lines 804-805, unique feedback call and created tasks-ba8c21 result; human turns 724 and 773 ask how the process works and whether it is described, while the agent proposes the README addition at 811, so origin agent retained; no origin_session, older-request stage not applicable
   provenance: {"harness_session":"codex:01a178d6-0f5f-7d01-8ac1-a01cfe262c14","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T21:21:32Z (main): curate-docs: tasks-d5ddb4 at c1bbcae confirms: criterion 8 finds README.md Statuses and Agent skills omit a reader-facing idea-to-ready overview. The scope procedure exists in skills/scope/SKILL.md sections 3-5 and 7, but the README gives no brief/research/wake/re-scope orientation; this task owns the addition and links.
+- 2026-10-26T23:26:17Z (main): started
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
