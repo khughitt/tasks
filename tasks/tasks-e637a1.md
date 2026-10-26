@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:45:33Z
+updated: 2026-10-26T00:49:06Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -162,3 +162,4 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:45:33Z (design/tasks-e637a1): resumed
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T00:49:06Z (design/tasks-e637a1): Setup baseline at 882a2bc: normal just test rc=101, 1729 passed/3 failed, exactly the tasks-2518ad move-test set at tests/move.rs:1717 seed commit refused by host git-identity-check (known environment failure); isolated GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test rc=0, 1732 passed (ignored included). Executing inline (executing-plans), claude-code/claude-opus-5-5; ledger .superpowers/sdd/2026-10-25-blocker-ranking/progress.md.
