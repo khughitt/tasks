@@ -1416,7 +1416,8 @@ Opt in per project in `tasks/.config.toml`:
     commit = true
 
 - Absent or false keeps manual commits; any other key in `[git]` is a config error.
-- Each write commits its records, attachment changes and configuration, once per git working tree, plus anything the repository's pre-commit hook stages; staging by another git process while the commit runs can land in it.
+- Each write commits its records and attachment changes, once per git working tree, plus anything the repository's pre-commit hook stages; staging by another git process while the commit runs can land in it.
+- Configuration changes are not committed automatically: `init`, `rename`, `retire` and `unretire` leave `tasks/.config.toml` for you to commit, or for `tasks commit` to sweep.
 - Subjects are `chore(tasks): <verb> <id>[ <id>…]`; `add` and `feedback` append the title, with the subject capped at 72 characters, with no trailer.
 - `commit_unavailable:` means git is missing or the root is outside git; `commit_deferred:` means staged changes, detached HEAD or an in-progress git operation; `commit_failed:` means a git operation or hook failed.
 - A successful write still exits 0 when its commit is skipped or fails; `cleanup needs attention:` means cleanup failed or the index could not be checked, so inspect the named paths and index.

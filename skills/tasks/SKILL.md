@@ -475,7 +475,8 @@ and no controller closes a worker's live claim merely by being its parent.
 ### Record commits
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
-Each write commits the files it wrote (records, attachments and configuration), plus whatever the repository's own pre-commit hook stages, once per git working tree. Staging another git process makes while the commit runs can land in it.
+Each write commits the records and attachments it wrote, plus whatever the repository's own pre-commit hook stages, once per git working tree. Staging another git process makes while the commit runs can land in it.
+Configuration changes (`init`, `rename`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` yourself or sweep it with `tasks commit`.
 `commit_unavailable:` means git is missing or the root is outside git.
 `commit_deferred:` means staged changes, detached HEAD, or an in-progress git operation prevented the commit; clear the cause first.
 `commit_failed:` means a git operation or hook failed; resolve the cause, using the record-commit routes above for a refusing hook.
