@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:39:30Z
+updated: 2026-10-26T00:39:32Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -154,3 +154,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:39:26Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-fast.log", "state": "kept", "verification": "verified", "purpose": "Plan-phase existing fast-suite check with isolated Git configuration: 1728 passed, 4 ignored; not tests of unimplemented report", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "4a10e9c341b342154a78dbb1ea9ad780bb16b03607d2d84ebd8ada3627031bb3"}
 - 2026-10-26T00:39:28Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-r3-normal-fast.log", "state": "kept", "verification": "verified", "purpose": "Normal fast-suite diagnostic: exact known three move-test host-hook failures, 1725 passed and 4 ignored; not a passing suite", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "e48a835d68c27bbeec6eb5c0b6b8371409592fd18b0f2c6eb149e849dbc07df8"}
 - 2026-10-26T00:39:30Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-r3-isolated-fast.log", "state": "kept", "verification": "verified", "purpose": "Required isolated fast-suite comparison: 1728 passed, 4 ignored, exit 0", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "e99e1a52c1f6a762611f64f536d6758a4ce835d6e63f85dbb36f819fa0fc597c"}
+- 2026-10-26T00:39:32Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-e637a1", "state": "kept", "verification": "verified", "purpose": "Approved plan 327fe22 and S1, parked by user request for execution Setup in a fresh session. Spec d2940d0 bytes unchanged; plan S1 supersedes its e8d471 sequencing. All four review gates released, remaining dependencies preserved. Review/approval evidence attached, retained suite logs verified. No host pointers changed or session processes retained.", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "After fresh-session execution, final independent review and integration, inspect ignored files, preserve needed evidence, run tt-report and host-pointer checks before removal"}
