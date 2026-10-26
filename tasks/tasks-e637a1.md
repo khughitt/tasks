@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T01:48:27Z
+updated: 2026-10-26T01:49:06Z
 started: 2026-10-25T22:34:30Z
 completed: 2026-10-26T01:42:12Z
 closed: 2026-10-26T01:42:12Z
@@ -174,3 +174,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T01:48:20Z (main): attached: execution-ledger.md (12066 bytes): Inline execution ledger for plan 327fe22: baseline, per-task gates, every Ruling and every minor (deferred) line, final review rounds
 - 2026-10-26T01:48:24Z (main): attached: final-review-report.md (6000 bytes): Final whole-branch review round 1 (claude-code/claude-opus-5-5): With fixes, Important 2, Minor 5
 - 2026-10-26T01:48:27Z (main): attached: rereview-round-1-report.md (2726 bytes): Scoped re-review of corrective round 1 (5b7549f), claude-code/claude-opus-5-5: accept, Minor 3
+- 2026-10-26T01:49:06Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-e637a1","state":"released","verification":"verified","purpose":"Removed after merge 074672f and CLI reinstall: clean status, branch merged then deleted, no host pointers, no submodules, tt-report run; ignored target/ (build output, confined install, design-phase suite logs) discarded as regenerable; .superpowers/ plan workspaces preserved as attachments (design files already attached byte-identical; execution-ledger.md, final-review-report.md, rereview-round-1-report.md attached) and the rest discarded as derived","next_owner":"none","cleanup_trigger":"none"}
