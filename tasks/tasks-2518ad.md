@@ -1,15 +1,17 @@
 ---
 id: tasks-2518ad
 title: Move integration fixtures inherit host Git hooks and fail during seed commits
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: fix/move-fixture-git-isolation
 created: 2026-10-25T22:41:10Z
-updated: 2026-10-26T14:56:20Z
+updated: 2026-10-26T15:01:18Z
 started: 2026-10-26T14:56:04Z
+completed: 2026-10-26T15:01:18Z
+closed: 2026-10-26T15:01:18Z
 depends: []
 tags: [feedback, friction, "from:tasks"]
 agent: codex
@@ -30,4 +32,8 @@ The git fixture helper sets author and committer identity but inherits HOME, XDG
 - 2026-10-26T14:56:04Z (main): started
   provenance: {"harness_session":"claude-code:b9e6f0fa-77a8-4b9d-9a43-7099682b41cf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T14:56:20Z (fix/move-fixture-git-isolation): resumed
+  provenance: {"harness_session":"claude-code:b9e6f0fa-77a8-4b9d-9a43-7099682b41cf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T15:01:18Z (fix/move-fixture-git-isolation): done
+  provenance: {"harness_session":"claude-code:b9e6f0fa-77a8-4b9d-9a43-7099682b41cf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T15:01:18Z (fix/move-fixture-git-isolation): tests/move.rs's git helper now runs through common::git_fixture with an owned HOME and asserts repository ownership at init; move_git_fixtures_ignore_hostile_environment covers inherited selectors and a hostile global hook. common::git remains with tasks-047ad0.
   provenance: {"harness_session":"claude-code:b9e6f0fa-77a8-4b9d-9a43-7099682b41cf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
