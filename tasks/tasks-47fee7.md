@@ -6,9 +6,9 @@ priority: 3
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/readme-relay-recovery
 created: 2026-10-26T21:22:02Z
-updated: 2026-10-26T23:20:10Z
+updated: 2026-10-26T23:20:24Z
 started: 2026-10-26T23:20:10Z
 depends: []
 tags: [docs]
@@ -29,4 +29,6 @@ Where to look: README.md Relay identity, src/relay/resolve.rs SET_EXPLICIT, SET_
   provenance: {"harness_session":"codex:01a17a10-ca68-7152-a6d9-52e06712d48c","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
 - 2026-10-26T21:22:18Z (main): concerns: tasks-19b244 defect — f2ab2cb corrected PID-namespace recovery advice but left the README summary claiming every relay error recommends both identity variables; this correction removes that contradictory universal advice.
 - 2026-10-26T23:20:10Z (main): started
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:20:24Z (docs/readme-relay-recovery): resumed
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
