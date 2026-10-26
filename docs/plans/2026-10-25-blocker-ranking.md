@@ -18,6 +18,8 @@ approved frozen revision d2940d0 in repository tasks. User supplied round-5
 acceptance and delegated proceeding to planning; the controller accepted it.
 The spec remains frozen. Its nonblocking bb-scope fixture omission is corrected
 here: boundary targets are B, L **and X**; only L is unfollowed.
+Revision 2 addresses plan round 3 against cd80149. The sequencing amendment below
+is a spec-level ruling included in this revised plan's user-review gate.
 
 ## Global Constraints
 
@@ -55,23 +57,33 @@ here: boundary targets are B, L **and X**; only L is unfollowed.
 The worktree is `.worktrees/tasks-e637a1`, branch `design/tasks-e637a1`. It was
 hydrated with the README's locked cargo install, confined to target/local-install
 and target; no host pointer was changed. At execution Setup, re-enter the worktree
-skill and run the deferred full baseline `just test` before any product-code edits.
-Record the actual test count and exit status on tasks-e637a1. The known host-config
-fixture failure is tracked as tasks-2518ad; a diagnostic run with
-`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test` isolates Git config
-without changing hooks. Do not claim the normal environment is fixed. Any new test
-must use an explicitly constructed subprocess environment from its first RED run.
+skill and run the deferred full baseline before any product-code edits: record
+the ordinary `just test` result, and require
+`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test` to pass. Classify
+normal-environment failures by the explicit rule below. Record actual counts and
+exit statuses on tasks-e637a1; do not claim the ordinary environment is fixed.
+Any new test must use an explicitly constructed subprocess environment from its
+first RED run.
 
 The blocked implementation records are tasks-ceee0d (Task 1), tasks-5d0d99
 (Task 2), tasks-a7db30 (Task 3), plus ops-b36208 for vocabulary. After plan approval,
-the controller unblocks these four records; existing dependency edges remain.
-Task 1 can proceed then. Task 2 also waits on tasks-e8d471
-landing in the code base used for execution; a done record on an unmerged branch
-does not satisfy that integration prerequisite. Reuse its captured incoming-scan
-work through the stable `Scope::scan() -> Result<Vec<Task>>` seam; inspect any
-landed index helper before using it, rather than guessing its future signature.
-The graph engine still owns move-aware transitive analysis, not another registry
-walker. tasks-e90b4f's public-contract work is not a prerequisite.
+the controller unblocks these four records; Task 2 waits on Task 1 and Task 3 on
+Task 2 plus ops-b36208. Neither tasks-e8d471 nor tasks-e90b4f is a hard prerequisite.
+Use the already-existing `Scope::scan() -> Result<Vec<Task>>` seam. build consumes
+the captured slice and owns move-aware reverse adjacency/transitive analysis;
+it neither opens projects nor adds a registry walker.
+
+**Ruling S1 — remove the hard tasks-e8d471 sequencing requirement.** This supersedes
+only that sequencing in d2940d0's Existing contracts and Implementation handoff
+sections, and removes tasks-5d0d99's edge to tasks-e8d471. **Why:** Scope::scan
+already exists and moving::inbound already uses it; this plan consumes no new
+interface produced by the show-dependents task. Reusing a captured scan meets the
+spec's no-second-project-walker intent without an unrelated delivery wait.
+**Cost:** the two features can evolve separately, so their owners must coordinate
+scan semantics and factor genuinely shared code when it has actual callers.
+Leave a coordination note on tasks-e8d471 to reuse Scope::scan/captured rows and
+avoid a new walker. Approval of this revised plan also reviews this amendment;
+no report behaviour, coverage rule or public show contract changes.
 
 Task 3 waits for Task 2 and ops-b36208. That prerequisite is blocked for this plan's
 review, with source `tasks-e637a1:blockers-vocabulary`.
@@ -101,10 +113,39 @@ rows make parser_surface_equals_table fail, use the documented `adopt cli.toml
 --at <landed-commit>` route selecting the suitable landed snapshot; never hand-copy.
 
 Before each implementation task: `tasks start <step-id>`, trial-arm, focused RED
-test, minimum change, focused GREEN, `just test-fast`, then `tasks check` and
-conventional commit. Record the task's actual results. New Git fixture mutations
+test, minimum change, focused GREEN, the suite gates below, then `tasks check`
+and conventional commit. Record the task's actual results. New Git fixture mutations
 use `tests/common/git_fixture::{command, assert_repo}` and temporary HOME;
 never call the inherited-environment `common::git` helper for a new fixture.
+
+### Tasks-checkout test gates
+
+For **every Tasks 1–3 commit**, require a green
+`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test-fast`. Apply that same
+Git-config prefix to focused test-one runs below; RED still must prove the intended
+failing assertion/absent API, never an unrelated fixture failure or zero selection.
+This isolation applies only to test commands, not git commits or their hooks, and
+does not modify host config. The ops vocabulary task keeps its own checkout's gates.
+
+Also run ordinary `just test-fast` once per task's final verification and save its
+log and exit status separately. The known tasks-2518ad exception is **exactly**
+these three `tests/move.rs` tests failing during the seed commit at the host
+identity hook, while the isolated suite is green:
+
+- correction_i1_move_stamp_keeps_identical_sibling_stale
+- move_explain_classifies_source_worktree_refusal
+- move_from_a_source_worktree_refuses
+
+A normal run with only that exact failure set and cause is recorded as the known
+environment failure; it does not block the commit or invite a fixture repair in
+this feature. Any other failing test, changed failure cause, crash or unclassified
+failure fails the gate and must be investigated as a regression until explained.
+Any isolated-suite failure fails the gate unconditionally. A normal suite that
+becomes green is recorded as green; do not invent three expected failures or
+infer that fixture repair shipped. A strict subset of the known failures requires
+reassessment rather than silently widening the exception. The same classification
+applies to the ordinary full-suite Setup baseline. Keep tasks-2518ad separate;
+this plan neither scopes nor fixes that record.
 
 ## File map and internal seams
 
@@ -148,9 +189,8 @@ No new public read or JSON field is introduced by this task.
   the module's existing fixture idiom):
 
 ```text
-captured copy open / disk copy done: lookup(scan-first) => Open
-same ID with lookup(Resolver authority) => Satisfied, closed timestamp retained
-Resolver keeps its own-prefix project local; foreign prefixes use registered roots
+lookup map A has open record => Open
+lookup map B has same ID done => Satisfied, closed timestamp retained
 done recurring, even due => Satisfied; restarted => Open
 dropped => Satisfied; shelved => Open; absent/move loop => Unresolved
 alias -> moved -> live => terminal canonical ID, chosen lookup used at every hop
@@ -159,8 +199,15 @@ lookup parse/I/O failure => same typed error, not Unresolved
 
 - [ ] Run `just test-one dependency_lookup_authority_and_verdicts`; expect RED
   because the new shared module/API is absent. Add a small integration assertion
-  to the existing `dependency_resolution_prefers_the_captured_snapshot` test and
-  Resolver-backed completion/closeout tests to pin caller authority before migration.
+  to the existing `dependency_resolution_prefers_the_captured_snapshot` test.
+  Add disk-backed `dependency_resolver_preserves_local_and_foreign_authority`
+  integration assertions to completion/closeout tests: Resolver uses the current
+  project's own-prefix file and registered roots for foreign prefixes, even when
+  a different captured copy exists. Use TestEnv and the isolated git_fixture
+  helpers for registry/worktree setup; do not pretend in-memory maps test Resolver.
+  Run `just test-one --test cli dependency_resolver_preserves_local_and_foreign_authority`
+  with the isolation prefix; this characterizes existing behaviour and must pass
+  before and after the refactor.
 - [ ] Implement the two helpers. Keep `list::resolve_dependency`'s return shape
   and supply a lookup that consults the captured scan first, then ReadCtx, at each
   move hop. `open_deps` supplies Resolver::resolve_task, preserving its project-local
@@ -173,8 +220,12 @@ lookup parse/I/O failure => same typed error, not Unresolved
   open_deps includes everything except Satisfied. Keep existing warnings/errors
   and scan ownership. Do not alter show.resolved or review wake policy.
 - [ ] Run the new test GREEN, `just test-one dependency_resolution`,
+  `just test-one --test cli dependency_resolver_preserves_local_and_foreign_authority`,
   `just test-one --test review`, and existing dependency/recurrence tests selected
-  through test-one; then `just test-fast`, tasks check and the pre-commit check.
+  through test-one with the isolation prefix; then require
+  `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test-fast` green, classify
+  the separate normal run under Tasks-checkout test gates, and run tasks check
+  and the pre-commit check.
   Expect no existing JSON/eligibility/closeout changes. Commit
   `refactor: share dependency verdict with explicit lookup authority`.
 
@@ -182,7 +233,7 @@ lookup parse/I/O failure => same typed error, not Unresolved
 
 **Files:** Create src/blockers.rs, add its module in src/main.rs; new analysis-only
 payload structs in src/output.rs where needed. Tests live in src/blockers.rs.
-**Requires:** Task 1 and integrated tasks-e8d471.
+**Requires:** Task 1. No prerequisite on tasks-e8d471 (Ruling S1).
 
 **Interfaces:** Consume Task 1 and a captured scan. Produce:
 
@@ -195,7 +246,12 @@ pub fn build(
 
 Coverage's serialized fields are exactly the spec's mode, requested_projects,
 scanned_projects, unreachable_projects, boundary_targets, unfollowed_targets,
-complete. `Analysis` has `rows: Vec<Impact>`, coverage, unresolved diagnostics and
+complete. Its **input** carries mode/requested/scanned/unreachable from scope
+opening, with empty boundary_targets/unfollowed_targets and complete initially
+true only when no requested project is unreachable. build derives and overwrites
+both target sets and the final complete verdict from that input and examined
+references; callers cannot supply a precomputed graph-completeness result.
+`Analysis` has `rows: Vec<Impact>`, coverage, unresolved diagnostics and
 sorted cycle components. `Impact` holds the terminal Task, goal Option<bool>,
 cycle, all seven spec counts (work/goal direct+transitive, relief, own open,
 own unresolved), both five-status work maps and up to three direct examples.
@@ -239,9 +295,11 @@ ranked IDs: [B,R,X,L]; all work-map totals are todo in the base fixture
   original references in unresolved diagnostics. Deduplicate per the spec, derive
   exact counterfactual direct relief without recursively completing dependents,
   then sort/rank all rows. No limit, I/O loop or host evidence belongs in build.
-- [ ] Run `just test-one blockers_` GREEN and `just test-fast`; check/commit
-  `feat: compute ranked downstream blocker impact`. Record any landed incoming
-  helper reused and verify there is one scope scan, not repeated scans per blocker.
+- [ ] Run `just test-one blockers_` GREEN with the isolation prefix, then require
+  `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test-fast` green and
+  classify the separate normal run under Tasks-checkout test gates; check/commit
+  `feat: compute ranked downstream blocker impact`. Verify there is one captured
+  scope scan and no repeated scans per blocker; no future incoming helper is required.
 
 ### Task 3: Ship the scoped CLI report and user guidance
 
@@ -284,7 +342,10 @@ optional ParkInfo/ClaimInfo and diagnostics; do not serialize the internal Task.
   counts, wrapped titles and all attention/claim/resource labels. Assert footer
   explains structural-only goals, no goal-child attribution, host-local evidence,
   unknown history and relief not ready. All spec fields appear in JSON with exact
-  zero/omission rules, timestamps ignored only for snapshot comparison. Existing
+  zero/omission rules, timestamps ignored only for snapshot comparison. Explicitly
+  assert JSON warnings contain the unavailable-history-metrics notice and pretty
+  headings say complete for a complete fixture and partial for a cut/unresolved
+  fixture, matching coverage.complete even at n0. Existing
   ready/next result order and JSON stay equal before/after calling blockers;
   relief is shown even for a shelved/user-held/claimed/deferred consumer without
   asserting it is ready. Run these tests RED through test-one.
@@ -306,7 +367,10 @@ optional ParkInfo/ClaimInfo and diagnostics; do not serialize the internal Task.
   requirement. Do not install guidance links or change global startup instructions.
 - [ ] Run `just test-one --test blockers` GREEN and
   `just test-one parser_surface_equals_table`; run focused Task 1 regressions,
-  then `just test-fast` and tasks check. Commit adopted table with parser/output/docs:
+  all focused runs use the isolation prefix. Then require
+  `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test-fast` green, classify
+  the separate normal run under Tasks-checkout test gates, and run tasks check.
+  Commit adopted table with parser/output/docs:
   `feat: report ranked downstream blockers`. Run the existing pre-push full gate
   if pushing is later authorized; otherwise run just test only if hooks are absent
   or affected behaviour lacks fast coverage. There is no push authorization here.

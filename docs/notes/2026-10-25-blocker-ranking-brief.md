@@ -178,3 +178,19 @@ and explicitly parameterizes lookup authority for the shared internal helper.
 The plan has three blocked implementation steps plus a blocked ops vocabulary
 prerequisite; their review gates must be released deliberately after plan approval.
 The plan still needs its separate user review. No product code has changed.
+
+Plan round 3 (claude-code/claude-opus-5-5) returned revise against cd80149 with
+Important 2 and Minor 3. The revised plan makes isolated Git-config tests the
+required green gate at each step, while recording the normal run's exact known
+three-test host-hook failure and rejecting other failures as regressions until
+explained. It separates Resolver's disk-backed authority fixture from the
+in-memory helper matrix, defines Coverage seed/derived fields, and names tests
+for the JSON history warning and complete/partial pretty heading.
+
+Spec-level Ruling S1 removes the hard tasks-e8d471 prerequisite: the existing
+Scope::scan captured slice already meets the no-second-project-walker intent,
+and Task 2 uses no new artifact from that show-dependents task. The cost is that
+the features evolve independently and must coordinate scan semantics; a note on
+tasks-e8d471 records that coordination. The approved spec d2940d0 stays frozen;
+the revised plan explicitly includes this sequencing amendment for user review.
+Task 2 now waits only on Task 1; all implementation review gates remain blocked.
