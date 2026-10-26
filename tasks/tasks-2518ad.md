@@ -1,10 +1,13 @@
 ---
 id: tasks-2518ad
 title: Move integration fixtures inherit host Git hooks and fail during seed commits
-status: idea
+status: todo
 priority: 2
+size: s
+complexity: low
+process: direct
 created: 2026-10-25T22:41:10Z
-updated: 2026-10-26T02:04:07Z
+updated: 2026-10-26T14:55:58Z
 depends: []
 tags: [feedback, friction, "from:tasks"]
 agent: codex
