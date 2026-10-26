@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:28:02Z
+updated: 2026-10-26T00:28:04Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -128,3 +128,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:25:31Z (design/tasks-e637a1): Ruling S1: remove the hard tasks-e8d471 prerequisite required by spec d2940d0 Existing contracts/Implementation handoff and plan cd80149. Why: Scope::scan already exists, moving::inbound already uses it, and build consumes a captured slice without any artifact from e8d471; the no-second-project-walker intent is met directly. Cost: independently evolving report/show work needs scan-semantics coordination and factoring only when actual shared callers exist. This amendment is explicit in the revised plan user-review gate; no implementation is authorized yet.
 - 2026-10-26T00:28:00Z (design/tasks-e637a1): review: plan round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-26T00:28:02Z (design/tasks-e637a1): attached: plan-round-3-report.md (4997 bytes): Full supplied review of plan cd80149: claude-code/claude-opus-5-5, Important 2 and Minor 3, all addressed by 327fe22.
+- 2026-10-26T00:28:04Z (design/tasks-e637a1): attached: plan-round-4-self-review-report.md (2536 bytes): Self-review of revised plan 327fe22 by codex/gpt-6.1-sol: no remaining findings; observed suite results recorded; user approval pending.
