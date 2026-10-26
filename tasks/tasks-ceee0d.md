@@ -1,13 +1,13 @@
 ---
 id: tasks-ceee0d
 title: Share dependency resolution and preserve caller policies
-status: blocked
+status: todo
 priority: 2
 size: s
 complexity: high
 process: direct
 created: 2026-10-26T00:08:20Z
-updated: 2026-10-26T00:36:36Z
+updated: 2026-10-26T00:36:38Z
 depends: []
 parent: tasks-e637a1
 tags: []
