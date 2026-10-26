@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-25T18:15:24Z
-updated: 2026-10-26T15:34:17Z
+updated: 2026-10-26T15:34:19Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, gap, "from:lore"]
@@ -30,3 +30,5 @@ A user asked how scoping differs from research, what decides when a brief or a r
 
 - 2026-10-25T18:15:24Z (feedback): created
   provenance: {"harness_session":"claude-code:96139a24-901e-4b9f-9dd9-fc2e1d277366","harness_session_source":"CLAUDE_CODE_SESSION_ID","origin":"agent"}
+- 2026-10-26T15:34:19Z (main): scope: scoped; 0845def README Statuses/Agent skills and current scope/tasks skills establish a bounded reader-facing overview, P2/s/low/direct in tasks-6ed79b; original report preserved; origin: filing matched, claude-code:96139a24-901e-4b9f-9dd9-fc2e1d277366 lines 804-805, unique feedback call and created tasks-ba8c21 result; human turns 724 and 773 ask how the process works and whether it is described, while the agent proposes the README addition at 811, so origin agent retained; no origin_session, older-request stage not applicable
+  provenance: {"harness_session":"codex:01a178d6-0f5f-7d01-8ac1-a01cfe262c14","harness_session_source":"CODEX_THREAD_ID"}
