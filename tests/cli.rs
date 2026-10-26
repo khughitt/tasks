@@ -6,6 +6,49 @@ use common::{
 };
 
 #[test]
+fn common_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("common_git_fixtures_ignore_hostile_environment") {
+        return;
+    }
+    let env = TestEnv::new();
+    let root = tempfile::tempdir().unwrap();
+    let main = root.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    common::git_fixture::assert_repo(env.home.path(), &main);
+    std::fs::write(main.join("README"), "main\n").unwrap();
+    git(&main, &["add", "README"]);
+    git(&main, &["commit", "-qm", "seed"]);
+
+    let side = root.path().join("side");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &main, &side);
+    std::fs::write(side.join("README"), "side\n").unwrap();
+    git(&side, &["add", "README"]);
+    git(&side, &["commit", "-qm", "side"]);
+    let read = |dir: &std::path::Path, args: &[&str]| {
+        let out = common::git_fixture::command(env.home.path(), dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        out.stdout
+    };
+    assert_eq!(read(&main, &["show", "HEAD:README"]), b"main\n");
+    assert_eq!(read(&side, &["show", "HEAD:README"]), b"side\n");
+}
+
+#[test]
 fn prime_summary_empty_project() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -13476,6 +13519,7 @@ fn a_recurring_park_left_by_a_removed_worktree_is_released_by_done() {
     let side = main.join("wt");
     let side_arg = side.to_str().unwrap();
     git(&main, &["worktree", "add", "-q", "-b", "side", side_arg]);
+    common::git_fixture::assert_worktree(env.home.path(), &main, &side);
     // Host A parks the next occurrence in the worktree; the record is integrated into main.
     as_agent(&env, &side, "agent-a")
         .args(["start", &id])
