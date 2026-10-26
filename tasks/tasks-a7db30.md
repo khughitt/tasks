@@ -1,15 +1,17 @@
 ---
 id: tasks-a7db30
 title: Ship the scoped CLI report and user guidance
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: direct
 owner: design/tasks-e637a1
 created: 2026-10-26T00:08:28Z
-updated: 2026-10-26T01:09:43Z
+updated: 2026-10-26T01:22:39Z
 started: 2026-10-26T01:09:43Z
+completed: 2026-10-26T01:22:39Z
+closed: 2026-10-26T01:22:39Z
 depends: [ops-b36208, tasks-5d0d99]
 parent: tasks-e637a1
 tags: []
@@ -31,4 +33,8 @@ Adopt landed ops vocabulary with parser changes; implement blockers JSON, compac
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:36:51Z (design/tasks-e637a1): Keith approved plan 327fe22 and Ruling S1 in the controller session; review gate released, remaining dependencies unchanged. Execution is reserved for a fresh session; no Setup or implementation performed here.
 - 2026-10-26T01:09:43Z (design/tasks-e637a1): started
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T01:22:39Z (design/tasks-e637a1): done
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T01:22:39Z (design/tasks-e637a1): tasks blockers shipped: noun command with flattened scope and -n default 20, one captured scan through blockers::build, host-local park/claim evidence for every ranked prefix, BlockersOut JSON contract and pretty renderer with footer, README and skill guidance; adopted ops f90085b row; four CLI tests green (de83ef3).
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
