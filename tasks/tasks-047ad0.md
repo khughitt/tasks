@@ -1,15 +1,17 @@
 ---
 id: tasks-047ad0
 title: Isolate the shared Git helper used by CLI integration fixtures
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: direct
 owner: fix/tasks-047ad0
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:21:14Z
+updated: 2026-10-26T15:21:17Z
 started: 2026-10-26T15:12:35Z
+completed: 2026-10-26T15:21:17Z
+closed: 2026-10-26T15:21:17Z
 depends: []
 tags: [testing]
 source: "tasks-284d9b:shared-git-fixture-follow-up"
@@ -45,3 +47,7 @@ Done: common::git cannot inherit repository selectors or host environment/config
 - 2026-10-26T15:20:57Z (fix/tasks-047ad0): Ruling: exclude production Git isolation and CLI behavior from this review at d082ffee729a780303f3a22bcc6c12128dc9a6e1. Why: unchanged and explicitly outside tasks-047ad0. Cost: production isolation receives no assurance from this fixture-only fix. Ruling: exclude independent Git helpers elsewhere at the same revision. Why: this task and the prior review bound the work to common::git and connected callers. Cost: those independent helpers may still inherit environment and need separate work.
 - 2026-10-26T15:21:00Z (fix/tasks-047ad0): attached: fixture-isolation-review-report.md (2462 bytes): Full read-only whole-branch review by codex/gpt-6.1-sol, frozen d082ffee729a780303f3a22bcc6c12128dc9a6e1: Ship, no findings; 6 independent tests passed.
 - 2026-10-26T15:21:14Z (fix/tasks-047ad0): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-047ad0","state":"kept","verification":"verified","purpose":"Reviewed implementation awaiting immediate local integration and checked removal; target contains only regenerable build/install outputs and redundant logs, with verification excerpts and full review preserved as verified task attachments","next_owner":"session:codex:01a178c4-420d-75e3-a07d-83976bde0d40","cleanup_trigger":"After local merge into main in this turn, recheck pointers, Git state and ignored files, run tt-report, and remove the task worktree"}
+- 2026-10-26T15:21:17Z (fix/tasks-047ad0): done
+  provenance: {"harness_session":"codex:01a178c4-420d-75e3-a07d-83976bde0d40","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T15:21:17Z (fix/tasks-047ad0): Isolated common::git with temporary HOME and key-built environment; checked init/linked ownership; hostile-parent RED to GREEN verified; baseline 1744 passed, fast 1741 passed (4 ignored), just check passed, review Ship with 6 independent tests and no findings.
+  provenance: {"harness_session":"codex:01a178c4-420d-75e3-a07d-83976bde0d40","harness_session_source":"CODEX_THREAD_ID"}
