@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-22T23:10:50Z
-updated: 2026-10-22T23:10:50Z
+updated: 2026-10-26T02:14:39Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -24,3 +24,7 @@ Ideas it wakes: Before this result's branch merges, run tasks note tasks-d8d97e 
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-22-session-continuity-brief.md — evidence, constraints and open questions
+
+## Notes
+
+- 2026-10-26T02:14:39Z (main): relay-3d6c93 evidence (Codex 0.164.0 TUI, docs/notes/2026-10-15-codex-worker-rows-acceptance.md in relay, 'Root switches in one process'): /new, /resume and /fork change the root in one process with no SessionEnd for the old root; the new root's SessionStart (source startup|resume|fork) arrives only with its first prompt; a tool call's CODEX_THREAD_ID and CODEX_SESSION_ID name the new root; a worker spawned before the switch keeps running under the old root's session_id. Both roots share one process handle, so process liveness cannot tell them apart
