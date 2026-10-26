@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-047ad0
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:21:00Z
+updated: 2026-10-26T15:21:14Z
 started: 2026-10-26T15:12:35Z
 depends: []
 tags: [testing]
@@ -44,3 +44,4 @@ Done: common::git cannot inherit repository selectors or host environment/config
 - 2026-10-26T15:20:54Z (fix/tasks-047ad0): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-26T15:20:57Z (fix/tasks-047ad0): Ruling: exclude production Git isolation and CLI behavior from this review at d082ffee729a780303f3a22bcc6c12128dc9a6e1. Why: unchanged and explicitly outside tasks-047ad0. Cost: production isolation receives no assurance from this fixture-only fix. Ruling: exclude independent Git helpers elsewhere at the same revision. Why: this task and the prior review bound the work to common::git and connected callers. Cost: those independent helpers may still inherit environment and need separate work.
 - 2026-10-26T15:21:00Z (fix/tasks-047ad0): attached: fixture-isolation-review-report.md (2462 bytes): Full read-only whole-branch review by codex/gpt-6.1-sol, frozen d082ffee729a780303f3a22bcc6c12128dc9a6e1: Ship, no findings; 6 independent tests passed.
+- 2026-10-26T15:21:14Z (fix/tasks-047ad0): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-047ad0","state":"kept","verification":"verified","purpose":"Reviewed implementation awaiting immediate local integration and checked removal; target contains only regenerable build/install outputs and redundant logs, with verification excerpts and full review preserved as verified task attachments","next_owner":"session:codex:01a178c4-420d-75e3-a07d-83976bde0d40","cleanup_trigger":"After local merge into main in this turn, recheck pointers, Git state and ignored files, run tt-report, and remove the task worktree"}
