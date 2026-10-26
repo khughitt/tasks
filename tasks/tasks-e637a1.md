@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T01:42:12Z
+updated: 2026-10-26T01:48:20Z
 started: 2026-10-25T22:34:30Z
 completed: 2026-10-26T01:42:12Z
 closed: 2026-10-26T01:42:12Z
@@ -171,3 +171,4 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T01:42:12Z (design/tasks-e637a1): Designed (spec d2940d0), planned (327fe22 + Ruling S1) and shipped tasks blockers via children tasks-ceee0d, tasks-5d0d99, tasks-a7db30 and ops-b36208; final review accepted after one test-only corrective round (5b7549f); brief updated.
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T01:48:20Z (main): attached: execution-ledger.md (12066 bytes): Inline execution ledger for plan 327fe22: baseline, per-task gates, every Ruling and every minor (deferred) line, final review rounds
