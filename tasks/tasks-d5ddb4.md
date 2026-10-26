@@ -2,12 +2,12 @@
 id: tasks-d5ddb4
 title: Documentation review
 status: todo
-priority: 1
+priority: 3
 size: s
 complexity: low
 process: direct
 created: 2026-10-24T12:49:55Z
-updated: 2026-10-26T21:22:21Z
+updated: 2026-10-26T21:22:42Z
 depends: []
 tags: [docs]
 source: curate-docs
