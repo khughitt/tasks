@@ -168,3 +168,13 @@ superseded. This revision is not approved and no implementation plan was drafted
 Fresh builder review round 4 of frozen d2940d0 by codex/gpt-6.1-sol accepts for
 planning with no Important or Minor findings. Full reviews and the updated ledger
 are attached to tasks-e637a1. The user still reviews the design before planning.
+
+The supplied round-5 review (claude-code/claude-opus-5-5) accepts d2940d0 with one
+nonblocking Minor: the bb-scope fixture also has boundary X, while only L is
+unfollowed. Following the user's delegation to accept and proceed, the controller
+accepted the design and preserved its frozen bytes. The
+[implementation plan](../plans/2026-10-25-blocker-ranking.md) corrects that fixture
+and explicitly parameterizes lookup authority for the shared internal helper.
+The plan has three blocked implementation steps plus a blocked ops vocabulary
+prerequisite; their review gates must be released deliberately after plan approval.
+The plan still needs its separate user review. No product code has changed.
