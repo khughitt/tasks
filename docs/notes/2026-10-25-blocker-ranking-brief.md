@@ -194,3 +194,13 @@ the features evolve independently and must coordinate scan semantics; a note on
 tasks-e8d471 records that coordination. The approved spec d2940d0 stays frozen;
 the revised plan explicitly includes this sequencing amendment for user review.
 Task 2 now waits only on Task 1; all implementation review gates remain blocked.
+
+Plan round 5 independently accepts frozen 327fe22 with no findings
+(claude-code/claude-opus-5-5). Keith explicitly approved the plan and Ruling S1,
+then requested parking for execution in a fresh session. The review gates on
+tasks-ceee0d, tasks-5d0d99, tasks-a7db30 and ops-b36208 are released; their remaining
+implementation dependency edges are preserved. No execution Setup or product-code
+change ran in the approval session. The next session reads approved spec d2940d0
+**together with** approved plan 327fe22 and its S1 sequencing amendment, runs the
+deferred full baseline using the plan's exact normal/isolated failure rules, then
+starts implementation. The frozen spec's old sequencing is superseded only by S1.
