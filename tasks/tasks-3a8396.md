@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-3a8396
 created: 2026-10-26T01:55:16Z
-updated: 2026-10-26T02:00:07Z
+updated: 2026-10-26T02:01:46Z
 started: 2026-10-26T01:59:24Z
 depends: []
 tags: [cli]
@@ -40,3 +40,4 @@ Verification: just test-one --test blockers and blockers_ green, just test-fast;
   provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T02:00:07Z (fix/tasks-3a8396): resumed
   provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T02:01:46Z (fix/tasks-3a8396): Process direct; workspace .worktrees/tasks-3a8396 on fix/tasks-3a8396. Verified source final-review-report.md and rereview-round-1-report.md against code: eight minors map to help, diagnostic spellings, scan-first lookup, shared fixture helpers and row/width/footer assertions; spec still carries proposed status. Surface audit reads get_about only, so long_about needs no vocabulary change. Share the existing linear scan lookup rather than add an index or change all picker callers; canonical counts remain unchanged, only diagnostic rows expand. Confined README cargo install completed; full just test baseline running before edits.
