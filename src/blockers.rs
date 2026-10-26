@@ -759,6 +759,65 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
             }
         }
 
+        // Spellings of one identity count once everywhere: a row's own open and unresolved
+        // counts, its diagnostics, and a target's dependents, maps and examples.
+        let mut world = World::new(vec![
+            rec("aa-000020", Status::Moved, 2, &[], "moved_to: bb-000021\n"),
+            rec("bb-000021", Status::Todo, 2, &[], ""),
+            rec(
+                "aa-000030",
+                Status::Todo,
+                2,
+                &["aa-000020", "bb-000021", "old-0000ee", "aa-0000ee"],
+                "",
+            ),
+            rec(
+                "aa-000022",
+                Status::Idea,
+                2,
+                &["old-000020", "aa-000020", "bb-000021"],
+                "",
+            ),
+            rec("aa-000031", Status::Idea, 2, &["aa-000030"], ""),
+        ]);
+        world.registry.aliases.insert("old".into(), "aa".into());
+        let analysis = world.analyse(&["aa", "bb"]);
+        let own = row(&analysis, "aa-000030");
+        assert_eq!(
+            (own.unmet_dependency_count, own.unresolved_dependency_count),
+            (1, 1)
+        );
+        let diagnostics: Vec<_> = analysis
+            .unresolved
+            .iter()
+            .map(|d| {
+                (
+                    d.dependent.clone(),
+                    d.reference.clone(),
+                    d.canonical.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            diagnostics,
+            [(id("aa-000030"), id("old-0000ee"), Some(id("aa-0000ee")))]
+        );
+        let target = row(&analysis, "bb-000021");
+        assert_eq!(counts(target), [2, 3, 0, 0, 1, 0, 0]);
+        assert_eq!(target.direct_examples, ids(&["aa-000022", "aa-000030"]));
+        let direct = WorkByStatus {
+            idea: 1,
+            todo: 1,
+            ..WorkByStatus::default()
+        };
+        assert_eq!(target.direct_work_by_status, direct);
+        let transitive = WorkByStatus {
+            idea: 2,
+            todo: 1,
+            ..WorkByStatus::default()
+        };
+        assert_eq!(target.transitive_work_by_status, transitive);
+
         // Missing, unregistered and move-loop targets are diagnostics, never rows.
         let world = World::new(vec![
             rec(

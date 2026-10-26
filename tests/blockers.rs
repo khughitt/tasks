@@ -672,6 +672,74 @@ fn blockers_pretty_contract_and_existing_reads() {
     assert!(pretty(&["--color", "always"], "120").contains("\u{1b}["));
     assert!(!pretty(&["--color", "never"], "120").contains("\u{1b}["));
 
+    // Every continuation label on a ranked row: a user park's reason and step, its host
+    // requirement beside the task's needs, an agent park, a reviewed idea awaiting the
+    // user, a hand-seeded cycle (the CLI refuses one) and a future deferral.
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[needs.paid-calls]\nmeaning = \"spends money on a provider\"\n");
+    std::fs::write(&config, text).unwrap();
+    let blocker_of = |title: &str, extra: &[&str]| {
+        let id = add(&env, &sci, title, extra);
+        add(
+            &env,
+            &sci,
+            &format!("Consumer of {title}"),
+            &["--depends", &id],
+        );
+        id
+    };
+    let quiet = blocker_of("Quiet run", &["--need", "paid-calls"]);
+    env.json(
+        &sci,
+        &[
+            "park",
+            &quiet,
+            "run it overnight",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "5",
+            "--needs",
+            "headless",
+        ],
+    );
+    let handed = blocker_of("Handed over", &[]);
+    env.json(&sci, &["park", &handed, "pick it up"]);
+    let idea = blocker_of("Waiting idea", &["--status", "idea"]);
+    env.json(
+        &sci,
+        &[
+            "note",
+            &idea,
+            "asked the user",
+            "--reviewed",
+            "--awaiting-user",
+        ],
+    );
+    blocker_of("Later", &["--defer", "30d"]);
+    let first = add(&env, &sci, "Cycle first", &[]);
+    let second = add(&env, &sci, "Cycle second", &["--depends", &first]);
+    let record = sci.join(format!("tasks/{first}.md"));
+    let seeded = std::fs::read_to_string(&record)
+        .unwrap()
+        .replace("depends: []", &format!("depends: [{second}]"));
+    std::fs::write(&record, seeded).unwrap();
+    let text = pretty(&["--color", "never"], "120");
+    for line in [
+        "user:   quiet: run it overnight",
+        "host:   park host requirement headless",
+        "needs:  paid-calls",
+        "park:   waiting on agent: pick it up",
+        "user:   reviewed idea awaiting the user",
+        "cycle:  investigate cycle",
+        "defer:  deferred until ",
+        "cycles (1):",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+
     // A claim shows its holder; a cut path makes the heading partial even at -n 0.
     let claimed = add(&env, &sci, "Held blocker", &[]);
     add(&env, &sci, "Waits on held", &["--depends", &claimed]);
