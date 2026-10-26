@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:28:04Z
+updated: 2026-10-26T00:28:05Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -129,3 +129,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:28:00Z (design/tasks-e637a1): review: plan round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-26T00:28:02Z (design/tasks-e637a1): attached: plan-round-3-report.md (4997 bytes): Full supplied review of plan cd80149: claude-code/claude-opus-5-5, Important 2 and Minor 3, all addressed by 327fe22.
 - 2026-10-26T00:28:04Z (design/tasks-e637a1): attached: plan-round-4-self-review-report.md (2536 bytes): Self-review of revised plan 327fe22 by codex/gpt-6.1-sol: no remaining findings; observed suite results recorded; user approval pending.
+- 2026-10-26T00:28:05Z (design/tasks-e637a1): attached: review-ledger-plan-4.md (5436 bytes): Ledger through plan round 4, including spec-level Ruling S1 with why, cost and revision references; no deferred minors.
