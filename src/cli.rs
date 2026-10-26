@@ -63,6 +63,16 @@ pub struct ScopeArgs {
     pub group: Option<String>,
 }
 
+/// `blockers`: the scope it counts dependents in, and how many ranked rows to show.
+#[derive(Args, Debug)]
+pub struct BlockersArgs {
+    /// At most this many ranked rows; 0 keeps only the totals, coverage and diagnostics.
+    #[arg(short = 'n', long, value_name = "N", default_value_t = 20)]
+    pub limit: usize,
+    #[command(flatten)]
+    pub scope: ScopeArgs,
+}
+
 /// Everything `list` selects by, shared with `search`: statuses, record filters, order,
 /// the parked/periodic/deferred modes, and scope.
 #[derive(Args, Debug)]
@@ -881,6 +891,8 @@ pub enum Command {
         )]
         rm: Vec<String>,
     },
+    /// Rank unmet prerequisites by observed downstream impact.
+    Blockers(BlockersArgs),
     /// Dependency graph as mermaid or dot.
     Graph {
         /// mermaid or dot.

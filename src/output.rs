@@ -496,6 +496,10 @@ impl Output {
                 .iter_mut()
                 .for_each(|row| row.project_color = color_of(colors, &row.id)),
             Output::Tree(o) => paint_tree(colors, &mut o.nodes),
+            Output::Blockers(o) => o
+                .blockers
+                .iter_mut()
+                .for_each(|row| row.project_color = color_of(colors, &row.id)),
             Output::Lanes(o) => o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane)),
             Output::Prime(o) => {
                 for row in o
@@ -1270,6 +1274,76 @@ pub struct CheckOut {
     pub warnings: Vec<Finding>,
 }
 
+/// Whether a blockers row needs the person: `user` only on recorded evidence (a park
+/// waiting on the user, or a reviewed idea marked awaiting the user); never "actionable".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Attention {
+    User,
+    Unknown,
+}
+
+/// Where the park and claim evidence on blockers rows came from: this host's stores only.
+#[derive(Serialize)]
+pub struct ParkEvidence {
+    pub host: String,
+    pub scope: &'static str,
+}
+
+/// One ranked prerequisite (blocker-ranking spec, initial output contract).
+#[derive(Serialize)]
+pub struct BlockerRow {
+    pub rank: usize,
+    pub id: String,
+    pub title: String,
+    #[serde(skip)]
+    pub project_color: Option<crate::palette::Rgb>,
+    pub status: Status,
+    pub priority: u8,
+    /// Null for an out-of-scope target that is not a lane: its children were not scanned.
+    pub goal: Option<bool>,
+    pub cycle: bool,
+    pub direct_work_count: usize,
+    pub transitive_work_count: usize,
+    pub direct_goal_count: usize,
+    pub transitive_goal_count: usize,
+    pub direct_work_by_status: crate::blockers::WorkByStatus,
+    pub transitive_work_by_status: crate::blockers::WorkByStatus,
+    pub dependencies_cleared_direct_count: usize,
+    pub unmet_dependency_count: usize,
+    pub unresolved_dependency_count: usize,
+    pub attention: Attention,
+    pub awaiting_user: bool,
+    /// The task's declared resource needs; never the park's host requirement.
+    pub task_needs: Vec<String>,
+    /// A deferral still in the future.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub park: Option<ParkInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim: Option<ClaimInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub direct_examples: Vec<TaskId>,
+}
+
+#[derive(Serialize)]
+pub struct BlockersOut {
+    pub observed_at: String,
+    pub coverage: crate::blockers::Coverage,
+    pub park_evidence: ParkEvidence,
+    pub goal_detection: &'static str,
+    pub ranking: &'static str,
+    pub total: usize,
+    pub shown: usize,
+    pub omitted: usize,
+    pub limit: usize,
+    pub blockers: Vec<BlockerRow>,
+    pub unresolved: Vec<crate::blockers::UnresolvedDependency>,
+    pub cycles: Vec<Vec<TaskId>>,
+    pub warnings: Vec<String>,
+}
+
 /// One variant per command payload. Later tasks add variants; `pretty` grows with them.
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -1295,6 +1369,7 @@ pub enum Output {
     Claims(ClaimsOut),
     Prime(Box<PrimeOut>),
     Lanes(LanesOut),
+    Blockers(Box<BlockersOut>),
     Graph(GraphOut),
     Check(CheckOut),
     Tree(TreeOut),
@@ -1700,6 +1775,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             rendered
         }
         Output::Lanes(o) => lane_table(&o.lanes, painter, layout, None, true, false),
+        Output::Blockers(o) => crate::blockers_text::render(o, painter, layout),
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
             let mut rendered = String::new();
@@ -1977,6 +2053,7 @@ pub fn needs_theme(out: &Output) -> bool {
         Output::List(_)
             | Output::Prime(_)
             | Output::Lanes(_)
+            | Output::Blockers(_)
             | Output::Tree(_)
             | Output::Parked(_)
             | Output::Quiet(_)
@@ -1994,6 +2071,7 @@ pub fn shows_priority(out: &Output) -> bool {
         Output::List(_)
             | Output::Prime(_)
             | Output::Lanes(_)
+            | Output::Blockers(_)
             | Output::Tree(_)
             | Output::Quiet(_)
             | Output::Show(_)
@@ -2356,6 +2434,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Claims(_) => Vec::new(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Lanes(o) => o.warnings.clone(),
+        Output::Blockers(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
         Output::Check(o) => o
             .warnings

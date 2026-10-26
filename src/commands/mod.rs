@@ -1,5 +1,6 @@
 pub mod add;
 pub mod attach;
+pub mod blockers;
 pub mod check;
 pub mod claims;
 pub mod commit;
@@ -2297,6 +2298,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
         Command::Shelve { id, wake } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake),
         Command::Unshelve { id } => status::unshelve(open_id_write_ctx(dir, &id)?, id),
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
+        Command::Blockers(args) => blockers::run(open_read_ctx(dir, &args.scope)?, args),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
         Command::Commit { project } => {

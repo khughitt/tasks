@@ -699,6 +699,16 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["blockers"]
+summary = "Rank unmet prerequisites by observed downstream impact"
+options = [
+  { shared = "limit", value = "int", default = "20" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
+]
+
+[[cli.tasks.commands]]
 path = ["check"]
 verb = "check"
 summary = "Validate every task file. Prints nothing when there is nothing to report"
@@ -942,6 +952,13 @@ options = [
 path = ["ingest"]
 protocol = "relay observer envelope on stdin"
 summary = "append one relay observer envelope from stdin"
+
+[[cli.obs.commands]]
+path = ["cleanup"]
+summary = "inventory worktrees and explain cleanup findings"
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+]
 
 [[cli.obs.commands]]
 path = ["join"]
