@@ -62,7 +62,10 @@ fixture failure is tracked as tasks-2518ad; a diagnostic run with
 without changing hooks. Do not claim the normal environment is fixed. Any new test
 must use an explicitly constructed subprocess environment from its first RED run.
 
-Task 1 can proceed after this plan is approved. Task 2 also waits on tasks-e8d471
+The blocked implementation records are tasks-ceee0d (Task 1), tasks-5d0d99
+(Task 2), tasks-a7db30 (Task 3), plus ops-b36208 for vocabulary. After plan approval,
+the controller unblocks these four records; existing dependency edges remain.
+Task 1 can proceed then. Task 2 also waits on tasks-e8d471
 landing in the code base used for execution; a done record on an unmerged branch
 does not satisfy that integration prerequisite. Reuse its captured incoming-scan
 work through the stable `Scope::scan() -> Result<Vec<Task>>` seam; inspect any
@@ -70,8 +73,8 @@ landed index helper before using it, rather than guessing its future signature.
 The graph engine still owns move-aware transitive analysis, not another registry
 walker. tasks-e90b4f's public-contract work is not a prerequisite.
 
-Task 3 waits for Task 2 and a scoped ops vocabulary task. File that prerequisite
-as blocked for this plan's review, with source `tasks-e637a1:blockers-vocabulary`.
+Task 3 waits for Task 2 and ops-b36208. That prerequisite is blocked for this plan's
+review, with source `tasks-e637a1:blockers-vocabulary`.
 Its concrete deliverable in ops is the following command row in cli.toml, with
 a `tests/test_cli.py::CliTable` assertion for it:
 
