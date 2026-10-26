@@ -4,7 +4,7 @@ title: "A recurring task cannot be given a first due date: add refuses --defer t
 status: idea
 priority: 2
 created: 2026-10-26T14:47:22Z
-updated: 2026-10-26T15:35:17Z
+updated: 2026-10-26T15:36:10Z
 depends: []
 parent: tasks-46d207
 tags: [feedback, gap, "from:obs"]
@@ -13,6 +13,10 @@ origin: agent
 ---
 
 Action: filing a monthly reassessment task whose first check should fall a month from now, using add --every 30d --defer <date>. The add was refused because defer and every cannot both be set, and a new recurrence is ready immediately. Expected a way to start a recurrence on a chosen date. Workaround: a plain deferred task whose body tells each occurrence to reset its status and re-defer by 30 days, in two commands.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-26-first-recurrence-date-brief.md — first-occurrence alternatives and open lifecycle decisions
 
 ## Notes
 
