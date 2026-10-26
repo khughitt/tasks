@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-047ad0
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:20:57Z
+updated: 2026-10-26T15:21:00Z
 started: 2026-10-26T15:12:35Z
 depends: []
 tags: [testing]
@@ -43,3 +43,4 @@ Done: common::git cannot inherit repository selectors or host environment/config
 - 2026-10-26T15:18:00Z (fix/tasks-047ad0): attached: fixture-isolation-verification.txt (5253 bytes): Verification excerpts: 1744-test baseline, expected RED misrouting, GREEN regression, 1741-test fast suite (4 ignored), and successful just check; build chatter omitted.
 - 2026-10-26T15:20:54Z (fix/tasks-047ad0): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-26T15:20:57Z (fix/tasks-047ad0): Ruling: exclude production Git isolation and CLI behavior from this review at d082ffee729a780303f3a22bcc6c12128dc9a6e1. Why: unchanged and explicitly outside tasks-047ad0. Cost: production isolation receives no assurance from this fixture-only fix. Ruling: exclude independent Git helpers elsewhere at the same revision. Why: this task and the prior review bound the work to common::git and connected callers. Cost: those independent helpers may still inherit environment and need separate work.
+- 2026-10-26T15:21:00Z (fix/tasks-047ad0): attached: fixture-isolation-review-report.md (2462 bytes): Full read-only whole-branch review by codex/gpt-6.1-sol, frozen d082ffee729a780303f3a22bcc6c12128dc9a6e1: Ship, no findings; 6 independent tests passed.
