@@ -1,13 +1,15 @@
 ---
 id: tasks-047ad0
 title: Isolate the shared Git helper used by CLI integration fixtures
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:01:29Z
+updated: 2026-10-26T15:12:35Z
+started: 2026-10-26T15:12:35Z
 depends: []
 tags: [testing]
 source: "tasks-284d9b:shared-git-fixture-follow-up"
@@ -31,3 +33,5 @@ Done: common::git cannot inherit repository selectors or host environment/config
 - 2026-10-25T12:31:46Z (main): concerns: tasks-171b8b extension — Extend the completed linked/record-commit fixture hardening to the shared CLI/refs Git helper that its review deliberately excluded.
 - 2026-10-25T12:31:50Z (main): Duplicate check: open fixture/environment tasks in this project and all-project searches for the shared helper found no matching task. tasks-79a907 covers the isolated record-commit unit runner; ops-5dc3c0 covers separate Python fixture helpers, so neither duplicates this Rust helper fix. No hostile-environment reproduction has been run yet; only code inspection was needed to file the bounded follow-up.
 - 2026-10-26T15:01:29Z (main): tasks-2518ad (2b6625e) moved tests/move.rs off its private leaky git helper and made git_fixture::hostile_parent's fake global config carry a failing config-based pre-commit hook, so a hostile-parent regression for common::git also catches inherited host hooks.
+- 2026-10-26T15:12:35Z (main): started
+  provenance: {"harness_session":"codex:01a178c4-420d-75e3-a07d-83976bde0d40","harness_session_source":"CODEX_THREAD_ID"}
