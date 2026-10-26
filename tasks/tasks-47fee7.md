@@ -1,15 +1,17 @@
 ---
 id: tasks-47fee7
 title: Correct the README relay recovery summary for PID namespaces
-status: doing
+status: done
 priority: 3
 size: xs
 complexity: low
 process: direct
 owner: docs/readme-relay-recovery
 created: 2026-10-26T21:22:02Z
-updated: 2026-10-26T23:20:24Z
+updated: 2026-10-26T23:23:06Z
 started: 2026-10-26T23:20:10Z
+completed: 2026-10-26T23:23:06Z
+closed: 2026-10-26T23:23:06Z
 depends: []
 tags: [docs]
 source: tasks-d5ddb4
@@ -31,4 +33,8 @@ Where to look: README.md Relay identity, src/relay/resolve.rs SET_EXPLICIT, SET_
 - 2026-10-26T23:20:10Z (main): started
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T23:20:24Z (docs/readme-relay-recovery): resumed
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:23:06Z (docs/readme-relay-recovery): done
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:23:06Z (docs/readme-relay-recovery): README Relay identity recovery summary no longer claims every error prescribes TASKS_SESSION plus TASKS_SESSION_PID; it keeps TASKS_SESSION's precedence and the provenance limit, and names the PID-namespace refusal's TASKS_SESSION-only advice (matches src/relay/resolve.rs SET_EXPLICIT/SET_SESSION_ONLY)
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
