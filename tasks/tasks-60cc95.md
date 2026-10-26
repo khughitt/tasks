@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-25T17:19:48Z
-updated: 2026-10-26T15:20:12Z
+updated: 2026-10-26T15:20:30Z
 depends: []
 parent: tasks-a7460c
 tags: [feedback, friction, "from:ops"]
@@ -33,3 +33,5 @@ Verification: Start with an isolated CLI regression that keeps a plan in the sou
 
 - 2026-10-25T17:19:48Z (feedback): created
   provenance: {"harness_session":"claude-code:d825d1b2-617b-4da6-a70a-92adf0d4852f","harness_session_source":"CLAUDE_CODE_SESSION_ID","origin":"agent"}
+- 2026-10-26T15:20:30Z (main): scope: scoped; P2/s/mid/direct under tasks-a7460c; preserve source documents and tombstone links, exclude moved-only plans from heading-coverage audits while retaining non-moved coverage and main-checkout fallback; source inspection at f1d45f2 establishes unfiltered linked_plans collection and the final unlinked_step loop, no runtime reproduction; origin: filing matched claude-code:d825d1b2-617b-4da6-a70a-92adf0d4852f call line 405 and full created result line 411, id and at match 2026-10-25T17:19:48Z; human line 10 only selected an existing task, agent recorded migration cleanup and filed the incident at lines 386-411, so origin agent stands; exact historical move sequence remains unverified and current move is childless-only; no origin_session on occurrence, no older-request stage; brief: docs/notes/2026-10-15-branch-only-document-links-brief.md
+  provenance: {"harness_session":"codex:01a178c5-fc4f-79b0-847a-9aa4826e274e","harness_session_source":"CODEX_THREAD_ID"}
