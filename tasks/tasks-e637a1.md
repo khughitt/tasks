@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:28:47Z
+updated: 2026-10-26T00:28:49Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -138,3 +138,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:28:43Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-fast.log", "state": "kept", "verification": "verified", "purpose": "Plan-phase existing fast-suite check with isolated Git configuration: 1728 passed, 4 ignored; not tests of unimplemented report", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "4a10e9c341b342154a78dbb1ea9ad780bb16b03607d2d84ebd8ada3627031bb3"}
 - 2026-10-26T00:28:45Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-r3-normal-fast.log", "state": "kept", "verification": "verified", "purpose": "Normal fast-suite diagnostic: exact known three move-test host-hook failures, 1725 passed and 4 ignored; not a passing suite", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "e48a835d68c27bbeec6eb5c0b6b8371409592fd18b0f2c6eb149e849dbc07df8"}
 - 2026-10-26T00:28:47Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-r3-isolated-fast.log", "state": "kept", "verification": "verified", "purpose": "Required isolated fast-suite comparison: 1728 passed, 4 ignored, exit 0", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "e99e1a52c1f6a762611f64f536d6758a4ce835d6e63f85dbb36f819fa0fc597c"}
+- 2026-10-26T00:28:49Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-e637a1", "state": "kept", "verification": "verified", "purpose": "Await user review of revised plan 327fe22 including spec-level Ruling S1; accepted spec bytes unchanged, three child steps and ops prerequisite blocked. Full reviews and ledger attached, raw suite evidence hashed. No host pointers changed.", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "After plan approval, reviewed implementation and integration, inspect ignored files, preserve needed evidence, run tt-report and host-pointer checks before removal"}
