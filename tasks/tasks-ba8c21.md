@@ -1,15 +1,17 @@
 ---
 id: tasks-ba8c21
 title: Explain the idea-to-ready lifecycle in the README
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: docs/readme-docs
 created: 2026-10-25T18:15:24Z
-updated: 2026-10-26T23:26:21Z
+updated: 2026-10-26T23:30:00Z
 started: 2026-10-26T23:26:17Z
+completed: 2026-10-26T23:30:00Z
+closed: 2026-10-26T23:30:00Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, gap, "from:lore"]
@@ -38,4 +40,8 @@ A user asked how scoping differs from research, what decides when a brief or a r
 - 2026-10-26T23:26:17Z (main): started
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T23:26:21Z (docs/readme-docs): resumed
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:30:00Z (docs/readme-docs): done
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:30:00Z (docs/readme-docs): README Concepts gains 'From idea to ready work': capture, scope verdicts, briefs and research tasks, research as ordinary ready work, waking via dependencies and --no-reviewed findings, the next /scope reusing the handoff, and re-scoping todo/blocked work; linked from Statuses and Agent skills, procedure left in skills/scope/SKILL.md
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
