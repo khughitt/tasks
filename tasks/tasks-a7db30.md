@@ -1,17 +1,15 @@
 ---
 id: tasks-a7db30
 title: Ship the scoped CLI report and user guidance
-status: done
+status: todo
 priority: 2
 size: m
 complexity: high
 process: direct
 owner: design/tasks-e637a1
 created: 2026-10-26T00:08:28Z
-updated: 2026-10-26T01:22:39Z
+updated: 2026-10-26T01:34:41Z
 started: 2026-10-26T01:09:43Z
-completed: 2026-10-26T01:22:39Z
-closed: 2026-10-26T01:22:39Z
 depends: [ops-b36208, tasks-5d0d99]
 parent: tasks-e637a1
 tags: []
