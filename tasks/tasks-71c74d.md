@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-25T21:37:44Z
-updated: 2026-10-25T22:02:32Z
+updated: 2026-10-26T01:55:48Z
 depends: []
 parent: tasks-6166d6
 tags: []
@@ -38,3 +38,4 @@ Closeout: record the design/plan result on this task and in the brief. File acce
   provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
 - 2026-10-25T22:02:32Z (main): scope: rescoped; split the combined design from 7085e03 into P2/m/high/planned early dependency-event and confirmed-wait recording; collection first, independently of report/backfill, then supported duration/reconfirmation reporting; cover all mutation paths and interval/identity changes, distinct checked scope passes, unknown coverage and optional git reconstruction; replaced obsolete Ideas it wakes because tasks-e637a1 is now a todo sibling, not a waiting idea; code premises rechecked against 7085e03; brief: docs/notes/2026-10-25-blocker-ranking-brief.md
   provenance: {"harness_session":"codex:01a174fb-0fa0-7571-93ce-b3218da174d1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T01:55:48Z (main): tasks blockers shipped (merge 074672f) with blocking-since and confirmed-pass metrics reported as unknown and a permanent warning saying so. When this collection lands, the report needs those fields (spec d2940d0 forbids zero-filled placeholders), and the permanent warning should be reconsidered: the final reviewer noted it duplicates the pretty footer on every run.
