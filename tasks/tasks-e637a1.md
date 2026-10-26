@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:39:55Z
+updated: 2026-10-26T00:45:33Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -160,3 +160,5 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:39:55Z (design/tasks-e637a1): parked (waiting on agent, session): Fresh agent resumes .worktrees/tasks-e637a1, reads approved spec d2940d0 with approved plan 327fe22 and S1, invokes executing-plans Setup, runs the deferred full baseline under the approved exact normal/isolated test rules before any product-code edit, then starts tasks-ceee0d and executes the approved plan natively with final independent review. Task2 waits on Task1; Task3 on Task2 plus landed ops-b36208 vocabulary. Keith requested this session park after approval; no further user approval is needed to start Setup.
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T00:45:33Z (design/tasks-e637a1): resumed
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
