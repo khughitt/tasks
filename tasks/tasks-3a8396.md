@@ -1,15 +1,17 @@
 ---
 id: tasks-3a8396
 title: Address the blockers report's deferred review minors
-status: doing
+status: done
 priority: 3
 size: s
 complexity: low
 process: direct
 owner: fix/tasks-3a8396
 created: 2026-10-26T01:55:16Z
-updated: 2026-10-26T02:18:07Z
+updated: 2026-10-26T02:18:09Z
 started: 2026-10-26T01:59:24Z
+completed: 2026-10-26T02:18:09Z
+closed: 2026-10-26T02:18:09Z
 depends: []
 tags: [cli]
 source: tasks-e637a1
@@ -48,3 +50,7 @@ Verification: just test-one --test blockers and blockers_ green, just test-fast;
 - 2026-10-26T02:17:32Z (fix/tasks-3a8396): attached: cleanup-review-report.md (3128 bytes): Full independent whole-branch review of 8cd0814 by codex/gpt-6.1-sol: accepted, no findings; saved validation evidence inspected, suites not rerun by reviewer
 - 2026-10-26T02:17:34Z (fix/tasks-3a8396): attached: review-ledger.md (1198 bytes): Controller dispositions R1-R4 for review exclusions at 8cd0814, each with reason and cost; no deferred minors or corrective rounds
 - 2026-10-26T02:18:07Z (fix/tasks-3a8396): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-3a8396","state":"kept","verification":"verified","purpose":"Reviewed cleanup 8cd0814 ready for immediate local merge, CLI reinstall and removal in this turn. Only ignored target/ (regenerable builds, confined install and repeatable test/mutation logs) and .superpowers/ (review report and ledger attached byte-identically) require disposition. No submodules or host pointers; tt-report ran. Attached review files verified SHA-256 0ba1d5d653220fc6224aa27c6cf2faf56f027c0530e22fa294c844151bb3f747 and 565eada224e7073fdae55d4c0f194e1e080181027458b53152f2ff3265449826. No off-tree evidence or task scratch directory created.","next_owner":"session:codex:01a175ed-7097-7802-a439-c32c236ee97d","cleanup_trigger":"After authorized local integration and reinstall, confirm merged clean branch, attachments, ignored-file dispositions and no host pointers; remove this task worktree and branch"}
+- 2026-10-26T02:18:09Z (fix/tasks-3a8396): done
+  provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T02:18:09Z (fix/tasks-3a8396): Addressed all eight blockers review minors and corrected spec approval/shipment status in 8cd0814; independent codex/gpt-6.1-sol review accepted with no findings. Isolated full baseline 1743 passed; final isolated fast suite 1739 passed/4 ignored; focused blockers, resolution and parser checks passed. Known normal-environment move-fixture failures remain tracked in tasks-2518ad. Full review and exclusion rulings attached.
+  provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
