@@ -390,18 +390,17 @@ pub fn id_of(value: serde_json::Value) -> String {
     value["id"].as_str().unwrap().to_string()
 }
 
-/// Run git in `dir` under a fixed identity, asserting success.
+/// Run git with a temporary HOME and an isolated environment, asserting success.
 pub fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
+    let home = tempfile::tempdir().unwrap();
+    let output = git_fixture::command(home.path(), dir)
         .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@e")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@e")
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {output:?}");
+    if args.first() == Some(&"init") {
+        git_fixture::assert_repo(home.path(), dir);
+    }
 }
 
 /// Runs `check` in `dir` and returns its exit code and parsed findings (`null` when clean).

@@ -12,9 +12,14 @@ pub fn command(home: &Path, dir: &Path) -> Command {
 
 /// Check both boundaries before any fixture mutation beyond initialization.
 pub fn assert_repo(home: &Path, dir: &Path) {
+    assert_worktree(home, dir, dir);
+}
+
+/// A linked worktree's Git directories belong to its owned main fixture.
+pub fn assert_worktree(home: &Path, main: &Path, dir: &Path) {
     let read = |arg| {
         let out = command(home, dir)
-            .args(["rev-parse", arg])
+            .args(["rev-parse", "--path-format=absolute", arg])
             .output()
             .unwrap();
         assert!(out.status.success(), "git rev-parse {arg}: {out:?}");
@@ -24,9 +29,11 @@ pub fn assert_repo(home: &Path, dir: &Path) {
         .canonicalize()
         .unwrap()
     };
+    let main = main.canonicalize().unwrap();
     let dir = dir.canonicalize().unwrap();
     assert_eq!(read("--show-toplevel"), dir);
-    assert!(read("--absolute-git-dir").starts_with(&dir));
+    assert!(read("--absolute-git-dir").starts_with(&main));
+    assert!(read("--git-common-dir").starts_with(&main));
 }
 
 /// Run the named test again with hook selectors pointing only at owned foreign state.
