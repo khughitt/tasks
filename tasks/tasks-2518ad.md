@@ -4,7 +4,7 @@ title: Move integration fixtures inherit host Git hooks and fail during seed com
 status: idea
 priority: 2
 created: 2026-10-25T22:41:10Z
-updated: 2026-10-25T22:41:10Z
+updated: 2026-10-26T02:04:07Z
 depends: []
 tags: [feedback, friction, "from:tasks"]
 agent: codex
@@ -17,3 +17,7 @@ The git fixture helper sets author and committer identity but inherits HOME, XDG
 
 - 2026-10-25T22:41:10Z (feedback): created
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
+- 2026-10-26T02:04:07Z (feedback): feedback from tasks: Move integration fixtures inherit host Git hooks and fail during seed commits
+  provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T02:04:07Z (feedback): detail from tasks: Full baseline reproduced the same three seed-commit failures: 1740 tests passed and 3 failed when fixture Git inherited the host identity hook; isolated global and system Git configuration is being used for the comparison. No fixture remediation is included in the current cleanup.
+  provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
