@@ -1,17 +1,15 @@
 ---
 id: tasks-5d0d99
 title: Compute downstream impact and honest graph coverage
-status: done
+status: todo
 priority: 2
 size: m
 complexity: high
 process: direct
 owner: design/tasks-e637a1
 created: 2026-10-26T00:08:24Z
-updated: 2026-10-26T01:05:01Z
+updated: 2026-10-26T01:34:37Z
 started: 2026-10-26T00:56:04Z
-completed: 2026-10-26T01:05:01Z
-closed: 2026-10-26T01:05:01Z
 depends: [tasks-ceee0d]
 parent: tasks-e637a1
 tags: []
