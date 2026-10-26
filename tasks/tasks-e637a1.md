@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:13:19Z
+updated: 2026-10-26T00:13:21Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -113,3 +113,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:13:16Z (design/tasks-e637a1): review: plan round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-26T00:13:17Z (design/tasks-e637a1): attached: plan-self-review-round-2-report.md (2560 bytes): Final plan self-review of cd80149 by codex/gpt-6.1-sol: no findings; confirms required reinstall after integration, user plan approval pending.
 - 2026-10-26T00:13:19Z (design/tasks-e637a1): attached: review-ledger-plan-2.md (3988 bytes): Final ledger through spec round 5 and plan self-review round 2; cd80149 is the frozen plan for user review, no deferred findings.
+- 2026-10-26T00:13:21Z (design/tasks-e637a1): Final implementation-plan review revision: repository tasks, cd801493b06883d4415457f45d71840a94f505ad:docs/plans/2026-10-25-blocker-ranking.md (supersedes 1b1a11c). Preserves required cargo install from main after integration, without another approval gate. Plan self-reviewed, not independently reviewed; all three steps and ops-b36208 remain blocked pending separate user plan approval. No implementation has begun.
