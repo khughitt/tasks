@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-3a8396
 created: 2026-10-26T01:55:16Z
-updated: 2026-10-26T02:03:56Z
+updated: 2026-10-26T02:05:39Z
 started: 2026-10-26T01:59:24Z
 depends: []
 tags: [cli]
@@ -42,3 +42,4 @@ Verification: just test-one --test blockers and blockers_ green, just test-fast;
   provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T02:01:46Z (fix/tasks-3a8396): Process direct; workspace .worktrees/tasks-3a8396 on fix/tasks-3a8396. Verified source final-review-report.md and rereview-round-1-report.md against code: eight minors map to help, diagnostic spellings, scan-first lookup, shared fixture helpers and row/width/footer assertions; spec still carries proposed status. Surface audit reads get_about only, so long_about needs no vocabulary change. Share the existing linear scan lookup rather than add an index or change all picker callers; canonical counts remain unchanged, only diagnostic rows expand. Confined README cargo install completed; full just test baseline running before edits.
 - 2026-10-26T02:03:56Z (fix/tasks-3a8396): Baseline normal just test: exit 101, 1740 passed/3 failed/0 ignored. Exact known tasks-2518ad failures: correction_i1_move_stamp_keeps_identical_sibling_stale, move_from_a_source_worktree_refuses, move_explain_classifies_source_worktree_refusal; all at tests/move.rs:1717 seed git commit refused by inherited host git-identity-check (records_moved). No code edits. Isolated GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test running to establish clean full baseline.
+- 2026-10-26T02:05:39Z (fix/tasks-3a8396): Clean full baseline: GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test exit 0, 1743 passed/0 failed/0 ignored. Normal baseline limitation reproduced and recurred on tasks-2518ad. First regression changes assert unavailable history metrics in rendered blockers --help and both canonical/alias missing-reference diagnostic rows while keeping own unresolved count 1.
