@@ -1,15 +1,17 @@
 ---
 id: tasks-ceee0d
 title: Share dependency resolution and preserve caller policies
-status: doing
+status: done
 priority: 2
 size: s
 complexity: high
 process: direct
 owner: design/tasks-e637a1
 created: 2026-10-26T00:08:20Z
-updated: 2026-10-26T00:49:07Z
+updated: 2026-10-26T00:55:15Z
 started: 2026-10-26T00:49:07Z
+completed: 2026-10-26T00:55:15Z
+closed: 2026-10-26T00:55:15Z
 depends: []
 parent: tasks-e637a1
 tags: []
@@ -31,4 +33,8 @@ Extract the shared resolution and three-way verdict with a lookup parameter; pre
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:36:39Z (design/tasks-e637a1): Keith approved plan 327fe22 and Ruling S1 in the controller session; review gate released, remaining dependencies unchanged. Execution is reserved for a fresh session; no Setup or implementation performed here.
 - 2026-10-26T00:49:07Z (design/tasks-e637a1): started
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T00:55:15Z (design/tasks-e637a1): done
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T00:55:15Z (design/tasks-e637a1): Shared src/dependency.rs resolve (canonicalized lookup at every move hop) and three-way verdict; ready, closeout, parked, lanes, review::Deps and open_deps migrated with their lookup authority unchanged; unit matrix and disk-backed worktree/registered-root characterization test green (ab5f769).
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
