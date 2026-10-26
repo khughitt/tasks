@@ -1,13 +1,13 @@
 ---
 id: tasks-5d0d99
 title: Compute downstream impact and honest graph coverage
-status: idea
+status: blocked
 priority: 2
 size: m
 complexity: high
 process: direct
 created: 2026-10-26T00:08:24Z
-updated: 2026-10-26T00:08:24Z
+updated: 2026-10-26T00:08:26Z
 depends: [tasks-e8d471, tasks-ceee0d]
 parent: tasks-e637a1
 tags: []
@@ -25,3 +25,5 @@ Implement canonical graph counts, status breakdowns, rank, cycles and partial co
 
 - 2026-10-26T00:08:24Z (add): created
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID","origin":"agent"}
+- 2026-10-26T00:08:26Z (design/tasks-e637a1): Draft implementation plan is awaiting separate user review; after approval the controller unblocks this step, preserving implementation dependencies.
+  provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
