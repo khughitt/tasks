@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:39:20Z
+updated: 2026-10-26T00:39:22Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -149,3 +149,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:38:00Z (design/tasks-e637a1): attached: review-ledger-plan-approved.md (6224 bytes): Approval ledger: plan 327fe22 and Ruling S1 approved by Keith after independent round 5; no deferred findings; fresh-session execution requested.
 - 2026-10-26T00:39:18Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-move-check.log", "state": "kept", "verification": "verified", "purpose": "Reproduced fixture isolation failure, 87 passed and 3 failed; tracked as tasks-2518ad", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "18697a3fcca8ee985336f163235b0ef7dd7397e60cd603f6f68412699cf69440"}
 - 2026-10-26T00:39:20Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-move-isolated-check.log", "state": "kept", "verification": "verified", "purpose": "Focused isolated Git-config comparison, 90 tests passed", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "935b29cc5be907860c31b05c0dfd8bae3f847bc035a69e72595323dc344a2150"}
+- 2026-10-26T00:39:22Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-fast-isolated-check.log", "state": "kept", "verification": "verified", "purpose": "Fast-suite verification with isolated Git config, 1728 passed and 4 ignored", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "3a5aa386968ebb3d32507c08cbc5f94a43316b91e1911ab0510c939ff4b9d5c5"}
