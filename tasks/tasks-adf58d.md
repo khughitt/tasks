@@ -4,8 +4,9 @@ title: "A recurring task cannot be given a first due date: add refuses --defer t
 status: idea
 priority: 2
 created: 2026-10-26T14:47:22Z
-updated: 2026-10-26T14:47:22Z
+updated: 2026-10-26T15:35:17Z
 depends: []
+parent: tasks-46d207
 tags: [feedback, gap, "from:obs"]
 agent: claude-code/claude-opus-5-5
 origin: agent
