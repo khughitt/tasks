@@ -4,8 +4,8 @@ title: Show inherited urgency in ready without reordering it
 status: idea
 priority: 2
 created: 2026-10-26T01:55:21Z
-updated: 2026-10-26T14:58:20Z
-depends: []
+updated: 2026-10-26T15:00:32Z
+depends: [crew-a0952b]
 parent: tasks-46d207
 tags: [cli]
 source: tasks-e637a1
