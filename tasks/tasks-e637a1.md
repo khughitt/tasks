@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:28:05Z
+updated: 2026-10-26T00:28:34Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -130,3 +130,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:28:02Z (design/tasks-e637a1): attached: plan-round-3-report.md (4997 bytes): Full supplied review of plan cd80149: claude-code/claude-opus-5-5, Important 2 and Minor 3, all addressed by 327fe22.
 - 2026-10-26T00:28:04Z (design/tasks-e637a1): attached: plan-round-4-self-review-report.md (2536 bytes): Self-review of revised plan 327fe22 by codex/gpt-6.1-sol: no remaining findings; observed suite results recorded; user approval pending.
 - 2026-10-26T00:28:05Z (design/tasks-e637a1): attached: review-ledger-plan-4.md (5436 bytes): Ledger through plan round 4, including spec-level Ruling S1 with why, cost and revision references; no deferred minors.
+- 2026-10-26T00:28:34Z (design/tasks-e637a1): Revised plan frozen for user review: repository tasks, 327fe22b8fa7676dcc153ef6bd2d181a8d1e3be1:docs/plans/2026-10-25-blocker-ranking.md (supersedes cd80149). All Important 2 and Minor 3 findings addressed; self-review round 4 accepts with none remaining. Ruling S1 and its why/cost/revision references are in the plan and attached ledger; task2 hard edge removed and registered-root coordination note delivered to tasks-e8d471. Normal just test-fast exited 101 with 1725 passed/3 exact known move failures/4 ignored, all three at the known identity-hook seed commit; isolated fast exited 0 with 1728 passed/4 ignored. Document/pre-commit checks passed. No product code changed. The revised-plan review includes the spec-level sequencing amendment; all implementation records remain blocked pending approval.
