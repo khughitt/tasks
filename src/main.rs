@@ -1,4 +1,7 @@
 mod attachments;
+// Unused by the binary until the `blockers` command lands (blocker-ranking plan, Task 3).
+#[cfg_attr(not(test), allow(dead_code))]
+mod blockers;
 mod claims;
 mod cli;
 mod clipboard;
