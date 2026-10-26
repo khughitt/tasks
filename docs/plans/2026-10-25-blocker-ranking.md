@@ -323,8 +323,11 @@ Rebuild CLI changes under target/local-install with the confined locked install,
 and smoke-test that explicit binary with isolated fixture state. It must exercise
 local/group/all-projects coverage, user-held evidence and limit0 through their
 verdict, without shared launchers or live foreign records. Record real results;
-this plan asserts no measured latency. A shared host install is a separate approved
-rollout after integration, not an implicit consequence of approving this plan.
+this plan asserts no measured latency. After the reviewed branch is integrated,
+run the repository's required `cargo install --path .` from the main checkout,
+then verify that the installed CLI exposes blockers help and its read contract.
+The guide already authorizes this reinstall after CLI changes. Never install the
+worktree into a shared host launcher while it is serving as an isolated live test.
 
 Complete step records on their branch before merge. Keep tasks-e637a1 open while
 children or review gates remain; update the brief with shipped results only when
