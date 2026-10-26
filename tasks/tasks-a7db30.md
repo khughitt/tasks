@@ -1,13 +1,13 @@
 ---
 id: tasks-a7db30
 title: Ship the scoped CLI report and user guidance
-status: blocked
+status: todo
 priority: 2
 size: m
 complexity: high
 process: direct
 created: 2026-10-26T00:08:28Z
-updated: 2026-10-26T00:36:47Z
+updated: 2026-10-26T00:36:49Z
 depends: [ops-b36208, tasks-5d0d99]
 parent: tasks-e637a1
 tags: []
