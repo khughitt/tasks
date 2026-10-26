@@ -4,14 +4,19 @@ title: Detached record commits cannot resolve a newly linked document in the inv
 status: idea
 priority: 2
 created: 2026-10-26T11:31:17Z
-updated: 2026-10-26T11:31:17Z
+updated: 2026-10-26T15:19:17Z
 depends: []
+parent: tasks-a73dce
 tags: [feedback, friction, "from:relay"]
 agent: codex
 origin: agent
 ---
 
 Linking a new worktree-only spec succeeds but the automatic record commit runs validation from the records repository and reports doc_missing. The code worktree's own tasks check succeeds. The task skill allows document resolution through the invoking worktree, while automatic commits lose that context; moved the new working document into records storage to recover without bypassing validation.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-15-branch-only-document-links-brief.md — detached automatic commit evidence and the retained-document question
 
 ## Notes
 
