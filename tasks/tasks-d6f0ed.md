@@ -1,15 +1,17 @@
 ---
 id: tasks-d6f0ed
 title: Clarify that automatic record commits exclude configuration writes
-status: doing
+status: done
 priority: 3
 size: xs
 complexity: low
 process: direct
 owner: docs/readme-docs
 created: 2026-10-10T17:51:21Z
-updated: 2026-10-26T23:26:19Z
+updated: 2026-10-26T23:29:54Z
 started: 2026-10-26T23:26:15Z
+completed: 2026-10-26T23:29:54Z
+closed: 2026-10-26T23:29:54Z
 depends: []
 tags: [docs]
 source: "tasks-6939f6:final-review:M2"
@@ -24,4 +26,8 @@ Deferred final-review Minor M2 from tasks-6939f6: README and the tasks skill inc
 - 2026-10-26T23:26:15Z (main): started
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T23:26:19Z (docs/readme-docs): resumed
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:29:54Z (docs/readme-docs): done
+  provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T23:29:54Z (docs/readme-docs): README Record commits and the tasks skill now say each write commits its records and attachment changes only; init, rename, retire and unretire leave tasks/.config.toml for the user or the tasks commit sweep (matches Command::commit_verb and the written.rs journal callers)
   provenance: {"harness_session":"claude-code:ff0bbf59-4077-4302-b69b-3dac4260dec2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
