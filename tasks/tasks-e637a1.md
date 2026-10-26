@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:28:51Z
+updated: 2026-10-26T00:36:03Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -140,4 +140,6 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:28:47Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-r3-isolated-fast.log", "state": "kept", "verification": "verified", "purpose": "Required isolated fast-suite comparison: 1728 passed, 4 ignored, exit 0", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "e99e1a52c1f6a762611f64f536d6758a4ce835d6e63f85dbb36f819fa0fc597c"}
 - 2026-10-26T00:28:49Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "worktree", "path": ".worktrees/tasks-e637a1", "state": "kept", "verification": "verified", "purpose": "Await user review of revised plan 327fe22 including spec-level Ruling S1; accepted spec bytes unchanged, three child steps and ops prerequisite blocked. Full reviews and ledger attached, raw suite evidence hashed. No host pointers changed.", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "After plan approval, reviewed implementation and integration, inspect ignored files, preserve needed evidence, run tt-report and host-pointer checks before removal"}
 - 2026-10-26T00:28:51Z (design/tasks-e637a1): parked (waiting on user, review): User reviews repository tasks frozen revised plan 327fe22b8fa7676dcc153ef6bd2d181a8d1e3be1:docs/plans/2026-10-25-blocker-ranking.md including Ruling S1 removing unused tasks-e8d471 sequencing; on approval agent unblocks the three implementation steps and ops-b36208, preserves Task1->Task2->Task3 and ops vocabulary gates, runs the deferred full baseline with the documented isolated/normal classification, then implements natively in .worktrees/tasks-e637a1 with final independent review.
+  provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T00:36:03Z (design/tasks-e637a1): resumed
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
