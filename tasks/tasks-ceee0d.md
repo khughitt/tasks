@@ -7,7 +7,7 @@ size: s
 complexity: high
 process: direct
 created: 2026-10-26T00:08:20Z
-updated: 2026-10-26T00:08:22Z
+updated: 2026-10-26T00:36:36Z
 depends: []
 parent: tasks-e637a1
 tags: []
@@ -19,7 +19,7 @@ plan: docs/plans/2026-10-25-blocker-ranking.md
 step: "Task 1: Share dependency resolution and preserve caller policies"
 ---
 
-Extract the shared resolution and three-way verdict with a lookup parameter; preserve scan-first reads, Resolver local/foreign authority, closed timestamps and current caller policies. Draft implementation plan is awaiting separate user review; after approval the controller unblocks this step, preserving implementation dependencies.
+Extract the shared resolution and three-way verdict with a lookup parameter; preserve scan-first reads, Resolver local/foreign authority, closed timestamps and current caller policies. Plan 327fe22 approved by Keith, including Ruling S1. The review gate is released; preserve the remaining implementation dependency edges and start execution in a fresh session under the approved plan.
 
 ## Notes
 
