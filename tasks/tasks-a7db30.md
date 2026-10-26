@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: direct
 created: 2026-10-26T00:08:28Z
-updated: 2026-10-26T00:08:30Z
+updated: 2026-10-26T00:36:47Z
 depends: [ops-b36208, tasks-5d0d99]
 parent: tasks-e637a1
 tags: []
@@ -19,7 +19,7 @@ plan: docs/plans/2026-10-25-blocker-ranking.md
 step: "Task 3: Ship the scoped CLI report and user guidance"
 ---
 
-Adopt landed ops vocabulary with parser changes; implement blockers JSON, compact pretty output, host-local attention/claims, tests and README/skill guidance. No change to ready/next order or other JSON contracts. Draft implementation plan is awaiting separate user review; after approval the controller unblocks this step, preserving implementation dependencies.
+Adopt landed ops vocabulary with parser changes; implement blockers JSON, compact pretty output, host-local attention/claims, tests and README/skill guidance. No change to ready/next order or other JSON contracts. Plan 327fe22 approved by Keith, including Ruling S1. The review gate is released; preserve the remaining implementation dependency edges and start execution in a fresh session under the approved plan.
 
 ## Notes
 
