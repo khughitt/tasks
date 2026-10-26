@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T01:49:16Z
+updated: 2026-10-26T01:49:18Z
 started: 2026-10-25T22:34:30Z
 completed: 2026-10-26T01:42:12Z
 closed: 2026-10-26T01:42:12Z
@@ -180,3 +180,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T01:49:12Z (main): retained: {"host":"titan","kind":"evidence","path":".worktrees/tasks-e637a1/target/blocker-design-fast-isolated-check.log","state":"released","verification":"verified","purpose":"Discarded with the worktree as regenerable suite output; its counts are recorded in the 2026-10-26 00:28 notes and the normal-environment move failure is reproduced by any normal just test (tracked as tasks-2518ad)","next_owner":"none","cleanup_trigger":"none"}
 - 2026-10-26T01:49:14Z (main): retained: {"host":"titan","kind":"evidence","path":".worktrees/tasks-e637a1/target/blocker-design-revision-2-fast.log","state":"released","verification":"verified","purpose":"Discarded with the worktree as regenerable suite output; its counts are recorded in the 2026-10-26 00:28 notes and the normal-environment move failure is reproduced by any normal just test (tracked as tasks-2518ad)","next_owner":"none","cleanup_trigger":"none"}
 - 2026-10-26T01:49:16Z (main): retained: {"host":"titan","kind":"evidence","path":".worktrees/tasks-e637a1/target/blocker-plan-fast.log","state":"released","verification":"verified","purpose":"Discarded with the worktree as regenerable suite output; its counts are recorded in the 2026-10-26 00:28 notes and the normal-environment move failure is reproduced by any normal just test (tracked as tasks-2518ad)","next_owner":"none","cleanup_trigger":"none"}
+- 2026-10-26T01:49:18Z (main): retained: {"host":"titan","kind":"evidence","path":".worktrees/tasks-e637a1/target/blocker-plan-r3-normal-fast.log","state":"released","verification":"verified","purpose":"Discarded with the worktree as regenerable suite output; its counts are recorded in the 2026-10-26 00:28 notes and the normal-environment move failure is reproduced by any normal just test (tracked as tasks-2518ad)","next_owner":"none","cleanup_trigger":"none"}
