@@ -1,13 +1,15 @@
 ---
 id: tasks-a7db30
 title: Ship the scoped CLI report and user guidance
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: direct
+owner: design/tasks-e637a1
 created: 2026-10-26T00:08:28Z
-updated: 2026-10-26T00:36:51Z
+updated: 2026-10-26T01:09:43Z
+started: 2026-10-26T01:09:43Z
 depends: [ops-b36208, tasks-5d0d99]
 parent: tasks-e637a1
 tags: []
@@ -28,3 +30,5 @@ Adopt landed ops vocabulary with parser changes; implement blockers JSON, compac
 - 2026-10-26T00:08:30Z (design/tasks-e637a1): Draft implementation plan is awaiting separate user review; after approval the controller unblocks this step, preserving implementation dependencies.
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:36:51Z (design/tasks-e637a1): Keith approved plan 327fe22 and Ruling S1 in the controller session; review gate released, remaining dependencies unchanged. Execution is reserved for a fresh session; no Setup or implementation performed here.
+- 2026-10-26T01:09:43Z (design/tasks-e637a1): started
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
