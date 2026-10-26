@@ -80,6 +80,18 @@ mean those documents were verified.
    or `--group <name>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
+   `tasks blockers` ranks open prerequisites by the open work that depends on them,
+   directly and transitively (`-n` defaults to 20; `--project`, `--group` or
+   `--all-projects` widen the dependents counted). It is a report, not a picker, and
+   `ready`/`next` keep their order. Read `coverage.complete` first: a partial scan
+   (unfollowed out-of-scope paths, unresolved references, unreachable projects) gives
+   lower-bound counts and observed ranks. `dependencies_cleared_direct_count` is never
+   readiness or permission. Goals are structural only, and a childless closeout hub
+   counts as work. Park and claim evidence is this host's. `attention: user` needs a
+   recorded wait, so record an approval gate with `park --waiting-on user --reason
+   approval` (or `note --reviewed --awaiting-user` on a reviewed idea) rather than only
+   in prose; a declared need is a resource, not an approval. How long a blocker has
+   blocked is not measured yet.
 3. Run `tasks show <id>` and read the inventory's `required` rows in order before
    starting; use **Task references** below to retrieve them. Read the task's `process`
    and follow **Process and workspace** below before

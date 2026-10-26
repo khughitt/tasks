@@ -1,6 +1,7 @@
 use super::ReadCtx;
 use crate::claims::{Liveness, WaitingOn};
 use crate::cli::{FilterArgs, ListArgs};
+use crate::dependency::Verdict;
 use crate::error::Result;
 use crate::filter::{Fields, TaskFilter, TextQuery, check_parent};
 use crate::halt::{self, HaltSnapshot};
@@ -18,15 +19,34 @@ use crate::scope::Scope;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use time::OffsetDateTime;
 
+/// The captured scan answers first at every move hop, then the read scope.
 pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
-    let resolve = |id: &TaskId| {
-        let id = ctx.registry.canonical_id(id);
-        match all.iter().find(|task| task.id == id) {
+    crate::dependency::resolve(&ctx.registry, id, |id| {
+        match all.iter().find(|task| task.id == *id) {
             Some(task) => Ok(Some(task.clone())),
-            None => ctx.resolve_task(&id),
+            None => ctx.resolve_task(id),
         }
-    };
-    crate::tombstone::follow(resolve(id)?, resolve)
+    })
+}
+
+/// `Some(true)` satisfied, `Some(false)` open, `None` unresolved: the known-closed map the
+/// pickers consult.
+pub(super) fn known_closed(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<bool>> {
+    Ok(
+        match crate::dependency::verdict(resolve_dependency(ctx, all, id)?.as_ref()) {
+            Verdict::Satisfied => Some(true),
+            Verdict::Open => Some(false),
+            Verdict::Unresolved => None,
+        },
+    )
+}
+
+/// Whether the dependency positively satisfies; open and unresolved both hold.
+pub(super) fn satisfied(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<bool> {
+    Ok(
+        crate::dependency::verdict(resolve_dependency(ctx, all, id)?.as_ref())
+            == Verdict::Satisfied,
+    )
 }
 
 /// The dependency view for rows of `scan` (wait-aware spec §4.3): one per scan, never
@@ -268,9 +288,7 @@ pub fn ready_tasks(
             if closed.contains_key(dependency) {
                 continue;
             }
-            let value =
-                resolve_dependency(ctx, all, dependency)?.map(|task| !task.status.is_open());
-            closed.insert(dependency.clone(), value);
+            closed.insert(dependency.clone(), known_closed(ctx, all, dependency)?);
         }
     }
     let lookup = |id: &TaskId| -> Option<bool> { closed.get(id).copied().flatten() };
@@ -839,9 +857,8 @@ pub fn prime(
         for dependency in &task.depends {
             // An unreachable dependency counts as open, exactly as `done` treats it: what
             // we cannot resolve, we cannot call closed.
-            match resolve_dependency(&ctx, &all, dependency)? {
-                Some(dependency) if !dependency.status.is_open() => {}
-                _ => open.push(dependency.to_string()),
+            if !satisfied(&ctx, &all, dependency)? {
+                open.push(dependency.to_string());
             }
         }
         if open.is_empty() {
@@ -979,6 +996,7 @@ mod tests {
         std::fs::write(project.root.join(crate::repo::CONFIG_REL), "not toml = [").unwrap();
         let mut registry = crate::registry::Registry::default();
         registry.register("sci", &project.root).unwrap();
+        registry.aliases.insert("old".into(), "sci".into());
         let ctx = ReadCtx {
             scope: Scope::All {
                 projects: vec![],
@@ -992,7 +1010,20 @@ mod tests {
 
         assert_eq!(
             resolve_dependency(&ctx, std::slice::from_ref(&dependency), &dependency.id).unwrap(),
-            Some(dependency)
+            Some(dependency.clone())
         );
+        // An alias spelling canonicalizes before the scan is consulted, and the shared
+        // verdict judges the captured copy without opening the broken root.
+        let alias = TaskId {
+            prefix: "old".into(),
+            hex: dependency.id.hex.clone(),
+        };
+        let mut done = dependency.clone();
+        done.status = Status::Done;
+        assert_eq!(
+            known_closed(&ctx, std::slice::from_ref(&dependency), &alias).unwrap(),
+            Some(false)
+        );
+        assert!(satisfied(&ctx, std::slice::from_ref(&done), &alias).unwrap());
     }
 }

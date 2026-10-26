@@ -2,6 +2,7 @@
 //! with its `review_reason`. See docs/specs/2026-10-11-review-state-design.md and
 //! docs/specs/2026-10-17-wait-aware-review-design.md.
 
+use crate::dependency::Verdict;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::model::{Status, Task};
@@ -50,11 +51,12 @@ impl Deps {
                 if states.contains_key(dependency) {
                     continue;
                 }
-                let state = match resolve(dependency)? {
-                    Some(found) if !found.status.is_open() => DepState::Closed {
-                        closed: found.closed.clone(),
+                let found = resolve(dependency)?;
+                let state = match crate::dependency::verdict(found.as_ref()) {
+                    Verdict::Satisfied => DepState::Closed {
+                        closed: found.and_then(|found| found.closed),
                     },
-                    _ => DepState::Open,
+                    Verdict::Open | Verdict::Unresolved => DepState::Open,
                 };
                 states.insert(dependency.clone(), state);
             }

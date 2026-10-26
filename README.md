@@ -132,6 +132,40 @@ subtree until `tasks unblock`. A lane cannot nest inside a lane.
 A need (`--need <name>`, declared under `[needs]` in `tasks/.config.toml`) names a shared
 resource a step uses. An exclusive need serves one session at a time; see [Claims](#claims).
 
+### Blockers
+
+`tasks blockers` ranks the open prerequisites holding up the most open work (design:
+`docs/specs/2026-10-25-blocker-ranking-design.md`). It reads one scan and writes nothing;
+`ready` and `next` keep their order. Each row counts the open records that depend on it
+directly and through chains of `depends`, each once. Ideas, blocked, deferred and
+shelved records count as affected work, and goals are counted separately. Rows rank by
+transitive work, then direct work, the row's own declared priority, creation time and
+id. `--limit` (`-n`; default 20, `0` for totals and coverage only) truncates after ranking.
+
+- **Scope.** Dependents are counted in the current project by default, or under
+  `--project`, `--group` or `--all-projects`. A prerequisite in another project still gets a
+  row, but its own dependencies are not followed: `coverage.unfollowed_targets` names
+  it, and `coverage.complete` is false. A missing, unregistered or move-looping reference
+  is listed under `unresolved` and also makes the scan partial. An unreachable project
+  does too. A partial scan's counts are lower bounds and its ranks are observed ranks;
+  `--all-projects` follows the paths a narrower scope cut.
+- **What a count is not.** `dependencies_cleared_direct_count` counts direct dependents
+  whose every other dependency is already satisfied. It is not readiness or
+  permission: lifecycle, deferrals, claims, needs and approvals still apply. Goals are
+  structural only (lanes and records with children). A childless closeout hub whose
+  purpose lives in prose counts as work, and a goal's children get none of its impact
+  without an explicit dependency.
+- **Whose move it is.** `attention` is `user` only on recorded evidence: a park waiting on
+  the user (`--waiting-on user`, with its reason and next step), or a reviewed idea marked
+  `--awaiting-user`. Everything else is `unknown`, including an approval gate written
+  only in a body: record it with `tasks park <id> "<step>" --waiting-on user --reason
+  approval` before the report can show it. Parks and claims are this host's evidence
+  (`park_evidence.host`), so a park recorded on another host is unknown here. A declared
+  need (`task_needs`) names a resource, not an approval; a park's own `needs` is its host
+  requirement.
+- **Not yet measured.** How long a prerequisite has blocked, and across how many scope
+  passes, is not recorded yet; the report says so in its warnings and does not estimate it.
+
 ### Process
 
 Every task can record how an agent works it. `--process direct|planned` on `add` or
@@ -253,6 +287,8 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks add "Capture lane" --lane -p 1 -b "Why it runs; first milestone"  # an effort beside the others
     tasks edit <id> --no-lane        # clear the lane marker
     tasks lanes                      # each lane: guidance, state, and the step it could take now
+    tasks blockers                   # open prerequisites ranked by the open work they hold up
+    tasks blockers --all-projects -n 0  # totals and coverage only, every reachable project
     tasks next --under sci-4f2a9c    # the next step inside one lane, at any depth
     tasks list --under sci-4f2a9c    # a goal's whole subtree (--parent is direct children)
     tasks block sci-4f2a9c "host busy"  # pause a lane; tasks unblock resumes it
@@ -275,11 +311,11 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
-                                     #   next, tree, tags, sample, docs. Needs no local project.
+                                     #   next, tree, tags, sample, docs, blockers. Needs no local project.
     tasks projects                   # the registry: reachable? counts?
     tasks group set vf nodes atoms   # a named set of registered projects (this host only)
     tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
-                                     #   sample, lanes, quiet, docs. Needs no local project.
+                                     #   sample, lanes, quiet, docs, blockers. Needs no local project.
     tasks groups                     # each group, its members, and whether they are reachable
     tasks group rm vf                # delete the group; its projects stay registered
     tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project

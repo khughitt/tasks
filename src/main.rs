@@ -1,4 +1,6 @@
 mod attachments;
+mod blockers;
+mod blockers_text;
 mod claims;
 mod cli;
 mod clipboard;
@@ -7,6 +9,7 @@ mod complete;
 mod complexity;
 mod config;
 mod defer;
+mod dependency;
 mod doc_fetch;
 mod error;
 mod filter;
@@ -238,6 +241,7 @@ fn main() {
                 | cli::Command::Ready { .. }
                 | cli::Command::Next { .. }
                 | cli::Command::Sample { .. }
+                | cli::Command::Blockers(_)
                 | cli::Command::Graph { .. }
                 | cli::Command::Check
                 | cli::Command::Prime { .. }

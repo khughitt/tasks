@@ -135,3 +135,89 @@ Both design tasks retain accepted implementation steps as children. Replace the
 obsolete Ideas it wakes instruction: there is no waiting idea after promotion.
 Keep findings on the tasks and in this brief; goal closeout requires the actual
 retained deliverables. This revision approves no design, plan or implementation.
+
+## Downstream design review handoff
+
+tasks-e637a1 now has a proposed [ranked blocker design](../specs/2026-10-25-blocker-ranking-design.md),
+initially frozen for user review at c45fc7f. A read-only builder check by
+codex/gpt-6.1-sol returned "nothing important left"; it grants no user approval.
+The design recommends a dedicated impact-ranked read, preserves ready/next, keeps
+dependency relief separate from execution permission, and documents structural-only
+goal detection, local coverage and host-local approval evidence. Display-only
+inherited urgency remains an explicit deferred alternative, under crew's active
+beneficiary policy. No product code or CLI vocabulary changed.
+
+The next step is the user's design review, followed by a separately reviewed
+implementation plan. That plan must sequence the shared incoming scan and canonical
+internal dependency-verdict extraction before integration. History collection remains independent
+under tasks-71c74d. This design task and its coordination goal remain open.
+
+Review round 3 (claude-code/claude-opus-5-5) returned revise with three Important
+and five Minor findings against c45fc7f. Revision 2 addresses all eight: foreign
+paths cut by local/group scope mark coverage partial with named unfollowed targets;
+rows show their own open/unresolved dependencies; shared internal rule extraction
+can ship here without waiting for tasks-e90b4f's public design. It also names the
+review/open_deps callers, explains the goal-child attribution cost, limits
+awaiting_user to reviewed ideas, distinguishes task_needs from park.needs and
+shows observed live/unverifiable claim holders. Ranking still weights all open
+work equally, with per-status counts making the composition visible. Compact
+pretty rows move explanations below the row. New fixtures cover each change.
+The task notes and next review request name the new frozen revision; c45fc7f is
+superseded. This revision is not approved and no implementation plan was drafted.
+
+Fresh builder review round 4 of frozen d2940d0 by codex/gpt-6.1-sol accepts for
+planning with no Important or Minor findings. Full reviews and the updated ledger
+are attached to tasks-e637a1. The user still reviews the design before planning.
+
+The supplied round-5 review (claude-code/claude-opus-5-5) accepts d2940d0 with one
+nonblocking Minor: the bb-scope fixture also has boundary X, while only L is
+unfollowed. Following the user's delegation to accept and proceed, the controller
+accepted the design and preserved its frozen bytes. The
+[implementation plan](../plans/2026-10-25-blocker-ranking.md) corrects that fixture
+and explicitly parameterizes lookup authority for the shared internal helper.
+The plan has three blocked implementation steps plus a blocked ops vocabulary
+prerequisite; their review gates must be released deliberately after plan approval.
+The plan still needs its separate user review. No product code has changed.
+
+Plan round 3 (claude-code/claude-opus-5-5) returned revise against cd80149 with
+Important 2 and Minor 3. The revised plan makes isolated Git-config tests the
+required green gate at each step, while recording the normal run's exact known
+three-test host-hook failure and rejecting other failures as regressions until
+explained. It separates Resolver's disk-backed authority fixture from the
+in-memory helper matrix, defines Coverage seed/derived fields, and names tests
+for the JSON history warning and complete/partial pretty heading.
+
+Spec-level Ruling S1 removes the hard tasks-e8d471 prerequisite: the existing
+Scope::scan captured slice already meets the no-second-project-walker intent,
+and Task 2 uses no new artifact from that show-dependents task. The cost is that
+the features evolve independently and must coordinate scan semantics; a note on
+tasks-e8d471 records that coordination. The approved spec d2940d0 stays frozen;
+the revised plan explicitly includes this sequencing amendment for user review.
+Task 2 now waits only on Task 1; all implementation review gates remain blocked.
+
+Plan round 5 independently accepts frozen 327fe22 with no findings
+(claude-code/claude-opus-5-5). Keith explicitly approved the plan and Ruling S1,
+then requested parking for execution in a fresh session. The review gates on
+tasks-ceee0d, tasks-5d0d99, tasks-a7db30 and ops-b36208 are released; their remaining
+implementation dependency edges are preserved. No execution Setup or product-code
+change ran in the approval session. The next session reads approved spec d2940d0
+**together with** approved plan 327fe22 and its S1 sequencing amendment, runs the
+deferred full baseline using the plan's exact normal/isolated failure rules, then
+starts implementation. The frozen spec's old sequencing is superseded only by S1.
+
+## Shipped result (2026-10-26)
+
+`tasks blockers` shipped on branch design/tasks-e637a1 under approved plan 327fe22:
+ab5f769 shares one dependency verdict across ready, closeout, parked, lanes, the
+review view and `done`'s open-dependency check, with lookup authority unchanged;
+d298cf3 adds the pure impact analysis; de83ef3 adds the command, JSON contract,
+pretty view and guidance; 5b7549f closes the final review's two Important test gaps.
+The CLI row landed first in ops (f90085b, ops-b36208). Observed verification: Setup
+baseline isolated full suite 1732 passed; final isolated fast suite 1739 passed, with
+the normal environment failing only the known tasks-2518ad move tests; a confined
+build passed a seven-check smoke over local, group and all-projects coverage, a
+user-held park and `-n 0`; the final reviewer's read-only run over the real registry
+covered 35 projects and 460 rows with complete coverage. Final review (Opus) asked
+for two test additions, now accepted on re-review; eight Minor findings stay
+deferred in the execution ledger. Blocking age and confirmed scope passes remain
+unknown until tasks-71c74d's collection lands; tasks-6166d6 stays open for it.
