@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-3a8396
 created: 2026-10-26T01:55:16Z
-updated: 2026-10-26T02:18:09Z
+updated: 2026-10-26T02:20:35Z
 started: 2026-10-26T01:59:24Z
 completed: 2026-10-26T02:18:09Z
 closed: 2026-10-26T02:18:09Z
@@ -54,3 +54,4 @@ Verification: just test-one --test blockers and blockers_ green, just test-fast;
   provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T02:18:09Z (fix/tasks-3a8396): Addressed all eight blockers review minors and corrected spec approval/shipment status in 8cd0814; independent codex/gpt-6.1-sol review accepted with no findings. Isolated full baseline 1743 passed; final isolated fast suite 1739 passed/4 ignored; focused blockers, resolution and parser checks passed. Known normal-environment move-fixture failures remain tracked in tasks-2518ad. Full review and exclusion rulings attached.
   provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T02:20:35Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-3a8396","state":"released","verification":"verified","purpose":"Removed after local merge 185d7a4 and CLI reinstall from main. Merged blockers checks 10 passed; installed help and tasks check passed. Branch merged and deleted, tracked tree clean, no submodules, no host pointers, tt-report run. Discarded target/ builds, confined install, mutation source backup and repeatable test logs as regenerable/already versioned; full validation counts/failure names remain in task notes. Discarded .superpowers/ copies only after review report and ledger were attached, listed by tasks show and matched byte-for-byte and by SHA-256 in main. No off-tree scratch or evidence remains.","next_owner":"none","cleanup_trigger":"none"}
