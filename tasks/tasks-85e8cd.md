@@ -4,8 +4,8 @@ title: Detached record commits cannot resolve a newly linked document in the inv
 status: idea
 priority: 2
 created: 2026-10-26T11:31:17Z
-updated: 2026-10-26T15:19:17Z
-depends: []
+updated: 2026-10-26T15:19:27Z
+depends: [tasks-6644b7]
 parent: tasks-a73dce
 tags: [feedback, friction, "from:relay"]
 agent: codex
