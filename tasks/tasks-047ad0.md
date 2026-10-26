@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-047ad0
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:14:00Z
+updated: 2026-10-26T15:15:47Z
 started: 2026-10-26T15:12:35Z
 depends: []
 tags: [testing]
@@ -38,3 +38,4 @@ Done: common::git cannot inherit repository selectors or host environment/config
 - 2026-10-26T15:12:54Z (fix/tasks-047ad0): resumed
   provenance: {"harness_session":"codex:01a178c4-420d-75e3-a07d-83976bde0d40","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T15:14:00Z (fix/tasks-047ad0): Direct scope confirmed: common::git plus regression in tests/cli.rs and linked-worktree ownership assertion in the one common-helper caller that commits through side. Keep its existing signature, reuse git_fixture::command with per-invocation temporary HOME, and validate init before later fixture writes. No production, CLI, routing, dependency, or independent-helper changes. Worktree hydration completed with README cargo install --locked --path . confined to worktree target and install root; installed output now at target/hydrated-install.
+- 2026-10-26T15:15:47Z (fix/tasks-047ad0): Baseline: just test in .worktrees/tasks-047ad0 passed all 1744 tests, 0 failed, 0 ignored. Log retained under target/tasks-047ad0-baseline.log until attached at closeout. Regression break: inherited Git selectors redirect common::git initialization away from the intended fixture; inherited global hooks can also prevent commits.
