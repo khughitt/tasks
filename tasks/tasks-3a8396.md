@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tasks-3a8396
 created: 2026-10-26T01:55:16Z
-updated: 2026-10-26T02:17:29Z
+updated: 2026-10-26T02:17:32Z
 started: 2026-10-26T01:59:24Z
 depends: []
 tags: [cli]
@@ -45,3 +45,4 @@ Verification: just test-one --test blockers and blockers_ green, just test-fast;
 - 2026-10-26T02:05:39Z (fix/tasks-3a8396): Clean full baseline: GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test exit 0, 1743 passed/0 failed/0 ignored. Normal baseline limitation reproduced and recurred on tasks-2518ad. First regression changes assert unavailable history metrics in rendered blockers --help and both canonical/alias missing-reference diagnostic rows while keeping own unresolved count 1.
 - 2026-10-26T02:10:32Z (fix/tasks-3a8396): Implementation covers all eight deferred minors plus approved/shipped spec status. RED: blockers_identity_and_lifecycle failed on missing canonical-spelling diagnostic; blockers_cli_surface_and_limits failed on missing history help. GREEN: blockers_ 10 passed; --test blockers 4 passed; dependency_resol 3 passed; parser_surface_equals_table 1 passed. Row-association mutation moved needs onto another row and failed the intended assertion; renderer restored byte-identically. Final isolated just test-fast exit 0, 1739 passed/4 ignored. JSON keys unchanged; only unresolved diagnostic rows expand. Shared scan_lookup intentionally keeps current linear complexity; map indexing is optional and outside this cleanup.
 - 2026-10-26T02:17:29Z (fix/tasks-3a8396): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-26T02:17:32Z (fix/tasks-3a8396): attached: cleanup-review-report.md (3128 bytes): Full independent whole-branch review of 8cd0814 by codex/gpt-6.1-sol: accepted, no findings; saved validation evidence inspected, suites not rerun by reviewer
