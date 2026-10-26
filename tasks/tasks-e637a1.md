@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T01:48:24Z
+updated: 2026-10-26T01:48:27Z
 started: 2026-10-25T22:34:30Z
 completed: 2026-10-26T01:42:12Z
 closed: 2026-10-26T01:42:12Z
@@ -173,3 +173,4 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T01:48:20Z (main): attached: execution-ledger.md (12066 bytes): Inline execution ledger for plan 327fe22: baseline, per-task gates, every Ruling and every minor (deferred) line, final review rounds
 - 2026-10-26T01:48:24Z (main): attached: final-review-report.md (6000 bytes): Final whole-branch review round 1 (claude-code/claude-opus-5-5): With fixes, Important 2, Minor 5
+- 2026-10-26T01:48:27Z (main): attached: rereview-round-1-report.md (2726 bytes): Scoped re-review of corrective round 1 (5b7549f), claude-code/claude-opus-5-5: accept, Minor 3
