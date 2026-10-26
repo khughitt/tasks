@@ -1,10 +1,8 @@
 # Ranked downstream blockers
 
-Status: proposed for user review. Task: tasks-e637a1. This is a design decision
-record, not documentation of shipped behaviour. All choices below are the author's
-recommendations until the user approves this revision.
-Revision 2 addresses review round 3 of frozen c45fc7f; no design approval has
-been given. Author decisions remain subject to the user's review.
+Status: approved and shipped. Task: tasks-e637a1. The design was approved at
+d2940d0; the approved implementation plan 327fe22 includes sequencing amendment S1.
+The report shipped in merge 074672f. This remains a design decision record.
 
 ## Intent and boundaries
 

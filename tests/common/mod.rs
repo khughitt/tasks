@@ -488,3 +488,81 @@ pub fn write_editor_stub(env: &TestEnv, marker: &Path) -> String {
         &format!("touch '{}'\nexit 1", marker.display()),
     )
 }
+
+/// This test process's PID view, read as `src/pidview.rs` reads it: the namespace its
+/// `/proc` numbers pids in, and `None` unless `NSpid` is exactly one positive pid.
+pub fn own_pid_view() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let nspid = status
+        .lines()
+        .find_map(|line| line.strip_prefix("NSpid:"))?;
+    let mut entries = nspid.split_whitespace();
+    let pid: u32 = entries.next()?.parse().ok()?;
+    if pid == 0 || entries.next().is_some() {
+        return None;
+    }
+    let ns = std::fs::metadata("/proc/self/ns/pid").ok()?;
+    Some(format!("{}:{}", ns.dev(), ns.ino()))
+}
+
+/// Writes a claim straight into the store.
+pub fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let (pid, pid_start, boot) = if live {
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+        let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+        (std::process::id(), start, boot.trim().to_string())
+    } else {
+        (0, 1, "not-this-boot".to_string())
+    };
+    let view = own_pid_view()
+        .map(|view| format!("pid_view = \"{view}\"\n"))
+        .unwrap_or_default();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
+         pid_start = {pid_start}\nboot_id = \"{boot}\"\nhost = \"h\"\n\
+         worktree = \"/elsewhere\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+         seen = \"2026-01-01T00:00:00Z\"\n{view}"
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+/// Rewrites one stored claim's `pid_view`, leaving the rest as written.
+pub fn set_pid_view(env: &TestEnv, prefix: &str, id: &str, view: &str) {
+    let path = env.claim_store(prefix);
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    store["claims"][id]
+        .as_table_mut()
+        .unwrap()
+        .insert("pid_view".into(), toml::Value::String(view.into()));
+    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
+}
+
+/// A claim held by this test process but recorded in `view`.
+pub fn write_claim_in_view(env: &TestEnv, prefix: &str, id: &str, session: &str, view: &str) {
+    write_claim(env, prefix, id, session, true);
+    set_pid_view(env, prefix, id, view);
+}
+
+/// Commits `dir` as a git repository and adds a worktree of it at `at`. Every git run uses
+/// the isolated fixture environment, checked against both boundaries before its first write.
+pub fn isolated_worktree(env: &TestEnv, dir: &Path, at: &Path) {
+    let git = |args: &[&str]| {
+        let out = git_fixture::command(env.home.path(), dir)
+            .args(["-c", "init.defaultBranch=main"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["init", "-q"]);
+    git_fixture::assert_repo(env.home.path(), dir);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "seed"]);
+    git(&["worktree", "add", "-q", "-b", "wt", at.to_str().unwrap()]);
+}

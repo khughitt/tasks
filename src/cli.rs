@@ -892,6 +892,9 @@ pub enum Command {
         rm: Vec<String>,
     },
     /// Rank unmet prerequisites by observed downstream impact.
+    #[command(
+        long_about = "Rank unmet prerequisites by observed downstream impact.\n\nHistory metrics (blocking since, confirmed scope passes) are unavailable; this report ranks observed downstream impact only."
+    )]
     Blockers(BlockersArgs),
     /// Dependency graph as mermaid or dot.
     Graph {

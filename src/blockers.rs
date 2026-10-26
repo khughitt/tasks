@@ -160,7 +160,8 @@ impl<F: FnMut(&TaskId) -> Result<Option<Task>>> View<'_, F> {
                     judged
                         .unresolved
                         .entry(self.registry.canonical_id(reference))
-                        .or_insert_with(|| reference.clone());
+                        .or_default()
+                        .insert(reference.clone());
                 }
             }
         }
@@ -171,8 +172,8 @@ impl<F: FnMut(&TaskId) -> Result<Option<Task>>> View<'_, F> {
 #[derive(Default)]
 struct Judged {
     open: BTreeSet<TaskId>,
-    /// Canonical spelling -> the first stored reference with it.
-    unresolved: BTreeMap<TaskId, TaskId>,
+    /// Canonical spelling -> every stored reference with it.
+    unresolved: BTreeMap<TaskId, BTreeSet<TaskId>>,
 }
 
 impl Judged {
@@ -183,11 +184,15 @@ impl Judged {
     fn diagnostics(&self, dependent: &TaskId) -> impl Iterator<Item = UnresolvedDependency> {
         self.unresolved
             .iter()
-            .map(move |(canonical, reference)| UnresolvedDependency {
-                dependent: dependent.clone(),
-                reference: reference.clone(),
-                canonical: (canonical != reference).then(|| canonical.clone()),
-                reason: "unresolved",
+            .flat_map(move |(canonical, references)| {
+                references
+                    .iter()
+                    .map(move |reference| UnresolvedDependency {
+                        dependent: dependent.clone(),
+                        reference: reference.clone(),
+                        canonical: (canonical != reference).then(|| canonical.clone()),
+                        reason: "unresolved",
+                    })
             })
     }
 }
@@ -759,8 +764,7 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
             }
         }
 
-        // Spellings of one identity count once everywhere: a row's own open and unresolved
-        // counts, its diagnostics, and a target's dependents, maps and examples.
+        // Counts deduplicate identities; diagnostics preserve every stored spelling.
         let mut world = World::new(vec![
             rec("aa-000020", Status::Moved, 2, &[], "moved_to: bb-000021\n"),
             rec("bb-000021", Status::Todo, 2, &[], ""),
@@ -800,7 +804,10 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
             .collect();
         assert_eq!(
             diagnostics,
-            [(id("aa-000030"), id("old-0000ee"), Some(id("aa-0000ee")))]
+            [
+                (id("aa-000030"), id("aa-0000ee"), None),
+                (id("aa-000030"), id("old-0000ee"), Some(id("aa-0000ee")))
+            ]
         );
         let target = row(&analysis, "bb-000021");
         assert_eq!(counts(target), [2, 3, 0, 0, 1, 0, 0]);

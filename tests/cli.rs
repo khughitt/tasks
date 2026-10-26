@@ -1,6 +1,7 @@
 mod common;
 use common::{
-    TestEnv, check_findings, editor_script, findings_of, git, id_of, worktree_with_excluded_docs,
+    TestEnv, check_findings, editor_script, findings_of, git, id_of, isolated_worktree,
+    own_pid_view, set_pid_view, worktree_with_excluded_docs, write_claim, write_claim_in_view,
     write_doc,
 };
 
@@ -1467,27 +1468,10 @@ fn a_checkout_still_using_a_retired_prefix_refuses() {
     );
 }
 
-/// This test process's PID view, read as `src/pidview.rs` reads it: the namespace its
-/// `/proc` numbers pids in, and `None` unless `NSpid` is exactly one positive pid.
-fn test_pid_view() -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    let nspid = status
-        .lines()
-        .find_map(|line| line.strip_prefix("NSpid:"))?;
-    let mut entries = nspid.split_whitespace();
-    let pid: u32 = entries.next()?.parse().ok()?;
-    if pid == 0 || entries.next().is_some() {
-        return None;
-    }
-    let ns = std::fs::metadata("/proc/self/ns/pid").ok()?;
-    Some(format!("{}:{}", ns.dev(), ns.ino()))
-}
-
 /// The view an exported pid establishes from this test process: its own, only when that
 /// is the initial PID namespace (claim PID-view design §2).
 fn exported_pid_view() -> Option<String> {
-    test_pid_view().filter(|view| view.ends_with(":4026531836"))
+    own_pid_view().filter(|view| view.ends_with(":4026531836"))
 }
 
 fn stored_claim(env: &TestEnv, prefix: &str, id: &str) -> toml::Value {
@@ -1501,49 +1485,6 @@ fn pid_view_of(claim: &toml::Value) -> Option<String> {
         .get("pid_view")
         .and_then(|v| v.as_str())
         .map(str::to_string)
-}
-
-/// Writes a claim straight into the store.
-fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
-    let path = env.claim_store(prefix);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let (pid, pid_start, boot) = if live {
-        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
-        let rest = stat.rsplit_once(") ").unwrap().1.to_string();
-        let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
-        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
-        (std::process::id(), start, boot.trim().to_string())
-    } else {
-        (0, 1, "not-this-boot".to_string())
-    };
-    let view = test_pid_view()
-        .map(|view| format!("pid_view = \"{view}\"\n"))
-        .unwrap_or_default();
-    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
-    text.push_str(&format!(
-        "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
-         pid_start = {pid_start}\nboot_id = \"{boot}\"\nhost = \"h\"\n\
-         worktree = \"/elsewhere\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
-         seen = \"2026-01-01T00:00:00Z\"\n{view}"
-    ));
-    std::fs::write(&path, text).unwrap();
-}
-
-/// Rewrites one stored claim's `pid_view`, leaving the rest as written.
-fn set_pid_view(env: &TestEnv, prefix: &str, id: &str, view: &str) {
-    let path = env.claim_store(prefix);
-    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    store["claims"][id]
-        .as_table_mut()
-        .unwrap()
-        .insert("pid_view".into(), toml::Value::String(view.into()));
-    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
-}
-
-/// A claim held by this test process but recorded in `view`.
-fn write_claim_in_view(env: &TestEnv, prefix: &str, id: &str, session: &str, view: &str) {
-    write_claim(env, prefix, id, session, true);
-    set_pid_view(env, prefix, id, view);
 }
 
 /// Writes a park entry straight into the store.
@@ -11484,7 +11425,7 @@ fn write_detailed_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, li
     };
     let path = env.claim_store(prefix);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let view = test_pid_view()
+    let view = own_pid_view()
         .map(|view| format!("pid_view = \"{view}\"\n"))
         .unwrap_or_default();
     let mut text = std::fs::read_to_string(&path).unwrap_or_default();
@@ -31916,24 +31857,6 @@ fn editor_preserves_occurrence_keys() {
     );
     assert_eq!(shown_task(&env, &dir, &id)["notes"], before);
     assert_eq!(notes_bytes(), bytes_before);
-}
-
-/// Commits `dir` as a git repository and adds a worktree of it at `at`. Every git run uses
-/// the isolated fixture environment, checked against both boundaries before its first write.
-fn isolated_worktree(env: &TestEnv, dir: &std::path::Path, at: &std::path::Path) {
-    let git = |args: &[&str]| {
-        let out = common::git_fixture::command(env.home.path(), dir)
-            .args(["-c", "init.defaultBranch=main"])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "git {args:?}: {out:?}");
-    };
-    git(&["init", "-q"]);
-    common::git_fixture::assert_repo(env.home.path(), dir);
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "seed"]);
-    git(&["worktree", "add", "-q", "-b", "wt", at.to_str().unwrap()]);
 }
 
 #[test]
