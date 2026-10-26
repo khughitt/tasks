@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-23T20:15:09Z
-updated: 2026-10-23T20:15:09Z
+updated: 2026-10-26T21:21:30Z
 depends: []
 tags: [docs]
 source: ops-2c5fbc
@@ -25,3 +25,7 @@ At 2026-10-23: README.md 1257 lines; AGENTS.md 123, just over the default budget
 Done when: `tools/ops-docs check` exits 0 here with identity.toml present; the project's check route runs it (and so its pre-commit hook, where it has one); and `bin/ops-projects check` in ops no longer lists tasks and still exits 0.
 
 Profile: personal; integrate under this repository's own rules.
+
+## Notes
+
+- 2026-10-26T21:21:30Z (main): curate-docs: tasks-d5ddb4 at c1bbcae confirms: mechanical ops-docs exits 2 because tools/ops-docs is absent, with no identity.toml or authority declaration; existing guide-contract adoption owns the fix. Criterion 4 also confirms the repeated Session protocol, Process and workspace rules, and commit-conventions line in AGENTS.md; keep the skill pointer/adoption and repository-specific instructions while removing restatements. Both remain in this adoption task; the bounded audit made no prose edits.
