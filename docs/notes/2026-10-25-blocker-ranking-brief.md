@@ -204,3 +204,20 @@ change ran in the approval session. The next session reads approved spec d2940d0
 **together with** approved plan 327fe22 and its S1 sequencing amendment, runs the
 deferred full baseline using the plan's exact normal/isolated failure rules, then
 starts implementation. The frozen spec's old sequencing is superseded only by S1.
+
+## Shipped result (2026-10-26)
+
+`tasks blockers` shipped on branch design/tasks-e637a1 under approved plan 327fe22:
+ab5f769 shares one dependency verdict across ready, closeout, parked, lanes, the
+review view and `done`'s open-dependency check, with lookup authority unchanged;
+d298cf3 adds the pure impact analysis; de83ef3 adds the command, JSON contract,
+pretty view and guidance; 5b7549f closes the final review's two Important test gaps.
+The CLI row landed first in ops (f90085b, ops-b36208). Observed verification: Setup
+baseline isolated full suite 1732 passed; final isolated fast suite 1739 passed, with
+the normal environment failing only the known tasks-2518ad move tests; a confined
+build passed a seven-check smoke over local, group and all-projects coverage, a
+user-held park and `-n 0`; the final reviewer's read-only run over the real registry
+covered 35 projects and 460 rows with complete coverage. Final review (Opus) asked
+for two test additions, now accepted on re-review; eight Minor findings stay
+deferred in the execution ledger. Blocking age and confirmed scope passes remain
+unknown until tasks-71c74d's collection lands; tasks-6166d6 stays open for it.
