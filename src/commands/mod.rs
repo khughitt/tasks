@@ -1594,11 +1594,11 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     let mut open = Vec::new();
     for dependency in &task.depends {
-        match crate::tombstone::follow(resolver.resolve_task(dependency)?, |id| {
-            resolver.resolve_task(id)
-        })? {
-            Some(task) if !task.status.is_open() => {}
-            _ => open.push(dependency.to_string()),
+        // The project's own file answers for its prefix, registered roots for the rest.
+        let found =
+            crate::dependency::resolve(&ctx.registry, dependency, |id| resolver.resolve_task(id))?;
+        if crate::dependency::verdict(found.as_ref()) != crate::dependency::Verdict::Satisfied {
+            open.push(dependency.to_string());
         }
     }
     Ok(open)

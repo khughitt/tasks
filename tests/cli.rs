@@ -31917,3 +31917,72 @@ fn editor_preserves_occurrence_keys() {
     assert_eq!(shown_task(&env, &dir, &id)["notes"], before);
     assert_eq!(notes_bytes(), bytes_before);
 }
+
+/// Commits `dir` as a git repository and adds a worktree of it at `at`. Every git run uses
+/// the isolated fixture environment, checked against both boundaries before its first write.
+fn isolated_worktree(env: &TestEnv, dir: &std::path::Path, at: &std::path::Path) {
+    let git = |args: &[&str]| {
+        let out = common::git_fixture::command(env.home.path(), dir)
+            .args(["-c", "init.defaultBranch=main"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["init", "-q"]);
+    common::git_fixture::assert_repo(env.home.path(), dir);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "seed"]);
+    git(&["worktree", "add", "-q", "-b", "wt", at.to_str().unwrap()]);
+}
+
+#[test]
+fn dependency_resolver_preserves_local_and_foreign_authority() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let blocker = id_of(env.json(&sci, &["add", "Blocker", "-p", "2"]));
+    let consumer = id_of(env.json(&sci, &["add", "Consumer", "-p", "2"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign", "-p", "2"]));
+    env.json(&sci, &["dep", &consumer, "--on", &blocker]);
+    env.json(&sci, &["dep", &consumer, "--on", &foreign]);
+    let scratch = tempfile::tempdir().unwrap();
+    let sci_tree = scratch.path().join("sci-tree");
+    let fam_tree = scratch.path().join("fam-tree");
+    isolated_worktree(&env, &sci, &sci_tree);
+    isolated_worktree(&env, &fam, &fam_tree);
+
+    // The registered sci root closes the blocker the worktree still holds open.
+    env.json(&sci, &["done", &blocker, "registered copy"]);
+    let ready = |dir: &std::path::Path| -> Vec<String> {
+        env.json(dir, &["ready"])["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let refusal = |dir: &std::path::Path| -> String {
+        let out = env
+            .cmd(dir)
+            .args(["done", &consumer, "x"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+
+    // The worktree's own file answers for its prefix, in the captured scan (ready) and in
+    // the write-side check (done); the registered root answers for the foreign prefix.
+    assert!(!ready(&sci_tree).contains(&consumer));
+    let err = refusal(&sci_tree);
+    assert!(err.contains("open_dependencies"), "{err}");
+    assert!(err.contains(&blocker) && err.contains(&foreign), "{err}");
+
+    // Closing the registered fam copy releases the foreign edge although a fam worktree
+    // still holds it open, while the worktree's own open blocker holds the consumer.
+    env.json(&fam, &["done", &foreign, "registered copy"]);
+    assert!(!ready(&sci_tree).contains(&consumer));
+    let err = refusal(&sci_tree);
+    assert!(err.contains(&blocker) && !err.contains(&foreign), "{err}");
+}

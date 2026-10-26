@@ -7,6 +7,7 @@ mod complete;
 mod complexity;
 mod config;
 mod defer;
+mod dependency;
 mod doc_fetch;
 mod error;
 mod filter;

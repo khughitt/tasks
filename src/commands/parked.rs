@@ -267,12 +267,9 @@ pub fn candidates(
         }
         let mut held = false;
         for dependency in &task.depends {
-            match super::list::resolve_dependency(ctx, all, dependency)? {
-                Some(dependency) if !dependency.status.is_open() => {}
-                _ => {
-                    held = true;
-                    break;
-                }
+            if !super::list::satisfied(ctx, all, dependency)? {
+                held = true;
+                break;
             }
         }
         if held {

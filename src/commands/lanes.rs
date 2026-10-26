@@ -66,9 +66,10 @@ pub(super) fn rows(
             if closed.contains_key(dependency) {
                 continue;
             }
-            let value = super::list::resolve_dependency(ctx, all, dependency)?
-                .map(|found| !found.status.is_open());
-            closed.insert(dependency.clone(), value);
+            closed.insert(
+                dependency.clone(),
+                super::list::known_closed(ctx, all, dependency)?,
+            );
         }
     }
     let (holds, mine) = load_holds(ctx, now)?;
