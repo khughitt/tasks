@@ -1,15 +1,17 @@
 ---
 id: tasks-5d0d99
 title: Compute downstream impact and honest graph coverage
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: direct
 owner: design/tasks-e637a1
 created: 2026-10-26T00:08:24Z
-updated: 2026-10-26T01:34:39Z
+updated: 2026-10-26T01:37:46Z
 started: 2026-10-26T00:56:04Z
+completed: 2026-10-26T01:37:46Z
+closed: 2026-10-26T01:37:46Z
 depends: [tasks-ceee0d]
 parent: tasks-e637a1
 tags: []
@@ -37,4 +39,8 @@ Implement canonical graph counts, status breakdowns, rank, cycles and partial co
 - 2026-10-26T01:05:01Z (design/tasks-e637a1): src/blockers.rs build(): memoized canonical resolution over one captured scan, unique reverse adjacency, visited-set reach, iterative Tarjan cycles, boundary/unfollowed coverage, relief and own counts, deterministic rank; five unit tests green (d298cf3).
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-26T01:34:39Z (design/tasks-e637a1): resumed
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T01:37:46Z (design/tasks-e637a1): done
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T01:37:46Z (design/tasks-e637a1): Review round 1 Important 2 fixed in 5b7549f: alias/move dedup of own counts, diagnostics, maps and examples asserted (mutation RED, GREEN).
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
