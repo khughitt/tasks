@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-047ad0
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:16:45Z
+updated: 2026-10-26T15:18:00Z
 started: 2026-10-26T15:12:35Z
 depends: []
 tags: [testing]
@@ -40,3 +40,4 @@ Done: common::git cannot inherit repository selectors or host environment/config
 - 2026-10-26T15:14:00Z (fix/tasks-047ad0): Direct scope confirmed: common::git plus regression in tests/cli.rs and linked-worktree ownership assertion in the one common-helper caller that commits through side. Keep its existing signature, reuse git_fixture::command with per-invocation temporary HOME, and validate init before later fixture writes. No production, CLI, routing, dependency, or independent-helper changes. Worktree hydration completed with README cargo install --locked --path . confined to worktree target and install root; installed output now at target/hydrated-install.
 - 2026-10-26T15:15:47Z (fix/tasks-047ad0): Baseline: just test in .worktrees/tasks-047ad0 passed all 1744 tests, 0 failed, 0 ignored. Log retained under target/tasks-047ad0-baseline.log until attached at closeout. Regression break: inherited Git selectors redirect common::git initialization away from the intended fixture; inherited global hooks can also prevent commits.
 - 2026-10-26T15:16:45Z (fix/tasks-047ad0): RED: just test-one --test cli common_git_fixtures_ignore_hostile_environment exited 101 with the old common::git: hostile selectors redirected init to the owned foreign .git, leaving the intended fixture uninitialized; the isolated boundary probe failed with not a git repository before staging. Parent checks confirmed foreign HEAD/index/fake global config unchanged. Only explicit fake child environment and owned temporary repositories were used; log target/tasks-047ad0-red.log.
+- 2026-10-26T15:18:00Z (fix/tasks-047ad0): attached: fixture-isolation-verification.txt (5253 bytes): Verification excerpts: 1744-test baseline, expected RED misrouting, GREEN regression, 1741-test fast suite (4 ignored), and successful just check; build chatter omitted.
