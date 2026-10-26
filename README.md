@@ -92,7 +92,7 @@ output. The [command tour](#command-tour) shows the rest of the CLI, and
 Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`, plus
 `moved`, the read-only tombstone [`tasks move`](#moving-tasks) leaves behind.
 An idea is an uncommitted thought and is never offered by `ready`; scope it into a `todo`
-first. `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
+first ([From idea to ready work](#from-idea-to-ready-work)). `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
 `tasks unshelve <id>` to return it as an idea.
 
 Ideas carry an optional `reviewed` flag (set by `note --reviewed` and `edit --reviewed`,
@@ -111,6 +111,41 @@ and anchors its next cycle. When due, it appears in `ready` with status `done`; 
 `start` before completing the next occurrence. Early runs are allowed. `--every` accepts
 positive whole days or weeks (for example, `30d` or `2w`), up to 36500 days; goals
 cannot recur.
+
+### From idea to ready work
+
+Work usually enters as an idea and reaches `ready` through one or more `/scope` passes.
+This is the shape of that path across sessions; the
+[scope skill](skills/scope/SKILL.md) holds the procedure.
+
+1. **Capture.** `tasks add "<title>" --status idea` records a thought without committing
+   to it.
+2. **Scope.** `/scope` reviews a small cluster of ideas against evidence (code, history,
+   sources, linked work) and gives each one verdict: `scoped` promotes it to `todo` with
+   a body saying why, what done means and where to look, rated and with its process
+   chosen; the others are `briefed`, `question` (only the user can answer), `shelved`,
+   or a proposed drop. Scoping weighs evidence; it does not do the research or the work.
+3. **Brief and research.** When decisions remain, the pass writes a one-page brief under
+   `docs/notes/` framing the alternatives and unanswered questions, and the idea stays an
+   idea. Each bounded question the brief needs answered becomes an ordinary task (its
+   question, where to start, a bound, the expected result and the ideas it wakes), or a
+   design task when the questions need design; the waiting ideas depend on it.
+4. **Do the research.** There is no research command: a research task is ready work like
+   any other, picked through `tasks ready` or `tasks next` and taken with `tasks start`.
+   Its completion adds the finding to each waiting idea with
+   `tasks note <id> --no-reviewed "<finding>"`; an answer to a `question` is recorded the
+   same way.
+5. **Scope again.** Closing the research clears the dependency, so the idea returns to the
+   review queue (`woken`, or `unreviewed` once a finding is noted). The next `/scope`
+   picks it up and reuses the existing brief, goal and research tasks rather than
+   starting over.
+6. **Re-scope before building.** When a `todo` or `blocked` task's premises change,
+   `/scope <id>` re-checks them before implementation: it narrows the task, confirms it,
+   or returns it to `idea` when a decision has reopened.
+
+Scoping settles what the work is, not how it is reviewed: a scoped `direct` task runs
+from its body, while `planned` work still needs its reviewed design spec and
+implementation plan ([Process](#process)).
 
 ### Goals, lanes and dependencies
 
@@ -1354,6 +1389,7 @@ refines them within fixed bounds.
 
 `skills/scope/SKILL.md` is the deliberate idea review between capture and maintenance:
 `/scope` turns a bounded cluster into supported next actions and handoffs.
+[From idea to ready work](#from-idea-to-ready-work) gives the lifecycle it serves.
 
 ### Feedback
 
