@@ -2,6 +2,13 @@
 
 ## Problem
 
+Follow-on scope, 2026-10-26: the ranked report has shipped (074672f). Three
+agent-proposed extensions remain: display-only urgency (tasks-27ba8d), explicit
+closeout-hub identity (tasks-9d2f66), and blocker context in prime (tasks-14ba63).
+Reuse this handoff and the Work discovery and resumption lane (tasks-46d207);
+keep these extensions outside tasks-6166d6's original delivery criteria.
+The original scope and review history below remain as evidence, not open gates.
+
 The user asks to surface and prioritize blockers by direct/indirect downstream
 impact and by how long or through how many scope passes they have blocked work.
 These are two deliverables: a ranked downstream report, and evidence collection
@@ -15,7 +22,28 @@ substantive children; no additional records are needed.
 
 ## Current behaviour and evidence
 
-Code checked at 7085e03, unchanged by this revision; no runtime pilot was run.
+Follow-on code checked at 9cd4699; no runtime pilot was run in this scope pass.
+`src/commands/blockers.rs` delegates to the pure analysis in `src/blockers.rs`;
+`src/hierarchy.rs::is_goal` recognizes lanes and records with children, leaving
+childless closeout hubs counted as work. `src/commands/list.rs::prime` has no
+blocker section. `src/prime_summary.rs::bound` enforces a 12,288-byte JSON limit,
+fixed section caps and omission metadata. `src/query.rs::ready_order` still uses
+declared priority. crew-a0952b still owns active outcomes and urgency; its body
+explicitly says no tasks feature is needed yet. Its completion is a reconsideration
+trigger, not evidence that a usable display contract will necessarily ship.
+
+The three creation calls bind by inference to the unique filing call
+toolu_01Ln8QArefcMFd4m21KrRVfn in
+claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d (01:55:14Z), whose captured result
+lists their IDs (01:55:35Z). `jq -r .id` discarded action/timestamp fields; the
+captured result contains no reuse warning. The user's own preceding words were
+"Great! Are there any follow ups we should create?" (01:53:33Z); the specific
+extensions were agent proposals, with no later correction in that session.
+Their `origin: agent` remains. Stage 2 is not applicable: no origin_session is
+recorded. Open cross-project searches for closeout, beneficiary, blocker and prime
+found no existing design/research task answering these extension questions.
+
+Original scoping evidence, checked at 7085e03:
 
 - `src/commands/show.rs::describe` exposes outgoing dependencies and children.
   tasks-e8d471 adds incoming dependents using local or explicit cross-project scans;
@@ -51,6 +79,14 @@ The full original capture remains in tasks-e637a1 under Original capture.
 
 ## Constraints
 
+Follow-on designs preserve the shipped report and ordinary prime JSON until a
+reviewed change explicitly replaces their contracts. Keep the summary's byte
+limit, omission recovery and trial-gated startup adoption (tasks-dc696d); a new
+section is not permission to alter startup guidance. Reuse the captured scan and
+blocker analysis rather than calling the CLI recursively or adding another project
+walker. This project declares no shared needs. Neither extension waits on history
+collection merely to begin design, and neither may delay that collection.
+
 “Prioritize” means an explicitly ranked report of blockers, not just an unsorted
 count. The recommended first version leaves ready/next ordering unchanged; this
 is a design choice the user can override, not a settled narrowing of the ask.
@@ -74,6 +110,15 @@ classifying authorization from prose. This brief grants no spending or live call
 
 ## Alternatives
 
+For the follow-ons, retain the dedicated report while preparing separate reviewed
+designs for typed hub identity and prime placement (current lean). An urgency
+display waits on the allocator's input contract. Adding all three immediately
+would settle schema, scheduling and output-budget choices without evidence;
+leaving every wait in prose would cause repeated scope passes. The recorded edges
+below keep the choices explicit without authorizing implementation.
+
+Original report alternatives (the first shipped):
+
 1. **Current recommendation:** rank downstream impact in a focused report and
    independently design/ship forward dependency events plus scope-confirmed waits.
    Define deterministic order/ties; distinguish unique impacted work from work
@@ -89,6 +134,25 @@ classifying authorization from prose. This brief grants no spending or live call
    and the start of historical coverage. They remain choices the user can revisit.
 
 ## Unanswered questions
+
+Follow-on questions:
+- **Allocator, crew-a0952b:** what active-beneficiary snapshot, lifecycle stopping
+  rules, freshness and explanatory path can tasks consume? Reconsider tasks-27ba8d
+  after that result; never derive urgency from every open dependent.
+- **Hub design:** explicit task-level goal identity or edge-purpose metadata?
+  Settle how old records, moves/renames, mixed closeout and ordinary dependencies,
+  ranking/status totals and relief counts behave. A synthetic childless-hub versus
+  ordinary-consumer fixture must distinguish the intended results without reading
+  prose or changing readiness. The design author proposes; the user reviews.
+- **Prime design:** dedicated-view guidance, compact rows, or both; full prime,
+  opt-in summary, or separately reviewed placement? Define dependent scope,
+  partial-coverage labels, omission/recovery and byte-budget eviction order. Use a
+  projected mixed local/cross-project fixture and oversized mandatory metadata to
+  check 12 KiB behavior. Preserve picker order and trial gates. The design author
+  proposes; the user reviews. No implementation is authorized here.
+
+The downstream-design questions below were answered by the shipped design;
+the evidence-design questions remain open under tasks-71c74d:
 
 - **Downstream design, tasks-e637a1:** settle unique direct/transitive counts,
   diamond deduplication, deterministic ranking, goals/closeout edges, cycles,
@@ -115,6 +179,21 @@ classifying authorization from prose. This brief grants no spending or live call
 
 ## Proposed decomposition
 
+Follow-on pass: parent the three ideas and the two design follow-ups directly
+under existing tasks-46d207, without changing that lane's body or creating a new
+goal. Preserve every idea's source and full body. All three receive `briefed`:
+tasks-27ba8d waits on crew-a0952b; tasks-9d2f66 waits on tasks-e176a0 (Design
+explicit closeout-hub identity from the blocker brief); tasks-14ba63 waits on
+tasks-7903ff (Design blocker context in prime from the blocker brief).
+Each design is P2/s/high/planned: the size is the
+written handoff, while schema and read-contract judgments justify high complexity
+and separate user design/plan review gates. At completion, each follow-up records
+its result here and adds a `--no-reviewed` finding to its waiting idea before its
+result branch merges. The allocator remains owned by its existing project;
+no foreign record is changed by this pass.
+
+Original delivery decomposition (ranked design and implementation now done):
+
 - tasks-6166d6 remains the P2/m/high/planned coordination goal under Work
   discovery and resumption (tasks-46d207). Done means a usable ranked downstream
   report, shipped event/confirmation collection and a persistence report of
@@ -136,7 +215,7 @@ obsolete Ideas it wakes instruction: there is no waiting idea after promotion.
 Keep findings on the tasks and in this brief; goal closeout requires the actual
 retained deliverables. This revision approves no design, plan or implementation.
 
-## Downstream design review handoff
+**Downstream design review history**
 
 tasks-e637a1 now has a proposed [ranked blocker design](../specs/2026-10-25-blocker-ranking-design.md),
 initially frozen for user review at c45fc7f. A read-only builder check by
@@ -205,7 +284,7 @@ change ran in the approval session. The next session reads approved spec d2940d0
 deferred full baseline using the plan's exact normal/isolated failure rules, then
 starts implementation. The frozen spec's old sequencing is superseded only by S1.
 
-## Shipped result (2026-10-26)
+**Shipped result (2026-10-26)**
 
 `tasks blockers` shipped on branch design/tasks-e637a1 under approved plan 327fe22:
 ab5f769 shares one dependency verdict across ready, closeout, parked, lanes, the
