@@ -683,10 +683,11 @@ it drops the recorded view when it saves, and it reports that claim as stale. Ch
 
 Enabling relay never rewrites a claim already held: a claim keeps the identity it was
 created with. The level is Linux-only — it needs `/proc` — and it sits *below*
-`TASKS_SESSION` in the ladder, which is why every relay identity error ends by telling you
-to set `TASKS_SESSION` and `TASKS_SESSION_PID`. That override is the recovery path from all
-of them, and distinguishes agents sharing a process when native thread identity is
-unavailable. It never supplies native note provenance.
+`TASKS_SESSION` in the ladder, so an explicit `TASKS_SESSION` recovers from every relay
+identity error and distinguishes agents sharing a process when native thread identity is
+unavailable. Each error names the override to set: `TASKS_SESSION` and
+`TASKS_SESSION_PID`, except the PID-namespace refusal above, which asks for
+`TASKS_SESSION` alone. The override never supplies native note provenance.
 
 ### Choosing a process
 
