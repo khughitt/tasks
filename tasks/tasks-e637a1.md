@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:01:56Z
+updated: 2026-10-26T00:09:50Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -16,6 +16,7 @@ tags: [cli]
 agent: claude-code
 origin: mixed
 spec: docs/specs/2026-10-25-blocker-ranking-design.md
+plan: docs/plans/2026-10-25-blocker-ranking.md
 ---
 
 Why: the user asks to surface and prioritize prerequisites by their direct and indirect downstream impact. [ref:brief] now separates downstream ranking from dependency-history collection (tasks-71c74d). This task designs a ranked report, with existing ready/next order unchanged as the recommended default; the user may override that choice at design review.
