@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:09:50Z
+updated: 2026-10-26T00:09:53Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -105,3 +105,4 @@ Agent additions to weigh when scoping:
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:00:32Z (design/tasks-e637a1): review: spec round 5 — verdict: accept; findings: Minor 1; reviewer: claude-code/claude-opus-5-5
 - 2026-10-26T00:01:56Z (design/tasks-e637a1): Design decision: accept frozen d2940d0 following the supplied round-5 acceptance and instruction to proceed to planning. The nonblocking Minor fixture omission is carried explicitly into the plan: bb boundary targets are B, L and X, with only L unfollowed. Preserve the approved frozen spec bytes; plan must parameterize lookup authority so scan-first reads and Resolver-based writes retain their behaviour. Process remains planned in .worktrees/tasks-e637a1; implementation awaits separate plan review.
+- 2026-10-26T00:09:53Z (design/tasks-e637a1): attached: spec-round-5-report.md (3790 bytes): Full supplied round-5 acceptance of d2940d0 by claude-code/claude-opus-5-5, Minor 1; corrected bb-scope X expectation is carried into the implementation plan.
