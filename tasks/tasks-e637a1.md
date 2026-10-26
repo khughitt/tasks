@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T00:28:43Z
+updated: 2026-10-26T00:28:45Z
 started: 2026-10-25T22:34:30Z
 depends: []
 parent: tasks-6166d6
@@ -136,3 +136,4 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:28:39Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-fast-isolated-check.log", "state": "kept", "verification": "verified", "purpose": "Fast-suite verification with isolated Git config, 1728 passed and 4 ignored", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup, attach needed logs or preserve hashed raw bytes under the retained-item rule before removal", "sha256": "3a5aa386968ebb3d32507c08cbc5f94a43316b91e1911ab0510c939ff4b9d5c5"}
 - 2026-10-26T00:28:41Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-design-revision-2-fast.log", "state": "kept", "verification": "verified", "purpose": "Revision d2940d0 fast-suite output with isolated Git config: 1728 passed, 4 ignored", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup attach needed logs or preserve hashed raw bytes before removal", "sha256": "94ed8fa2f3d1d5b22075d085615544dd71ec9140fa1e23bceb3adde877cb33dd"}
 - 2026-10-26T00:28:43Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-fast.log", "state": "kept", "verification": "verified", "purpose": "Plan-phase existing fast-suite check with isolated Git configuration: 1728 passed, 4 ignored; not tests of unimplemented report", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "4a10e9c341b342154a78dbb1ea9ad780bb16b03607d2d84ebd8ada3627031bb3"}
+- 2026-10-26T00:28:45Z (design/tasks-e637a1): retained: {"host": "titan", "kind": "evidence", "path": ".worktrees/tasks-e637a1/target/blocker-plan-r3-normal-fast.log", "state": "kept", "verification": "verified", "purpose": "Normal fast-suite diagnostic: exact known three move-test host-hook failures, 1725 passed and 4 ignored; not a passing suite", "next_owner": "task:tasks-e637a1", "cleanup_trigger": "At worktree cleanup preserve needed test evidence before removal", "sha256": "e48a835d68c27bbeec6eb5c0b6b8371409592fd18b0f2c6eb149e849dbc07df8"}
