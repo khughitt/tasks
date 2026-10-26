@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-09T14:58:40Z
-updated: 2026-10-26T00:25:37Z
+updated: 2026-10-26T01:55:53Z
 depends: []
 tags: [quick-add]
 source: "mindful:thought:f489a269e04a438ab5732282730531aa"
@@ -33,3 +33,4 @@ Where: src/commands/show.rs (`describe`, `run`), src/output.rs (`ShowFields`, `R
 
 - 2026-10-13T11:10:31Z (main): scope: scoped; only incoming depends edges are missing (children already shown, parents are same-project); dependents from show's existing scan, cross-project behind show --all-projects since an all-project scan measured ~1.3 s vs ~0.03 s for show; s/mid/direct, P2 unchanged
 - 2026-10-26T00:25:37Z (main): Coordination from tasks-e637a1 plan review: blocker analysis will take the existing captured Scope::scan rows and build move-aware reverse adjacency; it consumes no new artifact from this show-dependents task. Ruling S1 removes tasks-5d0d99’s hard wait on this task. Reuse Scope::scan/captured rows for show and moving::inbound rather than adding another project walker; coordinate/factor shared indexing only where there are real callers. This does not change this task’s scope or authorize implementation of the unapproved report plan.
+- 2026-10-26T01:55:53Z (main): tasks blockers shipped (merge 074672f): src/blockers.rs builds move-aware unique reverse adjacency from one captured Scope::scan. If show gains dependents, factor that shared piece rather than writing a second walker, as the coordination note asked.
