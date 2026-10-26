@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-047ad0
 created: 2026-10-25T12:30:00Z
-updated: 2026-10-26T15:21:17Z
+updated: 2026-10-26T15:22:29Z
 started: 2026-10-26T15:12:35Z
 completed: 2026-10-26T15:21:17Z
 closed: 2026-10-26T15:21:17Z
@@ -51,3 +51,4 @@ Done: common::git cannot inherit repository selectors or host environment/config
   provenance: {"harness_session":"codex:01a178c4-420d-75e3-a07d-83976bde0d40","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T15:21:17Z (fix/tasks-047ad0): Isolated common::git with temporary HOME and key-built environment; checked init/linked ownership; hostile-parent RED to GREEN verified; baseline 1744 passed, fast 1741 passed (4 ignored), just check passed, review Ship with 6 independent tests and no findings.
   provenance: {"harness_session":"codex:01a178c4-420d-75e3-a07d-83976bde0d40","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-26T15:22:29Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/tasks-047ad0","state":"released","verification":"verified","purpose":"Merged locally into main at 0f312a9; preserved verified task attachments; discarded regenerable target build/install outputs and redundant logs; after clean Git/submodule/ignored-file checks, tt-report and no-host-pointer verification, removed worktree and merged branch","next_owner":"none","cleanup_trigger":"none"}
