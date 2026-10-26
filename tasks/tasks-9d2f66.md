@@ -4,8 +4,8 @@ title: Distinguish closeout hubs from real blockage in dependency counts
 status: idea
 priority: 2
 created: 2026-10-26T01:55:26Z
-updated: 2026-10-26T15:00:36Z
-depends: []
+updated: 2026-10-26T15:00:38Z
+depends: [tasks-e176a0]
 parent: tasks-46d207
 tags: [cli]
 source: tasks-e637a1
