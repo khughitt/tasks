@@ -1,13 +1,15 @@
 ---
 id: tasks-ceee0d
 title: Share dependency resolution and preserve caller policies
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: high
 process: direct
+owner: design/tasks-e637a1
 created: 2026-10-26T00:08:20Z
-updated: 2026-10-26T00:36:39Z
+updated: 2026-10-26T00:49:07Z
+started: 2026-10-26T00:49:07Z
 depends: []
 parent: tasks-e637a1
 tags: []
@@ -28,3 +30,5 @@ Extract the shared resolution and three-way verdict with a lookup parameter; pre
 - 2026-10-26T00:08:22Z (design/tasks-e637a1): Draft implementation plan is awaiting separate user review; after approval the controller unblocks this step, preserving implementation dependencies.
   provenance: {"harness_session":"codex:01a17532-7bd2-7062-bf78-835c57d1662f","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-26T00:36:39Z (design/tasks-e637a1): Keith approved plan 327fe22 and Ruling S1 in the controller session; review gate released, remaining dependencies unchanged. Execution is reserved for a fresh session; no Setup or implementation performed here.
+- 2026-10-26T00:49:07Z (design/tasks-e637a1): started
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
