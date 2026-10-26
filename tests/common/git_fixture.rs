@@ -55,7 +55,10 @@ pub fn hostile_parent(test: &str) -> bool {
     let head = git(&["rev-parse", "HEAD"]);
     let index = std::fs::read(foreign.join(".git/index")).unwrap();
     let config = home.join(".gitconfig");
-    let config_bytes = b"[user]\nname = foreign\nemail = foreign@example.invalid\n";
+    // A host-style config-based hook (git 2.54+): a fixture that inherits global config
+    // runs it at commit and fails, as a host identity hook did against moved records.
+    let config_bytes = b"[user]\nname = foreign\nemail = foreign@example.invalid\n\
+        [hook \"hostile\"]\nevent = pre-commit\ncommand = false\n";
     std::fs::write(&config, config_bytes).unwrap();
 
     let out = Command::new(std::env::current_exe().unwrap())

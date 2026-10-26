@@ -2,6 +2,16 @@ mod common;
 use common::TestEnv;
 
 #[test]
+fn move_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("move_git_fixtures_ignore_hostile_environment") {
+        return;
+    }
+    move_from_a_source_worktree_refuses();
+    move_explain_classifies_source_worktree_refusal();
+    correction_i1_move_stamp_keeps_identical_sibling_stale();
+}
+
+#[test]
 fn external_doc_move_without_step_does_not_fetch() {
     let mut env = TestEnv::new();
     let source = env.init("dots");
@@ -1703,18 +1713,19 @@ fn moving_back_mints_a_fresh_id() {
     assert_eq!(env.json(&dots, &["show", &back])["task"]["moved_from"], n);
 }
 
-/// Run git in `dir` under a fixed identity, asserting success (as `tests/cli.rs::git`).
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
+/// Run git in `dir` through the isolated fixture route, asserting success: no host config,
+/// hook or inherited repository selector reaches it, and `init` proves the fixture owns
+/// its repository before the first write.
+fn git(env: &TestEnv, dir: &std::path::Path, args: &[&str]) {
+    let home = env.home.path();
+    let output = common::git_fixture::command(home, dir)
         .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@e")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@e")
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {output:?}");
+    if args.first() == Some(&"init") {
+        common::git_fixture::assert_repo(home, dir);
+    }
 }
 
 #[test]
@@ -1724,12 +1735,13 @@ fn move_from_a_source_worktree_refuses() {
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     env.init("wali");
-    git(&dots, &["init", "-q", "-b", "main"]);
+    git(&env, &dots, &["init", "-q", "-b", "main"]);
     let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
-    git(&dots, &["add", "-A"]);
-    git(&dots, &["commit", "-qm", "seed"]);
+    git(&env, &dots, &["add", "-A"]);
+    git(&env, &dots, &["commit", "-qm", "seed"]);
     let side = dots.join("wt");
     git(
+        &env,
         &dots,
         &[
             "worktree",
@@ -2333,12 +2345,13 @@ fn move_explain_classifies_source_worktree_refusal() {
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     env.init("wali");
-    git(&dots, &["init", "-q", "-b", "main"]);
+    git(&env, &dots, &["init", "-q", "-b", "main"]);
     let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
-    git(&dots, &["add", "-A"]);
-    git(&dots, &["commit", "-qm", "seed"]);
+    git(&env, &dots, &["add", "-A"]);
+    git(&env, &dots, &["commit", "-qm", "seed"]);
     let side = dots.join("wt");
     git(
+        &env,
         &dots,
         &[
             "worktree",
@@ -2371,7 +2384,7 @@ fn correction_i1_move_stamp_keeps_identical_sibling_stale() {
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
-    git(&dots, &["init", "-q", "-b", "main"]);
+    git(&env, &dots, &["init", "-q", "-b", "main"]);
     let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
     let path = dots.join(format!("tasks/{a}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
@@ -2388,10 +2401,11 @@ fn correction_i1_move_stamp_keeps_identical_sibling_stale() {
         .join("\n")
         + "\n";
     std::fs::write(&path, text).unwrap();
-    git(&dots, &["add", "-A"]);
-    git(&dots, &["commit", "-qm", "seed"]);
+    git(&env, &dots, &["add", "-A"]);
+    git(&env, &dots, &["commit", "-qm", "seed"]);
     let side = dots.join("wt");
     git(
+        &env,
         &dots,
         &[
             "worktree",
