@@ -1,15 +1,17 @@
 ---
 id: tasks-e637a1
 title: Design ranked downstream blocker reporting
-status: doing
+status: done
 priority: 2
 size: s
 complexity: high
 process: planned
 owner: design/tasks-e637a1
 created: 2026-10-25T21:31:04Z
-updated: 2026-10-26T01:41:45Z
+updated: 2026-10-26T01:42:12Z
 started: 2026-10-25T22:34:30Z
+completed: 2026-10-26T01:42:12Z
+closed: 2026-10-26T01:42:12Z
 depends: []
 parent: tasks-6166d6
 tags: [cli]
@@ -165,3 +167,7 @@ Agent additions to weigh when scoping:
 - 2026-10-26T00:49:06Z (design/tasks-e637a1): Setup baseline at 882a2bc: normal just test rc=101, 1729 passed/3 failed, exactly the tasks-2518ad move-test set at tests/move.rs:1717 seed commit refused by host git-identity-check (known environment failure); isolated GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just test rc=0, 1732 passed (ignored included). Executing inline (executing-plans), claude-code/claude-opus-5-5; ledger .superpowers/sdd/2026-10-25-blocker-ranking/progress.md.
 - 2026-10-26T01:33:40Z (design/tasks-e637a1): review: impl round 1 — verdict: revise; findings: Important 2, Minor 5; reviewer: claude-code/claude-opus-5-5
 - 2026-10-26T01:41:45Z (design/tasks-e637a1): review: impl round 2 — verdict: accept; findings: Minor 3; reviewer: claude-code/claude-opus-5-5
+- 2026-10-26T01:42:12Z (design/tasks-e637a1): done
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-26T01:42:12Z (design/tasks-e637a1): Designed (spec d2940d0), planned (327fe22 + Ruling S1) and shipped tasks blockers via children tasks-ceee0d, tasks-5d0d99, tasks-a7db30 and ops-b36208; final review accepted after one test-only corrective round (5b7549f); brief updated.
+  provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
