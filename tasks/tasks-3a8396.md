@@ -1,13 +1,15 @@
 ---
 id: tasks-3a8396
 title: Address the blockers report's deferred review minors
-status: todo
+status: doing
 priority: 3
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-26T01:55:16Z
-updated: 2026-10-26T01:55:16Z
+updated: 2026-10-26T01:59:24Z
+started: 2026-10-26T01:59:24Z
 depends: []
 tags: [cli]
 source: tasks-e637a1
@@ -34,3 +36,5 @@ Verification: just test-one --test blockers and blockers_ green, just test-fast;
 
 - 2026-10-26T01:55:16Z (add): created
   provenance: {"harness_session":"claude-code:bafecb5c-78ad-4c0f-b8fc-6772b931692d","harness_session_source":"CLAUDE_CODE_SESSION_ID","origin":"agent"}
+- 2026-10-26T01:59:24Z (main): started
+  provenance: {"harness_session":"codex:01a175ed-7097-7802-a439-c32c236ee97d","harness_session_source":"CODEX_THREAD_ID"}
