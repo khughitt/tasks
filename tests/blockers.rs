@@ -3,7 +3,7 @@
 //! isolated environment; git runs only through `common::git_fixture`.
 
 mod common;
-use common::{TestEnv, id_of};
+use common::{TestEnv, id_of, isolated_worktree, write_claim, write_claim_in_view};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,25 @@ fn has_row(out: &Value, id: &str) -> bool {
         .unwrap()
         .iter()
         .any(|row| row["id"] == id)
+}
+
+fn pretty_row(text: &str, id: &str) -> String {
+    let mut lines = text
+        .lines()
+        .skip_while(|line| line.split_whitespace().nth(1) != Some(id));
+    let heading = lines
+        .next()
+        .unwrap_or_else(|| panic!("no row for {id}: {text}"));
+    std::iter::once(heading)
+        .chain(lines.take_while(|line| {
+            !line.is_empty()
+                && !line
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|rank| rank.parse::<usize>().is_ok())
+        }))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn strings(value: &Value) -> Vec<String> {
@@ -97,74 +116,17 @@ fn snapshot(roots: &[&Path]) -> BTreeMap<PathBuf, Vec<u8>> {
     files
 }
 
-/// Commits `dir` as a git repository and adds a worktree of it at `at`, every git run
-/// under the isolated fixture environment, checked against both boundaries first.
-fn isolated_worktree(env: &TestEnv, dir: &Path, at: &Path) {
-    let git = |args: &[&str]| {
-        let out = common::git_fixture::command(env.home.path(), dir)
-            .args(["-c", "init.defaultBranch=main"])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "git {args:?}: {out:?}");
-    };
-    git(&["init", "-q"]);
-    common::git_fixture::assert_repo(env.home.path(), dir);
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "seed"]);
-    git(&["worktree", "add", "-q", "-b", "wt", at.to_str().unwrap()]);
-}
-
-/// A claim written straight into the store: held by this test process (`live`), recorded
-/// in a PID view no process here can judge (`unverifiable`), or long dead (`stale`).
-fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, state: &str) {
-    let path = env.claim_store(prefix);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let (pid, pid_start, boot) = if state == "stale" {
-        (0, 1, "not-this-boot".to_string())
-    } else {
-        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
-        let rest = stat.rsplit_once(") ").unwrap().1.to_string();
-        let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
-        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
-        (std::process::id(), start, boot.trim().to_string())
-    };
-    let view = match state {
-        "unverifiable" => "pid_view = \"0:1\"\n".to_string(),
-        _ => own_pid_view()
-            .map(|view| format!("pid_view = \"{view}\"\n"))
-            .unwrap_or_default(),
-    };
-    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
-    text.push_str(&format!(
-        "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
-         pid_start = {pid_start}\nboot_id = \"{boot}\"\nhost = \"h\"\n\
-         worktree = \"/elsewhere\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
-         seen = \"2026-01-01T00:00:00Z\"\n{view}"
-    ));
-    std::fs::write(&path, text).unwrap();
-}
-
-/// This process's PID view, when it is the only namespace level (as tests/cli.rs).
-fn own_pid_view() -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    let nspid = status
-        .lines()
-        .find_map(|line| line.strip_prefix("NSpid:"))?;
-    let mut entries = nspid.split_whitespace();
-    let pid: u32 = entries.next()?.parse().ok()?;
-    if pid == 0 || entries.next().is_some() {
-        return None;
-    }
-    let ns = std::fs::metadata("/proc/self/ns/pid").ok()?;
-    Some(format!("{}:{}", ns.dev(), ns.ino()))
-}
-
 #[test]
 fn blockers_cli_surface_and_limits() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
+
+    let help = env.cmd(&sci).args(["blockers", "--help"]).output().unwrap();
+    assert!(help.status.success(), "{help:?}");
+    let help = String::from_utf8(help.stdout).unwrap();
+    for limit in ["blocking since", "confirmed scope passes", "unavailable"] {
+        assert!(help.contains(limit), "{limit}: {help}");
+    }
 
     // An empty graph keeps every collection and an explicit zero.
     let out = blockers(&env, &sci, &[]);
@@ -489,9 +451,9 @@ fn blockers_attention_claims_and_resources() {
     let live = blocker_of("Held live", &[]);
     let unsure = blocker_of("Held unverifiable", &[]);
     let stale = blocker_of("Held stale", &[]);
-    write_claim(&env, "sci", &live, "live-session", "live");
-    write_claim(&env, "sci", &unsure, "far-session", "unverifiable");
-    write_claim(&env, "sci", &stale, "dead-session", "stale");
+    write_claim(&env, "sci", &live, "live-session", true);
+    write_claim_in_view(&env, "sci", &unsure, "far-session", "0:1");
+    write_claim(&env, "sci", &stale, "dead-session", false);
     let out = blockers(&env, &sci, &[]);
     assert_eq!(row(&out, &live)["claim"]["session"], "live-session");
     assert!(row(&out, &live)["claim"].get("unverified").is_none());
@@ -527,7 +489,7 @@ fn blockers_pretty_contract_and_existing_reads() {
         &sci,
         &["park", &consumers[1], "ask", "--waiting-on", "user"],
     );
-    write_claim(&env, "sci", &consumers[2], "holder", "live");
+    write_claim(&env, "sci", &consumers[2], "holder", true);
 
     let ready = env.json(&sci, &["ready"]);
     let next = env.json(&sci, &["next"]);
@@ -639,6 +601,7 @@ fn blockers_pretty_contract_and_existing_reads() {
             assert!(text.contains(&blocker), "{text}");
             assert!(text.contains("Ünïcode"), "{text}");
             assert!(text.contains("coverage complete"), "{text}");
+            let block = pretty_row(&text, &blocker);
             for label in [
                 "cleared 4",
                 "goals 0/0",
@@ -646,13 +609,13 @@ fn blockers_pretty_contract_and_existing_reads() {
                 "todo 3",
                 "shelved 1",
             ] {
-                assert!(text.contains(label), "{label}: {text}");
+                assert!(block.contains(label), "{label}: {block}");
             }
             for footer in [
                 "structural only",
                 "not attributed to a goal's children",
                 "host-local",
-                "unknown",
+                "history: blocking since",
                 "does not mean ready",
             ] {
                 assert!(text.contains(footer), "{footer}: {text}");
@@ -718,7 +681,7 @@ fn blockers_pretty_contract_and_existing_reads() {
             "--awaiting-user",
         ],
     );
-    blocker_of("Later", &["--defer", "30d"]);
+    let later = blocker_of("Later", &["--defer", "30d"]);
     let first = add(&env, &sci, "Cycle first", &[]);
     let second = add(&env, &sci, "Cycle second", &["--depends", &first]);
     let record = sci.join(format!("tasks/{first}.md"));
@@ -727,26 +690,37 @@ fn blockers_pretty_contract_and_existing_reads() {
         .replace("depends: []", &format!("depends: [{second}]"));
     std::fs::write(&record, seeded).unwrap();
     let text = pretty(&["--color", "never"], "120");
-    for line in [
-        "user:   quiet: run it overnight",
-        "host:   park host requirement headless",
-        "needs:  paid-calls",
-        "park:   waiting on agent: pick it up",
-        "user:   reviewed idea awaiting the user",
-        "cycle:  investigate cycle",
-        "defer:  deferred until ",
-        "cycles (1):",
+    for (id, line) in [
+        (&quiet, "user:   quiet: run it overnight"),
+        (&quiet, "host:   park host requirement headless"),
+        (&quiet, "needs:  paid-calls"),
+        (&handed, "park:   waiting on agent: pick it up"),
+        (&idea, "user:   reviewed idea awaiting the user"),
+        (&first, "cycle:  investigate cycle"),
+        (&second, "cycle:  investigate cycle"),
+        (&later, "defer:  deferred until "),
     ] {
-        assert!(text.contains(line), "{line}: {text}");
+        let block = pretty_row(&text, id);
+        assert!(block.contains(line), "{line}: {block}");
     }
+    assert!(text.contains("cycles (1):"), "{text}");
+    assert!(
+        text.lines().all(|line| line.chars().count() <= 120),
+        "{text}"
+    );
 
     // A claim shows its holder; a cut path makes the heading partial even at -n 0.
     let claimed = add(&env, &sci, "Held blocker", &[]);
     add(&env, &sci, "Waits on held", &["--depends", &claimed]);
-    write_claim(&env, "sci", &claimed, "far-session", "unverifiable");
+    write_claim_in_view(&env, "sci", &claimed, "far-session", "0:1");
     let text = pretty(&["--color", "never"], "120");
+    let block = pretty_row(&text, &claimed);
     assert!(
-        text.contains("someone") && text.contains("unverifiable"),
+        block.contains("claim:") && block.contains("someone") && block.contains("unverifiable"),
+        "{block}"
+    );
+    assert!(
+        text.lines().all(|line| line.chars().count() <= 120),
         "{text}"
     );
     let other = env.init("fam");

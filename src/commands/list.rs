@@ -19,14 +19,16 @@ use crate::scope::Scope;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use time::OffsetDateTime;
 
-/// The captured scan answers first at every move hop, then the read scope.
+/// The captured scan answers first, then the read scope.
+pub(super) fn scan_lookup(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
+    match all.iter().find(|task| task.id == *id) {
+        Some(task) => Ok(Some(task.clone())),
+        None => ctx.resolve_task(id),
+    }
+}
+
 pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
-    crate::dependency::resolve(&ctx.registry, id, |id| {
-        match all.iter().find(|task| task.id == *id) {
-            Some(task) => Ok(Some(task.clone())),
-            None => ctx.resolve_task(id),
-        }
-    })
+    crate::dependency::resolve(&ctx.registry, id, |id| scan_lookup(ctx, all, id))
 }
 
 /// `Some(true)` satisfied, `Some(false)` open, `None` unresolved: the known-closed map the

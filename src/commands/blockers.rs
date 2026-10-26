@@ -43,13 +43,9 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
         .collect();
     let coverage = Coverage::new(mode, requested, scanned.clone(), unreachable);
 
-    // The captured scan answers first, as for `ready`; the read scope answers the rest.
     let all = ctx.scope.scan()?;
     let analysis = crate::blockers::build(&all, &ctx.registry, coverage, |id| {
-        match all.iter().find(|task| task.id == *id) {
-            Some(task) => Ok(Some(task.clone())),
-            None => ctx.resolve_task(id),
-        }
+        super::list::scan_lookup(&ctx, &all, id)
     })?;
 
     // Every ranked prefix's store, before truncation, so a malformed one fails even at -n 0.
