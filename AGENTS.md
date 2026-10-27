@@ -13,6 +13,10 @@ whether brainstorming runs.
 
 ## Gates
 
+Run `just setup` in a fresh checkout or worktree, or after dependency changes. It
+uses `work-link` when available to keep `target/` off the synced tree, then fetches
+the locked Cargo dependencies; safe to rerun.
+
     just gate
 
 Tests: `just test-one <name>` for a test-name filter, or `just test-one --test cli <name>`

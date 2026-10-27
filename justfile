@@ -37,6 +37,14 @@ ci_remote := "origin"
 push_fast_cmd := fast_cmd
 one_cmd := test_env + " cargo test"
 
+# Keep generated directories off the synced tree on hosts with work-link.
+work-link *names:
+    {{tt}} work-link -- sh -c 'if command -v work-link >/dev/null; then work-link --ensure {{names}}; fi'
+
+# Hydrate a fresh checkout or worktree; safe to rerun after dependency changes.
+setup:
+    {{tt}} setup -- sh -c 'just work-link target && cargo fetch --locked'
+
 # The inner loop: the whole non-ignored suite, with no arguments.
 test-fast:
     {{tt}} test-fast -- sh -c '{{fast_cmd}}'
