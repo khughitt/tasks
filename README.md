@@ -48,7 +48,7 @@ Once per repository:
     cd <repo>
     tasks init --prefix <p>          # p: a letter then 1-7 letters/digits, e.g. sci
 
-`init` creates `tasks/` and the doc roots and registers the project. If the project keeps
+`init` creates the tasks/ directory and the doc roots and registers the project. If the project keeps
 specs or plans outside `docs/specs/` and `docs/plans/`, see
 [Adopting in an existing project](#adopting-in-an-existing-project) before running `init`.
 
@@ -196,7 +196,7 @@ efforts. The first paragraph of its body is its guidance in `prime` and `tasks l
 `next --under <lane>` picks within it, and `tasks block <lane> "<why>"` pauses its
 subtree until `tasks unblock`. A lane cannot nest inside a lane.
 
-A need (`--need <name>`, declared under `[needs]` in `tasks/.config.toml`) names a shared
+A need (`--need <name>`, declared under `[needs]` in tasks/.config.toml) names a shared
 resource a step uses. An exclusive need serves one session at a time; see [Claims](#claims).
 
 ### Blockers
@@ -660,7 +660,7 @@ relay = true
 ```
 
 The file is host-local on purpose. Whether relay runs is a property of a machine, while the
-per-project `tasks/.config.toml` syncs between hosts, so the switch does not belong there.
+per-project tasks/.config.toml syncs between hosts, so the switch does not belong there.
 
 Turn it on only where relay's hooks actually publish its agent registry. Every `tasks` command
 run under a harness is in scope once the switch is on, and without the registry every
@@ -789,7 +789,7 @@ Design: `docs/specs/2026-09-13-task-process-design.md`.
 ### Attachments
 
 Attachments live in `tasks/files/<id>/`, one directory per task, committed with the
-record. Each file is capped at 2 MiB unless `tasks/.config.toml` sets
+record. Each file is capped at 2 MiB unless tasks/.config.toml sets
 `[attachments] max_bytes`. A task's own `attached: <name> (<n> bytes)` and
 `detached: <name>: <why>` notes are the ledger of which files it owns. `show` lists
 the files with absolute paths. `check` reports these kinds:
@@ -1048,7 +1048,7 @@ says so in `warnings`; `--rm` with either spelling removes that one dependency. 
 `--on`/`--rm` pair therefore cannot rewrite a stored retired prefix: in two calls it drops
 the edge, and in one call it is refused because both flags name the same task.
 
-Rename requires clean `tasks/`, no live claims, and at most one git worktree. An interrupted
+Rename requires a clean tasks/ directory, no live claims, and at most one git worktree. An interrupted
 rename freezes writes to that project; reads remain available. Re-run the same command to
 resume, or use `--explain` to observe its recovery verdict without writing, locking, or
 checking authorization. Outside git, rename warns that forward recovery is the only
@@ -1111,7 +1111,7 @@ binary before recording history.
 
 ### Retiring a project
 
-A project that is over declares it in its own `tasks/.config.toml` with `tasks retire
+A project that is over declares it in its own tasks/.config.toml with `tasks retire
 [--successor <prefix>] --reason "<one line>"`, run in its registered checkout. It refuses
 while any task is open in any checkout, while a claim is live, or while a linked worktree
 cannot be read, and writes a `[retired]` table (`date`, `reason`, optional `successor`,
@@ -1133,7 +1133,7 @@ while its code lives in another git checkout. Run this in the overlay project di
 
     tasks init --prefix <p> --checkout <path>
 
-Its `tasks/.config.toml` carries `[checkout] path`, written relative to the project root
+Its tasks/.config.toml carries `[checkout] path`, written relative to the project root
 (absolute paths are accepted when read). Commands run in the code checkout or its
 worktrees open the linked project; nothing is written into the code tree. Claims and
 parks name the code worktree, so resume there. `tasks projects --json` rows carry
@@ -1158,7 +1158,7 @@ outcomes are:
 `holds_records` reports whether the repository keeps a project's records. It is true
 when an existing registered root lies in one of the repository's worktrees and shares
 its common git directory, so a registered project counts even on an unborn branch. It
-is also true when the repository tracks a regular `tasks/.config.toml` file in `HEAD`,
+is also true when the repository tracks a regular tasks/.config.toml file in `HEAD`,
 even if that file is deleted locally. An unborn branch with no registered root holds
 none. Two
 projects declaring the same checkout fail with `checkout_conflict`. Init refuses
@@ -1174,7 +1174,7 @@ Every project has three locations:
 | --- | --- | --- | --- | --- |
 | `root` | the registered root; what `tasks root` prints | the checkout | the checkout | `<overlay>/<prefix>` |
 | `checkout` | the code checkout sessions run in | = root | = root | the foreign repository |
-| `records` | where `tasks/` and `docs/` live | = root | `<records-root>/<prefix>` | = root |
+| `records` | where tasks/ and docs/ live | = root | `<records-root>/<prefix>` | = root |
 
 Run this in the code checkout:
 
@@ -1202,7 +1202,7 @@ tack = "<records-root>/tack"
 
 Init refuses with:
 
-- `records_in_tree`: `tasks/.config.toml` is still in the checkout's working tree or
+- `records_in_tree`: tasks/.config.toml is still in the checkout's working tree or
   index. Remove it with `git rm -r tasks`. A HEAD that still tracks it while the index
   deletes it is allowed, so the removal commit's `tasks check` passes.
 - `checkout_conflict`: another prefix declares this checkout.
@@ -1251,10 +1251,10 @@ there while `locate` refuses it.
 
 Two errors guard against the split:
 
-- `records_moved`: a `tasks/.config.toml` found in a code tree (an old branch) whose
+- `records_moved`: a tasks/.config.toml found in a code tree (an old branch) whose
   prefix is paired elsewhere, from every command and from `check` when the index still
   holds the file. The detail names the records directory. Rebase or merge the branch
-  onto the main branch; that tree's `tasks/` is read-only history.
+  onto the main branch; that tree's tasks/ directory is read-only history.
 - `records_unpaired`: a registered root with no config and no `[records]` row, as on a
   second host before its own `init --records`, from its checkout and from every command
   that names the prefix (`--project`, an id, `move --to`). The detail names `init
@@ -1267,7 +1267,7 @@ A malformed registry is a `config` error for every command.
 `<records-root>/<new>` as one resumable stage (`records` in `TASKS_RENAME_STOP_AFTER`),
 updates the `[records]` key and value in the same registry save, and leaves `[checkout]
 path` unchanged. It leaves the directory rename uncommitted: commit it in the records
-repository. The usual refusals apply against the records repository (clean `tasks/`, no
+repository. The usual refusals apply against the records repository (a clean tasks/ directory, no
 live claims, at most one worktree). On the second host, `rename --adopt` pairs the
 renamed directory; a plain `rename` there, finding the old directory gone and the new
 one present with no rename in progress, refuses with `validation` naming `--adopt`.
@@ -1345,7 +1345,7 @@ same three values, styles `--pretty` output only; JSON never carries escape sequ
 in a shell rc leaves piped and agent-run output plain. A non-empty `NO_COLOR` turns off
 color selected through the environment, and an explicit `--color` overrides it.
 
-Assign a persistent project color with an optional top-level key in `tasks/.config.toml`,
+Assign a persistent project color with an optional top-level key in tasks/.config.toml,
 before any table headers:
 
 ```toml
@@ -1430,7 +1430,7 @@ A report about a project's tooling goes to the project that owns it:
     tasks feedback --project <owner> "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<detail>"]
 
 The owner must be registered and opt in with a `[feedback]` table (`scope = "<what it
-owns>"`) in its `tasks/.config.toml`; any other is refused with the list of those that
+owns>"`) in its tasks/.config.toml; any other is refused with the list of those that
 accept. The entry lands as an `idea` in the owner's registered checkout, tagged `feedback`,
 the category, and `from:<your prefix>`, or `from:unregistered` when filed outside every
 project. A repeat of the same one-liner in the same owner
@@ -1478,18 +1478,18 @@ repository is public.
 
 #### Record commits
 
-Opt in per project in `tasks/.config.toml`:
+Opt in per project in tasks/.config.toml:
 
     [git]
     commit = true
 
 - Absent or false keeps manual commits; any other key in `[git]` is a config error.
 - Each write commits its records and attachment changes, once per git working tree, plus anything the repository's pre-commit hook stages; staging by another git process while the commit runs can land in it.
-- Configuration changes are not committed automatically: `init`, `rename`, `retire` and `unretire` leave `tasks/.config.toml` for you to commit, or for `tasks commit` to sweep.
+- Configuration changes are not committed automatically: `init`, `rename`, `retire` and `unretire` leave tasks/.config.toml for you to commit, or for `tasks commit` to sweep.
 - Subjects are `chore(tasks): <verb> <id>[ <id>…]`; `add` and `feedback` append the title, with the subject capped at 72 characters, with no trailer.
 - `commit_unavailable:` means git is missing or the root is outside git; `commit_deferred:` means staged changes, detached HEAD or an in-progress git operation; `commit_failed:` means a git operation or hook failed.
 - A successful write still exits 0 when its commit is skipped or fails; `cleanup needs attention:` means cleanup failed or the index could not be checked, so inspect the named paths and index.
-- Clear the warning's cause, then run `tasks commit [--project <p>]` to recover or sweep every uncommitted file under `tasks/` into one commit; it ignores the switch and exits 1 when it cannot commit.
+- Clear the warning's cause, then run `tasks commit [--project <p>]` to recover or sweep every uncommitted file under tasks/ into one commit; it ignores the switch and exits 1 when it cannot commit.
 - Record commits preserve intermediate task history while code is in progress; code and record commits land on the task's branch before it merges.
 
 ## Bounded session summaries
