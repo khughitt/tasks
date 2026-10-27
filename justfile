@@ -24,11 +24,11 @@ tt := "python3 tools/tt"
 test_env := "ceiling=$(realpath -e -- \"${TMPDIR:-/tmp}\") && GIT_CEILING_DIRECTORIES=$ceiling"
 fast_cmd := test_env + " cargo test --no-fail-fast"
 test_cmd := test_env + " cargo test --no-fail-fast -- --include-ignored"
-check_cmd := "python3 tools/ops-check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
+check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
 
 # README and design documents stay on the full check; only guide/task records skip Rust checks.
 docs_paths := "AGENTS.md tasks/*.md"
-docs_check_cmd := "python3 tools/ops-check && tasks check"
+docs_check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
 
 # No CI workflow: every push retains the full local gate.
 ci_suite_refs := ""
@@ -49,11 +49,17 @@ test-one +args:
 test:
     {{tt}} test -- sh -c '{{test_cmd}}'
 
-# Seconds, not minutes: format, lint, tasks check.
+# Seconds, not minutes: hygiene, the guide contract, format, lint, tasks check.
 check:
     {{tt}} check -- sh -c '{{check_cmd}}'
 
 gate: check test
+
+# Regenerate the identity regions in README.md and AGENTS.md from identity.toml. The only
+# thing that edits those regions; `check` refuses a commit while they are out of date.
+# Design: ops docs/specs/2026-09-22-project-guides-design.md §5.
+docs:
+    {{tt}} docs -- python3 tools/ops-docs write
 
 # Link every skills/* directory into ~/.claude/skills and ~/.agents/skills. Idempotent;
 # re-run after a pull adds a skill.

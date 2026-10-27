@@ -1,0 +1,18 @@
+# What this project is. `tools/ops-docs write` renders it into the identity region of
+# README.md and AGENTS.md; `tools/ops-docs check` refuses a commit while they differ.
+# Design: ops docs/specs/2026-09-22-project-guides-design.md §3.
+name = "tasks"
+aliases = []
+# At most 80 characters: this line sits in every agent session in every project.
+purpose = "The file-based task tracker every project here uses"
+# One to three sentences, at most 400 characters: what it does and for whom.
+abstract = """
+Tracks a project's work as one markdown file per task, checked into the project, for
+coding agents and the people supervising them. A single Rust binary is the only writer
+and answers in JSON by default; the skills shipped beside it teach agents the session
+protocol. Each host registers its projects, so one command can read across all of them.
+"""
+# Documents that are the authority for what is built or decided; each must be tracked.
+authority = ["docs/specs/2026-08-29-tasks-design.md"]
+# Directories with their own identity.toml, README.md, and AGENTS.md.
+subsystems = []
