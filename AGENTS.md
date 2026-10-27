@@ -36,7 +36,7 @@ runs the full gate unless every pushed ref is covered by full-suite CI on `ci_re
 a fresh clone, run `git config core.hooksPath .githooks` once.
 
 Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
-`cargo install --path .`
+`cargo install --locked --path .`
 
 ## Layout
 
@@ -73,7 +73,3 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
   `parser_surface_equals_table` fails until the adopted table matches the parser.
 - JSON output is the contract; `--pretty` is for humans. Never change JSON shapes without a task.
 - Fail early with a typed error; no silent fallbacks.
-- This repo owns `tasks feedback --project tasks`: review feedback ideas without a
-  triage note and redact project content with `tasks edit`.
-- Demoing or smoke-testing `tasks init`? Use `XDG_CONFIG_HOME=$(mktemp -d)` so the scratch
-  project does not leave a permanent entry in the real registry.

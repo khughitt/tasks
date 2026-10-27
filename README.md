@@ -15,6 +15,8 @@ design link.
 
 ## Setup
 
+<a id="quick-start"></a>
+
 If you are an agent asked to install `tasks` or adopt it in a project, do steps 1–3 in
 order. Each step is idempotent.
 
@@ -94,6 +96,7 @@ What `tasks` writes in a project and on each host:
     tasks/sci-4f2a9c.md              one task
     tasks/files/sci-4f2a9c/          the task's attachments
     ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [records] prefix -> records dir; [groups] name -> prefixes
+    ~/.local/state/tasks/            per-machine state ($XDG_STATE_HOME): claims and parks, move and rename journals, record-commit locks
 
 This repository:
 
@@ -101,7 +104,7 @@ This repository:
     tests/                           end-to-end tests against the built binary in temp repos
     skills/                          the tasks, curate and scope agent skills
     docs/specs/, docs/plans/         design and plan documents, linked from tasks
-    tools/                           the timing wrapper and checks vendored from ops (tools/README.md), and one-off backfills
+    tools/                           tt, ops-check, ops-docs and cli.toml vendored from ops (tools/README.md); review and wait backfills
 
 ## Consumers
 
@@ -109,9 +112,10 @@ Every project registered on these hosts tracks its work with `tasks` and loads t
 skills in `skills/`. [tasks-tui](https://github.com/khughitt/tasks-tui) (`tui`) is a
 terminal front end: it shells out to `tasks`, reads the JSON, and launches an agent on a
 task in a new terminal. The CLI is the whole contract; the TUI never touches
-`tasks/*.md`. obs indexes task records and parses the note shapes its outcome measures
-read, lookout (`look`) shows task state beside live agents, and ops reads the host
-registry to join each project's declared identity to its registered root.
+`tasks/*.md`. `obs` indexes task records and parses the note shapes its outcome
+measures read; lookout (`look`) shows task state beside live agents; `flows` keeps each
+flow's state and gate evidence in task notes; `crew` reads tasks as work items; and `ops`
+reads the host registry to join each project's declared identity to its registered root.
 
 ## Concepts
 
@@ -776,7 +780,7 @@ does not change readiness, ordering, or `start` eligibility based on process, an
 does not run skills or create worktrees.
 
 Projects must adopt the process policy in their agent instructions (see the
-[adoption snippet](#3-tell-the-projects-agents) in the quick start) before it can take
+[adoption snippet](#3-tell-the-projects-agents) under Setup) before it can take
 precedence over generic brainstorming triggers.
 This repo has adopted it. The writing-plans integration is the tasks skill's child
 command (`--complexity <level> --process <value>`), not the upstream plan-writing skill.
