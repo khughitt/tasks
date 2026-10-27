@@ -1,0 +1,24 @@
+---
+id: tasks-b4df1e
+title: Add a just setup recipe so a new worktree has a declared hydration route
+status: todo
+priority: 3
+size: xs
+complexity: low
+process: direct
+created: 2026-10-27T00:34:40Z
+updated: 2026-10-27T00:34:40Z
+depends: []
+parent: tasks-6ed79b
+tags: [docs]
+source: tasks-82be9d
+agent: claude-code
+origin: agent
+---
+
+The justfile defines no setup recipe, and the guides name no setup command, so each session hydrating a new worktree must decide for itself how. During tasks-82be9d that meant running cargo fetch --locked on its own judgment. The ops template (templates/justfile setup_cmd) starts with just work-link for generated directories, then installs. Here that is work-link target (the main checkout's target/ is already a work-link symlink), then cargo fetch --locked. Done when just setup exists, is idempotent, runs through tools/tt, and is named in AGENTS.md Gates; verify in a fresh worktree, followed by just test-fast.
+
+## Notes
+
+- 2026-10-27T00:34:40Z (add): created
+  provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID","origin":"agent"}
