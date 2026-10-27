@@ -1,13 +1,15 @@
 ---
 id: tasks-b4df1e
 title: Add a just setup recipe so a new worktree has a declared hydration route
-status: todo
+status: doing
 priority: 3
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-27T00:34:40Z
-updated: 2026-10-27T00:34:40Z
+updated: 2026-10-27T00:51:03Z
+started: 2026-10-27T00:51:03Z
 depends: []
 parent: tasks-6ed79b
 tags: [docs]
@@ -22,3 +24,5 @@ The justfile defines no setup recipe, and the guides name no setup command, so e
 
 - 2026-10-27T00:34:40Z (add): created
   provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID","origin":"agent"}
+- 2026-10-27T00:51:03Z (main): started
+  provenance: {"harness_session":"codex:01a17ad5-cdd2-7952-9bf4-bff2e7cfd4f2","harness_session_source":"CODEX_THREAD_ID"}
