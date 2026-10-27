@@ -6,9 +6,9 @@ priority: 3
 size: m
 complexity: mid
 process: direct
-owner: main
+owner: docs/guide-contract
 created: 2026-10-23T20:15:09Z
-updated: 2026-10-27T00:13:09Z
+updated: 2026-10-27T00:16:24Z
 started: 2026-10-27T00:13:09Z
 depends: []
 tags: [docs]
@@ -32,4 +32,6 @@ Profile: personal; integrate under this repository's own rules.
 
 - 2026-10-26T21:21:30Z (main): curate-docs: tasks-d5ddb4 at c1bbcae confirms: mechanical ops-docs exits 2 because tools/ops-docs is absent, with no identity.toml or authority declaration; existing guide-contract adoption owns the fix. Criterion 4 also confirms the repeated Session protocol, Process and workspace rules, and commit-conventions line in AGENTS.md; keep the skill pointer/adoption and repository-specific instructions while removing restatements. Both remain in this adoption task; the bounded audit made no prose edits.
 - 2026-10-27T00:13:09Z (main): started
+  provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-27T00:16:24Z (docs/guide-contract): resumed
   provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
