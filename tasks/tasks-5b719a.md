@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-09-30T10:28:08Z
-updated: 2026-10-08T09:50:38Z
+updated: 2026-10-27T00:34:42Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, friction, "from:tasks"]
@@ -32,3 +32,4 @@ Next action: scope the smallest front-door addition around the existing document
 
 - 2026-10-06T16:52:04Z (main): organization: assigned to guidance/adoption; current justfile confirms the missing reinstall recipe, so compare one existing-command wrapper before proposing wider build tooling.
 - 2026-10-08T09:50:37Z (main): scope: scoped; P2/s/low/direct; one timed just install recipe using the README's locked Cargo command, aligned command pointers and isolated installation verification; no new build abstraction or host pointer changes
+- 2026-10-27T00:34:42Z (main): From tasks-82be9d: AGENTS.md now uses --locked (aligned with README). Still open: run from a worktree, a plain cargo install replaces the tasks binary on PATH, which the global live-test rule forbids; the recipe or its guide line should say to run it from the main checkout, or point --root/CARGO_TARGET_DIR inside the worktree.
