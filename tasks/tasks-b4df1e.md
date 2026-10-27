@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: chore/tasks-b4df1e-setup
 created: 2026-10-27T00:34:40Z
-updated: 2026-10-27T00:55:15Z
+updated: 2026-10-27T00:57:42Z
 started: 2026-10-27T00:51:03Z
 depends: []
 parent: tasks-6ed79b
@@ -30,3 +30,4 @@ The justfile defines no setup recipe, and the guides name no setup command, so e
   provenance: {"harness_session":"codex:01a17ad5-cdd2-7952-9bf4-bff2e7cfd4f2","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-27T00:51:43Z (chore/tasks-b4df1e-setup): Scope: direct, two-file change (justfile and AGENTS.md Gates), following the source task’s declared work-link target plus cargo fetch --locked sequence. Hydrated .worktrees/tasks-b4df1e-setup with that sequence; existing just setup is absent. Baseline command: just test; running before edits.
 - 2026-10-27T00:55:15Z (chore/tasks-b4df1e-setup): Verification: full baseline just test passed 1745 tests; after recipe/doc change, just setup succeeded twice, Cargo.lock stayed unchanged, just test-fast passed 1741 tests (4 ignored), and just check passed. Code commit 1936e51. Independent read-only review dispatched. A second pristine worktree will verify setup before any build output exists.
+- 2026-10-27T00:57:42Z (chore/tasks-b4df1e-setup): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
