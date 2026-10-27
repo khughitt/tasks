@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: docs/guide-contract
 created: 2026-10-23T20:15:09Z
-updated: 2026-10-27T00:16:24Z
+updated: 2026-10-27T00:20:11Z
 started: 2026-10-27T00:13:09Z
 depends: []
 tags: [docs]
@@ -35,3 +35,4 @@ Profile: personal; integrate under this repository's own rules.
   provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-27T00:16:24Z (docs/guide-contract): resumed
   provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-27T00:20:11Z (docs/guide-contract): Adoption committed cd41dce on docs/guide-contract in .worktrees/82be9d-guide-contract: identity.toml (authority = the 2026-08-29 design spec, rejected README.md as self-referential), tools/ops-docs v4, README reshaped to Setup/Usage/Layout/Consumers ahead of Concepts/Reference, AGENTS.md 123 -> 79 lines (no budget raise). Baseline just test 1745 passed; just check and test-fast (1741) green. Review dispatched.
