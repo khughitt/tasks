@@ -26,8 +26,8 @@ fast_cmd := test_env + " cargo test --no-fail-fast"
 test_cmd := test_env + " cargo test --no-fail-fast -- --include-ignored"
 check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
 
-# README and design documents stay on the full check; only guide/task records skip Rust checks.
-docs_paths := "AGENTS.md tasks/*.md"
+# README and design documents stay on the full check; only the agent guide skips Rust checks.
+docs_paths := "AGENTS.md"
 docs_check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
 
 # No CI workflow: every push retains the full local gate.
