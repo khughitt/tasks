@@ -1,15 +1,17 @@
 ---
 id: tasks-82be9d
 title: "Adopt the project-guide contract: identity.toml, generated regions, ops-docs check in the gate"
-status: doing
+status: done
 priority: 3
 size: m
 complexity: mid
 process: direct
 owner: docs/guide-contract
 created: 2026-10-23T20:15:09Z
-updated: 2026-10-27T00:25:57Z
+updated: 2026-10-27T00:27:01Z
 started: 2026-10-27T00:13:09Z
+completed: 2026-10-27T00:27:01Z
+closed: 2026-10-27T00:27:01Z
 depends: []
 tags: [docs]
 source: ops-2c5fbc
@@ -37,3 +39,7 @@ Profile: personal; integrate under this repository's own rules.
   provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-27T00:20:11Z (docs/guide-contract): Adoption committed cd41dce on docs/guide-contract in .worktrees/82be9d-guide-contract: identity.toml (authority = the 2026-08-29 design spec, rejected README.md as self-referential), tools/ops-docs v4, README reshaped to Setup/Usage/Layout/Consumers ahead of Concepts/Reference, AGENTS.md 123 -> 79 lines (no budget raise). Baseline just test 1745 passed; just check and test-fast (1741) green. Review dispatched.
 - 2026-10-27T00:25:57Z (docs/guide-contract): review: impl round 1 — verdict: accept; findings: Minor 8; reviewer: claude-code/claude-opus-5-5
+- 2026-10-27T00:27:01Z (docs/guide-contract): done
+  provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-27T00:27:01Z (docs/guide-contract): Adopted the project-guide contract: identity.toml (purpose copied from ops's mirror, authority the 2026-08-29 design spec), vendored tools/ops-docs v4, identity regions rendered, README reshaped to Setup/Usage/Layout/Consumers, AGENTS.md 123 -> 75 lines without restatements; just check and the pre-commit hook run ops-docs check; just docs renders. Follow-up tasks-abd9c6.
+  provenance: {"harness_session":"claude-code:c4bc7ff8-9393-47cf-a05c-ff61c4b7df6b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
