@@ -5823,6 +5823,39 @@ fn an_editor_save_cannot_set_or_move_the_anchor() {
 }
 
 #[test]
+fn add_body_from_stdin_round_trips_multiline_text() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = env
+        .cmd(&dir)
+        .args(["add", "From stdin", "--body", "-"])
+        .write_stdin("First line\n\nSecond line: café\n")
+        .assert()
+        .success();
+    let id = id_of(serde_json::from_slice(&out.get_output().stdout).unwrap());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["body"],
+        "First line\n\nSecond line: café"
+    );
+}
+
+#[test]
+fn edit_body_from_stdin_round_trips_multiline_text() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Original", "--body", "Old body"]));
+    env.cmd(&dir)
+        .args(["edit", &id, "--body", "-"])
+        .write_stdin("Replacement\n\nSecond line: café\n")
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["body"],
+        "Replacement\n\nSecond line: café"
+    );
+}
+
+#[test]
 fn edit_flags_update_fields_and_enforce_rules() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

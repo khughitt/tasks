@@ -6,7 +6,7 @@ use crate::format::parse_task;
 use crate::model::{Note, Status, Task, TaskId};
 use crate::output::Output;
 use crate::resolve::{DocKind, Resolver};
-use std::io::{IsTerminal, Read, Write};
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
@@ -93,7 +93,7 @@ fn notes_unchanged_or_trimmed(original: &[Note], edited: &[Note]) -> bool {
         })
 }
 
-pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
+pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     // `--status` conflicts with `--need` at the CLI, so the two uses never meet.
     let adds_needs = !args.fields.needs.is_empty();
     if args.force && args.status.as_deref() != Some("done") && !adds_needs {
@@ -173,11 +173,6 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     let original = task.clone();
     let original_needs = task.needs.clone();
     let was_lane = task.lane;
-    if args.fields.body.as_deref() == Some("-") {
-        let mut body = String::new();
-        std::io::stdin().read_to_string(&mut body)?;
-        args.fields.body = Some(body);
-    }
     if let Some(title) = args.title {
         task.title = title;
     }

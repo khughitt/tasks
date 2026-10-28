@@ -218,6 +218,8 @@ running the editor. Pass field flags for automation, or `tasks edit <id> --edito
 to explicitly run a scripted or GUI editor without a terminal. `--editor` conflicts
 with every field flag. Notes stay append-only; the editor permits
 only trailing-space/tab cleanup in existing notes.
+For a multi-line body, read stdin with `tasks edit <id> --body - < body.md`
+instead of passing the body inline.
 Prefer a defined tag (`tasks tags`); add a dictionary entry when a new tag is worth
 keeping. See the [tag dictionary](../../README.md#adopting-in-an-existing-project).
 
@@ -518,6 +520,8 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
 - A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--origin <user|agent|mixed>] [--origin-session <key>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
+  Add a body with `--body <text>`, or use `tasks add "<title>" --body - < body.md`
+  to read a multi-line body from stdin.
   Pass `--origin` on any `add` or `feedback` when your own session shows whose ask it
   is: `user` when every ask in the record comes from the user's prompt (they described
   it, asked for it to be filed, or it relays their words); `agent` when none does (your

@@ -226,6 +226,7 @@ pub struct FieldArgs {
     /// Add or replace a reference entry (repeatable).
     #[arg(long = "ref", value_name = "ENTRY")]
     pub refs: Vec<String>,
+    /// Body text, or `-` to read it from stdin.
     #[arg(short = 'b', long)]
     pub body: Option<String>,
     /// Urgency, 0 (most urgent) to 4.

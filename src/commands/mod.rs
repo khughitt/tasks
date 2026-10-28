@@ -43,6 +43,7 @@ use crate::repo::Project;
 use crate::resolve::{DocKind, Resolver};
 use crate::scope::{Origin, Scope};
 use crate::shorthand::Shorthand;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// What `save` must do to the claim store once every validation has passed. Recorded by the
@@ -1017,8 +1018,15 @@ pub fn apply_fields(
     let step_changed =
         fields.step.as_ref().or(task.step.as_ref()) != original.and_then(|task| task.step.as_ref());
     if let Some(body) = &fields.body {
-        validate_body(body)?;
-        task.body = body.clone();
+        let body = if body == "-" {
+            let mut body = String::new();
+            std::io::stdin().read_to_string(&mut body)?;
+            body
+        } else {
+            body.clone()
+        };
+        validate_body(&body)?;
+        task.body = body;
     }
     let mut handles = std::collections::HashSet::new();
     for text in &fields.refs {
