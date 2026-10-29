@@ -713,11 +713,11 @@ mod tests {
     fn expands_leading_tilde_on_load() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("projects.toml");
-        std::fs::write(&path, "[projects]\nsci = \"~/d/science\"\n").unwrap();
+        std::fs::write(&path, "[projects]\nsci = \"~/src/science\"\n").unwrap();
         let r = Registry::load_with_home(&path, Some(home.path().into())).unwrap();
         assert_eq!(
             r.project_root("sci").unwrap(),
-            home.path().join("d/science")
+            home.path().join("src/science")
         );
     }
 
@@ -1012,7 +1012,7 @@ mod tests {
                 ["\"gone\"", "not a registered project"],
             ),
             (
-                "[[locations.tack.former]]\nroot = \"~/d/ai\"\nuntil = \"2026-09-27\"\n",
+                "[[locations.tack.former]]\nroot = \"~/src/ai\"\nuntil = \"2026-09-27\"\n",
                 ["\"tack\"", "absolute"],
             ),
             (

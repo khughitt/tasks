@@ -780,8 +780,8 @@ host's projects: two projects using the same name mean the same machine resource
 
 ```toml
 [projects]
-sci = "~/d/science"
-fam = "~/d/familiar"
+sci = "~/src/science"
+fam = "~/src/familiar"
 
 [groups]
 verifiably = ["atoms", "nodes"]

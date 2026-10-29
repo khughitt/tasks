@@ -601,7 +601,7 @@ mod tests {
             (
                 Locations {
                     storage: None,
-                    former: vec![former("~/d/ai", None, "2026-01-01")],
+                    former: vec![former("~/src/ai", None, "2026-01-01")],
                 },
                 "absolute",
             ),

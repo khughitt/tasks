@@ -342,7 +342,7 @@ Expected GREEN; the search finds no active mirror code/README instructions (hist
 
 **Files:** hq `codex/hooks.json`, `codex/hooks.work.json`, new `tools/test_claim_guard_wiring.py`, `README.md`.
 
-**Interfaces:** Existing command `~/d/ops/hooks/claim-guard --harness codex`, registered once on `Stop` and once on `SubagentStop` in each file. `links.toml` keeps personal and work-home routes unchanged. This is a separate hq commit after Task 2, allowing mirror cleanup and wiring to activate at different points.
+**Interfaces:** Existing command `<ops checkout>/hooks/claim-guard --harness codex`, registered once on `Stop` and once on `SubagentStop` in each file. `links.toml` keeps personal and work-home routes unchanged. This is a separate hq commit after Task 2, allowing mirror cleanup and wiring to activate at different points.
 
 - [ ] **Step 1: Add a RED configuration test that covers both files.** Hq's `just test` already discovers `tools/test_*.py`; use standard library JSON/TOML parsing and pytest's existing parametrization:
 
@@ -353,7 +353,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMAND = "~/d/ops/hooks/claim-guard --harness codex"
+COMMAND = "<ops checkout>/hooks/claim-guard --harness codex"
 
 @pytest.mark.parametrize("file,home", [("hooks.json", "codex"),
                                      ("hooks.work.json", "codex-work")])
@@ -365,7 +365,7 @@ def test_both_codex_homes_guard_root_and_worker(file, home):
         assert commands.count(COMMAND) == 1
     others = [h["command"] for group in hooks["Stop"]
               for h in group["hooks"] if h["command"] != COMMAND]
-    assert others == ["~/d/familiar/bin/familiar hook --agent codex Stop",
+    assert others == ["<familiar checkout>/bin/familiar hook --agent codex Stop",
                       "~/.local/bin/harness-state-refresh"]
     manifest = tomllib.loads((ROOT / "links.toml").read_text())
     assert manifest["harness"][home]["links"]["hooks.json"] == f"codex/{file}"
@@ -377,7 +377,7 @@ Run hq `just test`; expected RED: no guard on `SubagentStop`. The added assertio
 
 ```json
 "SubagentStop": [
-  { "hooks": [{ "type": "command", "command": "~/d/ops/hooks/claim-guard --harness codex" }] }
+  { "hooks": [{ "type": "command", "command": "<ops checkout>/hooks/claim-guard --harness codex" }] }
 ]
 ```
 

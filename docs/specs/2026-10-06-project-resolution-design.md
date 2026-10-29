@@ -265,8 +265,8 @@ Retired projects stay registered, so they resolve normally.
 3. Append the remaining components lexically. A `..` among the remaining components
    gives `invalid`.
 
-This is how `~/d/ai/x` and `<Dropbox>/ai/x` reach the same answer even though
-`ai` no longer exists: `~/d` still resolves. Every match is component-wise, so
+This is how `<Dropbox link>/ai/x` and `<Dropbox>/ai/x` reach the same answer even though
+`ai` no longer exists: `<Dropbox link>` still resolves. Every match is component-wise, so
 `/a/tack` never matches `/a/tackle`.
 
 ### 4.2 Locations
