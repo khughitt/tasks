@@ -10,7 +10,7 @@ Turn one bounded idea cluster into evidence-backed next actions and handoffs. In
     /scope [<id>... | --tag <tag>] [--project <prefix>]
 
 Do not ask the user to choose a cluster. Do not `tasks start` selected ideas: this is a
-review pass, and each idea must remain unclaimed until its verdict is written.
+review pass, and each member must remain unclaimed until its verdict is written.
 Explicit ids may also name scoped tasks to re-scope (see "Re-scope a scoped task").
 
 ## 1. Select and fix the root
@@ -19,24 +19,29 @@ Explicit ids are the exact batch. Otherwise discover candidates with:
 
     tasks list --needs-review [--tag <tag>] [--project <prefix>]
 
-It returns the scope queue, the rows pretty tables mark `*`. Each row's `review_reason`
-says why it is there: `unreviewed` (no pass has looked, or a finding readmitted it),
-`woken` (a dependency closed, or a deferral came due, after the last review),
-`stranded` (reviewed, but waiting on nothing recorded and with nothing new), or
-`unassessed` (a leaf `todo` or `blocked` task without process). Draw the batch from
-`unreviewed` and `woken` ideas first; when none is eligible, from `stranded` ideas; only
-then from `unassessed` rows, each a re-scope (see "Re-scope a scoped task"). A goal whose pieces live in other projects
-holds them as `depends`, so it appears among those rows as a leaf; rate it as its
+It returns the scope queue, the rows pretty tables mark `*`. Select the first tier
+with eligible unclaimed rows, retaining the coherent-cluster and bounded-batch rules
+within that tier:
+
+1. Unreviewed ideas and woken ideas or shelves.
+2. Stranded ideas.
+3. Unassessed leaf todo/blocked rows without process, each a re-scope.
+4. Stranded shelves, including legacy undated shelves and unresolved wake targets.
+
+`woken` means new closure/date evidence for an idea, or ANY currently closed wake
+ target or due checkpoint for a shelf. Shelf execution dependencies, future dates and
+ resource/user execution gates do not suppress review evidence. `stranded` means an
+ idea has no recorded wait/new evidence, or a shelf lacks a checkpoint/has an unresolved
+ wake target. Due/closed shelf evidence takes precedence over repair; an unresolved
+ target is never satisfied. Ordinary list ordering does not implement these tiers.
+A goal whose pieces live in other projects holds them as `depends`; rate its leaf
 closeout, usually `--process direct`.
 
-A reviewed idea stays out of the queue only while it waits on something recorded: an
-open dependency, a pending `proposal:`, the user (`awaiting_user`), or a deferral not yet
-due. It comes back by itself when that wait ends, or at once when it has none.
-Incidental notes (curate, comments) neither readmit it nor change its wait. A todo or
-blocked row leaves when a re-scope sets its process. An explicit id bypasses only this
-review-state exclusion; it must still be an unclaimed idea at revalidation, or an
-unclaimed `todo` or `blocked` task, which makes it a re-scope, and the pass still has the
-three-document ceiling.
+Reviewed ideas stay out while they wait on an open/unresolved dependency, pending
+proposal, synced `awaiting_user`, or future deferral. Incidental notes change none of
+those waits. Todo/blocked rows leave after a re-scope sets process. Explicit ids bypass
+review-queue exclusion only: they must remain unclaimed ideas, shelves, or todo/blocked
+re-scope members at revalidation. Keep the three-document ceiling.
 
 Fix one task-command root before member reads, and use `tasks -C <root> ...` for
 every later task command:
@@ -180,12 +185,29 @@ overlaps; batch membership does not make the same unanswered question new work.
 | `scoped` | Approach and context are established and correctness has a check | Rewrite the body to say why, done, and where to look; set `todo`, priority, size, complexity, and process by the tasks skill rubrics; decompose into children under that idea if needed |
 | `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed; make it depend on each follow-up that wakes it (§5). A brief that leaves nothing to wait on is not `briefed`: use `question` or `shelved` |
 | `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading; write the audit note with `--reviewed --awaiting-user` |
-| `shelved` | Worth keeping, but not worth reviewing now | Run `tasks -C <root> shelve <id> "<wake condition>"` |
+| `shelved` | Worth keeping, but not worth reviewing now | Run `tasks -C <root> shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` |
 | `drop` | It landed, its premise is gone, or another task covers it | Keep status; propose the drop with the supporting commit or id |
 
 `scoped` is exceptional. Unknowns do not establish priority, make investigation
 automatically low complexity, or justify implementation tasks that disguise unresolved
 decisions. Preserve the full source material when shortening bodies.
+
+For a shelf, gather the latest human condition, subsequent notes and each target's
+current outcome while it remains shelved. `wake_on` is ANY-of review evidence, distinct
+from execution `depends`; never copy all execution dependencies into wake targets.
+If it should return to ordinary idea review, revalidate, then `tasks -C <root> unshelve
+<id>` before the scoped/briefed/question/drop-proposal procedure. This clears date and
+targets and preserves the dependencies and full history; it grants no execution permission.
+A pending user decision becomes an idea with a synced `--reviewed --awaiting-user`
+note. If the condition remains unmet or unknown, keep the full human condition and
+renew with an explicit future date and only remaining unresolved completion targets.
+Omitted targets are removed; remove already-considered closed targets to acknowledge
+that evidence. For a manual/external event, use prose/date rather than a false closure
+trigger. `--no-defer` cannot erase a checkpoint. On a condition met, complete the
+unshelve-to-review handoff in this session or record and renew a concrete remaining
+condition; an acknowledgement note alone is insufficient. Reads do not unshelve.
+Reopened/recurring targets become open again; a close/reopen between scans may be
+missed until the checkpoint. There is no event-history guarantee.
 
 Choose `--process direct` when the task or reviewed plan settles the outcome,
 approach, and verification; choose `--process planned` when written design and plan
@@ -308,8 +330,9 @@ the idea is later promoted to `todo`. When the follow-up closes, the edge readmi
 Immediately before each member's first write, run `tasks -C <root> show <id>` again.
 Compare top-level `claim.live`, `task.status`, and `task.updated` with the first show.
 Skip the member without any write or audit note if it changed, has a live claim, or is
-no longer in the status it had at the first show (an idea, or a `todo` or `blocked`
-task, a re-scope). Documents may name skipped members only as related context; do
+no longer in the status it had at the first show (idea, shelved, or a todo/blocked
+re-scope). For queue-selected shelves, also recheck `needs_review`; a target may have
+reopened since selection. Treat unverifiable claims as live and skip them. Documents may name skipped members only as related context; do
 not say they were processed. If every member is skipped, create no goal or document.
 
 Revalidation comes once, before all of a member's writes, so its own writes cannot trip
@@ -328,7 +351,7 @@ is not a lock; propagate a CLI race failure. There is no per-member approval che
 Report the cluster and why, then one line per selected member with its verdict or skip
 reason (a re-scoped member also names what is now established), followed by handoff
 paths. Then include only nonempty groups for drops (id and supporting commit/id),
-questions (id and text), and shelves (id and wake condition).
+questions (id and text), and shelves (id, full condition, checkpoint and wake targets).
 
 When later research completes, its completion must add a finding note with `--no-reviewed` to every waiting
 idea named by `Ideas it wakes`, before this result's branch merges, so default selection

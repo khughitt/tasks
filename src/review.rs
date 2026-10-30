@@ -20,14 +20,15 @@ pub enum ReviewReason {
 }
 
 /// What one dependency edge says once resolved (spec §4.1). An edge that cannot be
-/// resolved is `Open`, as `ready` treats it.
+/// resolved is `Unresolved`: ideas wait on it, shelves need repair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepState {
     Open,
+    Unresolved,
     Closed { closed: Option<String> },
 }
 
-/// The edges of the reviewed ideas in one scan, resolved against that scan (spec §4.3).
+/// The wait and wake edges in one scan, resolved against that scan (spec §4.3).
 /// Built once per scan and never shared: a parked row read from its recorded checkout is
 /// judged with that checkout's view, so one id can be open in one view and done in
 /// another.
@@ -36,18 +37,20 @@ pub struct Deps {
 }
 
 impl Deps {
-    /// Resolves every edge of every reviewed idea in `scan`, each distinct id once.
+    /// Resolves reviewed ideas' dependencies and shelves' wake targets once per distinct id.
     /// `resolve` follows `moved_to` chains and returns `None` for an unresolvable edge.
     pub fn of_scan(
         scan: &[Task],
         mut resolve: impl FnMut(&TaskId) -> Result<Option<Task>>,
     ) -> Result<Deps> {
         let mut states = HashMap::new();
-        for task in scan
-            .iter()
-            .filter(|task| task.status == Status::Idea && task.reviewed)
-        {
-            for dependency in &task.depends {
+        for task in scan {
+            let edges = match task.status {
+                Status::Idea if task.reviewed => &task.depends,
+                Status::Shelved => &task.wake_on,
+                _ => continue,
+            };
+            for dependency in edges {
                 if states.contains_key(dependency) {
                     continue;
                 }
@@ -56,12 +59,31 @@ impl Deps {
                     Verdict::Satisfied => DepState::Closed {
                         closed: found.and_then(|found| found.closed),
                     },
-                    Verdict::Open | Verdict::Unresolved => DepState::Open,
+                    Verdict::Open => DepState::Open,
+                    Verdict::Unresolved => DepState::Unresolved,
                 };
                 states.insert(dependency.clone(), state);
             }
         }
         Ok(Deps { states })
+    }
+
+    /// Missing wake targets need a repair warning, even if another signal wakes the shelf.
+    pub fn warnings(&self, scan: &[Task]) -> Vec<String> {
+        scan.iter()
+            .filter(|task| task.status == Status::Shelved)
+            .flat_map(|task| {
+                task.wake_on
+                    .iter()
+                    .filter(|target| *self.state(target) == DepState::Unresolved)
+                    .map(|target| {
+                        format!(
+                            "{}: wake target {target} is unreachable; repair the shelf condition",
+                            task.id
+                        )
+                    })
+            })
+            .collect()
     }
 
     /// A view from given states, for unit fixtures.
@@ -91,6 +113,25 @@ pub fn state(
         Status::Idea if waits(task, deps, now) => None,
         Status::Idea if woken(task, deps) => Some(ReviewReason::Woken),
         Status::Idea => Some(ReviewReason::Stranded),
+        Status::Shelved => {
+            if task
+                .wake_on
+                .iter()
+                .any(|id| matches!(deps.state(id), DepState::Closed { .. }))
+                || crate::defer::is_due(task, now)
+            {
+                Some(ReviewReason::Woken)
+            } else if task.defer.is_none()
+                || task
+                    .wake_on
+                    .iter()
+                    .any(|id| *deps.state(id) == DepState::Unresolved)
+            {
+                Some(ReviewReason::Stranded)
+            } else {
+                None
+            }
+        }
         Status::Todo | Status::Blocked
             if task.process.is_none() && !task.lane && child_count == 0 =>
         {
@@ -105,10 +146,12 @@ fn waits(task: &Task, deps: &Deps, now: OffsetDateTime) -> bool {
     task.awaiting_user
         || crate::defer::is_deferred(task, now)
         || crate::proposal::pending(task).is_some()
-        || task
-            .depends
-            .iter()
-            .any(|dependency| *deps.state(dependency) == DepState::Open)
+        || task.depends.iter().any(|dependency| {
+            matches!(
+                deps.state(dependency),
+                DepState::Open | DepState::Unresolved
+            )
+        })
 }
 
 /// Spec §4.2: new evidence since the review. Called only when nothing waits, so a
@@ -347,6 +390,43 @@ mod tests {
 
     const REVIEWED: &str = "reviewed: true\nreviewed_at: 2026-10-17T09:00:00Z\n";
     const NOW: &str = "2026-10-20T00:00:00Z";
+
+    #[test]
+    fn shelf_review_precedence_and_utc_boundary() {
+        use ReviewReason::*;
+        let a = id("sci-0000aa");
+        let b = id("sci-0000bb");
+        let mut shelf = idea("defer: 2026-10-21\n", "sci-0000cc");
+        shelf.status = Status::Shelved;
+        shelf.wake_on = vec![a.clone(), b.clone()];
+        let open = Deps::from_states([(a.clone(), DepState::Open), (b.clone(), DepState::Open)]);
+        let closed = Deps::from_states([
+            (a.clone(), closed("2026-10-01T00:00:00Z")),
+            (b.clone(), DepState::Open),
+        ]);
+        let missing = Deps::of_scan(&[shelf.clone()], |_| Ok(None)).unwrap();
+        assert_eq!(state(&shelf, 0, &open, at(NOW)), None);
+        assert_eq!(state(&shelf, 0, &closed, at(NOW)), Some(Woken));
+        assert_eq!(state(&shelf, 0, &missing, at(NOW)), Some(Stranded));
+        assert_eq!(state(&shelf, 0, &open, at("2026-10-20T23:59:59Z")), None);
+        assert_eq!(
+            state(&shelf, 0, &open, at("2026-10-21T00:00:00Z")),
+            Some(Woken)
+        );
+        assert_eq!(
+            state(&shelf, 0, &missing, at("2026-10-21T00:00:00Z")),
+            Some(Woken)
+        );
+        shelf.defer = None;
+        assert_eq!(state(&shelf, 0, &closed, at(NOW)), Some(Woken));
+        assert_eq!(state(&shelf, 0, &open, at(NOW)), Some(Stranded));
+        shelf.wake_on.clear();
+        assert_eq!(state(&shelf, 0, &open, at(NOW)), Some(Stranded));
+        shelf.defer = Some(crate::defer::Defer::parse("2026-10-21").unwrap());
+        assert_eq!(state(&shelf, 0, &open, at(NOW)), None);
+        shelf.wake_on = vec![a];
+        assert!(Deps::of_scan(&[shelf], |_| Err(Error::Validation("hard read".into()))).is_err());
+    }
 
     #[test]
     fn state_follows_spec_section_4() {

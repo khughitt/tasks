@@ -308,6 +308,17 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         }
         rows.push(("deferred", value));
     }
+    if !t.wake_on.is_empty() {
+        let mut value = Vec::new();
+        for target in &t.wake_on {
+            if !value.is_empty() {
+                value.push(Span::plain(", "));
+            }
+            let target = target.to_string();
+            value.push(present::id(&target, color(o, &target)));
+        }
+        rows.push(("wake on", value));
+    }
     for (key, value) in [("source", &t.source), ("agent", &t.agent)] {
         if let Some(value) = value {
             rows.push((key, vec![present::owner(value)]));
@@ -758,6 +769,8 @@ mod tests {
     fn fields() -> ShowFields {
         ShowFields {
             task: crate::format::parse_task(BARE, "x").unwrap(),
+            needs_review: false,
+            review_reason: None,
             project_colors: Default::default(),
             spec_path: None,
             plan_path: None,

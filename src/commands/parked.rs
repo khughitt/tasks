@@ -176,7 +176,7 @@ fn unavailable(
 /// The row from the checkout the park recorded, judged with that checkout's own scan and
 /// dependency view (wait-aware spec §4.3).
 fn resolve_recorded(
-    ctx: &ReadCtx,
+    ctx: &mut ReadCtx,
     id: &TaskId,
     park: &Park,
     claims: &ClaimSnapshot,

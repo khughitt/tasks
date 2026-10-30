@@ -79,7 +79,7 @@ pub fn sample(
     }
     let drawn = &pool[..take];
 
-    let deps = super::list::review_deps(&ctx, &all)?;
+    let deps = super::list::review_deps(&mut ctx, &all)?;
     let colors = ctx.project_colors();
     let mut out = Output::List(ListOut {
         tasks: drawn

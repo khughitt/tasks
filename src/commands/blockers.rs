@@ -152,7 +152,7 @@ fn row(rank: usize, impact: &Impact, claims: &ClaimSnapshot, now: OffsetDateTime
         task_needs: task.needs.clone(),
         defer: task
             .defer
-            .filter(|_| crate::defer::is_deferred(task, now))
+            .filter(|_| task.status != Status::Shelved && crate::defer::is_deferred(task, now))
             .map(|defer| defer.to_string()),
         park: park.map(ParkInfo::of),
         claim: claims

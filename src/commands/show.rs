@@ -100,6 +100,21 @@ pub fn describe(
     fetch: Fetch,
 ) -> Result<ShowFields> {
     let mut resolver = Resolver::new(project, registry);
+    let deps = crate::review::Deps::of_scan(std::slice::from_ref(&task), |id| {
+        crate::dependency::resolve(registry, id, |id| {
+            match all.iter().find(|candidate| candidate.id == *id) {
+                Some(found) => Ok(Some(found.clone())),
+                None => resolver.resolve_task(id),
+            }
+        })
+    })?;
+    warnings.extend(deps.warnings(std::slice::from_ref(&task)));
+    let review_reason = crate::review::state(
+        &task,
+        crate::hierarchy::children(all, &task.id, registry).len(),
+        &deps,
+        now,
+    );
     resolver.set_fetch(fetch);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
@@ -242,6 +257,7 @@ pub fn describe(
     let named = task
         .depends
         .iter()
+        .chain(&task.wake_on)
         .chain(&task.moved_to)
         .chain(&task.moved_from);
     for id in named {
@@ -260,6 +276,8 @@ pub fn describe(
         .filter_map(|(prefix, color)| color.map(|color| (prefix, color)))
         .collect();
     Ok(ShowFields {
+        needs_review: review_reason.is_some(),
+        review_reason,
         project_colors,
         spec_path,
         plan_path,

@@ -124,8 +124,18 @@ reads the host registry to join each project's declared identity to its register
 Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`, plus
 `moved`, the read-only tombstone [`tasks move`](#moving-tasks) leaves behind.
 An idea is an uncommitted thought and is never offered by `ready`; scope it into a `todo`
-first ([From idea to ready work](#from-idea-to-ready-work)). `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
-`tasks unshelve <id>` to return it as an idea.
+first ([From idea to ready work](#from-idea-to-ready-work)). `shelved` is open and discoverable in ordinary list/search, while execution views exclude it.
+Use `tasks shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` and
+`tasks unshelve <id>` to return it as an unreviewed idea. The date is a review checkpoint;
+ANY currently done/dropped wake target or a due checkpoint yields `woken` in
+`list --needs-review`, independent of unrelated open execution dependencies. Missing
+checkpoints or unresolved targets yield `stranded`; due/closed evidence takes precedence.
+Reads never unshelve or write notes. Renewal replaces the full date/target pair;
+`edit --no-defer` cannot erase a shelf checkpoint. Shelved goals/recurrences may carry
+a checkpoint, and a shelved parent's date permits children. Parser syntax is status
+independent; writers and `check` enforce shelf-only wake targets and cadence/date pairs.
+Reopened targets stop waking; close/reopen entirely between scans can be missed until
+the checkpoint. The scope skill applies its four selection tiers and skips live claims.
 
 Ideas carry an optional `reviewed` flag (set by `note --reviewed` and `edit --reviewed`,
 which also stamp `reviewed_at`; cleared by `--no-reviewed` and by every status change),
@@ -374,7 +384,7 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
     tasks release <id> "sandbox exited"  # drop a claim this command cannot judge, holder known gone; records why
     tasks release new-4f2a9c "gone" --adopting old  # the same for a claim recorded before a rename this host has not adopted
-    tasks shelve <id> "when the dependency lands" # keep open work out of active views
+    tasks shelve <id> "when the pilot lands" --defer 30d --wake-on <pilot-id>
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,

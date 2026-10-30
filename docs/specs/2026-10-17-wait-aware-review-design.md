@@ -1,5 +1,21 @@
 # Wait-aware review state: reviewed ideas that wait on nothing come back
 
+Current shelf amendment (2026-10-30): shelves are included in ordinary list/search
+and use `defer` as a mandatory checkpoint for new/renewed shelves, independent of
+execution readiness. `wake_on` is a sparse ANY-of review-evidence list. A due checkpoint
+or currently closed target yields woken; absent date/unresolved target yields stranded,
+with closed/due evidence taking precedence. Old undated shelves remain readable.
+Shelved goals, lanes and recurrences may carry a checkpoint, and a shelved parent's
+date permits new children. On exit, transition clears date/targets before final writer
+validation; syntax parsing stays status independent for cadence/date and wake fields.
+A dated shelf cannot erase its checkpoint while remaining shelved. Prime's deferral
+summary and blocker defer labels exclude shelf checkpoints; list --deferred retains them.
+Scope tiers are unreviewed/woken ideas and woken shelves, stranded ideas, unassessed
+todo/blocked, then stranded shelves. Reads do not unshelve; current-state wake evidence
+can disappear on reopen. The dated checkpoint bounds missed close/reopen occurrences.
+The sections below record the earlier decision and ordinary non-shelf behavior.
+
+
 Status: implemented (plan docs/plans/2026-10-17-wait-aware-review.md); rollout complete 2026-10-17
 Task: tasks-1a3280 (parent tasks-5408fe, lane tasks-46d207; answers tasks-163055)
 Brief: `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md`

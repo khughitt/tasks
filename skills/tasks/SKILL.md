@@ -50,13 +50,16 @@ mean those documents were verified.
    `--needs-review` keeps rows that still need a look, each with a `review_reason`:
    `unreviewed` ideas, `woken` and `stranded` reviewed ideas (no recorded wait: open
    dependency, pending proposal, `awaiting_user`, or future deferral), and `unassessed`
-   leaf todo or blocked tasks with no process. Pretty tables mark those rows with a
+   leaf todo or blocked tasks with no process, plus `woken` shelves (closed target/due
+   checkpoint) and `stranded` shelves (missing checkpoint/unresolved target). Scope
+   selects unreviewed/woken first, stranded ideas second, unassessed rows third, then
+   stranded shelves. Pretty tables mark those rows with a
    leading `*`; together they are the scope queue, which `/scope` with no ids draws from.
    `note --reviewed --awaiting-user` records that a reviewed idea waits on the user;
    `--no-reviewed` readmits it with the answer.
    `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
    phrase (literal, case-insensitive; notes are not searched) and takes every `list`
-   option, so `tasks search "<phrase>" --all-projects` (open work, shelved aside) is the
+   option, so `tasks search "<phrase>" --all-projects` (all open work, including shelves) is the
    duplicate check before filing.
    Never pick a task with children; those are goals. `ready` already omits them.
    A parent must be in the same project, so a goal whose pieces live in other projects
@@ -513,12 +516,30 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `edit --status todo` first and defer it in a second command when both are wanted.
 - Deliberate idea review: `/scope [<id>... | --tag <tag>] [--project <prefix>]`. The same
   skill re-scopes a `todo` or `blocked` task named by id: re-check its premises, then narrow it.
-- Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
-  (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
-  `prime`'s roadmap and ready sections. A surviving shelved park overlay remains visible in
-  `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
-  `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
-  returns it to `idea`.
+- Not now, but kept: `tasks shelve <id> "<what would bring it back>" --defer 30d [--wake-on <id>]...`.
+  The required future date is a review checkpoint; any named target currently done or
+  dropped also admits the shelf to `list --needs-review`, even before the date and
+  while unrelated execution dependencies remain open. `wake_on` is review evidence;
+  `depends` still controls execution. A dropped target prompts a decision, not proof of
+  delivery. For manual/external conditions use prose and a date, without inventing a target.
+  Shelves remain open and discoverable in ordinary `list`/`search`; `ready`, `next`,
+  `sample` and `prime`'s roadmap/ready sections exclude them. Parks remain visible for cleanup.
+  Reads never change status or write a wake note. Due dates or closed targets produce
+  `woken`; no date or an unresolved target produces `stranded`, with repair warnings
+  for missing targets. Closed/due evidence takes precedence over repair. Old undated
+  shelves remain readable and incidentally editable; renew them deliberately.
+  Renew with `shelve` to replace the whole date/target pair, omitting targets whose
+  evidence has already been considered. `edit --no-defer` cannot erase a shelf checkpoint.
+  Shelved goals, lanes, parents and recurrences may carry checkpoints; a shelf parent's
+  date does not prevent a new child. Parsing accepts retained shelf metadata in editor
+  drafts; writers and `check` enforce `wake_on` only on shelves and `every` plus `defer`
+  only on shelves. Ordinary goal/parent/recurrence restrictions resume on shelf exit.
+  `edit --status shelved` refuses; `tasks unshelve <id>` returns an unreviewed idea,
+  clearing date/targets and preserving execution dependencies, history and links. On a
+  condition met, complete that handoff in the same session or explicitly renew the
+  remaining condition and date. Scope still skips live/unverifiable claims and respects
+  human decisions. Reopening a target removes its wake evidence; a close/reopen entirely
+  between scans is not an event delivery guarantee. The checkpoint bounds this gap.
 - A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--origin <user|agent|mixed>] [--origin-session <key>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
   Add a body with `--body <text>`, or use `tasks add "<title>" --body - < body.md`
   to read a multi-line body from stdin.
@@ -594,7 +615,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `tasks block <lane> "<why>"`: its subtree leaves `ready`, `next`, and `prime`'s ready
   list until `tasks unblock <lane>`. `ready` and `next` warn about the paused work;
   `prime` shows the lane as `paused` in its lanes block. `start` on a task inside a paused
-  lane still works. Never pause with `shelve`, which hides the lane from every view and
+  lane still works. Never pause with `shelve`, which removes the lane from execution views and
   needs its subtree shelved first. `check` warns about a lane with no steps yet.
 - Dispatching several agents at once: mark each self-contained task with
   `tasks edit <id> --parallel`, then `tasks ready --parallel -n <N>` for the set to hand

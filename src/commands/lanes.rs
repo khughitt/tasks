@@ -25,7 +25,7 @@ pub fn run(
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let halts = super::list::halt_snapshots(&mut ctx, &all);
-    let deps = super::list::review_deps(&ctx, &all)?;
+    let deps = super::list::review_deps(&mut ctx, &all)?;
     let lanes = rows(
         &mut ctx, &all, &deps, &claims, &halts, cutoff, &without, now,
     )?;
