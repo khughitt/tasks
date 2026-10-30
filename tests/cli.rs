@@ -1555,7 +1555,7 @@ fn shelved_is_hidden_from_default_views_but_counted() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    env.json(&sci, &["shelve", &id, "later"]);
+    env.json(&sci, &["shelve", &id, "--defer", "30d", "later"]);
 
     let ids = |value: &serde_json::Value| -> Vec<String> {
         value["tasks"]
@@ -1597,11 +1597,11 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
     let leaf = id_of(env.json(&sci, &["add", "Leaf", "--parent", &subgoal]));
     let root = id_of(env.json(&sci, &["add", "Root", "--status", "idea"]));
     let root_child = id_of(env.json(&sci, &["add", "Root child", "--parent", &root]));
-    env.json(&sci, &["shelve", &child, "later"]);
-    env.json(&sci, &["shelve", &leaf, "later"]);
-    env.json(&sci, &["shelve", &subgoal, "later"]);
-    env.json(&sci, &["shelve", &root_child, "later"]);
-    env.json(&sci, &["shelve", &root, "later"]);
+    env.json(&sci, &["shelve", &child, "--defer", "30d", "later"]);
+    env.json(&sci, &["shelve", &leaf, "--defer", "30d", "later"]);
+    env.json(&sci, &["shelve", &subgoal, "--defer", "30d", "later"]);
+    env.json(&sci, &["shelve", &root_child, "--defer", "30d", "later"]);
+    env.json(&sci, &["shelve", &root, "--defer", "30d", "later"]);
 
     let tree = env.json(&sci, &["tree"]);
     assert_eq!(tree["nodes"].as_array().unwrap().len(), 1, "{tree}");
@@ -1676,7 +1676,7 @@ fn parked_shelved_task_is_visible_but_never_a_next_candidate() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    env.json(&sci, &["shelve", &id, "later"]);
+    env.json(&sci, &["shelve", &id, "--defer", "30d", "later"]);
     write_park(
         &env,
         "sci",
@@ -1699,7 +1699,7 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
     let sci = env.init("sci");
     let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "2"]));
     let work = id_of(env.json(&sci, &["add", "Work", "-p", "2", "--depends", &dep]));
-    env.json(&sci, &["shelve", &dep, "later"]);
+    env.json(&sci, &["shelve", &dep, "--defer", "30d", "later"]);
 
     assert!(
         env.json(&sci, &["ready"])["tasks"]
@@ -1722,7 +1722,7 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
         format!("depends on shelved {dep}: unshelve it or drop the dependency")
     );
 
-    env.json(&sci, &["shelve", &work, "later"]);
+    env.json(&sci, &["shelve", &work, "--defer", "30d", "later"]);
     assert!(
         !env.check(&sci)["warnings"]
             .as_array()
@@ -3059,7 +3059,7 @@ fn check_reports_deferred_goals_and_deferrals_on_the_wrong_status() {
         "the status rule is not parsing's: {v}"
     );
 
-    // Parsing still owns the shape rules: defer beside every fails the scan.
+    // Cadence/date status rules belong to check and writers, so the scan still succeeds.
     let both = id_of(env.json(&sci, &["add", "Both", "--every", "30d"]));
     let path = sci.join(format!("tasks/{both}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
@@ -3075,7 +3075,7 @@ fn check_reports_deferred_goals_and_deferrals_on_the_wrong_status() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["kind"] == "parse" && e["file"].as_str().unwrap().contains(&both)),
+            .any(|e| e["kind"] == "defer_periodic" && e["id"] == both),
         "{v}"
     );
 
@@ -6391,7 +6391,7 @@ fn check_holds_only_open_records_to_their_doc_links() {
     let shelved = linked(&env, "Shelved", "Task 3: three");
     env.json(&dir, &["drop", &dropped, "merged away"]);
     env.json(&dir, &["done", &done, "landed"]);
-    env.json(&dir, &["shelve", &shelved, "later"]);
+    env.json(&dir, &["shelve", &shelved, "--defer", "30d", "later"]);
 
     // The plan revision merges every heading away and the spec is retired.
     write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: all\n");
@@ -6469,7 +6469,7 @@ fn show_missing_plans_stay_readable_and_keep_read_failures() {
     let open = linked("Open");
     let shelved = linked("Shelved");
     let closed = linked("Closed");
-    env.json(&dir, &["shelve", &shelved, "later"]);
+    env.json(&dir, &["shelve", &shelved, "--defer", "30d", "later"]);
     env.json(&dir, &["done", &closed]);
     std::fs::remove_file(dir.join(plan)).unwrap();
     for id in [&open, &shelved] {
@@ -10297,7 +10297,7 @@ fn every_status_transition_spends_a_deferral() {
         ("todo", vec!["start"]),
         ("todo", vec!["done", "landed"]),
         ("todo", vec!["drop", "no"]),
-        ("todo", vec!["shelve", "later"]),
+        ("todo", vec!["shelve", "later", "--defer", "30d"]),
         ("idea", vec!["edit", "--status", "todo"]),
     ];
     for (status, action) in cases {
@@ -10306,7 +10306,11 @@ fn every_status_transition_spends_a_deferral() {
         args.extend(&action[1..]);
         env.json(&sci, &args);
         let value = env.json(&sci, &["show", &id]);
-        assert!(value["task"]["defer"].is_null(), "{action:?} left {value}");
+        if action[0] == "shelve" {
+            assert!(value["task"]["defer"].is_string(), "{value}");
+        } else {
+            assert!(value["task"]["defer"].is_null(), "{action:?} left {value}");
+        }
     }
 
     let kept = id_of(env.json(&sci, &["add", "Kept", "--defer", "30d"]));
@@ -13118,7 +13122,7 @@ fn halt_views_all_projects_filter_only_the_halted_project() {
     let sci_task = id_of(env.json(&sci, &["add", "Sci work", "-p", "2"]));
     let fam_task = id_of(env.json(&fam, &["add", "Fam work", "-p", "2"]));
     let halt = id_of(env.json(&sci, &["add", "Incident", "-p", "0", "--tag", "halt"]));
-    env.json(&sci, &["shelve", &halt, "pending"]);
+    env.json(&sci, &["shelve", &halt, "--defer", "30d", "pending"]);
     for command in ["ready", "prime", "next"] {
         let output = env.json(&fam, &[command, "--all-projects"]);
         assert_eq!(output["halts"][0]["id"], halt, "{output}");
@@ -13171,7 +13175,7 @@ fn halt_views_claimed_shelved_and_deferred_halts_stay_visible() {
         ],
     ));
     env.json(&main, &["start", &claimed]);
-    env.json(&main, &["shelve", &shelved, "later"]);
+    env.json(&main, &["shelve", &shelved, "--defer", "30d", "later"]);
     let ids: Vec<String> = env.json(&side, &["prime"])["halts"]
         .as_array()
         .unwrap()
@@ -20071,7 +20075,16 @@ fn shelve_writes_the_status_and_the_note_and_unshelve_returns_to_idea() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--size", "s"]));
-    let v = env.json(&sci, &["shelve", &id, "when profiles have two consumers"]);
+    let v = env.json(
+        &sci,
+        &[
+            "shelve",
+            &id,
+            "--defer",
+            "30d",
+            "when profiles have two consumers",
+        ],
+    );
     assert_eq!(v["id"], id);
     let shown = env.json(&sci, &["show", &id]);
     assert_eq!(shown["task"]["status"], "shelved");
@@ -20094,7 +20107,11 @@ fn shelve_requires_a_wake_condition_and_unshelve_requires_shelved() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    let out = env.cmd(&sci).args(["shelve", &id]).output().unwrap();
+    let out = env
+        .cmd(&sci)
+        .args(["shelve", "--defer", "30d", &id])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2), "usage error, nothing written");
     assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
 
@@ -20148,7 +20165,7 @@ fn shelve_follows_the_claim_rules_and_clears_a_park_and_its_escalation() {
     let held = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
     write_claim(&env, "sci", &held, "agent-z", true);
     let err = as_agent(&env, &sci, "agent-a")
-        .args(["shelve", &held, "later"])
+        .args(["shelve", &held, "--defer", "30d", "later"])
         .output()
         .unwrap();
     let err: serde_json::Value = serde_json::from_slice(&err.stderr).unwrap();
@@ -20175,7 +20192,7 @@ fn shelve_follows_the_claim_rules_and_clears_a_park_and_its_escalation() {
 
     let v: serde_json::Value = {
         let out = as_agent(&env, &sci, "agent-a")
-            .args(["shelve", &parked, "after the rack lands"])
+            .args(["shelve", &parked, "--defer", "30d", "after the rack lands"])
             .output()
             .unwrap();
         assert!(
@@ -20206,15 +20223,15 @@ fn shelve_refuses_a_goal_with_unshelved_open_descendants() {
     let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
     let a = id_of(env.json(&sci, &["add", "A", "--parent", &goal]));
     let b = id_of(env.json(&sci, &["add", "B", "--parent", &goal]));
-    let err = error_of(&env, &sci, &["shelve", &goal, "someday"]);
+    let err = error_of(&env, &sci, &["shelve", &goal, "--defer", "30d", "someday"]);
     assert_eq!(err["error"]["kind"], "open_descendants");
     let detail = err["error"]["detail"].as_str().unwrap();
     assert!(detail.contains(&a) && detail.contains(&b), "{detail}");
     assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
 
-    env.json(&sci, &["shelve", &a, "someday"]);
+    env.json(&sci, &["shelve", &a, "--defer", "30d", "someday"]);
     env.json(&sci, &["done", &b, "landed"]);
-    env.json(&sci, &["shelve", &goal, "someday"]);
+    env.json(&sci, &["shelve", &goal, "--defer", "30d", "someday"]);
     assert_eq!(
         env.json(&sci, &["show", &goal])["task"]["status"],
         "shelved"
@@ -20226,7 +20243,7 @@ fn start_and_park_refuse_a_shelved_task_and_name_unshelve() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    env.json(&sci, &["shelve", &id, "later"]);
+    env.json(&sci, &["shelve", &id, "--defer", "30d", "later"]);
     for args in [
         vec!["start", id.as_str()],
         vec!["park", id.as_str(), "next"],
@@ -20268,7 +20285,7 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
     assert_eq!(err["error"]["kind"], "validation");
     assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
 
-    env.json(&sci, &["shelve", &id, "later"]);
+    env.json(&sci, &["shelve", &id, "--defer", "30d", "later"]);
     let retitle = editor_script(&sci, "sed -i 's/^title: T$/title: Renamed/' \"$1\"");
     let out = env
         .cmd(&sci)
@@ -20429,7 +20446,7 @@ fn process_missing_warns_only_while_doing() {
 
     let idea = id_of(env.json(&dir, &["add", "Idea", "--status", "idea"]));
     let shelved = id_of(env.json(&dir, &["add", "Shelf"]));
-    env.json(&dir, &["shelve", &shelved, "not now"]);
+    env.json(&dir, &["shelve", &shelved, "--defer", "30d", "not now"]);
     let dropped = id_of(env.json(&dir, &["add", "Drop"]));
     env.json(&dir, &["drop", &dropped, "unneeded"]);
     assert!(!missing(&env.check(&dir)));
@@ -24265,7 +24282,7 @@ fn list_parked_applies_the_filter_and_keeps_shelved_in_its_pool() {
     let sci = env.init("sci");
     let small = id_of(env.json(&sci, &["add", "Small", "--size", "s"]));
     let shelved = id_of(env.json(&sci, &["add", "Shelved", "--size", "s"]));
-    env.json(&sci, &["shelve", &shelved, "later"]);
+    env.json(&sci, &["shelve", &shelved, "--defer", "30d", "later"]);
     let large = id_of(env.json(&sci, &["add", "Large", "--size", "l"]));
     let root = sci.display().to_string();
     for id in [&small, &shelved, &large] {
@@ -27026,7 +27043,10 @@ fn lanes_view_reports_every_state_and_picks_as_next_does() {
         .success();
     env.json(&sci, &["block", &paused_lane, "the host is busy"]);
     let shelved_lane = id_of(env.json(&sci, &["add", "Shelved lane", "--lane"]));
-    env.json(&sci, &["shelve", &shelved_lane, "next quarter"]);
+    env.json(
+        &sci,
+        &["shelve", &shelved_lane, "--defer", "30d", "next quarter"],
+    );
 
     let view = json_as(&env, &sci, "me", &["lanes"]);
     let rows = view["lanes"].as_array().unwrap();
@@ -27180,7 +27200,7 @@ fn lanes_view_counts_every_live_descendant_once_including_recurrences() {
         &sci,
         &["add", "Shelved", "--parent", &mixed, "--status", "idea"],
     ));
-    env.json(&sci, &["shelve", &shelved, "later"]);
+    env.json(&sci, &["shelve", &shelved, "--defer", "30d", "later"]);
 
     let view = env.json(&sci, &["lanes"]);
     let rows = view["lanes"].as_array().unwrap();
@@ -27457,7 +27477,7 @@ fn prime_and_lanes_never_read_the_dependencies_of_closed_or_shelved_lane_work() 
             &far,
         ],
     ));
-    env.json(&sci, &["shelve", &shelved, "later"]);
+    env.json(&sci, &["shelve", &shelved, "--defer", "30d", "later"]);
     // Garble the one record both depend on: resolving it is now a parse error, so any
     // read of these two records' dependencies fails the command.
     std::fs::write(fam.join(format!("tasks/{far}.md")), "garbage").unwrap();
@@ -27999,7 +28019,7 @@ fn group_halt_views_filter_members_and_warn_only_about_members() {
     let sci_task = id_of(env.json(&sci, &["add", "Sci work", "-p", "2"]));
     let fam_task = id_of(env.json(&fam, &["add", "Fam work", "-p", "2"]));
     let halt = id_of(env.json(&sci, &["add", "Incident", "-p", "0", "--tag", "halt"]));
-    env.json(&sci, &["shelve", &halt, "pending"]);
+    env.json(&sci, &["shelve", &halt, "--defer", "30d", "pending"]);
     std::fs::remove_file(ops.join("tasks/.config.toml")).unwrap();
     let about_ops = |w: &String| w.starts_with("ops:") || w.starts_with("project ops ");
     for command in ["ready", "prime", "next"] {
@@ -28128,7 +28148,7 @@ fn retired_write_every_command_is_refused_in_the_registered_checkout() {
     let blocked = id_of(env.json(&old, &["add", "B", "-p", "2"]));
     env.json(&old, &["block", &blocked, "why"]);
     let shelved = id_of(env.json(&old, &["add", "S", "-p", "2"]));
-    env.json(&old, &["shelve", &shelved, "later"]);
+    env.json(&old, &["shelve", &shelved, "--defer", "30d", "later"]);
     let claimed = id_of(env.json(&old, &["add", "C", "-p", "2"]));
     env.json(&old, &["start", &claimed]);
     declare_retired(&old, Some("new"));
@@ -28142,7 +28162,7 @@ fn retired_write_every_command_is_refused_in_the_registered_checkout() {
         vec!["drop", &id, "m"],
         vec!["block", &id, "m"],
         vec!["unblock", &blocked],
-        vec!["shelve", &id, "m"],
+        vec!["shelve", &id, "--defer", "30d", "m"],
         vec!["unshelve", &shelved],
         vec!["dep", &id, "--on", &id2],
     ];
@@ -28812,7 +28832,7 @@ fn retired_write_every_command_is_refused_from_a_worktree_made_before_retirement
     let blocked = id_of(env.json(&main, &["add", "B", "-p", "2"]));
     env.json(&main, &["block", &blocked, "why"]);
     let shelved = id_of(env.json(&main, &["add", "S", "-p", "2"]));
-    env.json(&main, &["shelve", &shelved, "later"]);
+    env.json(&main, &["shelve", &shelved, "--defer", "30d", "later"]);
     let attached = id_of(env.json(&main, &["add", "A", "-p", "2"]));
     let file = main.join("shot.txt");
     std::fs::write(&file, "x").unwrap();
@@ -28854,7 +28874,7 @@ fn retired_write_every_command_is_refused_from_a_worktree_made_before_retirement
         vec!["drop", &id, "m"],
         vec!["block", &id, "m"],
         vec!["unblock", &blocked],
-        vec!["shelve", &id, "m"],
+        vec!["shelve", &id, "--defer", "30d", "m"],
         vec!["unshelve", &shelved],
         vec!["dep", &id, "--on", &id2],
         vec!["attach", &attached, second.to_str().unwrap()],
@@ -31985,4 +32005,378 @@ fn dependency_resolver_preserves_local_and_foreign_authority() {
     assert!(!ready(&sci_tree).contains(&consumer));
     let err = refusal(&sci_tree);
     assert!(err.contains(&blocker) && !err.contains(&foreign), "{err}");
+}
+
+#[test]
+fn shelf_checkpoint_is_atomic_and_replaces() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = id_of(env.json(&dir, &["add", "A"]));
+    let b = id_of(env.json(&dir, &["add", "B"]));
+    let id = id_of(env.json(&dir, &["add", "Wait", "--depends", &a]));
+    let path = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&path).unwrap();
+    env.usage(&dir, &["shelve", &id, "later"]);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    for bad in ["0d", "2000-01-01", "soon"] {
+        assert_eq!(
+            env.fail(&dir, &["shelve", &id, "later", "--defer", bad]),
+            "validation"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    for target in [&id, "sci-ffffff"] {
+        let out = env
+            .cmd(&dir)
+            .args([
+                "shelve",
+                &id,
+                "later",
+                "--defer",
+                "30d",
+                "--wake-on",
+                target,
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &id,
+            "A or B",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &a,
+            "--wake-on",
+            &a,
+            "--wake-on",
+            &b,
+        ],
+    );
+    let first = env.json(&dir, &["show", &id])["task"].clone();
+    assert_eq!(first["status"], "shelved");
+    assert_eq!(first["wake_on"], serde_json::json!([a, b]));
+    assert!(first["defer"].is_string());
+    assert_eq!(first["depends"], serde_json::json!([a]));
+    env.json(
+        &dir,
+        &["shelve", &id, "B", "--defer", "14d", "--wake-on", &b],
+    );
+    let renewed = env.json(&dir, &["show", &id])["task"].clone();
+    assert_eq!(renewed["wake_on"], serde_json::json!([b]));
+    assert_ne!(renewed["defer"], first["defer"]);
+    env.json(&dir, &["shelve", &id, "manual", "--defer", "7d"]);
+    assert!(
+        env.json(&dir, &["show", &id])["task"]
+            .get("wake_on")
+            .is_none()
+    );
+    env.json(&dir, &["done", &b, "new evidence"]);
+    let closed = env.json(
+        &dir,
+        &[
+            "shelve",
+            &id,
+            "closed evidence",
+            "--defer",
+            "7d",
+            "--wake-on",
+            &b,
+        ],
+    );
+    assert!(
+        closed["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains(&b))
+    );
+    env.json(&dir, &["unshelve", &id]);
+    let out = env.json(&dir, &["show", &id]);
+    assert_eq!(out["task"]["status"], "idea");
+    assert!(out["task"].get("wake_on").is_none());
+    assert!(out["task"].get("defer").is_none());
+    assert_eq!(out["task"]["depends"], serde_json::json!([a]));
+}
+
+#[test]
+fn shelf_parse_status_rules_are_writer_checks() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let both = id_of(env.json(&dir, &["add", "Both", "--every", "30d"]));
+    let wrong_status = id_of(env.json(&dir, &["add", "Wrong status"]));
+    let target = id_of(env.json(&dir, &["add", "Target"]));
+    for (id, line) in [
+        (&both, "defer: 2099-01-02\n".to_string()),
+        (&wrong_status, format!("wake_on: [{target}]\n")),
+    ] {
+        let path = dir.join(format!("tasks/{id}.md"));
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            raw.replacen("priority: 2\n", &format!("priority: 2\n{line}"), 1),
+        )
+        .unwrap();
+    }
+    assert!(env.json(&dir, &["show", &both])["task"]["defer"].is_string());
+    assert_eq!(
+        env.json(&dir, &["show", &wrong_status])["task"]["wake_on"],
+        serde_json::json!([target])
+    );
+    let (rc, findings) = check_findings(&env, &dir);
+    assert_eq!(rc, 1);
+    let kinds: Vec<_> = findings["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"defer_periodic"), "{findings}");
+    assert!(kinds.contains(&"wake_status"), "{findings}");
+    assert!(!kinds.contains(&"parse"), "{findings}");
+    for id in [&both, &wrong_status] {
+        let path = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            env.fail(&dir, &["note", id, "refused invalid state"]),
+            "validation"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    let path = dir.join(format!("tasks/{wrong_status}.md"));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, raw.replace(&target, "malformed")).unwrap();
+    assert_eq!(env.fail(&dir, &["show", &wrong_status]), "parse");
+}
+
+#[test]
+fn shelf_goal_lane_and_parent_checkpoints() {
+    for lane in [false, true] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let goal = if lane {
+            id_of(env.json(&dir, &["add", "Lane", "--lane"]))
+        } else {
+            id_of(env.json(&dir, &["add", "Goal"]))
+        };
+        let kid = id_of(env.json(&dir, &["add", "Kid", "--parent", &goal]));
+        env.json(&dir, &["shelve", &kid, "later", "--defer", "30d"]);
+        env.json(&dir, &["shelve", &goal, "later", "--defer", "30d"]);
+        env.check(&dir);
+        let added = id_of(env.json(&dir, &["add", "New kid", "--parent", &goal]));
+        let moved = id_of(env.json(&dir, &["add", "Reparented"]));
+        env.json(&dir, &["edit", &moved, "--parent", &goal]);
+        assert_eq!(
+            env.fail(&dir, &["shelve", &goal, "renew", "--defer", "14d"]),
+            "open_descendants"
+        );
+        env.json(&dir, &["shelve", &added, "later", "--defer", "30d"]);
+        env.json(&dir, &["shelve", &moved, "later", "--defer", "30d"]);
+        env.json(&dir, &["shelve", &goal, "renew", "--defer", "14d"]);
+        env.check(&dir);
+        env.json(&dir, &["unshelve", &goal]);
+        assert_eq!(
+            env.fail(&dir, &["edit", &goal, "--defer", "30d"]),
+            "validation"
+        );
+        assert_eq!(
+            env.fail(&dir, &["edit", &goal, "--every", "30d"]),
+            "validation"
+        );
+        let parent = id_of(env.json(&dir, &["add", "Deferred leaf", "--defer", "30d"]));
+        assert_eq!(
+            env.fail(&dir, &["add", "Refused kid", "--parent", &parent]),
+            "validation"
+        );
+    }
+}
+
+#[test]
+fn shelf_recurrence_editor_exit() {
+    for remove_date in [false, true] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let target = id_of(env.json(&dir, &["add", "Target"]));
+        let id = id_of(env.json(&dir, &["add", "Recurring", "--every", "30d"]));
+        env.json(&dir, &["done", &id, "first occurrence"]);
+        let anchor = env.json(&dir, &["show", &id])["task"]["last_done"].clone();
+        env.json(&dir, &["start", &id]);
+        env.json(
+            &dir,
+            &[
+                "shelve",
+                &id,
+                "review later",
+                "--defer",
+                "30d",
+                "--wake-on",
+                &target,
+            ],
+        );
+        env.check(&dir);
+        assert_eq!(env.json(&dir, &["show", &id])["task"]["last_done"], anchor);
+        assert_eq!(
+            env.fail(&dir, &["add", "No recurring parent", "--parent", &id]),
+            "validation"
+        );
+        let path = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&path).unwrap();
+        let bad = editor_script(
+            &dir,
+            "sed -i 's/^status: shelved$/status: todo/;s/^defer: .*/defer: 2099-01-02/' \"$1\"",
+        );
+        let out = env
+            .cmd(&dir)
+            .env("EDITOR", &bad)
+            .args(["edit", &id, "--editor"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let script = if remove_date {
+            "sed -i 's/^status: shelved$/status: todo/;/^defer:/d' \"$1\""
+        } else {
+            "sed -i 's/^status: shelved$/status: todo/' \"$1\""
+        };
+        let editor = editor_script(&dir, script);
+        let out = env
+            .cmd(&dir)
+            .env("EDITOR", &editor)
+            .args(["edit", &id, "--editor"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let task = env.json(&dir, &["show", &id])["task"].clone();
+        assert_eq!(task["status"], "todo");
+        assert_eq!(task["every"], "30d");
+        assert_eq!(task["last_done"], anchor);
+        assert!(task.get("defer").is_none());
+        assert!(task.get("wake_on").is_none());
+    }
+}
+
+#[test]
+fn shelf_checkpoint_cannot_be_erased() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Dated"]));
+    env.json(&dir, &["shelve", &id, "later", "--defer", "30d"]);
+    let path = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(env.fail(&dir, &["edit", &id, "--no-defer"]), "validation");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let editor = editor_script(&dir, "sed -i '/^defer:/d' \"$1\"");
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &editor)
+        .args(["edit", &id, "--editor"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    env.json(&dir, &["edit", &id, "--defer", "14d"]);
+    assert_ne!(std::fs::read(&path).unwrap(), before);
+    let legacy = id_of(env.json(&dir, &["add", "Legacy"]));
+    let legacy_path = dir.join(format!("tasks/{legacy}.md"));
+    let raw = std::fs::read_to_string(&legacy_path).unwrap();
+    std::fs::write(&legacy_path, raw.replace("status: todo", "status: shelved")).unwrap();
+    env.json(&dir, &["edit", &legacy, "--title", "Legacy edited"]);
+    assert_eq!(
+        env.json(&dir, &["show", &legacy])["task"]["title"],
+        "Legacy edited"
+    );
+    env.json(&dir, &["unshelve", &id]);
+    env.json(&dir, &["edit", &id, "--defer", "30d"]);
+    env.json(&dir, &["edit", &id, "--no-defer"]);
+}
+
+#[test]
+fn shelf_move_rename_and_claims() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let dst = env.init("dst");
+    let target = id_of(env.json(&old, &["add", "Target"]));
+    let id = id_of(env.json(&old, &["add", "Shelf", "--body", "Keep this user text"]));
+    env.json(
+        &old,
+        &[
+            "shelve",
+            &id,
+            "preserve the wake prose",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &target,
+        ],
+    );
+    let original = env.json(&old, &["show", &id])["task"].clone();
+    let raw = std::fs::read_to_string(old.join(format!("tasks/{id}.md"))).unwrap();
+    env.json(&old, &["rename", "old", "new"]);
+    let renamed = id.replacen("old-", "new-", 1);
+    let renamed_target = target.replacen("old-", "new-", 1);
+    let renamed_raw = std::fs::read_to_string(old.join(format!("tasks/{renamed}.md"))).unwrap();
+    assert_eq!(
+        raw.split_once("\n---\n").unwrap().1,
+        renamed_raw.split_once("\n---\n").unwrap().1
+    );
+    assert_eq!(
+        env.json(&old, &["show", &renamed])["task"]["wake_on"],
+        serde_json::json!([renamed_target])
+    );
+    write_claim(&env, "new", &renamed, "other-session", true);
+    let before = std::fs::read(old.join(format!("tasks/{renamed}.md"))).unwrap();
+    assert_eq!(
+        env.fail(&old, &["shelve", &renamed, "refused", "--defer", "14d"]),
+        "claimed"
+    );
+    assert_eq!(
+        std::fs::read(old.join(format!("tasks/{renamed}.md"))).unwrap(),
+        before
+    );
+    std::fs::remove_file(env.claim_store("new")).unwrap();
+    let moved = env.json(&old, &["move", &renamed, "--to", "dst"]);
+    let new_id = moved["id"].as_str().unwrap();
+    let task = env.json(&dst, &["show", new_id])["task"].clone();
+    assert_eq!(task["status"], "shelved");
+    assert_eq!(task["wake_on"], serde_json::json!([renamed_target]));
+    assert_eq!(task["defer"], original["defer"]);
+    assert_eq!(task["body"], original["body"]);
+    let tombstone = std::fs::read_to_string(old.join(format!("tasks/{renamed}.md"))).unwrap();
+    assert!(!tombstone.contains("wake_on:"));
+    assert!(!tombstone.contains("defer:"));
+}
+
+#[test]
+fn shelf_failed_record_write_preserves_metadata_and_claims() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Shelf"]));
+    env.json(&dir, &["shelve", &id, "later", "--defer", "30d"]);
+    let path = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&path).unwrap();
+    let claims = std::fs::read(env.claim_store("sci")).ok();
+    let tasks = dir.join("tasks");
+    let permissions = std::fs::metadata(&tasks).unwrap().permissions();
+    std::fs::set_permissions(&tasks, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["shelve", &id, "renew", "--defer", "14d"])
+        .output();
+    std::fs::set_permissions(&tasks, permissions).unwrap();
+    let out = out.unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "io");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(std::fs::read(env.claim_store("sci")).ok(), claims);
 }

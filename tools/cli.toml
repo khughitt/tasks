@@ -678,8 +678,12 @@ args = [{ name = "id", value = "ref", required = true }]
 
 [[cli.tasks.commands]]
 path = ["shelve"]
-summary = "Put a task out of active work: status=shelved, hidden from the default views, open for dependencies. The wake condition is required and becomes the note"
+summary = "Shelve open work with a required wake condition and review checkpoint, keeping it visible in lists"
 args = [{ name = "id", value = "ref", required = true }, { name = "wake", value = "string", required = true }]
+options = [
+  { names = ["--defer"], value = "when", role = "set", required = true },
+  { names = ["--wake-on"], value = "ref", repeatable = true },
+]
 
 [[cli.tasks.commands]]
 path = ["unshelve"]

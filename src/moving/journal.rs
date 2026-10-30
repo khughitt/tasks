@@ -270,6 +270,10 @@ impl Journal {
         expected_target.moved_from = Some(source.id.clone());
         expected_target.updated.clone_from(&target.updated);
         let mut expected_tombstone = source.clone();
+        if source.status == Status::Shelved {
+            expected_tombstone.wake_on.clear();
+            expected_tombstone.defer = None;
+        }
         expected_tombstone.status = Status::Moved;
         expected_tombstone.reviewed = false;
         expected_tombstone.reviewed_at = None;

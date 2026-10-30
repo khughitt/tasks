@@ -857,13 +857,18 @@ pub enum Command {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
     },
-    /// Put a task out of active work: status=shelved, hidden from the default views,
-    /// open for dependencies. The wake condition is required and becomes the note.
+    /// Shelve open work with a required wake condition and review checkpoint, keeping it visible in lists.
     Shelve {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         /// What would bring the task back.
         wake: String,
+        /// Next review checkpoint (UTC day).
+        #[arg(long, value_name = "WHEN", add = ArgValueCandidates::new(crate::complete::defer_dates))]
+        defer: String,
+        /// Review evidence when any named task closes; separate from dependencies.
+        #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        wake_on: Vec<String>,
     },
     /// Return a shelved task to idea.
     Unshelve {

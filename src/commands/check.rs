@@ -503,9 +503,25 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 errors.push(finding(Some(task), file.clone(), "periodic_goal", detail));
             }
         }
+        if !task.wake_on.is_empty() && task.status != Status::Shelved {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "wake_status",
+                "only a shelved task carries wake_on".into(),
+            ));
+        }
         if task.defer.is_some() {
+            if task.every.is_some() && task.status != Status::Shelved {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "defer_periodic",
+                    "only a shelf combines every with a review checkpoint".into(),
+                ));
+            }
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
-            if crate::hierarchy::is_goal(task, !kids.is_empty()) {
+            if task.status != Status::Shelved && crate::hierarchy::is_goal(task, !kids.is_empty()) {
                 let detail = if kids.is_empty() {
                     "is a lane and is deferred; a goal is never ready, so the deferral hides \
                      nothing"
@@ -528,7 +544,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     file.clone(),
                     "defer_status",
                     format!(
-                        "is {} and carries defer; a deferral may sit only on an idea, todo, or blocked task",
+                        "is {} and carries defer; a date may sit only on an idea, todo, blocked, or shelved task",
                         task.status.as_str()
                     ),
                 ));

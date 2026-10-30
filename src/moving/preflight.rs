@@ -96,6 +96,10 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         }
     }
     let mut tombstone = source.clone();
+    if source.status == Status::Shelved {
+        tombstone.wake_on.clear();
+        tombstone.defer = None;
+    }
     tombstone.status = Status::Moved;
     tombstone.reviewed = false;
     tombstone.reviewed_at = None;
@@ -154,6 +158,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
 pub(super) fn validate_record(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     validate_task(task)?;
     crate::review::validate(task)?;
+    crate::defer::validate(task)?;
     project.validate_docs(task)?;
     crate::needs::require_declared(&project.needs, &task.needs)?;
     hierarchy::validate_parent(project, registry, task)?;

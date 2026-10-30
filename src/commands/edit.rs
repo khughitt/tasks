@@ -28,6 +28,22 @@ fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
 }
 
 pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
+    if edited.wake_on != original.wake_on {
+        return Err(Error::Validation(format!(
+            "wake_on is set by shelving; use `tasks shelve {}`",
+            original.id
+        )));
+    }
+    if original.status == Status::Shelved
+        && edited.status == Status::Shelved
+        && original.defer.is_some()
+        && edited.defer.is_none()
+    {
+        return Err(Error::Validation(format!(
+            "a shelf requires its checkpoint; use `tasks shelve {0}` to renew or `tasks unshelve {0}` to return to review",
+            original.id
+        )));
+    }
     if edited.id != original.id {
         return Err(Error::Validation("id is immutable".into()));
     }
@@ -190,6 +206,17 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         task.last_done = None;
     }
     if args.no_defer {
+        if original.status == Status::Shelved
+            && args
+                .status
+                .as_deref()
+                .is_none_or(|status| status == "shelved")
+        {
+            return Err(Error::Validation(format!(
+                "a shelf requires its checkpoint; use `tasks shelve {0}` to renew or `tasks unshelve {0}` to return to review",
+                task.id
+            )));
+        }
         task.defer = None;
     }
     if args.no_source {
@@ -443,7 +470,10 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let status = edited.status;
     // spec §2.2: a save may change the status or the date, never both, since the
     // transition below clears the date and would silently discard a new one.
-    if status != original.status && edited.defer != original.defer {
+    if status != original.status
+        && edited.defer != original.defer
+        && !(original.status == Status::Shelved && edited.defer.is_none())
+    {
         return Err(keep(Error::Validation(
             "a save that changes the status cannot also change defer; change the status \
              first, then set the date"

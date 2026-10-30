@@ -114,6 +114,7 @@ mod tests {
 
     fn task(hex: &str) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse(&format!("sci-{hex}")).unwrap(),
             title: hex.into(),
             status: Status::Todo,

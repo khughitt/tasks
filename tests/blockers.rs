@@ -484,7 +484,7 @@ fn blockers_pretty_contract_and_existing_reads() {
         }
         consumers.push(add(&env, &sci, &format!("Consumer {name}"), &extra));
     }
-    env.json(&sci, &["shelve", &consumers[0], "later"]);
+    env.json(&sci, &["shelve", &consumers[0], "--defer", "30d", "later"]);
     env.json(
         &sci,
         &["park", &consumers[1], "ask", "--waiting-on", "user"],

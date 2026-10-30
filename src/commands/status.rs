@@ -283,9 +283,41 @@ pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
 
 /// A goal is shelved only after its open descendants are; `ready` reads each child's own
 /// status, so shelving the goal alone would hide it while its children stayed eligible.
-pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
+pub fn shelve(
+    mut ctx: Ctx,
+    id: String,
+    wake: String,
+    wake_on: Vec<String>,
+    defer: String,
+) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     crate::format::validate_line("wake condition", &wake)?;
+    let checkpoint =
+        crate::defer::Defer::resolve(&defer, crate::time::parse(&crate::time::now())?.date())?;
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry);
+    let mut targets = Vec::new();
+    for value in wake_on {
+        let given = ctx.shorthand.parse(&ctx.registry, &value)?;
+        let found =
+            crate::dependency::resolve(&ctx.registry, &given, |id| resolver.resolve_task(id))?
+                .ok_or_else(|| Error::UnresolvableId(given.to_string()))?;
+        let target = ctx.registry.canonical_id(&found.id);
+        if target == task.id {
+            return Err(Error::Validation(format!(
+                "{} cannot wake on itself",
+                task.id
+            )));
+        }
+        if targets.contains(&target) {
+            continue;
+        }
+        if !found.status.is_open() {
+            ctx.warnings.push(format!(
+                "{target} is already closed; the shelf is immediately eligible for review"
+            ));
+        }
+        targets.push(target);
+    }
     let all = ctx.project.scan()?;
     let unshelved: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
         .iter()
@@ -299,6 +331,8 @@ pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
         ));
     }
     transition(&mut ctx, &mut task, Status::Shelved, false)?;
+    task.defer = Some(checkpoint);
+    task.wake_on = targets;
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &format!("shelved: {wake}"))?;
     save(&mut ctx, &mut task)?;

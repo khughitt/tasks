@@ -1164,6 +1164,7 @@ pub fn apply_fields(
         _ => {}
     }
     validate_task(task)?;
+    crate::defer::validate(task)?;
     ctx.project.validate_docs(task)?;
     ctx.warnings.extend(resolver.take_warnings());
     Ok(())
@@ -1752,6 +1753,9 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     if task.status != to {
         // spec §2.2: a deferral is spent by a status change.
         task.defer = None;
+        if task.status == Status::Shelved {
+            task.wake_on.clear();
+        }
         // Review-state spec §3.2: a status change spends a review; a return to idea
         // arrives unreviewed.
         task.reviewed = false;
@@ -1807,6 +1811,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     task.updated = crate::time::after(&task.updated)?;
     validate_task(task)?;
     crate::review::validate(task)?;
+    crate::defer::validate(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, task)?;
@@ -2305,7 +2310,12 @@ fn dispatch(cli: Cli) -> Result<Output> {
         }
         Command::Block { id, message } => status::block(open_id_write_ctx(dir, &id)?, id, message),
         Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id)?, id),
-        Command::Shelve { id, wake } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake),
+        Command::Shelve {
+            id,
+            wake,
+            wake_on,
+            defer,
+        } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake, wake_on, defer),
         Command::Unshelve { id } => status::unshelve(open_id_write_ctx(dir, &id)?, id),
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Blockers(args) => blockers::run(open_read_ctx(dir, &args.scope)?, args),

@@ -152,6 +152,13 @@ pub fn not_reviewed(task: &Task) -> Error {
 /// from parsing: `parse_task` must accept a hand-edited record so `check` can report it
 /// and an editor save can transition it.
 pub fn validate(task: &Task) -> Result<()> {
+    if !task.wake_on.is_empty() && task.status != Status::Shelved {
+        return Err(Error::Validation(format!(
+            "{} is {}; only a shelved task carries wake_on",
+            task.id,
+            task.status.as_str()
+        )));
+    }
     if task.reviewed && task.status != Status::Idea {
         return Err(not_an_idea(task));
     }

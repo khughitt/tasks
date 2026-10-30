@@ -191,7 +191,7 @@ fn every_write_to_a_tombstone_refuses_and_names_the_new_id() {
         vec!["edit", a.as_str(), "-p", "1"],
         vec!["start", a.as_str()],
         vec!["park", a.as_str(), "next"],
-        vec!["shelve", a.as_str(), "later"],
+        vec!["shelve", a.as_str(), "--defer", "30d", "later"],
         vec!["drop", a.as_str(), "why"],
         vec!["done", a.as_str()],
         vec!["block", a.as_str(), "why"],
@@ -892,7 +892,7 @@ fn check_warns_moved_dep_on_closed_and_shelved_records() {
     let closed = id_of(env.json(&dots, &["add", "Closed", "-p", "2", "--depends", &a]));
     let shelved = id_of(env.json(&dots, &["add", "Shelved", "-p", "2", "--depends", &a]));
     env.json(&dots, &["drop", &closed, "no longer needed"]);
-    env.json(&dots, &["shelve", &shelved, "later"]);
+    env.json(&dots, &["shelve", &shelved, "--defer", "30d", "later"]);
     let n = moved_pair_by_hand(&env, &dots, &a, &wali);
     let report = env.check(&dots);
     for id in [closed, shelved] {

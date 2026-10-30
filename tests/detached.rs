@@ -644,7 +644,7 @@ fn the_lifecycle_from_the_code_checkout_and_its_worktree_writes_only_under_recor
         .to_string();
     env.json(&l.code, &["block", &second, "waiting"]);
     env.json(&l.code, &["unblock", &second]);
-    env.json(&l.code, &["shelve", &second, "later"]);
+    env.json(&l.code, &["shelve", &second, "--defer", "30d", "later"]);
     env.json(&l.code, &["unshelve", &second]);
     env.json(&l.code, &["drop", &second, "no longer needed"]);
 
