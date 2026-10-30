@@ -32676,3 +32676,124 @@ fn shelf_review_uses_each_checkouts_captured_scan() {
         false
     );
 }
+
+#[test]
+fn shelf_explicit_status_consumer_controls() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let dst = env.init("dst");
+    let mut all = Vec::new();
+    let mut tagged = Vec::new();
+    for halt in [false, true] {
+        for status in [
+            "idea", "todo", "doing", "blocked", "shelved", "done", "dropped",
+        ] {
+            let id = id_of(env.json(&dir, &["add", status]));
+            match status {
+                "idea" => {
+                    env.json(&dir, &["edit", &id, "--status", "idea"]);
+                }
+                "doing" => {
+                    env.json(&dir, &["start", &id]);
+                    env.json(&dir, &["park", &id, "resume"]);
+                }
+                "blocked" => {
+                    env.json(&dir, &["block", &id, "wait"]);
+                }
+                "shelved" => {
+                    env.json(&dir, &["shelve", &id, "review", "--defer", "30d"]);
+                }
+                "done" => {
+                    env.json(&dir, &["done", &id]);
+                }
+                "dropped" => {
+                    env.json(&dir, &["drop", &id]);
+                }
+                _ => {}
+            }
+            if halt {
+                tagged.push(id.clone());
+            }
+            all.push((id, status));
+        }
+    }
+    let moved = id_of(env.json(&dir, &["add", "Moved control"]));
+    env.json(&dir, &["move", &moved, "--to", "dst"]);
+    for id in tagged {
+        env.json(&dir, &["edit", &id, "--tag", "halt"]);
+    }
+    let ids = |v: serde_json::Value| -> std::collections::BTreeSet<String> {
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let ops = ids(env.json(
+        &dir,
+        &[
+            "list",
+            "--project",
+            "sci",
+            "--tag",
+            "halt",
+            "--status",
+            "idea",
+            "--status",
+            "todo",
+            "--status",
+            "doing",
+            "--status",
+            "blocked",
+            "--status",
+            "shelved",
+            "--json",
+        ],
+    ));
+    let expected = all
+        .iter()
+        .skip(7)
+        .filter(|(_, status)| !["done", "dropped"].contains(status))
+        .map(|(id, _)| id.clone())
+        .collect();
+    assert_eq!(ops, expected);
+    let obs = ids(env.json(
+        &dir,
+        &[
+            "list",
+            "--all-projects",
+            "--status",
+            "idea",
+            "--status",
+            "todo",
+            "--status",
+            "doing",
+            "--status",
+            "blocked",
+            "--status",
+            "shelved",
+            "--status",
+            "done",
+            "--status",
+            "dropped",
+        ],
+    ));
+    let moved_target = env.json(&dst, &["list"])["tasks"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut expected: std::collections::BTreeSet<_> =
+        all.iter().map(|(id, _)| id.clone()).collect();
+    expected.insert(moved_target);
+    assert_eq!(obs, expected);
+    assert!(!obs.contains(&moved));
+    let open = ids(env.json(&dir, &["list"]));
+    assert_eq!(
+        open,
+        all.iter()
+            .filter(|(_, status)| !["done", "dropped"].contains(status))
+            .map(|(id, _)| id.clone())
+            .collect()
+    );
+}
