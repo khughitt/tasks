@@ -32797,3 +32797,90 @@ fn shelf_explicit_status_consumer_controls() {
             .collect()
     );
 }
+
+fn shelf_missing_target_checkout_is_authoritative(claimed: bool) {
+    let mut observed = Vec::new();
+    for closed in [false, true] {
+        let mut env = TestEnv::new();
+        let main = env.init("sci");
+        let target = id_of(env.json(&main, &["add", "Main target"]));
+        let id = id_of(env.json(&main, &["add", "Alternate shelf"]));
+        env.json(
+            &main,
+            &[
+                "shelve",
+                &id,
+                "target closes",
+                "--defer",
+                "30d",
+                "--wake-on",
+                &target,
+            ],
+        );
+        let scratch = tempfile::tempdir().unwrap();
+        let tree = scratch.path().join("tree");
+        isolated_worktree(&env, &main, &tree);
+        std::fs::remove_file(tree.join(format!("tasks/{target}.md"))).unwrap();
+        std::fs::remove_file(main.join(format!("tasks/{id}.md"))).unwrap();
+        if closed {
+            env.json(&main, &["done", &target]);
+        }
+        if claimed {
+            write_claim(&env, "sci", &id, "foreign", true);
+            let store = env.claim_store("sci");
+            let raw = std::fs::read_to_string(&store).unwrap();
+            std::fs::write(&store, raw.replace("/elsewhere", tree.to_str().unwrap())).unwrap();
+        } else {
+            write_park(&env, "sci", &id, "agent-a", "agent", tree.to_str().unwrap());
+        }
+        let shown = env.json(&main, &["show", &id]);
+        assert_eq!(shown["review_reason"], "stranded");
+        assert!(
+            shown["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w.as_str().unwrap().contains("wake target"))
+        );
+        let mut views = Vec::new();
+        if !claimed {
+            for args in [
+                ["list", "--parked"].as_slice(),
+                ["list", "--parked", "--needs-review"].as_slice(),
+            ] {
+                let v = env.json(&main, args);
+                views.push((v["tasks"].clone(), v["warnings"].clone()));
+            }
+        }
+        let prime = env.json(&main, &["prime"]);
+        views.push((
+            prime[if claimed { "doing" } else { "parked" }].clone(),
+            prime["warnings"].clone(),
+        ));
+        for (rows, warnings) in views {
+            let row = rows.as_array().unwrap().iter().find(|row| row["id"] == id);
+            observed.push((
+                row.map(|r| r["review_reason"].clone()),
+                warnings
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|w| w.as_str().unwrap().contains("wake target")),
+            ));
+        }
+    }
+    assert_eq!(
+        observed,
+        vec![(Some(serde_json::json!("stranded")), true); if claimed { 2 } else { 6 }]
+    );
+}
+
+#[test]
+fn shelf_missing_target_in_parked_checkout_never_borrows_main() {
+    shelf_missing_target_checkout_is_authoritative(false);
+}
+
+#[test]
+fn shelf_missing_target_in_claimed_checkout_never_borrows_main() {
+    shelf_missing_target_checkout_is_authoritative(true);
+}

@@ -182,10 +182,10 @@ fn resolve_recorded(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
 ) -> Result<Option<(ParkedRow, Task)>> {
-    let Some((task, scan)) = scan_recorded(id, Path::new(&park.worktree))? else {
+    let Some((project, task, scan)) = open_recorded(id, Path::new(&park.worktree))? else {
         return Ok(None);
     };
-    let deps = super::list::review_deps(ctx, &scan)?;
+    let deps = super::list::recorded_review_deps(ctx, &project, &scan)?;
     let row = ParkedRow::resolved(
         TaskSummary::of(&task, &scan, &deps, Some(claims), &ctx.registry, now),
         Phase::of(&task),
@@ -222,11 +222,6 @@ pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Ta
         return Ok(None);
     };
     Ok(Some((project, task, scan)))
-}
-
-/// `open_recorded` without the project, for rows that need only the scan.
-pub fn scan_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Task, Vec<Task>)>> {
-    Ok(open_recorded(id, worktree)?.map(|(_, task, scan)| (task, scan)))
 }
 
 /// `deps` is `all`'s dependency view (wait-aware spec §4.3).
