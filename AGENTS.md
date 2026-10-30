@@ -65,7 +65,10 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 - `skills/tasks/SKILL.md` — the agent skill shipped to other projects; keep it in step with CLI changes.
   `skills/curate/SKILL.md` — the curation pass (`tasks sample`, then bounded edits); same rule.
   `skills/scope/SKILL.md` — the deliberate idea scoping pass; same rule.
-- `docs/specs/`, `docs/plans/` — design and plan docs; tasks link to them with `--spec` / `--plan --step`.
+- `docs/specs/`, `docs/plans/`, `docs/notes/` — the design, plan and note documents the code or
+  guides cite, revised in place. New specs, plans, briefs and handoffs go under the project's
+  records directory (`tasks where` names it), committed in the records repository, never in
+  this tree; tasks link to either with `--spec` / `--plan --step`.
 
 ## Rules
 

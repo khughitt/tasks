@@ -103,7 +103,7 @@ This repository:
     src/                             the CLI: parser, one module per subcommand, the record model
     tests/                           end-to-end tests against the built binary in temp repos
     skills/                          the tasks, curate and scope agent skills
-    docs/specs/, docs/plans/         design and plan documents, linked from tasks
+    docs/specs/, docs/plans/         the design and plan documents the code cites; new ones go to the records directory
     tools/                           tt, ops-check, ops-docs and cli.toml vendored from ops (tools/README.md); review and wait backfills
 
 ## Consumers
