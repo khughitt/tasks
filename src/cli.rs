@@ -913,6 +913,11 @@ pub enum Command {
     },
     /// Validate every task file. Prints nothing when there is nothing to report.
     Check,
+    /// Report eligibility for exact local task attachment paths
+    Attachments {
+        #[arg(value_name = "PATH", required = true, num_args = 1..=128)]
+        paths: Vec<String>,
+    },
     /// Commit every uncommitted file under tasks/ in one commit
     Commit {
         /// One registered project, by prefix

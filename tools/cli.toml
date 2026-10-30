@@ -615,6 +615,11 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["attachments"]
+summary = "Report eligibility for exact local task attachment paths"
+args = [{ name = "paths", value = "path", required = true, variadic = true }]
+
+[[cli.tasks.commands]]
 path = ["detach"]
 summary = "Remove one attachment and record why. Git history keeps committed bytes; an uncommitted file is gone for good"
 args = [{ name = "id", value = "ref", required = true }, { name = "name", value = "string", required = true }, { name = "why", value = "string", required = true }]
@@ -986,14 +991,23 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences or doc_findings"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings or profile"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "profile"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
   { shared = "since", role = "bound", value = "when", repeatable = false },
   { shared = "until", role = "bound", value = "when", repeatable = false },
   { names = ["--task"], value = "string" },
+]
+
+[[cli.obs.commands]]
+path = ["postmortem"]
+summary = "compare task activity or file configured investigations independently per selected project"
+options = [
+  { names = ["--hours"], value = "string" },
+  { shared = "project", role = "select", value = "string", repeatable = true },
+  { names = ["--file"], value = "none" },
 ]
 
 [[cli.obs.commands]]
@@ -2984,3 +2998,65 @@ path = []
 options = [
   {names = ["--acknowledge-only"], value = "none"},
 ]
+
+[cli.git-index-retention]
+project = "ops"
+tier = "automation"
+default_output = "pretty"
+env = "GIT-INDEX-RETENTION"
+protocol = "escaped decisions and summary; peer uses bounded length-prefixed JSON"
+
+[[cli.git-index-retention.commands]]
+path = []
+
+[[cli.git-index-retention.commands]]
+path = ["report"]
+summary = "Report verified recovery retention decisions"
+
+[[cli.git-index-retention.commands]]
+path = ["prune"]
+summary = "Prune verified expired recovery"
+options = [{names = ["--scheduled"], value = "none"}]
+
+[[cli.git-index-retention.commands]]
+path = ["protect"]
+summary = "Protect a local recovery record"
+args = [
+  {name = "repository", value = "string", required = true},
+  {name = "stamp", value = "string", required = true},
+]
+
+[[cli.git-index-retention.commands]]
+path = ["unprotect"]
+summary = "Remove the local recovery hold"
+args = [
+  {name = "repository", value = "string", required = true},
+  {name = "stamp", value = "string", required = true},
+]
+
+[[cli.git-index-retention.commands]]
+path = ["peer"]
+summary = "Serve a bounded internal retention session"
+
+[cli.worktree]
+project = "ops"
+tier = "automation"
+default_output = "pretty"
+env = "WORKTREE"
+protocol = "step progress and refusal diagnostics"
+
+[[cli.worktree.commands]]
+path = []
+
+[[cli.worktree.commands]]
+path = ["add"]
+summary = "Create, lock and set up a managed worktree"
+args = [
+  {name = "name", value = "string", required = true},
+  {name = "git-args", value = "string", required = false, variadic = true},
+]
+
+[[cli.worktree.commands]]
+path = ["rm"]
+summary = "Harvest, inspect, unlock and remove a managed worktree"
+args = [{name = "target", value = "path", required = true}]

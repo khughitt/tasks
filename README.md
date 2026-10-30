@@ -802,6 +802,23 @@ the files with absolute paths. `check` reports these kinds:
 Binaries older than attachments ignore tasks/files/ entirely. `feedback` never
 carries attachments.
 
+`tasks -C <project> attachments <path>...` reports eligibility for 1–128 unique
+paths spelled exactly `tasks/files/<id>/<name>`. It reads only that directory's
+configuration, requested owner records and files; it never searches the registry,
+another checkout or an external document provider. Closed owners and retired
+projects can retain eligible evidence. The command writes no records or claims.
+
+JSON protocol version 1 returns the canonical records directory, prefix and
+configuration SHA-256, with one ordered row per path. Eligible rows include the
+owner-record and file SHA-256 and empty `problems`; ineligible rows omit both
+digests and list problems with the audit kinds and severities above. Eligibility
+requires a current attached ledger entry, a valid name, safe regular files and
+the configured size cap. Symlinks are never followed below the project directory.
+Exit 0 means a complete answer, including negative rows. Malformed/unreadable
+configuration or owner records, I/O failures and observed changes during reads
+produce a typed error with no usable eligibility response. No file payload or
+task text is returned. `--pretty` displays each verdict and its problems.
+
 An interrupted `attach` leaves a file that `check` reports as `attachment_unnoted`.
 Rerun it with the same bytes and `--name <name>` to finish, or `detach` the file. An
 interrupted `detach` finishes when rerun.

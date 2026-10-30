@@ -603,7 +603,12 @@ impl Project {
     pub fn open(dir: &Path) -> Result<Project> {
         let records = dir.canonicalize()?;
         let text = std::fs::read_to_string(records.join(CONFIG_REL))?;
-        let config: Config = toml::from_str(&text)
+        Self::from_config(records, &text)
+    }
+
+    /// Parse a configuration snapshot already read from a canonical records directory.
+    pub(crate) fn from_config(records: PathBuf, text: &str) -> Result<Project> {
+        let config: Config = toml::from_str(text)
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
         if !is_valid_prefix(&config.prefix) {
             return Err(Error::Config(format!(
