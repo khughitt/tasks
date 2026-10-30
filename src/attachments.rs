@@ -8,6 +8,10 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+mod eligibility;
+pub(crate) use eligibility::local_query;
+pub use eligibility::{EligibilityRow, eligibility};
+
 pub const FILES_DIR: &str = "files";
 pub const DEFAULT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_NAME_BYTES: usize = 128;
@@ -212,14 +216,15 @@ pub fn human_size(bytes: u64) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,
 }
 
 /// One `check` finding about attachments, also shown as a `show` warning.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Problem {
     pub severity: Severity,
     pub kind: &'static str,

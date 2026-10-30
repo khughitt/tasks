@@ -1,5 +1,6 @@
 pub mod add;
 pub mod attach;
+pub mod attachments;
 pub mod blockers;
 pub mod check;
 pub mod claims;
@@ -2045,6 +2046,7 @@ fn fetch(no_fetch: bool) -> crate::resolve::Fetch {
 fn dispatch(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
+        Command::Attachments { paths } => attachments::run(dir, paths),
         Command::Init {
             prefix,
             checkout,

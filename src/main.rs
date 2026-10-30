@@ -243,6 +243,7 @@ fn main() {
                 | cli::Command::Sample { .. }
                 | cli::Command::Blockers(_)
                 | cli::Command::Graph { .. }
+                | cli::Command::Attachments { .. }
                 | cli::Command::Check
                 | cli::Command::Prime { .. }
                 | cli::Command::Lanes { .. }

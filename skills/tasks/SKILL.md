@@ -568,6 +568,14 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
+- A checker needing an exact local attachment verdict uses
+  `tasks -C <project> attachments tasks/files/<id>/<name>...` (1–128 unique paths).
+  This read-only query uses only the explicit project's local configuration,
+  requested owners and entries, never registry, checkout fallback or providers.
+  JSON version 1 binds eligible rows to configuration/record/file SHA-256; negative
+  rows carry audit problems and no record/file digests. Exit 0 includes negative
+  verdicts; invalid input, unreadable/malformed state and observed read instability
+  fail with a typed error and no usable response. It returns no payload or task text.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. `tasks dep <id> --on <new> --rm <old>` swaps a
   dependency in one save; any failure in the batch changes nothing. A goal that is committed work is a `todo` with a

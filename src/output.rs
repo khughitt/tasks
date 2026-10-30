@@ -1344,10 +1344,20 @@ pub struct BlockersOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct AttachmentEligibilityOut {
+    pub version: u8,
+    pub records: std::path::PathBuf,
+    pub prefix: String,
+    pub config_sha256: String,
+    pub attachments: Vec<crate::attachments::EligibilityRow>,
+}
+
 /// One variant per command payload. Later tasks add variants; `pretty` grows with them.
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum Output {
+    AttachmentEligibility(AttachmentEligibilityOut),
     Init(InitOut),
     Rename(RenameOut),
     Move(MoveOut),
@@ -1421,6 +1431,26 @@ fn halt_line(halts: &[HaltRow]) -> String {
 
 fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> String {
     match out {
+        Output::AttachmentEligibility(out) => out
+            .attachments
+            .iter()
+            .map(|row| {
+                if row.eligible {
+                    format!("{}: eligible", row.path)
+                } else {
+                    format!(
+                        "{}: ineligible\n{}",
+                        row.path,
+                        row.problems
+                            .iter()
+                            .map(|p| p.line())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::Init(o) => o.prefix.clone(),
         Output::Retire(o) => match &o.retired {
             Some(r) => {
@@ -2412,6 +2442,7 @@ pub fn pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usi
 
 pub fn warnings_of(out: &Output) -> Vec<String> {
     match out {
+        Output::AttachmentEligibility(_) => Vec::new(),
         Output::Init(o) => o.warnings.clone(),
         Output::Retire(o) => o.warnings.clone(),
         Output::Rename(o) => o.warnings.clone(),
