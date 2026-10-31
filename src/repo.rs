@@ -862,6 +862,15 @@ impl Project {
     }
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
+        self.write_task_guarded(registry, task, || Ok(()))
+    }
+
+    pub(crate) fn write_task_guarded(
+        &self,
+        registry: &Registry,
+        task: &Task,
+        before_write: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         crate::review::validate(task)?;
         crate::defer::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
@@ -869,10 +878,9 @@ impl Project {
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
         let path = self.task_path(&task.id);
-        atomic_write(
-            &path,
-            serialize_physical(&self.physical_for_save(task)?).as_bytes(),
-        )?;
+        let raw = serialize_physical(&self.physical_for_save(task)?);
+        before_write()?;
+        atomic_write(&path, raw.as_bytes())?;
         crate::written::record(&self.records, &path);
         Ok(())
     }

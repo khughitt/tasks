@@ -1,4 +1,5 @@
 pub mod add;
+pub mod archive_notes;
 pub mod attach;
 pub mod attachments;
 pub mod blockers;
@@ -2266,6 +2267,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             name,
             caption,
         ),
+        Command::ArchiveNotes { id, expect } => {
+            let ctx = if expect.is_some() {
+                open_id_write_ctx(dir, &id)?
+            } else {
+                open_id_ctx(dir, &id)?
+            };
+            archive_notes::run(ctx, id, expect)
+        }
         Command::Detach { id, name, why } => {
             attach::detach(open_id_write_ctx(dir, &id)?, id, name, why)
         }

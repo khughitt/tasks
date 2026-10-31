@@ -818,3 +818,361 @@ fn archive_rename_interruption_recovery() {
         );
     }
 }
+
+fn archivable() -> (TestEnv, PathBuf, String) {
+    let mut env = TestEnv::new();
+    let root = env.init("arc");
+    let id = env.json(&root, &["add", "Archive candidate"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.cmd(&root)
+        .env("CODEX_THREAD_ID", "source")
+        .args(["note", &id, &"é exact history ".repeat(400), "--stamp"])
+        .assert()
+        .success();
+    (env, root, id)
+}
+
+#[test]
+fn archive_preview_apply_exact() {
+    let (env, root, id) = archivable();
+    let path = raw_path(&root, &id);
+    // A body mention is not a note-section header; CRLF and trailing bytes are exact evidence.
+    env.json(
+        &root,
+        &[
+            "edit",
+            &id,
+            "--body",
+            "Mention ## Notes within this sentence",
+        ],
+    );
+    let original = std::fs::read_to_string(&path).unwrap();
+    let split = original.find("\n## Notes\n").unwrap() + 1;
+    let raw = format!(
+        "{}{}",
+        &original[..split],
+        original[split..].replace('\n', "\r\n")
+    );
+    std::fs::write(&path, &raw).unwrap();
+    let before = env.json(&root, &["show", &id])["task"].clone();
+    let preview = env.json(&root, &["archive-notes", &id]);
+    assert_eq!(preview["source_sha256"], digest(raw.as_bytes()));
+    assert_eq!(preview["eligible"], true, "{preview}");
+    assert_eq!(preview.as_object().unwrap().len(), 9);
+    assert_eq!(std::fs::read(&path).unwrap(), raw.as_bytes());
+    assert!(!root.join("tasks/files").exists());
+    let hash = preview["source_sha256"].as_str().unwrap();
+    let out = env.json(&root, &["archive-notes", &id, "--expect", hash]);
+    assert_eq!(out["action"], "archived");
+    assert_eq!(out["record_bytes_before"], raw.len());
+    assert_eq!(
+        out["record_bytes_after"],
+        std::fs::metadata(&path).unwrap().len()
+    );
+    let section = &raw.as_bytes()[raw.find("\n## Notes\r\n").unwrap() + 1..];
+    let name = preview["archive_name"].as_str().unwrap();
+    assert_eq!(preview["archive_bytes"], section.len());
+    assert_eq!(
+        std::fs::read(root.join(format!("tasks/files/{id}/{name}"))).unwrap(),
+        section
+    );
+    let after = env.json(&root, &["show", &id])["task"].clone();
+    let n = before["notes"].as_array().unwrap().len();
+    assert_eq!(
+        &after["notes"].as_array().unwrap()[..n],
+        before["notes"].as_array().unwrap()
+    );
+    assert_eq!(after["notes"].as_array().unwrap().len(), n + 2);
+    let mut expected = before;
+    expected["notes"] = after["notes"].clone();
+    expected["updated"] = after["updated"].clone();
+    assert_eq!(after, expected);
+}
+
+#[test]
+fn archive_retry_after_append() {
+    let (env, root, id) = archivable();
+    let preview = env.json(&root, &["archive-notes", &id]);
+    let hash = preview["source_sha256"].as_str().unwrap();
+    env.json(&root, &["archive-notes", &id, "--expect", hash]);
+    env.json(&root, &["note", &id, &"later history ".repeat(300)]);
+    let raw = std::fs::read(raw_path(&root, &id)).unwrap();
+    let out = env.json(&root, &["archive-notes", &id, "--expect", hash]);
+    assert_eq!(out["action"], "already_archived");
+    assert_eq!(out["record_bytes_before"], raw.len());
+    assert_eq!(out["record_bytes_after"], raw.len());
+    assert_eq!(std::fs::read(raw_path(&root, &id)).unwrap(), raw);
+    let second = env.json(&root, &["archive-notes", &id]);
+    env.json(
+        &root,
+        &[
+            "archive-notes",
+            &id,
+            "--expect",
+            second["source_sha256"].as_str().unwrap(),
+        ],
+    );
+    assert_eq!(
+        env.json(&root, &["archive-notes", &id, "--expect", hash])["action"],
+        "already_archived"
+    );
+    assert_eq!(
+        std::fs::read_dir(root.join(format!("tasks/files/{id}")))
+            .unwrap()
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn archive_interruption_recovery() {
+    for boundary in [
+        "before-segment-publish",
+        "after-segment-publish",
+        "before-record-switch",
+        "after-record-switch",
+    ] {
+        let (env, root, id) = archivable();
+        let path = raw_path(&root, &id);
+        let raw = std::fs::read(&path).unwrap();
+        let preview = env.json(&root, &["archive-notes", &id]);
+        let hash = preview["source_sha256"].as_str().unwrap();
+        let name = preview["archive_name"].as_str().unwrap();
+        let segment = root.join(format!("tasks/files/{id}/{name}"));
+        let out = env
+            .cmd(&root)
+            .env("TASKS_ARCHIVE_STOP_AFTER", boundary)
+            .args(["archive-notes", &id, "--expect", hash])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(86), "{boundary}: {out:?}");
+        assert_eq!(segment.exists(), boundary != "before-segment-publish");
+        if boundary != "after-record-switch" {
+            assert_eq!(std::fs::read(&path).unwrap(), raw);
+        }
+        let out = env.json(&root, &["archive-notes", &id, "--expect", hash]);
+        assert_eq!(
+            out["action"],
+            if boundary == "after-record-switch" {
+                "already_archived"
+            } else {
+                "archived"
+            }
+        );
+        let notes = env.json(&root, &["show", &id])["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(notes.len(), 4);
+        assert_eq!(
+            notes
+                .iter()
+                .filter(|n| n["text"].as_str().unwrap().starts_with("archived-notes:"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            std::fs::read_dir(segment.parent().unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
+        let split = raw.windows(9).position(|b| b == b"## Notes\n").unwrap();
+        assert_eq!(std::fs::read(&segment).unwrap(), raw[split..]);
+    }
+}
+
+#[test]
+fn archive_eligibility_boundaries_and_storage() {
+    let (env, root, id) = archivable();
+    let path = raw_path(&root, &id);
+    let initial = env.json(&root, &["archive-notes", &id]);
+    let config = root.join("tasks/.config.toml");
+    let old = std::fs::read_to_string(&config).unwrap();
+    let cap = initial["archive_bytes"].as_u64().unwrap();
+    for (limit, eligible) in [(cap, true), (cap - 1, false)] {
+        std::fs::write(
+            &config,
+            format!("{old}\n[attachments]\nmax_bytes = {limit}\n"),
+        )
+        .unwrap();
+        let preview = env.json(&root, &["archive-notes", &id]);
+        assert_eq!(preview["eligible"], eligible, "{preview}");
+        if !eligible {
+            let raw = std::fs::read(&path).unwrap();
+            assert_eq!(
+                env.fail(
+                    &root,
+                    &[
+                        "archive-notes",
+                        &id,
+                        "--expect",
+                        preview["source_sha256"].as_str().unwrap()
+                    ]
+                ),
+                "validation"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), raw);
+        }
+    }
+    std::fs::write(&config, old).unwrap();
+    let name = initial["archive_name"].as_str().unwrap();
+    let dir = root.join(format!("tasks/files/{id}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join(name);
+    std::fs::write(&target, b"conflict").unwrap();
+    assert_eq!(env.json(&root, &["archive-notes", &id])["eligible"], false);
+    assert_eq!(
+        env.fail(
+            &root,
+            &[
+                "archive-notes",
+                &id,
+                "--expect",
+                initial["source_sha256"].as_str().unwrap()
+            ]
+        ),
+        "validation"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"conflict");
+    std::fs::remove_file(&target).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path().join("missing"), &target).unwrap();
+    assert_eq!(env.json(&root, &["archive-notes", &id])["eligible"], false);
+    assert!(!outside.path().join("missing").exists());
+    let tiny = env.json(&root, &["add", "Tiny"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        env.json(&root, &["archive-notes", &tiny])["eligible"],
+        false
+    );
+    let tiny_path = raw_path(&root, &tiny);
+    let raw = std::fs::read_to_string(&tiny_path).unwrap();
+    let split = raw.find("## Notes").unwrap();
+    std::fs::write(&tiny_path, &raw[..split]).unwrap();
+    let p = env.json(&root, &["archive-notes", &tiny]);
+    assert_eq!(p["note_count"], 0);
+    assert_eq!(p["eligible"], false);
+}
+
+#[test]
+fn archive_stale_claim_and_policy() {
+    let (env, root, id) = archivable();
+    let preview = env.json(&root, &["archive-notes", &id]);
+    let hash = preview["source_sha256"].as_str().unwrap();
+    env.json(&root, &["note", &id, "concurrent append"]);
+    let raw = std::fs::read(raw_path(&root, &id)).unwrap();
+    assert_eq!(
+        env.fail(&root, &["archive-notes", &id, "--expect", hash]),
+        "concurrent_modification"
+    );
+    assert_eq!(std::fs::read(raw_path(&root, &id)).unwrap(), raw);
+    assert!(!root.join("tasks/files").exists());
+    for state in ["live", "unverifiable"] {
+        env.cmd(&root)
+            .env("TASKS_SESSION", "other")
+            .env("TASKS_SESSION_PID", std::process::id().to_string())
+            .args(["start", &id])
+            .assert()
+            .success();
+        if state == "unverifiable" {
+            let path = env.claim_store("arc");
+            let mut store: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            store["claims"][&id]
+                .as_table_mut()
+                .unwrap()
+                .insert("pid_view".into(), toml::Value::String("0:1".into()));
+            std::fs::write(path, toml::to_string(&store).unwrap()).unwrap();
+        }
+        let p = env.json(&root, &["archive-notes", &id]);
+        assert_eq!(
+            env.fail(
+                &root,
+                &[
+                    "archive-notes",
+                    &id,
+                    "--expect",
+                    p["source_sha256"].as_str().unwrap()
+                ]
+            ),
+            "claimed"
+        );
+    }
+    std::fs::remove_file(env.claim_store("arc")).unwrap();
+    for status in ["done", "shelved"] {
+        if status == "done" {
+            env.json(&root, &["done", &id]);
+        } else {
+            env.json(&root, &["edit", &id, "--status", "todo"]);
+            env.json(&root, &["shelve", &id, "wake", "--defer", "2030-01-01"]);
+        }
+        env.json(&root, &["note", &id, &"suffix ".repeat(300)]);
+        let p = env.json(&root, &["archive-notes", &id]);
+        env.json(
+            &root,
+            &[
+                "archive-notes",
+                &id,
+                "--expect",
+                p["source_sha256"].as_str().unwrap(),
+            ],
+        );
+        assert_eq!(env.json(&root, &["show", &id])["task"]["status"], status);
+    }
+}
+
+#[test]
+fn archive_receipts_require_the_exact_boundary() {
+    for failure in ["malformed", "unbound", "count", "source-repeat", "position"] {
+        let (env, root, id) = archivable();
+        let p = env.json(&root, &["archive-notes", &id]);
+        let hash = p["source_sha256"].as_str().unwrap();
+        if failure == "malformed" || failure == "unbound" {
+            let text = if failure == "malformed" {
+                "archived-notes: invalid".into()
+            } else {
+                format!(
+                    "archived-notes: v1 source={hash} segment={} count=2",
+                    p["archive_name"]
+                        .as_str()
+                        .unwrap()
+                        .trim_start_matches("notes-")
+                        .trim_end_matches(".notes")
+                )
+            };
+            env.json(&root, &["note", &id, &text]);
+        } else {
+            env.json(&root, &["archive-notes", &id, "--expect", hash]);
+            let path = raw_path(&root, &id);
+            let raw = std::fs::read_to_string(&path).unwrap();
+            let raw = match failure {
+                "count" => raw.replace(" count=2", " count=1"),
+                "source-repeat" => format!("{raw}{}\n", raw.lines().last().unwrap()),
+                "position" => raw.replacen(
+                    "## Notes\n",
+                    "## Notes\n\n- 2026-10-31T00:00:00Z (fixture): shifted\n",
+                    1,
+                ),
+                _ => unreachable!(),
+            };
+            std::fs::write(path, raw).unwrap();
+        }
+        let bytes = std::fs::read(raw_path(&root, &id)).unwrap();
+        assert_eq!(
+            env.fail(&root, &["archive-notes", &id]),
+            "validation",
+            "{failure}"
+        );
+        assert_eq!(
+            env.fail(&root, &["archive-notes", &id, "--expect", hash]),
+            "validation",
+            "{failure}"
+        );
+        assert_eq!(std::fs::read(raw_path(&root, &id)).unwrap(), bytes);
+    }
+}

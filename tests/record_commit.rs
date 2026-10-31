@@ -509,3 +509,84 @@ fn move_commits_copied_and_removed_attachments_in_both_roots() {
     );
     assert!(clean(&source) && clean(&target));
 }
+
+#[test]
+fn archive_record_commit_and_interrupted_retry_include_both_paths() {
+    for boundary in [None, Some("after-record-switch")] {
+        let mut env = TestEnv::new();
+        let root = project(&mut env, "arc", true);
+        let id = add(&env, &root, "Archive");
+        env.json(&root, &["note", &id, &"retained history ".repeat(300)]);
+        let p = env.json(&root, &["archive-notes", &id]);
+        let args = [
+            "archive-notes",
+            &id,
+            "--expect",
+            p["source_sha256"].as_str().unwrap(),
+        ];
+        if let Some(boundary) = boundary {
+            let out = env
+                .cmd(&root)
+                .env("TASKS_ARCHIVE_STOP_AFTER", boundary)
+                .args(args)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(86));
+        }
+        let out = env.json(&root, &args);
+        assert_eq!(
+            out["action"],
+            if boundary.is_some() {
+                "already_archived"
+            } else {
+                "archived"
+            }
+        );
+        assert!(out["warnings"].as_array().unwrap().is_empty(), "{out}");
+        let mut files = last_files(&root);
+        files.sort();
+        let mut expected = vec![
+            format!("tasks/{id}.md"),
+            format!("tasks/files/{id}/{}", p["archive_name"].as_str().unwrap()),
+        ];
+        expected.sort();
+        assert_eq!(files, expected);
+        assert!(git(&root, &["status", "--porcelain"]).is_empty());
+    }
+}
+
+#[test]
+fn archive_commit_failure_keeps_landed_history_and_retries_without_duplicate_notes() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "arc", true);
+    let id = add(&env, &root, "Archive");
+    env.json(&root, &["note", &id, &"retained history ".repeat(300)]);
+    let p = env.json(&root, &["archive-notes", &id]);
+    let args = [
+        "archive-notes",
+        &id,
+        "--expect",
+        p["source_sha256"].as_str().unwrap(),
+    ];
+    let hook = root.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = env.json(&root, &args);
+    assert_eq!(out["action"], "archived");
+    assert!(!out["warnings"].as_array().unwrap().is_empty(), "{out}");
+    let before = env.json(&root, &["show", &id])["task"].clone();
+    assert!(
+        root.join(format!(
+            "tasks/files/{id}/{}",
+            p["archive_name"].as_str().unwrap()
+        ))
+        .is_file()
+    );
+    std::fs::remove_file(hook).unwrap();
+    let retry = env.json(&root, &args);
+    assert_eq!(retry["action"], "already_archived");
+    assert!(retry["warnings"].as_array().unwrap().is_empty(), "{retry}");
+    assert_eq!(env.json(&root, &["show", &id])["task"], before);
+    assert!(git(&root, &["status", "--porcelain"]).is_empty());
+}

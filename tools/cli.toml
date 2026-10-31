@@ -615,6 +615,12 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["archive-notes"]
+summary = "Read-only note archive preview; --expect applies the verified source hash"
+args = [{ name = "id", value = "ref", required = true }]
+options = [{ names = ["--expect"], value = "string" }]
+
+[[cli.tasks.commands]]
 path = ["attachments"]
 summary = "Report eligibility for exact local task attachment paths"
 args = [{ name = "paths", value = "path", required = true, variadic = true }]
