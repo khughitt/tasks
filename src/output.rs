@@ -1280,6 +1280,8 @@ pub struct FeedbackOut {
 
 #[derive(Serialize)]
 pub struct CheckOut {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub growth: Option<Vec<crate::growth::GrowthRow>>,
     pub errors: Vec<Finding>,
     pub warnings: Vec<Finding>,
 }
@@ -1819,6 +1821,41 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
             let mut rendered = String::new();
+            if let Some(growth) = &o.growth {
+                use crate::table::{Column, Row};
+                let columns = [
+                    Column::fixed("id"),
+                    Column::right("record bytes"),
+                    Column::right("body bytes"),
+                    Column::right("notes"),
+                    Column::right("note text bytes"),
+                    Column::right("duplicate bytes"),
+                    Column::right("archived bytes"),
+                ];
+                let rows: Vec<_> = growth
+                    .iter()
+                    .map(|row| {
+                        Row::new(vec![
+                            row.id.clone(),
+                            row.record_bytes.to_string(),
+                            row.body_bytes.to_string(),
+                            row.note_count.to_string(),
+                            row.note_text_bytes.to_string(),
+                            row.duplicate_note_text_bytes.to_string(),
+                            row.archived_bytes.to_string(),
+                        ])
+                    })
+                    .collect();
+                let headed = crate::table::Layout {
+                    headers: true,
+                    ..*layout
+                };
+                rendered.push_str(&crate::table::render(
+                    &columns, &rows, &headed, None, painter,
+                ));
+                rendered.push_str("\nPlace bulky evidence in attachments or records documents; preserve original bytes before editing a body.\n");
+            }
+
             for finding in &o.errors {
                 let line = format!(
                     "error: {} [{}] {}",

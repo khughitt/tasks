@@ -16,6 +16,7 @@ mod filter;
 mod format;
 mod frontmatter;
 mod git;
+mod growth;
 mod halt;
 mod hierarchy;
 mod holds;
@@ -244,7 +245,7 @@ fn main() {
                 | cli::Command::Blockers(_)
                 | cli::Command::Graph { .. }
                 | cli::Command::Attachments { .. }
-                | cli::Command::Check
+                | cli::Command::Check { .. }
                 | cli::Command::Prime { .. }
                 | cli::Command::Lanes { .. }
                 | cli::Command::Tree { .. }
@@ -280,7 +281,7 @@ fn main() {
             // report. Pretty mode still prints `ok` for a person at a terminal.
             let silent = format == Format::Json
                 && matches!(&out, output::Output::Check(check)
-                    if check.errors.is_empty() && check.warnings.is_empty());
+                    if check.errors.is_empty() && check.warnings.is_empty() && check.growth.is_none());
             let mut theme_warning = None;
             let stdout_painter = if stdout_painter.enabled() && output::needs_theme(&out) {
                 // Redirected stdout is never queried: a pager may be reading the same

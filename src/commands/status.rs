@@ -199,6 +199,7 @@ pub fn note(
 ) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     crate::review::apply(&mut task, review, awaiting, &mut ctx.warnings)?;
+    let duplicate = crate::growth::first_duplicate(&task.notes, &text);
     let owner = owner_name(&ctx.project)?;
     if stamp {
         append_stamped_note(&mut ctx, &mut task, &owner, &text)?;
@@ -216,6 +217,13 @@ pub fn note(
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
     save(&mut ctx, &mut task)?;
+    if let Some(index) = duplicate {
+        let bytes = task.notes.last().expect("note appended").text.len();
+        ctx.warnings.push(format!(
+            "the note landed; its {bytes} bytes duplicate prior logical note {}; link bulky detail in an attachment or records document, or use the approved checkpoint procedure",
+            index + 1,
+        ));
+    }
 
     // Use the pruned store so a note cannot revive a stale claim.
     let existing = ctx.claims_mut()?.get(&task.id).cloned();

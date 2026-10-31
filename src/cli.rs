@@ -917,7 +917,11 @@ pub enum Command {
         all: bool,
     },
     /// Validate every task file. Prints nothing when there is nothing to report.
-    Check,
+    Check {
+        /// Include byte and note counts for every successfully parsed record.
+        #[arg(long)]
+        growth: bool,
+    },
     /// Report eligibility for exact local task attachment paths
     Attachments {
         #[arg(value_name = "PATH", required = true, num_args = 1..=128)]
