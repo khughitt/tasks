@@ -590,3 +590,101 @@ fn archive_commit_failure_keeps_landed_history_and_retries_without_duplicate_not
     assert_eq!(env.json(&root, &["show", &id])["task"], before);
     assert!(git(&root, &["status", "--porcelain"]).is_empty());
 }
+
+fn assert_required_history_in_head(root: &Path, id: &str) {
+    let record = git(root, &["show", &format!("HEAD:tasks/{id}.md")]);
+    let line = record
+        .lines()
+        .find_map(|line| line.strip_prefix("note_archives: "))
+        .unwrap();
+    let descriptors: Vec<String> = serde_json::from_str(line).unwrap();
+    for descriptor in descriptors {
+        let sha = descriptor.split(':').nth(1).unwrap();
+        let path = format!("tasks/files/{id}/notes-{sha}.notes");
+        assert_eq!(
+            git(root, &["show", &format!("HEAD:{path}")]).as_bytes(),
+            std::fs::read(root.join(path)).unwrap()
+        );
+    }
+}
+
+fn archive_recovery_publication(route: &str) {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "arc", true);
+    let id = add(&env, &root, "Archive recovery");
+    env.json(&root, &["note", &id, &"history A ".repeat(400)]);
+    let a = env.json(&root, &["archive-notes", &id]);
+    let a_hash = a["source_sha256"].as_str().unwrap();
+    let mut interrupted_hash = a_hash.to_string();
+    if route == "older-retry" {
+        env.json(&root, &["archive-notes", &id, "--expect", a_hash]);
+        env.json(&root, &["note", &id, &"history B ".repeat(400)]);
+        interrupted_hash = env.json(&root, &["archive-notes", &id])["source_sha256"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    }
+    env.cmd(&root)
+        .env("TASKS_ARCHIVE_STOP_AFTER", "after-record-switch")
+        .args(["archive-notes", &id, "--expect", &interrupted_hash])
+        .assert()
+        .code(86);
+    match route {
+        "note" => {
+            env.json(&root, &["note", &id, "ordinary write"]);
+        }
+        "older-retry" => {
+            assert_eq!(
+                env.json(&root, &["archive-notes", &id, "--expect", a_hash])["action"],
+                "already_archived"
+            );
+        }
+        "new-archive" => {
+            let path = root.join(format!("tasks/{id}.md"));
+            let raw = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(
+                &path,
+                format!(
+                    "{raw}- 2026-10-31T00:00:00Z (fixture): {}\n",
+                    "history B ".repeat(400)
+                ),
+            )
+            .unwrap();
+            let b = env.json(&root, &["archive-notes", &id]);
+            env.json(
+                &root,
+                &[
+                    "archive-notes",
+                    &id,
+                    "--expect",
+                    b["source_sha256"].as_str().unwrap(),
+                ],
+            );
+        }
+        "move" => {
+            let target = project(&mut env, "dst", true);
+            let moved = env.json(&root, &["move", &id, "--to", "dst"]);
+            assert_required_history_in_head(&target, moved["id"].as_str().unwrap());
+        }
+        _ => unreachable!(),
+    }
+    assert_required_history_in_head(&root, &id);
+    assert!(git(&root, &["status", "--porcelain"]).is_empty(), "{route}");
+}
+
+#[test]
+fn archive_publish_after_ordinary_note() {
+    archive_recovery_publication("note");
+}
+#[test]
+fn archive_publish_after_older_source_retry() {
+    archive_recovery_publication("older-retry");
+}
+#[test]
+fn archive_publish_after_new_archive() {
+    archive_recovery_publication("new-archive");
+}
+#[test]
+fn archive_publish_after_move() {
+    archive_recovery_publication("move");
+}

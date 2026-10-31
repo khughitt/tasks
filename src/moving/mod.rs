@@ -247,6 +247,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
             "{target} differs from its journal text"
         )));
     }
+    ctx.target.record_task_written(&task);
     if stop_after("destination") {
         return Ok(out);
     }
@@ -273,8 +274,8 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     let source_path = ctx.source.project.task_path(&source);
     if record_state(&source_path)? != FileState::Digest(digest(journal.tombstone_text.as_bytes())) {
         atomic_write(&source_path, journal.tombstone_text.as_bytes())?;
-        crate::written::record(&ctx.source.project.records, &source_path);
     }
+    ctx.source.project.record_task_written(&tombstone);
     if stop_after("tombstone") {
         return Ok(out);
     }

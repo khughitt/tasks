@@ -204,11 +204,7 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
     ctx.refuse_foreign_live_claim(&id)?;
     if let Some(name) = prior_receipt(&ctx, &task, &expected)? {
         // A switched record may not have reached auto-commit before interruption.
-        crate::written::record(&ctx.project.records, &ctx.project.task_path(&id));
-        crate::written::record(
-            &ctx.project.records,
-            &attachments::task_dir(&ctx.project, &id).join(&name),
-        );
+        ctx.project.record_task_written(&task);
         super::finish(&mut ctx);
         return Ok(Output::ArchiveApply(ArchiveApplyOut {
             id: id.to_string(),

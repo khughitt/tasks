@@ -881,8 +881,19 @@ impl Project {
         let raw = serialize_physical(&self.physical_for_save(task)?);
         before_write()?;
         atomic_write(&path, raw.as_bytes())?;
-        crate::written::record(&self.records, &path);
+        self.record_task_written(task);
         Ok(())
+    }
+
+    // A recovered record may depend on segment files that an earlier command never committed.
+    pub(crate) fn record_task_written(&self, task: &Task) {
+        crate::written::record(&self.records, &self.task_path(&task.id));
+        for archive in &task.note_archives {
+            crate::written::record(
+                &self.records,
+                &crate::attachments::task_dir(self, &task.id).join(archive.file_name()),
+            );
+        }
     }
 
     fn git(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
@@ -1290,7 +1301,7 @@ impl Project {
         drop(file);
         let linked = std::fs::hard_link(temp, self.task_path(&task.id));
         if linked.is_ok() {
-            crate::written::record(&self.records, &self.task_path(&task.id));
+            self.record_task_written(task);
         }
         let _ = std::fs::remove_file(temp);
         linked
