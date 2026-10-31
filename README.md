@@ -796,6 +796,37 @@ This repo has adopted it. The writing-plans integration is the tasks skill's chi
 command (`--complexity <level> --process <value>`), not the upstream plan-writing skill.
 Design: `docs/specs/2026-09-13-task-process-design.md`.
 
+### Record growth
+
+`tasks check` warns `record_growth` when an active task file exceeds its warning
+threshold, including closed and shelved records. Warnings leave exit status 0
+unless other errors exist and never prevent note, park or completion writes.
+The default is 65,536 bytes, lowered to one quarter of `[attachments] max_bytes`
+when that cap is smaller (integer division, minimum one byte). Optional
+`[growth] warn_bytes` sets any positive integer; unknown growth keys, zero and
+noninteger values fail. An override at or above the attachment cap gives up
+advance warning; it is preserved rather than clamped. Checking is periodic:
+one large write can exceed the attachment cap before the next check.
+
+`tasks check --growth` always returns a `growth` array in JSON, even when empty
+or otherwise clean. Rows cover successfully parsed records, largest first with
+id as the tie breaker: `id`, `record_bytes`, `body_bytes`, `note_count`,
+`note_text_bytes`, `duplicate_note_text_bytes`, and `archived_bytes` (currently
+zero). Counts use UTF-8 bytes. Invalid records remain errors and get no row.
+Ordinary check output omits the array and remains silent when clean.
+
+Duplicate accounting removes only trailing ASCII spaces and tabs when comparing
+note text, then counts the original stored bytes of occurrences after the first.
+A successful explicit `tasks note` with matching text returns an advisory naming
+the earliest prior logical note ordinal and the new stored byte count. Every
+observation still lands; automatic lifecycle notes do not get this advisory.
+Repeated observations can be legitimate.
+
+Keep bulky evidence in task attachments or records documents and link it from
+the task. For a large body, preserve its exact original bytes in an attachment
+or referenced document before shortening it with `tasks edit <id> --body`.
+Protected note history remains append-only; these diagnostics do not shrink it.
+
 ### Attachments
 
 Attachments live in `tasks/files/<id>/`, one directory per task, committed with the

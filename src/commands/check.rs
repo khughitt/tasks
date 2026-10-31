@@ -88,7 +88,7 @@ fn record_cycle(
     }
 }
 
-pub fn run(ctx: Ctx) -> Result<Output> {
+pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     // A code tree whose index still holds the config is on the pre-move side of the
     // migration: the walk missed it only because the working tree lost it.
     if ctx.project.kind == crate::repo::Kind::Detached
@@ -104,7 +104,18 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         .into_iter()
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
         .collect();
-    let (tasks, parse_errors) = ctx.project.scan_lenient();
+    let (records, parse_errors) = ctx.project.scan_lenient_with_raw();
+    let mut growth_rows: Vec<_> = records
+        .iter()
+        .map(|(task, raw)| crate::growth::measure(task, raw, 0))
+        .collect();
+    growth_rows.sort_by(|left, right| {
+        right
+            .record_bytes
+            .cmp(&left.record_bytes)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let tasks: Vec<_> = records.into_iter().map(|(task, _)| task).collect();
     let mut errors = Vec::new();
     // A worktree made before the retirement holds no `[retired]` until a merge; the
     // registered checkout's declaration covers it, as it does for writes. One that cannot
@@ -135,6 +146,16 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         )
     };
     let mut warnings = Vec::new();
+    let threshold = ctx.project.growth_warn_bytes();
+    for row in &growth_rows {
+        if row.record_bytes > threshold {
+            warnings.push(Finding {
+                id: Some(row.id.clone()), file: format!("tasks/{}.md", row.id),
+                kind: "record_growth".into(),
+                detail: format!("active record {} bytes exceeds threshold {threshold} bytes; place bulky evidence in attachments (`tasks attach`) or records documents and link it; preserve exact body bytes before using `tasks edit {} --body` to shorten a large body", row.record_bytes, row.id),
+            });
+        }
+    }
     for journal in &pending {
         warnings.push(finding(
             None,
@@ -793,7 +814,11 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
     }
 
-    Ok(Output::Check(CheckOut { errors, warnings }))
+    Ok(Output::Check(CheckOut {
+        errors,
+        warnings,
+        growth: growth.then_some(growth_rows),
+    }))
 }
 
 #[cfg(test)]

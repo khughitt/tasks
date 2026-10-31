@@ -116,6 +116,7 @@ pub struct Project {
     pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
+    pub growth_warn_bytes: Option<u64>,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.
     pub retired: Option<Retirement>,
     /// The code checkout sessions run in: the config's `[checkout] path`, absolute and
@@ -165,6 +166,8 @@ struct Config {
     feedback: Option<FeedbackConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attachments: Option<AttachmentsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    growth: Option<GrowthConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     needs: Option<crate::needs::Vocabulary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -282,6 +285,13 @@ struct FeedbackConfig {
 struct AttachmentsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_bytes: Option<u64>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GrowthConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    warn_bytes: Option<u64>,
 }
 
 /// The per-file attachment cap: positive, or the default when the table or key is absent.
@@ -496,6 +506,7 @@ impl Project {
                 tags: None,
                 feedback: None,
                 attachments: None,
+                growth: None,
                 needs: None,
                 retired: None,
                 git: None,
@@ -582,6 +593,7 @@ impl Project {
                 tags: None,
                 feedback: None,
                 attachments: None,
+                growth: None,
                 needs: None,
                 retired: None,
                 checkout: Some(CheckoutConfig {
@@ -643,6 +655,14 @@ impl Project {
             feedback: feedback_scope(config.feedback)?,
             needs: need_vocabulary(config.needs)?,
             attachments_max_bytes: attachments_max_bytes(config.attachments)?,
+            growth_warn_bytes: match config.growth.and_then(|growth| growth.warn_bytes) {
+                Some(0) => {
+                    return Err(Error::Config(format!(
+                        "{CONFIG_REL}: [growth] warn_bytes must be a positive integer"
+                    )));
+                }
+                limit => limit,
+            },
             retired: retirement(config.retired)?,
         })
     }
@@ -685,6 +705,11 @@ impl Project {
             }
         }
         Err(Error::NoProject(start))
+    }
+
+    pub fn growth_warn_bytes(&self) -> u64 {
+        self.growth_warn_bytes
+            .unwrap_or_else(|| (self.attachments_max_bytes / 4).clamp(1, 65536))
     }
 
     pub fn tasks_dir(&self) -> PathBuf {
@@ -768,6 +793,11 @@ impl Project {
     }
 
     pub fn scan_lenient(&self) -> (Vec<Task>, Vec<Error>) {
+        let (records, errors) = self.scan_lenient_with_raw();
+        (records.into_iter().map(|(task, _)| task).collect(), errors)
+    }
+
+    pub fn scan_lenient_with_raw(&self) -> (Vec<(Task, String)>, Vec<Error>) {
         let mut tasks = Vec::new();
         let mut errors = Vec::new();
         let entries = match std::fs::read_dir(self.tasks_dir()) {
@@ -797,7 +827,7 @@ impl Project {
                 continue;
             }
             match TaskId::parse(stem) {
-                Ok(id) => match self.read_task(&id) {
+                Ok(id) => match self.read_task_with_raw(&id) {
                     Ok(task) => tasks.push(task),
                     Err(error) => errors.push(error),
                 },
@@ -807,7 +837,7 @@ impl Project {
                 }),
             }
         }
-        tasks.sort_by(|left, right| left.id.cmp(&right.id));
+        tasks.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
         (tasks, errors)
     }
 

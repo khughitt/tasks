@@ -903,7 +903,16 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
                 String::from_utf8_lossy(&out.stderr)
             );
             let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-            assert_eq!(v["warnings"], serde_json::json!([]), "{vars:?}");
+            let warnings = v["warnings"].as_array().unwrap();
+            assert_eq!(warnings.len(), usize::from(stamp), "{vars:?}");
+            if stamp {
+                assert!(
+                    warnings[0]
+                        .as_str()
+                        .unwrap()
+                        .contains("duplicate prior logical note 3")
+                );
+            }
         }
         let after: toml::Value = toml::from_str(&env.read(env.home.path(), claims)).unwrap();
         for field in ["session", "pid", "pid_start", "boot_id", "started"] {
