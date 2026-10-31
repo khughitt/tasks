@@ -72,6 +72,13 @@ fn record_state(path: &Path) -> Result<FileState> {
 
 pub fn snapshot(ctx: &MoveCtx, journal: &Journal) -> Result<Snapshot> {
     journal.validate(&Journal::path(&ctx.source_id)?)?;
+    if journal
+        .source_records
+        .as_ref()
+        .is_some_and(|records| records != &ctx.source.project.records)
+    {
+        return Err(Error::MovePending("source records location changed; restore the journal's pinned source pairing before retrying".into()));
+    }
     preflight::validate_childless(ctx)?;
     if journal
         .target_park
@@ -136,8 +143,8 @@ pub fn snapshot(ctx: &MoveCtx, journal: &Journal) -> Result<Snapshot> {
 pub fn output(ctx: &MoveCtx, journal: &Journal, recovery: &str) -> MoveOut {
     let mut paths = BTreeMap::new();
     for (root, id) in [
-        (&journal.source_root, &journal.source),
-        (&journal.target_root, &journal.target),
+        (&ctx.source.project.records, &journal.source),
+        (&ctx.target.records, &journal.target),
     ] {
         let mut entries = vec![format!("tasks/{id}.md")];
         entries.extend(
@@ -184,8 +191,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     }
     let source = journal.source_id();
     let target = journal.target_id();
-    let task = crate::format::parse_task(&journal.target_text, &format!("{target}.md"))?;
-    let tombstone = crate::format::parse_task(&journal.tombstone_text, &format!("{source}.md"))?;
+    let (_, task, tombstone) = journal.logical_records()?;
     if task.id != target || tombstone.id != source {
         return Err(Error::MovePending(
             "journal record ids disagree with its source or target".into(),
@@ -241,6 +247,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
             "{target} differs from its journal text"
         )));
     }
+    ctx.target.record_task_written(&task);
     if stop_after("destination") {
         return Ok(out);
     }
@@ -267,13 +274,17 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     let source_path = ctx.source.project.task_path(&source);
     if record_state(&source_path)? != FileState::Digest(digest(journal.tombstone_text.as_bytes())) {
         atomic_write(&source_path, journal.tombstone_text.as_bytes())?;
-        crate::written::record(&ctx.source.project.records, &source_path);
     }
+    ctx.source.project.record_task_written(&tombstone);
     if stop_after("tombstone") {
         return Ok(out);
     }
     for attachment in &journal.attachments {
         verify_attachment(&ctx.target, &target, attachment)?;
+        if attachment.retain_source {
+            verify_attachment(&ctx.source.project, &source, attachment)?;
+            continue;
+        }
         let path = attachment_path(&ctx.source.project, &source, &attachment.name)?;
         match attachments::entry_state(&path)? {
             EntryState::File(_) => {
@@ -307,6 +318,16 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     }
     if stop_after("cleanup") {
         return Ok(out);
+    }
+    for (project, id) in [(&ctx.source.project, &source), (&ctx.target, &target)] {
+        let record = project.read_task(id)?;
+        let (_, problems) = attachments::audit_task(project, &record)?;
+        if let Some(problem) = problems
+            .iter()
+            .find(|problem| problem.severity == attachments::Severity::Error)
+        {
+            return Err(Error::MovePending(format!("{id}: {}", problem.detail)));
+        }
     }
     journal.remove()?;
     Ok(out)

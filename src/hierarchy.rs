@@ -430,6 +430,7 @@ mod tests {
 
     pub(crate) fn task(id: &str, parent: Option<&str>, status: Status) -> Task {
         Task {
+            note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: id.into(),

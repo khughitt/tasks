@@ -171,7 +171,7 @@ mod tests {
     }
 
     fn row(id: &str) -> TaskSummary {
-        let task = crate::format::parse_task(&format!(
+        let task = crate::history::fixture(&format!(
             "---\nid: demo-{id}\ntitle: Work\nstatus: todo\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: []\ntags: []\n---\n"
         ), "fixture").unwrap();
         let scan = [task];

@@ -811,8 +811,7 @@ one large write can exceed the attachment cap before the next check.
 `tasks check --growth` always returns a `growth` array in JSON, even when empty
 or otherwise clean. Rows cover successfully parsed records, largest first with
 id as the tie breaker: `id`, `record_bytes`, `body_bytes`, `note_count`,
-`note_text_bytes`, `duplicate_note_text_bytes`, and `archived_bytes` (currently
-zero). Counts use UTF-8 bytes. Invalid records remain errors and get no row.
+`note_text_bytes`, `duplicate_note_text_bytes`, and `archived_bytes` (the total verified segment bytes). Counts use UTF-8 bytes. Invalid records remain errors and get no row.
 Ordinary check output omits the array and remains silent when clean.
 
 Duplicate accounting removes only trailing ASCII spaces and tabs when comparing
@@ -825,7 +824,63 @@ Repeated observations can be legitimate.
 Keep bulky evidence in task attachments or records documents and link it from
 the task. For a large body, preserve its exact original bytes in an attachment
 or referenced document before shortening it with `tasks edit <id> --body`.
-Protected note history remains append-only; these diagnostics do not shrink it.
+Protected note history remains append-only; use `tasks archive-notes <id>` for a
+read-only preview of lossless note archival.
+
+### Note archives
+
+`tasks archive-notes <id>` reports `id`, `source_sha256`, `archive_name`,
+`archive_bytes`, `note_count`, `record_bytes_before`, `record_bytes_after`,
+`eligible` and `reasons`. It creates no files. The after size estimates the added
+descriptor, attachment ledger note and stamped receipt in the current environment.
+Empty suffixes, no byte saving, unsafe/conflicting storage and archives above
+`[attachments] max_bytes` are ineligible. A corrupt source fails explicitly.
+
+Before any apply to shared records, upgrade every host's reader, verify required
+history consumers, and coordinate one writer across hosts. The rollout gate is
+tasks-82096b; code installation alone does not close it. Technical apply syntax is
+`tasks archive-notes <id> --expect <source_sha256>` using the exact preview hash.
+This is an explicit mutation, with no force option: foreign live/unverifiable
+claims refuse; closed and shelved tasks keep their status. Growth warnings and
+agent guidance recommend preview only. A stale hash refuses before publication;
+the final local source recheck is not a distributed compare-and-swap.
+
+Apply stores the **exact bytes from the `## Notes` heading through EOF**, including
+CRLF, whitespace and provenance, as `tasks/files/<id>/notes-<sha256>.notes`.
+Ordered frontmatter descriptors `note_archives: ["v1:<sha256>:<note_count>", ...]`
+pin each immutable segment. Logical history is all verified segments in order,
+then the inline suffix. Ordinary Task JSON still exposes the complete `notes`
+array and no storage descriptors. Use JSON for history consumers; physical record
+paths are exactly `tasks/<id>.md`, while per-task attachment directories contain segments and other evidence.
+Recursive and extension-agnostic walkers must classify paths before task parsing.
+
+The compact record adds an attached ledger event and
+`archived-notes: v1 source=<hash> segment=<hash> count=<n>` receipt. Retrying the
+same source hash returns `already_archived`, even after later notes or archival,
+without another receipt. Apply returns the actual before/after sizes, id, source
+hash, archive name, action and warnings. Before a record switch the original is
+authoritative; an orphan is reusable only with byte-identical content. Uncertain
+save failures preserve it with recovery guidance. After the switch, normal record
+auto-commit includes both paths; a commit warning leaves landed state intact and
+the same retry can finish publication.
+
+Routine writes replace only the active record and leave every segment byte intact.
+The editor and retained failure buffer contain the compact record; descriptors
+are protected and full history remains available through `tasks show`. Missing,
+unsafe or mismatched segments fail logical reads and saves. Restore the exact
+bytes from a verified source or the matching Git revision; never skip, truncate,
+regenerate or substitute sanitized history. Historical post-archive bases require
+that revision's segments as well as its record. Older parsers reject the new key:
+downgrade requires restoring an explicitly verified pre-archive record with all
+later history preserved separately; there is no automatic undo.
+
+Total evidence and full-show cost do not shrink. Moves permanently keep archive
+copies on both the source tombstone and destination, while ordinary attachments
+move normally. Prefix rename/adopt keeps segment bytes unchanged. Never detach a
+required archive. The per-file cap and content/layout checks still apply: no
+multipart split, compression, cap increase or off-tree bypass is provided.
+Over-cap transport remains tasks-b81063. A body-dominant record can stay above
+its warning threshold after archival; preserve its exact body before editing it.
 
 ### Attachments
 

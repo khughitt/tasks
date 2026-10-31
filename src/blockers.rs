@@ -467,7 +467,7 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
             status.as_str(),
             depends.join(", "),
         );
-        crate::format::parse_task(&text, &format!("tasks/{id}.md")).unwrap()
+        crate::history::fixture(&text, &format!("tasks/{id}.md")).unwrap()
     }
 
     fn id(text: &str) -> TaskId {

@@ -214,7 +214,14 @@ pub fn eligibility(project: &Project, paths: &[String]) -> Result<Vec<Eligibilit
                         file: file.clone(),
                         detail: e.to_string(),
                     })?;
-                    let task = crate::format::parse_task(text, &file)?;
+                    let physical = crate::format::parse_physical(text, &file)?;
+                    let task = crate::history::load_logical(physical, |archive| {
+                        let path = super::task_dir(project, &id).join(archive.file_name());
+                        let snapshot = Snapshot::take(&path)?;
+                        let bytes = snapshot.read(Some(project.attachments_max_bytes))?;
+                        snapshots.push(snapshot);
+                        Ok(bytes)
+                    })?;
                     project.validate_docs(&task).map_err(|e| Error::Parse {
                         file: file.clone(),
                         detail: e.to_string(),

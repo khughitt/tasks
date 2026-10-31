@@ -70,7 +70,11 @@ fn growth_boundary_config_and_output() {
     assert!(detail.contains(&(bytes - 1).to_string()), "{detail}");
     assert!(detail.contains("attach"), "{detail}");
     assert!(detail.contains("edit"), "{detail}");
-    assert!(!detail.contains("archive-notes"), "{detail}");
+    assert!(
+        detail.contains("tasks archive-notes dot-a00001"),
+        "{detail}"
+    );
+    assert!(!detail.contains("--expect"), "{detail}");
     assert!(env.check(&root).get("growth").is_none());
     let pretty = env.pretty(&root, &["check", "--growth"]);
     for label in [

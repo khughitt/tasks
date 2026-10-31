@@ -107,8 +107,13 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     let (records, parse_errors) = ctx.project.scan_lenient_with_raw();
     let mut growth_rows: Vec<_> = records
         .iter()
-        .map(|(task, raw)| crate::growth::measure(task, raw, 0))
-        .collect();
+        .map(|(task, raw)| {
+            let bytes = crate::history::archived_bytes(task, |archive| {
+                ctx.project.read_archive(&task.id, archive)
+            })?;
+            Ok(crate::growth::measure(task, raw, bytes))
+        })
+        .collect::<Result<Vec<_>>>()?;
     growth_rows.sort_by(|left, right| {
         right
             .record_bytes
@@ -152,7 +157,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             warnings.push(Finding {
                 id: Some(row.id.clone()), file: format!("tasks/{}.md", row.id),
                 kind: "record_growth".into(),
-                detail: format!("active record {} bytes exceeds threshold {threshold} bytes; place bulky evidence in attachments (`tasks attach`) or records documents and link it; preserve exact body bytes before using `tasks edit {} --body` to shorten a large body", row.record_bytes, row.id),
+                detail: format!("active record {} bytes exceeds threshold {threshold} bytes; place bulky evidence in attachments (`tasks attach`) or records documents and link it; preview lossless note archival with `tasks archive-notes {}`; preserve exact body bytes before using `tasks edit {} --body` to shorten a large body", row.record_bytes, row.id, row.id),
             });
         }
     }
@@ -838,7 +843,7 @@ mod tests {
             }
         }
         text.push_str("---\n");
-        crate::format::parse_task(&text, "fixture").unwrap()
+        crate::history::fixture(&text, "fixture").unwrap()
     }
 
     #[test]

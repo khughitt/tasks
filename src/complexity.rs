@@ -106,6 +106,7 @@ mod tests {
 
     fn task(id: &str, complexity: Option<Complexity>) -> Task {
         Task {
+            note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: "t".into(),

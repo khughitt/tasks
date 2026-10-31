@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::format::{parse_task, serialize_task, validate_doc_path};
+use crate::format::{parse_physical, serialize_physical, validate_doc_path};
 use crate::model::{Task, TaskId, is_valid_prefix};
 use crate::registry::Registry;
 use std::collections::BTreeMap;
@@ -733,6 +733,18 @@ impl Project {
         Ok(std::fs::read_to_string(path)?)
     }
 
+    pub fn read_archive(
+        &self,
+        id: &TaskId,
+        archive: &crate::history::ArchiveDescriptor,
+    ) -> Result<Vec<u8>> {
+        crate::history::read_archive_at(&self.records, id, archive, self.attachments_max_bytes)
+    }
+
+    pub(crate) fn physical_for_save(&self, task: &Task) -> Result<crate::format::PhysicalTask> {
+        crate::history::physical_for_save(task, |archive| self.read_archive(&task.id, archive))
+    }
+
     pub fn read_task(&self, id: &TaskId) -> Result<Task> {
         self.read_task_with_raw(id).map(|(task, _)| task)
     }
@@ -740,7 +752,15 @@ impl Project {
     pub fn read_task_with_raw(&self, id: &TaskId) -> Result<(Task, String)> {
         let raw = self.read_raw(id)?;
         let file = format!("tasks/{id}.md");
-        let task = parse_task(&raw, &file)?;
+        let physical = parse_physical(&raw, &file)?;
+        if physical.id() != id {
+            return Err(Error::Parse {
+                file,
+                detail: format!("id field is {}", physical.id()),
+            });
+        }
+        let task =
+            crate::history::load_logical(physical, |archive| self.read_archive(id, archive))?;
         self.validate_docs(&task).map_err(|error| Error::Parse {
             file: file.clone(),
             detail: error.to_string(),
@@ -842,6 +862,15 @@ impl Project {
     }
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
+        self.write_task_guarded(registry, task, || Ok(()))
+    }
+
+    pub(crate) fn write_task_guarded(
+        &self,
+        registry: &Registry,
+        task: &Task,
+        before_write: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         crate::review::validate(task)?;
         crate::defer::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
@@ -849,9 +878,22 @@ impl Project {
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
         let path = self.task_path(&task.id);
-        atomic_write(&path, serialize_task(task).as_bytes())?;
-        crate::written::record(&self.records, &path);
+        let raw = serialize_physical(&self.physical_for_save(task)?);
+        before_write()?;
+        atomic_write(&path, raw.as_bytes())?;
+        self.record_task_written(task);
         Ok(())
+    }
+
+    // A recovered record may depend on segment files that an earlier command never committed.
+    pub(crate) fn record_task_written(&self, task: &Task) {
+        crate::written::record(&self.records, &self.task_path(&task.id));
+        for archive in &task.note_archives {
+            crate::written::record(
+                &self.records,
+                &crate::attachments::task_dir(self, &task.id).join(archive.file_name()),
+            );
+        }
     }
 
     fn git(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
@@ -1083,10 +1125,10 @@ impl Project {
                     continue;
                 }
             };
-            match parse_task(&raw, &file) {
+            match parse_physical(&raw, &file) {
                 Ok(task) => copies.push(SiblingCopy::Found {
                     root,
-                    updated: task.updated,
+                    updated: task.updated().to_string(),
                     raw,
                 }),
                 Err(error) => copies.push(SiblingCopy::Unreadable {
@@ -1180,7 +1222,8 @@ impl Project {
             if path.exists() {
                 continue;
             }
-            let linked = self.create_task_file(task);
+            let raw = serialize_physical(&self.physical_for_save(task)?);
+            let linked = self.create_task_file(task, &raw);
             match linked {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -1203,6 +1246,7 @@ impl Project {
         crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
+        let raw = serialize_physical(&self.physical_for_save(task)?);
         for _ in 0..16 {
             let temp = self.tasks_dir().join(format!(
                 ".{}.{:06x}.new.tmp",
@@ -1218,7 +1262,7 @@ impl Project {
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error.into()),
             };
-            return match self.publish_task_file(task, file, &temp) {
+            return match self.publish_task_file(task, &raw, file, &temp) {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     Err(Error::Validation(format!("{} already exists", task.id)))
@@ -1232,23 +1276,24 @@ impl Project {
         )))
     }
 
-    fn create_task_file(&self, task: &Task) -> std::io::Result<()> {
+    fn create_task_file(&self, task: &Task, raw: &str) -> std::io::Result<()> {
         let path = self.task_path(&task.id);
         let temp = path.with_file_name(format!(".{}.new.tmp", task.id));
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)?;
-        self.publish_task_file(task, file, &temp)
+        self.publish_task_file(task, raw, file, &temp)
     }
 
     fn publish_task_file(
         &self,
         task: &Task,
+        raw: &str,
         mut file: std::fs::File,
         temp: &Path,
     ) -> std::io::Result<()> {
-        if let Err(error) = file.write_all(serialize_task(task).as_bytes()) {
+        if let Err(error) = file.write_all(raw.as_bytes()) {
             drop(file);
             let _ = std::fs::remove_file(temp);
             return Err(error);
@@ -1256,7 +1301,7 @@ impl Project {
         drop(file);
         let linked = std::fs::hard_link(temp, self.task_path(&task.id));
         if linked.is_ok() {
-            crate::written::record(&self.records, &self.task_path(&task.id));
+            self.record_task_written(task);
         }
         let _ = std::fs::remove_file(temp);
         linked
@@ -1408,6 +1453,7 @@ mod tests {
 
     fn sample(p: &Project) -> Task {
         Task {
+            note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: p.new_id().unwrap(),
             title: "T".into(),
@@ -1568,7 +1614,7 @@ mod tests {
         assert_eq!(p.read_task(&t.id).unwrap(), t);
         let (from_raw, raw) = p.read_task_with_raw(&t.id).unwrap();
         assert_eq!(from_raw, t);
-        assert_eq!(parse_task(&raw, "test").unwrap(), t);
+        assert_eq!(crate::history::fixture(&raw, "test").unwrap(), t);
         assert_eq!(p.scan().unwrap(), vec![t.clone()]);
         assert!(std::fs::read_dir(p.tasks_dir()).unwrap().all(|entry| {
             !entry

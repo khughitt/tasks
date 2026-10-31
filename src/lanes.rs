@@ -464,6 +464,7 @@ mod tests {
 
     fn task(id: &str, parent: Option<&str>, status: Status, priority: u8) -> Task {
         Task {
+            note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: id.into(),

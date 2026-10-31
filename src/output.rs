@@ -738,6 +738,30 @@ pub struct AttachOut {
 }
 
 #[derive(Serialize)]
+pub struct ArchivePreview {
+    pub id: String,
+    pub source_sha256: String,
+    pub archive_name: String,
+    pub archive_bytes: u64,
+    pub note_count: usize,
+    pub record_bytes_before: u64,
+    pub record_bytes_after: u64,
+    pub eligible: bool,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ArchiveApplyOut {
+    pub id: String,
+    pub source_sha256: String,
+    pub archive_name: String,
+    pub record_bytes_before: u64,
+    pub record_bytes_after: u64,
+    pub action: &'static str,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct DetachOut {
     pub id: String,
     pub name: String,
@@ -1399,6 +1423,8 @@ pub enum Output {
     Docs(DocsOut),
     Feedback(FeedbackOut),
     Attach(AttachOut),
+    ArchivePreview(ArchivePreview),
+    ArchiveApply(ArchiveApplyOut),
     Detach(DetachOut),
     Retire(RetireOut),
 }
@@ -1931,6 +1957,18 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             crate::table::render(&columns, &rows, layout, None, painter)
         }
         Output::Feedback(o) => format!("{} {}", o.action, o.id),
+        Output::ArchivePreview(o) => format!(
+            "{}: {} → {} bytes; {}",
+            o.id,
+            o.record_bytes_before,
+            o.record_bytes_after,
+            if o.eligible {
+                "eligible".into()
+            } else {
+                o.reasons.join("; ")
+            }
+        ),
+        Output::ArchiveApply(o) => format!("{}: {} ({})", o.id, o.action, o.archive_name),
         Output::Attach(o) => o.file.path.clone(),
         Output::Detach(o) if o.removed => format!(
             "removed {}; git history keeps committed bytes, uncommitted ones are gone",
@@ -2523,6 +2561,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Tags(o) => o.warnings.clone(),
         Output::Docs(o) => o.warnings.clone(),
         Output::Feedback(o) => o.warnings.clone(),
+        Output::ArchivePreview(_) => Vec::new(),
+        Output::ArchiveApply(o) => o.warnings.clone(),
         Output::Attach(o) => o.warnings.clone(),
         Output::Detach(o) => o.warnings.clone(),
     }
@@ -2535,7 +2575,7 @@ mod tests {
 
     #[test]
     fn moved_counts_as_closed_and_in_the_total() {
-        let task = crate::format::parse_task(
+        let task = crate::history::fixture(
             "---\nid: sci-000001\ntitle: T\nstatus: moved\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\nmoved_to: wali-00000b\n---\n",
             "tasks/sci-000001.md",
         ).unwrap();

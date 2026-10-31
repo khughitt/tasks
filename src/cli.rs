@@ -743,6 +743,14 @@ pub enum Command {
         #[arg(long)]
         caption: Option<String>,
     },
+    /// Read-only note archive preview; --expect applies the verified source hash.
+    ArchiveNotes {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        /// Apply only the exact previewed source; shared records require reader rollout.
+        #[arg(long)]
+        expect: Option<String>,
+    },
     /// Remove one attachment and record why. Git history keeps committed bytes; an
     /// uncommitted file is gone for good.
     Detach {
@@ -1100,6 +1108,9 @@ impl Command {
             Command::Shelve { .. } => "shelve",
             Command::Unshelve { .. } => "unshelve",
             Command::Attach { .. } => "attach",
+            Command::ArchiveNotes {
+                expect: Some(_), ..
+            } => "archive-notes",
             Command::Detach { .. } => "detach",
             Command::Feedback { .. } => "feedback",
             Command::Move { .. } => "move",

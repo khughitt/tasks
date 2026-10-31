@@ -4,7 +4,7 @@ use crate::attachments::{self, Ledger};
 use crate::claims::{ClaimSnapshot, ClaimStore};
 use crate::commands::{self, append_note, append_stamped_note};
 use crate::error::{Error, Result};
-use crate::format::{serialize_task, validate_task};
+use crate::format::{serialize_physical, validate_task};
 use crate::hierarchy;
 use crate::model::{Relation, Status, Task, TaskId};
 use crate::registry::Registry;
@@ -120,15 +120,22 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
             continue;
         }
         let bytes = attachment_bytes(&ctx.source.project, id, &name)?.ok_or_else(|| Error::Validation(format!("{id}: attachment_missing: {name} is attached but its file is missing; restore it or run `tasks detach {id} {name} \"missing\"`")))?;
+        let retain_source = source
+            .note_archives
+            .iter()
+            .any(|archive| archive.file_name() == name);
         attachments.push(JournalAttachment {
+            retain_source,
             name: name.clone(),
             sha256: digest(&bytes),
         });
-        append_note(
-            &mut tombstone,
-            &owner,
-            &attachments::detached_note(&name, &format!("moved to {}", target.id)),
-        )?;
+        if !retain_source {
+            append_note(
+                &mut tombstone,
+                &owner,
+                &attachments::detached_note(&name, &format!("moved to {}", target.id)),
+            )?;
+        }
     }
     validate_record(&ctx.source.project, &ctx.registry, &tombstone)?;
     let store = ClaimStore::load(&ctx.source.project.prefix)?;
@@ -139,14 +146,21 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         park
     });
     Ok(Journal {
+        source_records: (!source.note_archives.is_empty())
+            .then(|| ctx.source.project.records.clone()),
         source: id.to_string(),
         target: target.id.to_string(),
         source_root: ctx.source.project.root.clone(),
         target_root: ctx.target.root.clone(),
         source_digest: digest(source_text.as_bytes()),
         source_text,
-        target_text: serialize_task(&target),
-        tombstone_text: serialize_task(&tombstone),
+        target_text: serialize_physical(&crate::history::physical_for_save(&target, |archive| {
+            ctx.source.project.read_archive(id, archive)
+        })?),
+        tombstone_text: serialize_physical(&crate::history::physical_for_save(
+            &tombstone,
+            |archive| ctx.source.project.read_archive(id, archive),
+        )?),
         attachments,
         source_park,
         target_park,

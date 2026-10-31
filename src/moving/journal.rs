@@ -11,12 +11,16 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalAttachment {
+    #[serde(default)]
+    pub retain_source: bool,
     pub name: String,
     pub sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_records: Option<PathBuf>,
     /// Full ids as strings: TaskId serializes but does not deserialize.
     pub source: String,
     pub target: String,
@@ -240,13 +244,71 @@ impl Journal {
             .map_err(|error| journal_error(path, error))
     }
 
+    pub fn logical_records(
+        &self,
+    ) -> Result<(crate::model::Task, crate::model::Task, crate::model::Task)> {
+        let load = |text: &str, id: &str| {
+            crate::history::load_logical(
+                crate::format::parse_physical(text, &format!("{id}.md"))?,
+                |archive| {
+                    let records = self.source_records.as_ref().ok_or_else(|| {
+                        Error::Validation(
+                            "archived move journal lacks its pinned source records directory"
+                                .into(),
+                        )
+                    })?;
+                    if !records.is_absolute() || records.canonicalize()? != *records {
+                        return Err(Error::Validation(
+                            "journal source records path must be absolute and canonical".into(),
+                        ));
+                    }
+                    let project = crate::repo::Project::open(records)?;
+                    if project.prefix != self.source_id().prefix
+                        || crate::rename::root_identity(&project.root)?
+                            != crate::rename::root_identity(&self.source_root)?
+                    {
+                        return Err(Error::Validation(
+                            "journal source records do not belong to its source project root"
+                                .into(),
+                        ));
+                    }
+                    let inventory = self
+                        .attachments
+                        .iter()
+                        .find(|entry| entry.name == archive.file_name());
+                    if inventory
+                        .is_none_or(|entry| !entry.retain_source || entry.sha256 != archive.sha256)
+                    {
+                        return Err(Error::Validation(
+                            "required archive lacks a matching retained source journal entry"
+                                .into(),
+                        ));
+                    }
+                    project.read_archive(&self.source_id(), archive)
+                },
+            )
+        };
+        Ok((
+            load(&self.source_text, &self.source)?,
+            load(&self.target_text, &self.target)?,
+            load(&self.tombstone_text, &self.source)?,
+        ))
+    }
+
     fn validate_records(&self) -> Result<()> {
         use crate::attachments::{Ledger, ledger};
-        use crate::format::parse_task;
         use crate::model::Status;
-        let source = parse_task(&self.source_text, &format!("{}.md", self.source))?;
-        let target = parse_task(&self.target_text, &format!("{}.md", self.target))?;
-        let tombstone = parse_task(&self.tombstone_text, &format!("{}.md", self.source))?;
+        let (source, target, tombstone) = self.logical_records()?;
+        for attachment in &self.attachments {
+            let required = source
+                .note_archives
+                .iter()
+                .any(|archive| archive.file_name() == attachment.name);
+            if attachment.retain_source != required {
+                return Err(Error::Validation("journal retained-source disposition must identify exactly the required note archives".into()));
+            }
+        }
+
         let refuse = || {
             Error::Validation("journal records do not describe one move preserving the source fields, history and attachment ledger".into())
         };
@@ -290,12 +352,17 @@ impl Journal {
                 &tombstone,
                 &mut expected_tombstone,
                 std::iter::once(format!("moved to {}", target.id))
-                    .chain(self.attachments.iter().map(|a| {
-                        crate::attachments::detached_note(
-                            &a.name,
-                            &format!("moved to {}", target.id),
-                        )
-                    }))
+                    .chain(
+                        self.attachments
+                            .iter()
+                            .filter(|a| !a.retain_source)
+                            .map(|a| {
+                                crate::attachments::detached_note(
+                                    &a.name,
+                                    &format!("moved to {}", target.id),
+                                )
+                            }),
+                    )
                     .collect(),
             ),
         ] {
@@ -351,9 +418,9 @@ pub(super) mod tests {
     use crate::rename::inventory::digest;
 
     pub(in crate::moving) fn sample() -> Journal {
-        use crate::format::{parse_task, serialize_task};
+        use crate::history::{fixture, fixture_text};
         let source_text = "---\nid: dots-00000a\ntitle: A\nstatus: todo\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: []\ntags: []\n---\n".to_string();
-        let source = parse_task(&source_text, "dots-00000a.md").unwrap();
+        let source = fixture(&source_text, "dots-00000a.md").unwrap();
         let mut target = source.clone();
         target.id = TaskId::parse("wali-00000b").unwrap();
         target.moved_from = Some(source.id.clone());
@@ -365,14 +432,15 @@ pub(super) mod tests {
         tombstone.updated.clone_from(&target.updated);
         crate::commands::append_note(&mut tombstone, "owner", "moved to wali-00000b").unwrap();
         Journal {
+            source_records: None,
             source: "dots-00000a".into(),
             target: "wali-00000b".into(),
             source_root: "/source".into(),
             target_root: "/target".into(),
             source_digest: digest(source_text.as_bytes()),
             source_text,
-            target_text: serialize_task(&target),
-            tombstone_text: serialize_task(&tombstone),
+            target_text: fixture_text(&target),
+            tombstone_text: fixture_text(&tombstone),
             attachments: vec![],
             source_park: None,
             source_escalation: None,
@@ -434,6 +502,7 @@ pub(super) mod tests {
         let mut journal = sample();
         for name in ["/etc/passwd", "../x", "a/b", ".hidden", ""] {
             journal.attachments = vec![JournalAttachment {
+                retain_source: false,
                 name: name.into(),
                 sha256: digest(b"png"),
             }];
@@ -441,6 +510,7 @@ pub(super) mod tests {
         }
         journal.attachments = vec![
             JournalAttachment {
+                retain_source: false,
                 name: "shot.png".into(),
                 sha256: digest(b"png")
             };
@@ -504,6 +574,7 @@ pub(super) mod tests {
             assert_invalid(&journal, Path::new("dots-00000a.toml"));
             journal.source_digest = digest(b"a");
             journal.attachments = vec![JournalAttachment {
+                retain_source: false,
                 name: "shot.png".into(),
                 sha256: bad,
             }];
@@ -543,6 +614,7 @@ pub(super) mod tests {
         let path = state.path().join("dots-00000a.toml");
         let mut journal = sample();
         journal.attachments = vec![JournalAttachment {
+            retain_source: false,
             name: "../x".into(),
             sha256: digest(b"x"),
         }];
