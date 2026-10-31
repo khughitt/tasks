@@ -264,3 +264,90 @@ mod tests {
         assert!(physical_for_save(&task, |_| Ok(bytes.to_vec())).is_err());
     }
 }
+
+#[cfg(test)]
+mod historical_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn archive_historical_basis() {
+        let repo = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap())
+                .env("HOME", home.path())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_AUTHOR_NAME", "fixture")
+                .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
+                .env("GIT_COMMITTER_NAME", "fixture")
+                .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+                .current_dir(repo.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out.stdout
+        };
+        git(&["init", "-q", "-b", "main"]);
+        let top = String::from_utf8(git(&["rev-parse", "--show-toplevel"])).unwrap();
+        assert_eq!(
+            Path::new(top.trim()).canonicalize().unwrap(),
+            repo.path().canonicalize().unwrap()
+        );
+        let dir = String::from_utf8(git(&["rev-parse", "--absolute-git-dir"])).unwrap();
+        assert!(Path::new(dir.trim()).starts_with(repo.path()));
+        let raw = "---\nid: arc-a00001\ntitle: Historical\nstatus: todo\npriority: 2\ncreated: 2026-10-30T00:00:00Z\nupdated: 2026-10-30T00:00:00Z\ndepends: []\ntags: []\n---\n\nBody\n\n## Notes\n\n- 2026-10-30T00:00:00Z (fixture): original evidence  \n  provenance: {\"harness_session\":\"codex:historical\",\"harness_session_source\":\"CODEX_THREAD_ID\"}\n";
+        std::fs::write(repo.path().join("record.md"), raw).unwrap();
+        git(&["add", "record.md"]);
+        git(&["-c", "commit.gpgsign=false", "commit", "-qm", "before"]);
+        let before = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+        let mut task = fixture(raw, "record.md").unwrap();
+        let original = task.notes.clone();
+        let bytes = raw.as_bytes()[raw.find("## Notes").unwrap()..].to_vec();
+        let archive = ArchiveDescriptor {
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            note_count: original.len(),
+        };
+        task.note_archives.push(archive.clone());
+        crate::commands::append_note(
+            &mut task,
+            "fixture",
+            &attachments::attached_note(&archive.file_name(), bytes.len() as u64, None),
+        )
+        .unwrap();
+        let compact = crate::format::serialize_physical(
+            &physical_for_save(&task, |_| Ok(bytes.clone())).unwrap(),
+        );
+        std::fs::write(repo.path().join("record.md"), compact).unwrap();
+        std::fs::write(repo.path().join(archive.file_name()), &bytes).unwrap();
+        git(&["add", "."]);
+        git(&["-c", "commit.gpgsign=false", "commit", "-qm", "after"]);
+        let after = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+        // Today's missing segment cannot substitute for, or invalidate, a pinned Git basis.
+        std::fs::remove_file(repo.path().join(archive.file_name())).unwrap();
+        for (revision, count) in [(before, original.len()), (after, original.len() + 1)] {
+            let raw = String::from_utf8(git(&["show", &format!("{revision}:record.md")])).unwrap();
+            let logical = load_logical(
+                crate::format::parse_physical(&raw, "record.md").unwrap(),
+                |a| Ok(git(&["show", &format!("{revision}:{}", a.file_name())])),
+            )
+            .unwrap();
+            assert_eq!(&logical.notes[..original.len()], original);
+            assert_eq!(logical.notes.len(), count);
+        }
+    }
+}

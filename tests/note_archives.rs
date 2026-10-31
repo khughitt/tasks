@@ -1176,3 +1176,124 @@ fn archive_receipts_require_the_exact_boundary() {
         assert_eq!(std::fs::read(raw_path(&root, &id)).unwrap(), bytes);
     }
 }
+
+#[test]
+fn archive_growth_and_append_cost() {
+    for body_dominant in [false, true] {
+        let (env, root, id) = archivable();
+        if body_dominant {
+            env.json(&root, &["edit", &id, "--body", &"body ".repeat(14000)]);
+        }
+        env.json(&root, &["note", &id, &"unique evidence ".repeat(5000)]);
+        for text in [
+            "review: impl round 1 — verdict: accept; findings: none; reviewer: human",
+            "concerns: arc-a00001 extension — synthetic follow-up",
+            "run: synthetic completed with 1 result",
+            "retained: {\"host\":\"fixture-a\",\"kind\":\"scratch\",\"path\":\"$WORK_ROOT/fixture\",\"state\":\"kept\",\"verification\":\"unknown\",\"sha256\":null,\"manifest\":null,\"purpose\":\"synthetic\",\"next_owner\":\"task:arc-a00001\",\"cleanup_trigger\":\"fixture complete\",\"verification_action\":\"inspect fixture\"}",
+            "retained: {\"host\":\"fixture-a\",\"kind\":\"scratch\",\"path\":\"$WORK_ROOT/fixture\",\"state\":\"released\",\"verification\":\"verified\",\"purpose\":\"synthetic removal\",\"next_owner\":\"none\",\"cleanup_trigger\":\"none\"}",
+            "retention checkpoint: observed 2026-10-30T00:00:00Z on fixture-a; basis synthetic; retained by main; this host: kept verified 0, kept unknown 0, released 1; changed 1.",
+            "retention checkpoint: incomplete; observed 2026-10-30T00:00:00Z on fixture-b; basis unavailable: synthetic; Next: inspect fixture.",
+        ] {
+            env.cmd(&root)
+                .env("CODEX_THREAD_ID", "history")
+                .args(["note", &id, text, "--stamp"])
+                .assert()
+                .success();
+        }
+        let source = root.join("evidence.txt");
+        std::fs::write(&source, "exact attachment").unwrap();
+        env.json(&root, &["attach", &id, source.to_str().unwrap()]);
+        let before = env.json(&root, &["show", &id])["task"].clone();
+        let growth_before = env.json(&root, &["check", "--growth"]);
+        assert!(!growth_before["warnings"].as_array().unwrap().is_empty());
+        let p = env.json(&root, &["archive-notes", &id]);
+        env.json(
+            &root,
+            &[
+                "archive-notes",
+                &id,
+                "--expect",
+                p["source_sha256"].as_str().unwrap(),
+            ],
+        );
+        let segment = root.join(format!(
+            "tasks/files/{id}/{}",
+            p["archive_name"].as_str().unwrap()
+        ));
+        let segment_bytes = std::fs::read(&segment).unwrap();
+        let active_before_append = std::fs::read(raw_path(&root, &id)).unwrap();
+        assert!(
+            active_before_append.len()
+                < growth_before["growth"][0]["record_bytes"].as_u64().unwrap() as usize
+        );
+        let after = env.json(&root, &["show", &id])["task"].clone();
+        let n = before["notes"].as_array().unwrap().len();
+        assert_eq!(
+            &after["notes"].as_array().unwrap()[..n],
+            before["notes"].as_array().unwrap()
+        );
+        let growth_after = env.json(&root, &["check", "--growth"]);
+        assert_eq!(
+            growth_after["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|x| x["kind"] == "record_growth"),
+            body_dominant
+        );
+        env.json(&root, &["note", &id, "later append"]);
+        let active_after_append = std::fs::read(raw_path(&root, &id)).unwrap();
+        assert!(active_after_append.len() > active_before_append.len());
+        assert!(
+            active_after_append.len()
+                < growth_before["growth"][0]["record_bytes"].as_u64().unwrap() as usize
+        );
+        assert_eq!(std::fs::read(segment).unwrap(), segment_bytes);
+        assert!(env.check(&root)["errors"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn archive_consumer_paths() {
+    let (env, root, id) = archivable();
+    let before = env.json(&root, &["show", &id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let p = env.json(&root, &["archive-notes", &id]);
+    env.json(
+        &root,
+        &[
+            "archive-notes",
+            &id,
+            "--expect",
+            p["source_sha256"].as_str().unwrap(),
+        ],
+    );
+    let check = env.json(&root, &["check", "--growth"]);
+    assert_eq!(check["growth"].as_array().unwrap().len(), 1);
+    assert_eq!(check["growth"][0]["id"], id);
+    assert_eq!(check["growth"][0]["note_count"], before.len() + 2);
+    assert!(check["errors"].as_array().unwrap().is_empty());
+    assert_eq!(
+        env.json(&root, &["list"])["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let shown = env.json(&root, &["show", &id]);
+    assert_eq!(
+        &shown["task"]["notes"].as_array().unwrap()[..before.len()],
+        before
+    );
+    assert_eq!(shown["files"].as_array().unwrap().len(), 1);
+    let completion = env
+        .cmd(&root)
+        .env("TASKS_COMPLETE", "zsh")
+        .env("_CLAP_COMPLETE_INDEX", "1")
+        .args(["--", "tasks", "archive-n"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&completion.stdout).contains("archive-notes"));
+}

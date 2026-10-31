@@ -156,6 +156,35 @@ only whitespace is rejected. Existing notes are never rewritten by other command
 that already ends in whitespace keeps it until an editor repair removes it (§5.3). Any other content after the delimiter is a `check` error. The section is created
 on the first note.
 
+#### Immutable note segments
+
+Current records may carry ordered `note_archives` frontmatter entries of the form
+`v1:<64 lowercase SHA-256 hex>:<positive note count>`. Each resolves only to
+`tasks/files/<id>/notes-<sha256>.notes`, the exact UTF-8 bytes from an earlier
+`## Notes` heading through EOF. Logical notes are verified segments in descriptor
+order plus the active inline suffix. Hash, count, grammar, provenance and live
+attachment ledger must all validate; missing/corrupt/unsafe history is an error,
+never a partial Task. Task JSON remains complete and omits physical descriptors.
+Physical parsing performs no filesystem IO and cannot expose a partial logical Task.
+
+Ordinary saves preserve immutable archived prefixes and serialize only the inline
+suffix. Editors receive only the compact active record and cannot change its
+descriptors. Moves retain source and destination archive copies; rename/adopt
+preserves exact segment bytes. Historical readers resolve at the pinned Git basis.
+Older parsers reject the key. Reader rollout and coordinated writer authorization
+precede any shared apply; no downgrade or bulk migration is implicit.
+
+`archive-notes <id>` previews exact source hash, segment size/count and projected
+active size without writes. Applying with `--expect <source_sha256>` requires all
+normal write/claim guards, a saving under-cap segment and safe storage. It publishes
+the segment before switching the record, adds attach/receipt events, and auto-commits
+both paths. A structurally validated receipt binds source hash, descriptor and exact
+logical boundary; retries after later notes do not duplicate it. Uncertain orphan
+bytes are preserved for verified retry. Local locks/source rechecks do not provide
+cross-host transactions or new power-loss guarantees. See README's Note archives
+for the current command, recovery and rollout contract; operational guidance is
+preview-only pending tasks-82096b.
+
 ### 3.3 Lifecycle
 
 Statuses are *open* (`idea`, `todo`, `doing`, `blocked`, `shelved`) or *closed* (`done`, `dropped`).
