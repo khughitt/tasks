@@ -620,6 +620,20 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   binary before moving synced records: older binaries cannot parse the new fields.
   For counterpart findings or manual undo, see the
   [recovery limits](../../docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
+- A growing task record: `tasks check --growth` reports active bytes and complete
+  logical-history counts. `tasks archive-notes <id>` is a read-only lossless
+  note-archive preview. Operational guidance is preview-only pending the reader,
+  consumer and coordinated-writer rollout gate tasks-82096b and explicit shared
+  apply authorization. A preview alone authorizes no mutation.
+  `tasks show` JSON contains every verified archived note in descriptor order,
+  followed by the inline suffix. Physical Markdown can contain `note_archives`
+  descriptors and only that suffix; read full history through the CLI, and classify
+  record versus attachment paths before recursive parsing. Required segments are
+  immutable and cannot be detached. On missing/hash/count errors restore exact
+  segment bytes from a verified source at the matching Git basis; never skip or
+  sanitize required history. Preserve exact body bytes before shortening a large
+  body. Archival reduces active rewrite cost, not total evidence or full-read cost;
+  existing cap/layout limits remain in force.
 - A screenshot or file for a task: `tasks attach <id> <path>` (or `-` with `--name`, or
   `--clipboard`), with `--caption "<what it shows>"`. `tasks show <id>` prints each
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
