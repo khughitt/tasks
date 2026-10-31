@@ -39,7 +39,7 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
              `tasks edit {parent} --no-every` first"
         )));
     }
-    if parent_record.defer.is_some() {
+    if parent_record.defer.is_some() && parent_record.status != Status::Shelved {
         return Err(Error::Validation(format!(
             "{parent} is deferred and cannot have children; clear the date with \
              `tasks edit {parent} --no-defer` first"
@@ -287,7 +287,7 @@ pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) ->
 
 /// A deferred goal would never appear in a picker.
 pub fn validate_defer(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
-    if task.defer.is_none() {
+    if task.defer.is_none() || task.status == Status::Shelved {
         return Ok(());
     }
     refuse_goal(project, registry, task, "be deferred")
@@ -430,6 +430,7 @@ mod tests {
 
     pub(crate) fn task(id: &str, parent: Option<&str>, status: Status) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: id.into(),
             status,

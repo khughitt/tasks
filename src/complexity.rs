@@ -106,6 +106,7 @@ mod tests {
 
     fn task(id: &str, complexity: Option<Complexity>) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: "t".into(),
             status: Status::Todo,

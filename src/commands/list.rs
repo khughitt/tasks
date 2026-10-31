@@ -15,6 +15,7 @@ use crate::query::{
     Picked, Readiness, SortKey, deferred_omission, is_candidate, paused_omissions, readiness,
     sort_by_key, sort_list, sort_periodic, sort_ready,
 };
+use crate::repo::Project;
 use crate::scope::Scope;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use time::OffsetDateTime;
@@ -53,8 +54,37 @@ pub(super) fn satisfied(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<bool
 
 /// The dependency view for rows of `scan` (wait-aware spec §4.3): one per scan, never
 /// shared, so each row is judged against the copies its own checkout holds.
-pub(super) fn review_deps(ctx: &ReadCtx, scan: &[Task]) -> Result<crate::review::Deps> {
-    crate::review::Deps::of_scan(scan, |id| resolve_dependency(ctx, scan, id))
+pub(super) fn review_deps(ctx: &mut ReadCtx, scan: &[Task]) -> Result<crate::review::Deps> {
+    let deps = crate::review::Deps::of_scan(scan, |id| resolve_dependency(ctx, scan, id))?;
+    for warning in deps.warnings(scan) {
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
+    Ok(deps)
+}
+
+/// The supplying checkout owns missing local IDs, just as it owns records in its scan.
+pub(super) fn recorded_review_deps(
+    ctx: &mut ReadCtx,
+    project: &Project,
+    scan: &[Task],
+) -> Result<crate::review::Deps> {
+    let resolver = crate::resolve::Resolver::new(project, &ctx.registry);
+    let deps = crate::review::Deps::of_scan(scan, |id| {
+        crate::dependency::resolve(&ctx.registry, id, |id| {
+            match scan.iter().find(|task| task.id == *id) {
+                Some(task) => Ok(Some(task.clone())),
+                None => resolver.resolve_task(id),
+            }
+        })
+    })?;
+    for warning in deps.warnings(scan) {
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
+    Ok(deps)
 }
 
 /// `list`, and `search` when `text` is given: the text predicate narrows the same
@@ -83,16 +113,14 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
     filter.resolve_under(&all, &ctx.registry)?;
-    let deps = review_deps(&ctx, &all)?;
+    let deps = review_deps(&mut ctx, &all)?;
     let mut tasks = all.clone();
     tasks.retain(|task| {
         let periodic_ok = !periodic || task.every.is_some();
         let deferred_ok = !deferred || task.defer.is_some();
-        // The default pool when --status is absent: open minus shelved, or every status
+        // The default pool when --status is absent: open, or every status
         // for --periodic, since most of a healthy series is closed (spec §5.2).
-        let pool_ok = !filter.statuses().is_empty()
-            || periodic
-            || (task.status.is_open() && task.status != Status::Shelved);
+        let pool_ok = !filter.statuses().is_empty() || periodic || task.status.is_open();
         periodic_ok
             && deferred_ok
             && pool_ok
@@ -549,7 +577,7 @@ pub fn ready(
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
     filter.resolve_under(&all, &ctx.registry)?;
-    let deps = review_deps(&ctx, &all)?;
+    let deps = review_deps(&mut ctx, &all)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
     let mut picked = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
     let halts = halt_rows(&snapshots, &all);
@@ -621,7 +649,7 @@ pub fn next(
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     filter.resolve_under(&all, &ctx.registry)?;
-    let deps = review_deps(&ctx, &all)?;
+    let deps = review_deps(&mut ctx, &all)?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &deps, &claims, &filter, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
@@ -707,7 +735,7 @@ fn claimed_elsewhere(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
-) -> Vec<(Task, Vec<Task>)> {
+) -> Vec<(Project, Task, Vec<Task>)> {
     let mut found = Vec::new();
     for (key, (claim, liveness)) in claims.iter() {
         if liveness.is_stale() {
@@ -726,7 +754,7 @@ fn claimed_elsewhere(
             continue;
         }
         let worktree = std::path::Path::new(&claim.worktree);
-        match super::parked::scan_recorded(&id, worktree) {
+        match super::parked::open_recorded(&id, worktree) {
             Ok(Some(resolved)) => {
                 ctx.warnings.push(format!(
                     "{id} is claimed in {}; resume it from that checkout",
@@ -757,7 +785,7 @@ pub fn prime(
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let deps = review_deps(&ctx, &all)?;
+    let deps = review_deps(&mut ctx, &all)?;
     let upcoming: Vec<OffsetDateTime> = all
         .iter()
         .filter_map(crate::periodic::due)
@@ -771,7 +799,7 @@ pub fn prime(
     };
     let waiting: Vec<crate::defer::Defer> = all
         .iter()
-        .filter(|task| crate::defer::is_deferred(task, now))
+        .filter(|task| task.status != Status::Shelved && crate::defer::is_deferred(task, now))
         .filter_map(|task| task.defer)
         .collect();
     let next = waiting.iter().min().copied();
@@ -781,7 +809,7 @@ pub fn prime(
         in_days: next.map(|defer| crate::defer::days_until(defer.date(), now)),
         due: all
             .iter()
-            .filter(|task| crate::defer::is_due(task, now))
+            .filter(|task| task.status != Status::Shelved && crate::defer::is_due(task, now))
             .count(),
     };
     let counts = Counts::of(&all);
@@ -824,11 +852,11 @@ pub fn prime(
         .cloned()
         .collect();
     let elsewhere = claimed_elsewhere(&mut ctx, &all, &claims);
-    doing.extend(elsewhere.iter().map(|(task, _)| task.clone()));
+    doing.extend(elsewhere.iter().map(|(_, task, _)| task.clone()));
     // Each row read from another checkout is judged with that checkout's own scan.
     let elsewhere_deps: Vec<_> = elsewhere
         .iter()
-        .map(|(_, scan)| review_deps(&ctx, scan))
+        .map(|(project, _, scan)| recorded_review_deps(&mut ctx, project, scan))
         .collect::<Result<_>>()?;
     sort_list(&mut doing);
     let roadmap = crate::hierarchy::forest(
@@ -961,9 +989,9 @@ pub fn prime(
             .map(|task| {
                 let (scan, deps) = elsewhere
                     .iter()
-                    .position(|(found, _)| found.id == task.id)
+                    .position(|(_, found, _)| found.id == task.id)
                     .map_or((all.as_slice(), &deps), |at| {
-                        (elsewhere[at].1.as_slice(), &elsewhere_deps[at])
+                        (elsewhere[at].2.as_slice(), &elsewhere_deps[at])
                     });
                 TaskSummary::of(task, scan, deps, Some(&claims), &ctx.registry, now)
             })

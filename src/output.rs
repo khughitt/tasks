@@ -388,6 +388,9 @@ impl InventoryRow {
 #[derive(Serialize)]
 pub struct ShowFields {
     pub task: Task,
+    pub needs_review: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_reason: Option<crate::review::ReviewReason>,
     /// Pretty-only colours of every project the view names (the record's own, its
     /// dependencies' and its move counterpart's), by prefix.
     #[serde(skip)]
@@ -576,6 +579,8 @@ pub struct TaskSummary {
     pub origin: Option<crate::model::Origin>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wake_on: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     /// The nearest lane at or above this task: its own id when it is a lane. Computed
@@ -803,6 +808,7 @@ impl TaskSummary {
             agent: task.agent.clone(),
             origin: task.origin,
             depends: task.depends.iter().map(ToString::to_string).collect(),
+            wake_on: task.wake_on.clone(),
             parent: task.parent.as_ref().map(ToString::to_string),
             in_lane: crate::hierarchy::lane_of(all, task, registry),
             child_count,
@@ -876,6 +882,8 @@ pub struct ParkedRow {
     pub origin: Option<crate::model::Origin>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wake_on: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -925,6 +933,7 @@ impl ParkedRow {
             agent: summary.agent,
             origin: summary.origin,
             depends: summary.depends,
+            wake_on: summary.wake_on,
             parent: summary.parent,
             in_lane: summary.in_lane,
             child_count: Some(summary.child_count),
@@ -964,6 +973,7 @@ impl ParkedRow {
             agent: None,
             origin: None,
             depends: Vec::new(),
+            wake_on: Vec::new(),
             parent: None,
             in_lane: None,
             child_count: None,
@@ -2531,6 +2541,7 @@ mod tests {
             agent: None,
             origin: None,
             depends: vec![],
+            wake_on: vec![],
             parent: None,
             in_lane: None,
             child_count: 0,

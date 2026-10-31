@@ -1,5 +1,21 @@
 # Deferred tasks: a one-shot date that hides work until it arrives
 
+Current shelf amendment (2026-10-30): shelves are included in ordinary list/search
+and use `defer` as a mandatory checkpoint for new/renewed shelves, independent of
+execution readiness. `wake_on` is a sparse ANY-of review-evidence list. A due checkpoint
+or currently closed target yields woken; absent date/unresolved target yields stranded,
+with closed/due evidence taking precedence. Old undated shelves remain readable.
+Shelved goals, lanes and recurrences may carry a checkpoint, and a shelved parent's
+date permits new children. On exit, transition clears date/targets before final writer
+validation; syntax parsing stays status independent for cadence/date and wake fields.
+A dated shelf cannot erase its checkpoint while remaining shelved. Prime's deferral
+summary and blocker defer labels exclude shelf checkpoints; list --deferred retains them.
+Scope tiers are unreviewed/woken ideas and woken shelves, stranded ideas, unassessed
+todo/blocked, then stranded shelves. Reads do not unshelve; current-state wake evidence
+can disappear on reopen. The dated checkpoint bounds missed close/reopen occurrences.
+The sections below record the earlier decision and ordinary non-shelf behavior.
+
+
 Status: implemented (2026-09-15)
 Task: tasks-be6fcc; feedback tasks-f5ab4a; motivating records prism-49a068 and prism-8a8eac
 

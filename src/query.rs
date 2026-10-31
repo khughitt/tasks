@@ -282,6 +282,7 @@ mod tests {
 
     fn t(id: &str, status: Status, priority: u8, size: Option<Size>, deps: &[&str]) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: id.into(),
             status,

@@ -102,7 +102,31 @@ pub fn parse_age(value: &str) -> Result<i64> {
 
 /// The statuses on which a deferral is meaningful.
 pub fn can_carry(status: Status) -> bool {
-    matches!(status, Status::Idea | Status::Todo | Status::Blocked)
+    matches!(
+        status,
+        Status::Idea | Status::Todo | Status::Blocked | Status::Shelved
+    )
+}
+
+/// Status-dependent validity belongs at writes/check, after editor transition cleanup.
+pub fn validate(task: &Task) -> Result<()> {
+    if task.defer.is_none() {
+        return Ok(());
+    }
+    if task.every.is_some() && task.status != Status::Shelved {
+        return Err(Error::Validation(format!(
+            "defer and every cannot both be set on {}; only a shelf combines cadence with a review checkpoint",
+            task.id
+        )));
+    }
+    if task.status != Status::Moved && !can_carry(task.status) {
+        return Err(Error::Validation(format!(
+            "{} is {}; defer requires an idea, todo, blocked or shelved task",
+            task.id,
+            task.status.as_str()
+        )));
+    }
+    Ok(())
 }
 
 /// The deferral has been spent by the clock but not yet by attention (spec §4).
@@ -135,6 +159,7 @@ mod tests {
 
     fn deferred(status: Status, defer: Option<&str>) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
             title: "Later".into(),
             status,
@@ -270,16 +295,12 @@ mod tests {
     }
 
     #[test]
-    fn only_picker_statuses_carry_a_deferral() {
+    fn picker_and_shelf_statuses_carry_a_date() {
         assert!(can_carry(Status::Idea));
         assert!(can_carry(Status::Todo));
         assert!(can_carry(Status::Blocked));
-        for status in [
-            Status::Doing,
-            Status::Shelved,
-            Status::Done,
-            Status::Dropped,
-        ] {
+        assert!(can_carry(Status::Shelved));
+        for status in [Status::Doing, Status::Done, Status::Dropped] {
             assert!(!can_carry(status), "{status:?}");
         }
     }

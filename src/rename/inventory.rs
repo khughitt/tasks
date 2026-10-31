@@ -376,7 +376,8 @@ pub(crate) fn validate_task_file(path: &Path, text: &str) -> Result<()> {
             detail: format!("id field is {}", task.id),
         });
     }
-    crate::review::validate(&task)
+    crate::review::validate(&task)?;
+    crate::defer::validate(&task)
 }
 
 pub(crate) fn task_paths(directory: &Path) -> Result<Vec<PathBuf>> {

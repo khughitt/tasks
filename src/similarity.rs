@@ -89,6 +89,7 @@ mod tests {
 
     fn feedback_task(id: &str, title: &str) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: title.into(),
             status: crate::model::Status::Idea,

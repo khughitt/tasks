@@ -813,6 +813,7 @@ impl Project {
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::review::validate(task)?;
+        crate::defer::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
         crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
@@ -1134,6 +1135,7 @@ impl Project {
         mut candidate: impl FnMut() -> u32,
     ) -> Result<()> {
         crate::review::validate(task)?;
+        crate::defer::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
         crate::hierarchy::validate_lanes(self, registry, task)?;
         // A new record has no children, so these refuse only a lane.
@@ -1164,6 +1166,7 @@ impl Project {
     pub fn create_task_exact(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::format::validate_task(task)?;
         crate::review::validate(task)?;
+        crate::defer::validate(task)?;
         self.validate_docs(task)?;
         crate::needs::require_declared(&self.needs, &task.needs)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
@@ -1375,6 +1378,7 @@ mod tests {
 
     fn sample(p: &Project) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: p.new_id().unwrap(),
             title: "T".into(),
             status: Status::Todo,

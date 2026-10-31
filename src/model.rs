@@ -137,6 +137,7 @@ mod tests {
         step: Option<&str>,
     ) -> Task {
         Task {
+            wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
             title: "T".into(),
             status,
@@ -629,11 +630,13 @@ pub struct Task {
     /// an ordinary task. See docs/specs/2026-09-09-periodic-design.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub every: Option<crate::periodic::Interval>,
-    /// A one-shot calendar date that keeps the record out of the pickers until it
-    /// arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status
+    /// A picker deferral, or a shelf's next review checkpoint, due on its UTC day. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status
     /// transition. See docs/specs/2026-09-15-defer-design.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer: Option<crate::defer::Defer>,
+    /// Completion evidence for shelf review, independent of execution dependencies.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wake_on: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     pub created: String,

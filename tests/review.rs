@@ -34,7 +34,7 @@ fn every_status_transition_clears_reviewed() {
     let dir = env.init("sci");
     for args in [
         vec!["edit", "ID", "--status", "todo"],
-        vec!["shelve", "ID", "later"],
+        vec!["shelve", "ID", "--defer", "30d", "later"],
         vec!["drop", "ID"],
     ] {
         let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
@@ -54,7 +54,7 @@ fn every_status_transition_clears_reviewed() {
     // Back to idea arrives unreviewed.
     let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
     seed_reviewed(&dir, &id);
-    env.json(&dir, &["shelve", &id, "later"]);
+    env.json(&dir, &["shelve", &id, "--defer", "30d", "later"]);
     env.json(&dir, &["unshelve", &id]);
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "idea");
     assert!(!reviewed(&env, &dir, &id));
@@ -1249,7 +1249,7 @@ fn an_unreachable_or_shelved_dependency_keeps_the_idea_waiting() {
         &dir,
         &["note", &shelved_wait, "--reviewed", "scope: briefed"],
     );
-    env.json(&dir, &["shelve", &follow_up, "later"]);
+    env.json(&dir, &["shelve", &follow_up, "--defer", "30d", "later"]);
     assert_eq!(queued(&env, &dir, &shelved_wait), None);
 }
 

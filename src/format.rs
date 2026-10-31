@@ -7,7 +7,7 @@ use crate::model::{
 
 pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 34] = [
+const KEYS: [&str; 35] = [
     "id",
     "title",
     "status",
@@ -23,6 +23,7 @@ const KEYS: [&str; 34] = [
     "needs",
     "every",
     "defer",
+    "wake_on",
     "owner",
     "created",
     "updated",
@@ -125,6 +126,11 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         .map_err(|e| perr(file, e.to_string()))?;
     let (body, refs, notes) = split_body(after, file)?;
     let task = Task {
+        wake_on: optional_list("wake_on")?
+            .iter()
+            .map(|value| TaskId::parse(value))
+            .collect::<Result<Vec<_>>>()
+            .map_err(|error| perr(file, error.to_string()))?,
         id: TaskId::parse(&required("id")?).map_err(|e| perr(file, e.to_string()))?,
         title: required("title")?,
         status: Status::parse(&required("status")?).map_err(|e| perr(file, e.to_string()))?,
@@ -509,7 +515,7 @@ pub fn roots_hint(kind: &str) -> String {
 
 pub fn validate_task(t: &Task) -> Result<()> {
     TaskId::parse(&t.id.to_string())?;
-    for dependency in &t.depends {
+    for dependency in t.depends.iter().chain(&t.wake_on) {
         TaskId::parse(&dependency.to_string())?;
     }
     validate_line("title", &t.title)?;
@@ -545,12 +551,6 @@ pub fn validate_task(t: &Task) -> Result<()> {
             }
         }
         _ => {}
-    }
-    if t.defer.is_some() && t.every.is_some() {
-        return Err(Error::Validation(format!(
-            "defer and every cannot both be set on {}; a recurrence already defers from each completion",
-            t.id
-        )));
     }
     if t.step.is_some() && t.plan.is_none() {
         return Err(Error::Validation("step requires plan".into()));
@@ -652,6 +652,12 @@ pub fn serialize_task(t: &Task) -> String {
     }
     if let Some(defer) = t.defer {
         pairs.push(("defer".into(), Value::Raw(defer.to_string())));
+    }
+    if !t.wake_on.is_empty() {
+        pairs.push((
+            "wake_on".into(),
+            Value::List(t.wake_on.iter().map(ToString::to_string).collect()),
+        ));
     }
     if let Some(o) = &t.owner {
         pairs.push(("owner".into(), s(o)));
@@ -1140,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn defer_is_read_as_a_date_even_unquoted_and_never_beside_every() {
+    fn defer_shape_parses_independently_of_cadence_status() {
         let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
         let t = parse_task(&with("defer: 2026-11-10"), "f").unwrap();
         assert_eq!(t.defer.unwrap().to_string(), "2026-11-10");
@@ -1148,9 +1154,8 @@ mod tests {
         assert_eq!(t.defer.unwrap().to_string(), "2026-11-10");
         assert!(parse_task(&with("defer: 2026-11-10T00:00:00Z"), "f").is_err());
         assert!(parse_task(&with("defer: soon"), "f").is_err());
-        let error = parse_task(&with("every: 30d\ndefer: 2026-11-10"), "f")
-            .unwrap_err()
-            .to_string();
+        let task = parse_task(&with("every: 30d\ndefer: 2026-11-10"), "f").unwrap();
+        let error = crate::defer::validate(&task).unwrap_err().to_string();
         assert!(
             error.contains("defer and every cannot both be set"),
             "{error}"

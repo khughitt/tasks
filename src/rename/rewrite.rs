@@ -26,7 +26,7 @@ pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
                 ("id", Value::Scalar(v)) | ("parent", Value::Scalar(v)) => {
                     Value::Scalar(move_one(&v))
                 }
-                ("depends", Value::List(items)) => {
+                ("depends" | "wake_on", Value::List(items)) => {
                     Value::List(items.iter().map(|item| move_one(item)).collect())
                 }
                 (key, Value::Scalar(v)) if crate::format::TIMESTAMP_KEYS.contains(&key) => {
