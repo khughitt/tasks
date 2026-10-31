@@ -135,8 +135,11 @@ mean those documents were verified.
    unnecessary explicit overrides bypass native root association.
    For relay identity setup and recovery, see [Relay identity](../../README.md#relay-identity-opt-in).
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
+   Use [Artifact placement and retention](#artifact-placement-and-retention) for
+   bulky evidence and retention checkpoints; keep required audit and review notes.
 5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a
-   turn that waits on the user, or whenever you set work down. It records the next step
+   turn that waits on the user, or whenever you set work down. First complete the
+   applicable [retention accounting](#artifact-placement-and-retention). It records the next step
    and this session in the shared store, releases your claim, and leaves status alone;
    `start` resumes it. A host pointer a live test repointed into the task's worktree (a
    launcher symlink, a service unit, a config include) is restored before the park, or
@@ -189,6 +192,8 @@ mean those documents were verified.
 6. `tasks done <id> "<what landed>"` on the task's branch before it merges (under `[git] commit`
    the CLI commits the record itself; otherwise commit it with the code). If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
+   Complete [retention accounting](#artifact-placement-and-retention) before closing;
+   any surviving item needs an open owner or an agreed handoff.
    To reopen a done or dropped task (a correction handed back after close), run
    `tasks edit <id> --status todo`, then `tasks start <id>`; `start` alone refuses and names
    that edit.
@@ -474,6 +479,37 @@ and no controller closes a worker's live claim merely by being its parent.
 
 ## Recording work
 
+### Artifact placement and retention
+
+Keep intent, scope, acceptance and named references in the task body. Notes hold
+short decisions, changed facts, required audit/review entries and next actions.
+Put long reports, transcripts, inventories and repeated tables in artifacts:
+
+- Small immutable evidence: use `tasks attach` and a `files:<name>` reference.
+  Preserve changed versions under new names; verify the ledger and exact bytes.
+- Evolving reports, ledgers and receipts: use the authorized records/overlay
+  document home under `docs/notes/`, or persistent task storage when that home is
+  not authorized for the content. Specs and plans keep their profile destination.
+- Large, mutable or layout-refused raw evidence: use persistent task storage with
+  its location, hash and ownership discoverable from the task.
+
+Design-document permission does not authorize operational data in a code
+repository. Work/external projects need an authorized private records destination
+or persistent storage and a permitted pointer; resolve missing publication
+permission before publishing. Attachments and refs confer no permission or cap
+exemption. Many rows call for an artifact; an independently actionable outcome,
+owner, dependency, approval or retention lifetime calls for a separate task.
+
+For projects adopting lore's retained-item guidance, read the installed
+[retained-item contract](~/.agents/skills/references/retained-item-records.md)
+before creating, refreshing, recovering or releasing retention records, and before
+park/done accounting. It owns placement details, changed-item records, container
+coverage, exact host checkpoints, publication/recovery order and cleanup ownership;
+do not duplicate its fields here or infer a tasks parser API. If the installed
+contract is unavailable, resolve that missing input before asserting a checkpoint.
+Follow its fresh inspection and immutable-basis procedure even when every item is
+unchanged. A recorded observation is not proof of current filesystem state.
+
 ### Record commits
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
@@ -568,6 +604,13 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
+  After interrupted attachment publication, retry the same name and bytes through
+  `tasks attach`, then verify both the live ledger and the payload at the intended
+  Git basis. Same-bytes adoption can repair the audit while leaving the file
+  untracked (tasks-b2bb36). Inspect the pending `tasks/` sweep, resolve unrelated
+  writes, run `tasks commit` when publication is missing, then verify exact bytes
+  with `git show <basis>:<attachment-path>` in the records repository. A successful
+  audit or exit 0 alone does not establish committed evidence.
 - A checker needing an exact local attachment verdict uses
   `tasks -C <project> attachments tasks/files/<id>/<name>...` (1–128 unique paths).
   This read-only query uses only the explicit project's local configuration,
@@ -700,7 +743,14 @@ or a backslash; inside those double quotes only `\"` and `\\` are escapes.
 Cross-project `@` references are not supported. Local `context` and `input` targets
 must exist when added or changed.
 
-Kind is a descriptive free label; it changes no behavior. Suggested vocabulary:
+A named reference navigates to current content; it does not pin historical bytes.
+For a review or checkpoint, separately pin the records repository, commit, path
+and byte hash, or the attachment's task, exact name and byte hash. Preserve those
+versions; a missing or mismatched historical artifact is a recovery failure, not
+permission to substitute today's file. See [Artifact placement and retention](#artifact-placement-and-retention).
+
+Kind is a descriptive free label; it changes no behavior. `manifest` and `receipt`
+need no CLI change and grant no validation or publication exemption. Suggested vocabulary:
 `brief`, `spec`, `plan`, `report` (findings, probes, spikes, diagnoses, audits, runs),
 `review`, `ledger`, `handoff`, `retro`, `runbook`, `guide`, `decision`, and artifacts
 `dataset`, `image`, `log`, `trace`, `transcript`.
