@@ -137,6 +137,7 @@ mod tests {
         step: Option<&str>,
     ) -> Task {
         Task {
+            note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
             title: "T".into(),
@@ -587,6 +588,8 @@ pub struct Ref {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Task {
+    #[serde(skip)]
+    pub(crate) note_archives: Vec<crate::history::ArchiveDescriptor>,
     pub id: TaskId,
     pub title: String,
     pub status: Status,

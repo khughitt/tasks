@@ -169,7 +169,7 @@ fn woken(task: &Task, deps: &Deps) -> bool {
             .is_some_and(|defer| defer.date() > reviewed_at.date())
 }
 
-/// Record stamps were validated by `parse_task`.
+/// Record stamps were validated by `parse_physical`.
 fn stamp(text: &str) -> OffsetDateTime {
     crate::time::parse(text).expect("record stamps are validated at parse")
 }
@@ -192,7 +192,7 @@ pub fn not_reviewed(task: &Task) -> Error {
 }
 
 /// The write-time rule (review-state spec §3.2, wait-aware spec §3.1–3.2). Never called
-/// from parsing: `parse_task` must accept a hand-edited record so `check` can report it
+/// from parsing: `parse_physical` must accept a hand-edited record so `check` can report it
 /// and an editor save can transition it.
 pub fn validate(task: &Task) -> Result<()> {
     if !task.wake_on.is_empty() && task.status != Status::Shelved {
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn validate_refuses_marker_or_stamp_without_reviewed() {
         let parse = |extra: &str| {
-            crate::format::parse_task(
+            crate::history::fixture(
                 &format!(
                     "---\nid: sci-000001\ntitle: T\nstatus: idea\npriority: 2\n{extra}\
                      created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
@@ -363,7 +363,7 @@ mod tests {
     }
 
     fn idea(extra: &str, depends: &str) -> Task {
-        crate::format::parse_task(
+        crate::history::fixture(
             &format!(
                 "---\nid: sci-000001\ntitle: T\nstatus: idea\npriority: 2\n{extra}\
                  created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(state(&idea(&marked, ""), 0, &none, now), None);
         // Todos keep review-state §4.
         let todo = |extra: &str| {
-            crate::format::parse_task(
+            crate::history::fixture(
                 &format!(
                     "---\nid: sci-000002\ntitle: T\nstatus: todo\npriority: 2\n{extra}\
                      created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn validate_refuses_reviewed_on_a_non_idea_only() {
-        let mut task = crate::format::parse_task(
+        let mut task = crate::history::fixture(
             "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nreviewed: true\n\
              created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
              depends: []\ntags: []\n---\n",

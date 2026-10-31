@@ -369,7 +369,15 @@ impl Inventory {
 
 pub(crate) fn validate_task_file(path: &Path, text: &str) -> Result<()> {
     let file = path.display().to_string();
-    let task = crate::format::parse_task(text, &file)?;
+    let physical = crate::format::parse_physical(text, &file)?;
+    let id = physical.id().clone();
+    let records = path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| Error::Validation("task record has no explicit records root".into()))?;
+    let task = crate::history::load_logical(physical, |archive| {
+        crate::repo::Project::open(records)?.read_archive(&id, archive)
+    })?;
     if path.file_stem().and_then(|name| name.to_str()) != Some(task.id.to_string().as_str()) {
         return Err(Error::Parse {
             file,

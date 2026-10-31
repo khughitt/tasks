@@ -184,8 +184,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     }
     let source = journal.source_id();
     let target = journal.target_id();
-    let task = crate::format::parse_task(&journal.target_text, &format!("{target}.md"))?;
-    let tombstone = crate::format::parse_task(&journal.tombstone_text, &format!("{source}.md"))?;
+    let (_, task, tombstone) = journal.logical_records()?;
     if task.id != target || tombstone.id != source {
         return Err(Error::MovePending(
             "journal record ids disagree with its source or target".into(),

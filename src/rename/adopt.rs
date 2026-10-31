@@ -54,13 +54,14 @@ pub fn run(
         for path in inventory::task_paths(&project.tasks_dir())? {
             let text = std::fs::read_to_string(&path)?;
             let task = inventory::validate_task_file(&path, &text)
-                .and_then(|()| crate::format::parse_task(&text, &path.display().to_string()));
+                .and_then(|()| crate::format::parse_physical(&text, &path.display().to_string()));
             match task {
-                Ok(task) if task.id.prefix == new => {
-                    tasks.insert(task.id.to_string());
+                Ok(task) if task.id().prefix == new => {
+                    tasks.insert(task.id().to_string());
                 }
                 Ok(task) => {
-                    stage = Stage::Refuse(format!("task {} does not use prefix {new:?}", task.id));
+                    stage =
+                        Stage::Refuse(format!("task {} does not use prefix {new:?}", task.id()));
                     break;
                 }
                 Err(error) => {

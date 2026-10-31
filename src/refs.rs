@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn audit_names_duplicates_and_unresolved_citations() {
         let text = "---\nid: sci-4f2a9c\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n\nSee [ref:a] and [ref:gone] and [ref:X].\n\n## References\n\n- a (context): docs/x.md\n- b (input): docs/x.md\n";
-        let task = crate::format::parse_task(text, "t.md").unwrap();
+        let task = crate::history::fixture(text, "t.md").unwrap();
         let problems = audit(&task);
         let kinds: Vec<_> = problems.iter().map(|p| p.kind).collect();
         assert_eq!(

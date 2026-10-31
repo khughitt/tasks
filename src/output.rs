@@ -2535,7 +2535,7 @@ mod tests {
 
     #[test]
     fn moved_counts_as_closed_and_in_the_total() {
-        let task = crate::format::parse_task(
+        let task = crate::history::fixture(
             "---\nid: sci-000001\ntitle: T\nstatus: moved\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\nmoved_to: wali-00000b\n---\n",
             "tasks/sci-000001.md",
         ).unwrap();

@@ -18,6 +18,7 @@ pub fn blank(
 ) -> Result<Task> {
     let now = crate::time::now();
     Ok(Task {
+        note_archives: Vec::new(),
         wake_on: Vec::new(),
         id: project.new_id()?,
         title,

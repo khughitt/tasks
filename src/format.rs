@@ -7,7 +7,7 @@ use crate::model::{
 
 pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 35] = [
+const KEYS: [&str; 36] = [
     "id",
     "title",
     "status",
@@ -24,6 +24,7 @@ const KEYS: [&str; 35] = [
     "every",
     "defer",
     "wake_on",
+    "note_archives",
     "owner",
     "created",
     "updated",
@@ -52,7 +53,43 @@ fn perr(file: &str, detail: impl Into<String>) -> Error {
     }
 }
 
-pub fn parse_task(text: &str, file: &str) -> Result<Task> {
+#[derive(Debug)]
+pub struct PhysicalTask {
+    metadata: Task,
+    pub inline_notes: Vec<Note>,
+    pub archives: Vec<crate::history::ArchiveDescriptor>,
+}
+
+impl PhysicalTask {
+    pub fn id(&self) -> &TaskId {
+        &self.metadata.id
+    }
+    pub fn status(&self) -> Status {
+        self.metadata.status
+    }
+    pub fn updated(&self) -> &str {
+        &self.metadata.updated
+    }
+
+    pub(crate) fn assemble(mut self, notes: Vec<Note>) -> Task {
+        self.metadata.notes = notes;
+        self.metadata.note_archives = self.archives;
+        self.metadata
+    }
+
+    pub(crate) fn project(task: &Task, inline_notes: Vec<Note>) -> Self {
+        let mut metadata = task.clone();
+        metadata.notes.clear();
+        metadata.note_archives.clear();
+        Self {
+            metadata,
+            inline_notes,
+            archives: task.note_archives.clone(),
+        }
+    }
+}
+
+pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
     let rest = text
         .strip_prefix("---\n")
         .ok_or_else(|| perr(file, "missing opening ---"))?;
@@ -125,7 +162,17 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         .collect::<Result<Vec<_>>>()
         .map_err(|e| perr(file, e.to_string()))?;
     let (body, refs, notes) = split_body(after, file)?;
-    let task = Task {
+    let archives = optional_list("note_archives")?
+        .iter()
+        .map(|value| {
+            crate::history::ArchiveDescriptor::parse(value)
+                .map_err(|error| perr(file, error.to_string()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    crate::history::validate_descriptors(&archives)
+        .map_err(|error| perr(file, error.to_string()))?;
+    let mut task = Task {
+        note_archives: Vec::new(),
         wake_on: optional_list("wake_on")?
             .iter()
             .map(|value| TaskId::parse(value))
@@ -197,7 +244,12 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         notes,
     };
     validate_task(&task).map_err(|e| perr(file, e.to_string()))?;
-    Ok(task)
+    let inline_notes = std::mem::take(&mut task.notes);
+    Ok(PhysicalTask {
+        metadata: task,
+        inline_notes,
+        archives,
+    })
 }
 
 /// Frontmatter keys holding a timestamp (the one scalar containing `:`). Single source for
@@ -303,6 +355,29 @@ fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> 
         .trim_end()
         .to_string();
     Ok((body, refs, notes))
+}
+
+fn validate_notes(notes: &[Note]) -> Result<()> {
+    for note in notes {
+        crate::time::parse(&note.at)?;
+        validate_owner(&note.by)?;
+        validate_note_text(&note.text)?;
+        validate_note_keys(note.provenance.as_ref(), &note.occurrence)
+            .map_err(Error::Validation)?;
+    }
+    Ok(())
+}
+
+pub fn parse_note_section(text: &str, file: &str) -> Result<Vec<Note>> {
+    if !text.starts_with("## Notes\n") && !text.starts_with("## Notes\r\n") {
+        return Err(perr(file, "archive must begin with ## Notes"));
+    }
+    let (body, refs, notes) = split_body(text, file)?;
+    if !body.is_empty() || !refs.is_empty() {
+        return Err(perr(file, "archive may contain only its note section"));
+    }
+    validate_notes(&notes).map_err(|error| perr(file, error.to_string()))?;
+    Ok(notes)
 }
 
 fn parse_note_line(line: &str) -> Option<Note> {
@@ -596,17 +671,13 @@ pub fn validate_task(t: &Task) -> Result<()> {
             )));
         }
     }
-    for n in &t.notes {
-        crate::time::parse(&n.at)?;
-        validate_owner(&n.by)?;
-        validate_note_text(&n.text)?;
-        validate_note_keys(n.provenance.as_ref(), &n.occurrence).map_err(Error::Validation)?;
-    }
+    validate_notes(&t.notes)?;
     crate::tombstone::validate(t)?;
     Ok(())
 }
 
-pub fn serialize_task(t: &Task) -> String {
+pub fn serialize_physical(record: &PhysicalTask) -> String {
+    let t = &record.metadata;
     let s = |v: &str| Value::Scalar(v.to_string());
     let mut pairs = vec![
         ("id".into(), s(&t.id.to_string())),
@@ -713,6 +784,12 @@ pub fn serialize_task(t: &Task) -> String {
     if let Some(id) = &t.moved_from {
         pairs.push(("moved_from".into(), s(&id.to_string())));
     }
+    if !record.archives.is_empty() {
+        pairs.push((
+            "note_archives".into(),
+            Value::List(record.archives.iter().map(ToString::to_string).collect()),
+        ));
+    }
     let mut out = String::from("---\n");
     out.push_str(&frontmatter::serialize(&pairs));
     out.push_str("---\n");
@@ -732,11 +809,11 @@ pub fn serialize_task(t: &Task) -> String {
             out.push('\n');
         }
     }
-    if !t.notes.is_empty() {
+    if !record.inline_notes.is_empty() {
         out.push('\n');
         out.push_str(NOTES_DELIMITER);
         out.push_str("\n\n");
-        for n in &t.notes {
+        for n in &record.inline_notes {
             out.push_str(&format!("- {} ({}): {}\n", n.at, n.by, n.text));
             if n.provenance.is_some() || !n.occurrence.is_empty() {
                 out.push_str("  provenance: ");
@@ -759,17 +836,17 @@ mod tests {
 
     #[test]
     fn the_references_section_round_trips_between_body_and_notes() {
-        let task = parse_task(WITH_REFS, "t.md").unwrap();
+        let task = crate::history::fixture(WITH_REFS, "t.md").unwrap();
         assert_eq!(task.body, "See [ref:brief].");
         assert_eq!(task.refs.len(), 2);
         assert_eq!(task.refs[1].reference, "docs/a b.md");
         assert_eq!(task.notes.len(), 1);
-        assert_eq!(serialize_task(&task), WITH_REFS);
+        assert_eq!(crate::history::fixture_text(&task), WITH_REFS);
     }
 
     #[test]
     fn references_serialize_decoded_values_and_omit_absent_fields() {
-        let mut task = parse_task(WITH_REFS, "t.md").unwrap();
+        let mut task = crate::history::fixture(WITH_REFS, "t.md").unwrap();
         let json = serde_json::to_value(&task).unwrap();
         assert_eq!(
             json["refs"],
@@ -789,21 +866,23 @@ mod tests {
         let text = format!(
             "{MINIMAL}\n## References\n\n- first (context): missing.md\n- second (input): missing.md\n"
         );
-        let task = parse_task(&text, "t.md").unwrap();
+        let task = crate::history::fixture(&text, "t.md").unwrap();
         assert!(task.body.is_empty());
         assert!(task.notes.is_empty());
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
         assert_eq!(
-            serialize_task(&parse_task(&format!("{MINIMAL}\n## References\n"), "t.md").unwrap()),
+            crate::history::fixture_text(
+                &crate::history::fixture(&format!("{MINIMAL}\n## References\n"), "t.md").unwrap()
+            ),
             MINIMAL
         );
     }
 
     #[test]
     fn no_section_is_written_without_entries() {
-        let task = parse_task(FULL, "t.md").unwrap();
-        assert_eq!(serialize_task(&task), FULL);
-        assert!(!serialize_task(&task).contains(REFS_DELIMITER));
+        let task = crate::history::fixture(FULL, "t.md").unwrap();
+        assert_eq!(crate::history::fixture_text(&task), FULL);
+        assert!(!crate::history::fixture_text(&task).contains(REFS_DELIMITER));
     }
 
     #[test]
@@ -832,7 +911,9 @@ mod tests {
             ),
         ];
         for (text, needle) in cases {
-            let error = parse_task(&text, "t.md").unwrap_err().to_string();
+            let error = crate::history::fixture(&text, "t.md")
+                .unwrap_err()
+                .to_string();
             assert!(error.contains(needle), "{needle}: {error}");
         }
     }
@@ -846,28 +927,28 @@ mod tests {
     #[test]
     fn citation_text_in_the_body_never_fails_a_read() {
         let text = WITH_REFS.replacen("See [ref:brief].", "See [ref:gone] and [ref:Bad].", 1);
-        assert!(parse_task(&text, "t.md").is_ok());
+        assert!(crate::history::fixture(&text, "t.md").is_ok());
     }
 
     const MINIMAL: &str = "---\nid: sci-000001\ntitle: Tiny\nstatus: idea\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n";
     const FULL: &str = "---\nid: sci-4f2a9c\ntitle: Bank the holdings ledger\nstatus: todo\npriority: 2\nsize: m\nowner: keith\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: [sci-91be03, fam-0c3d7e]\ntags: [world-index, cut-12]\nspec: docs/specs/2026-08-24-holdings-design.md\nplan: docs/plans/2026-08-24-holdings.md\nstep: \"Task 3: emit the ledger row\"\n---\n\nFree-form body.\n\nSecond paragraph.\n\n## Notes\n\n- 2026-08-29T15:10:44Z (keith): started; the spec's §4 assumption no longer holds.\n- 2026-08-29T16:41:02Z (slice-12): split the emitter into sci-a7d1e2.\n";
     #[test]
     fn full_roundtrip() {
-        let t = parse_task(FULL, "x").unwrap();
+        let t = crate::history::fixture(FULL, "x").unwrap();
         assert_eq!(t.title, "Bank the holdings ledger");
         assert_eq!(t.size, Some(Size::M));
         assert_eq!(t.depends.len(), 2);
         assert_eq!(t.step.as_deref(), Some("Task 3: emit the ledger row"));
         assert_eq!(t.body, "Free-form body.\n\nSecond paragraph.");
         assert_eq!(t.notes.len(), 2);
-        assert_eq!(serialize_task(&t), FULL);
+        assert_eq!(crate::history::fixture_text(&t), FULL);
     }
     #[test]
     fn minimal_roundtrip() {
-        let t = parse_task(MINIMAL, "x").unwrap();
+        let t = crate::history::fixture(MINIMAL, "x").unwrap();
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
-        assert_eq!(serialize_task(&t), MINIMAL);
+        assert_eq!(crate::history::fixture_text(&t), MINIMAL);
     }
 
     #[test]
@@ -875,10 +956,10 @@ mod tests {
         let text = "---\nid: dots-00000a\ntitle: T\nstatus: moved\npriority: 2\n\
     created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n\
     moved_to: wali-00000b\n---\n";
-        let task = parse_task(text, "tasks/dots-00000a.md").unwrap();
+        let task = crate::history::fixture(text, "tasks/dots-00000a.md").unwrap();
         assert_eq!(task.status, Status::Moved);
         assert_eq!(task.moved_to.as_ref().unwrap().to_string(), "wali-00000b");
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
     }
 
     #[test]
@@ -886,9 +967,9 @@ mod tests {
         let text = "---\nid: wali-00000b\ntitle: T\nstatus: todo\npriority: 2\n\
     created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n\
     moved_from: dots-00000a\n---\n";
-        let task = parse_task(text, "tasks/wali-00000b.md").unwrap();
+        let task = crate::history::fixture(text, "tasks/wali-00000b.md").unwrap();
         assert_eq!(task.moved_from.as_ref().unwrap().to_string(), "dots-00000a");
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
     }
 
     #[test]
@@ -918,7 +999,7 @@ mod tests {
             ),
         ] {
             assert!(
-                parse_task(&base(status, extra), "tasks/dots-00000a.md").is_err(),
+                crate::history::fixture(&base(status, extra), "tasks/dots-00000a.md").is_err(),
                 "{why} must not parse"
             );
         }
@@ -928,7 +1009,7 @@ mod tests {
     fn provenance_continuation_roundtrips_and_flattens_without_changing_old_notes() {
         let metadata = r#"  provenance: {"harness_session":"codex:opaque : \"id\" \\ tail","harness_session_source":"CODEX_SESSION_ID"}"#;
         let text = format!("{FULL}{metadata}\n");
-        let task = parse_task(&text, "provenance").unwrap();
+        let task = crate::history::fixture(&text, "provenance").unwrap();
         let json = serde_json::to_value(&task.notes).unwrap();
         assert!(json[0].get("harness_session").is_none());
         assert!(json[0].get("harness_session_source").is_none());
@@ -938,10 +1019,16 @@ mod tests {
         assert_eq!(json[1]["at"], "2026-08-29T16:41:02Z");
         assert_eq!(json[1]["by"], "slice-12");
         assert_eq!(json[1]["text"], "split the emitter into sci-a7d1e2.");
-        assert_eq!(serialize_task(&task), text);
-        assert_eq!(parse_task(&serialize_task(&task), "again").unwrap(), task);
+        assert_eq!(crate::history::fixture_text(&task), text);
+        assert_eq!(
+            crate::history::fixture(&crate::history::fixture_text(&task), "again").unwrap(),
+            task
+        );
         let plain = format!("{FULL}- 2026-08-29T17:00:00Z (keith): provenance: just text\n");
-        assert_eq!(serialize_task(&parse_task(&plain, "plain").unwrap()), plain);
+        assert_eq!(
+            crate::history::fixture_text(&crate::history::fixture(&plain, "plain").unwrap()),
+            plain
+        );
     }
 
     #[test]
@@ -967,31 +1054,42 @@ mod tests {
             r#"{"harness_session":"codex:a\nb","harness_session_source":"CODEX_SESSION_ID"}"#,
         ] {
             assert!(
-                parse_task(&format!("{FULL}  provenance: {json}\n"), "bad").is_err(),
+                crate::history::fixture(&format!("{FULL}  provenance: {json}\n"), "bad").is_err(),
                 "{json}"
             );
         }
         let metadata = "  provenance: {\"harness_session\":\"codex:a\",\"harness_session_source\":\"CODEX_THREAD_ID\"}\n";
-        assert!(parse_task(&format!("{MINIMAL}\n## Notes\n\n{metadata}"), "orphan").is_err());
-        assert!(parse_task(&format!("{FULL}{metadata}{metadata}"), "duplicate").is_err());
+        assert!(
+            crate::history::fixture(&format!("{MINIMAL}\n## Notes\n\n{metadata}"), "orphan")
+                .is_err()
+        );
+        assert!(
+            crate::history::fixture(&format!("{FULL}{metadata}{metadata}"), "duplicate").is_err()
+        );
     }
 
     #[test]
     fn process_round_trips_and_rejects_invalid_values() {
-        assert_eq!(serialize_task(&parse_task(MINIMAL, "x").unwrap()), MINIMAL);
+        assert_eq!(
+            crate::history::fixture_text(&crate::history::fixture(MINIMAL, "x").unwrap()),
+            MINIMAL
+        );
         for process in ["direct", "planned"] {
             let text = MINIMAL.replace(
                 "priority: 2\n",
                 &format!("priority: 2\nprocess: {process}\n"),
             );
-            assert_eq!(serialize_task(&parse_task(&text, "x").unwrap()), text);
+            assert_eq!(
+                crate::history::fixture_text(&crate::history::fixture(&text, "x").unwrap()),
+                text
+            );
         }
         for process in ["auto", "Direct", "\"\"", "[direct]"] {
             let text = MINIMAL.replace(
                 "priority: 2\n",
                 &format!("priority: 2\nprocess: {process}\n"),
             );
-            assert!(parse_task(&text, "x").is_err());
+            assert!(crate::history::fixture(&text, "x").is_err());
         }
     }
 
@@ -999,12 +1097,12 @@ mod tests {
     fn occurrence_keys_roundtrip_in_fixed_order() {
         let line = r#"  provenance: {"harness_session":"codex:w","harness_session_source":"CODEX_THREAD_ID","root_session":"codex:r","origin":"mixed","origin_session":"claude-code:old"}"#;
         let text = format!("{FULL}- 2026-10-25T12:00:00Z (add): created\n{line}\n");
-        let task = parse_task(&text, "t").unwrap();
+        let task = crate::history::fixture(&text, "t").unwrap();
         assert_eq!(
             task.notes.last().unwrap().occurrence.origin,
             Some(Origin::Mixed)
         );
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
     }
 
     #[test]
@@ -1012,9 +1110,9 @@ mod tests {
         let text = format!(
             "{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {{\"origin\":\"user\"}}\n"
         );
-        let task = parse_task(&text, "t").unwrap();
+        let task = crate::history::fixture(&text, "t").unwrap();
         assert!(task.notes.last().unwrap().provenance.is_none());
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
     }
 
     #[test]
@@ -1031,7 +1129,7 @@ mod tests {
         ] {
             let text =
                 format!("{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {json}\n");
-            assert!(parse_task(&text, "t").is_err(), "{json}");
+            assert!(crate::history::fixture(&text, "t").is_err(), "{json}");
         }
     }
 
@@ -1040,18 +1138,18 @@ mod tests {
         let text = format!(
             "{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {{\"origin\":\"user\"}}\n  provenance: {{\"origin\":\"agent\"}}\n"
         );
-        let error = parse_task(&text, "t").unwrap_err().to_string();
+        let error = crate::history::fixture(&text, "t").unwrap_err().to_string();
         assert!(error.contains("duplicate provenance line"), "{error}");
     }
 
     #[test]
     fn origin_frontmatter_roundtrips_after_agent_and_rejects_unknown_values() {
         let text = MINIMAL.replace("tags: []\n", "tags: []\nagent: codex/gpt-6\norigin: user\n");
-        let task = parse_task(&text, "x").unwrap();
+        let task = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(task.origin, Some(Origin::User));
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
         let bad = MINIMAL.replace("tags: []\n", "tags: []\norigin: someone\n");
-        let error = parse_task(&bad, "x").unwrap_err().to_string();
+        let error = crate::history::fixture(&bad, "x").unwrap_err().to_string();
         assert!(error.contains("unknown origin"), "{error}");
     }
 
@@ -1068,9 +1166,9 @@ mod tests {
             "tags: []\n",
             "tags: []\nsource: mind6-1\nmodel: claude-opus-5\nagent: codex/gpt-6\n",
         );
-        let task = parse_task(&text, "x").unwrap();
+        let task = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(task.agent.as_deref(), Some("codex/gpt-6"));
-        assert_eq!(serialize_task(&task), text);
+        assert_eq!(crate::history::fixture_text(&task), text);
 
         let mut bad = task.clone();
         bad.agent = Some("a\nb".into());
@@ -1081,20 +1179,20 @@ mod tests {
     fn complexity_round_trips_after_size_and_rejects_unknown_levels() {
         let text = MINIMAL.replace("priority: 2\n", "priority: 2\nsize: m\ncomplexity: mid\n");
         // Through the allowlist first: an unlisted key is rejected before any field parses.
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(t.complexity, Some(Complexity::Mid));
-        assert_eq!(serialize_task(&t), text);
+        assert_eq!(crate::history::fixture_text(&t), text);
         let bad = MINIMAL.replace("priority: 2\n", "priority: 2\ncomplexity: medium\n");
-        let error = parse_task(&bad, "x").unwrap_err().to_string();
+        let error = crate::history::fixture(&bad, "x").unwrap_err().to_string();
         assert!(error.contains("low, mid, high"), "{error}");
     }
 
     #[test]
     fn cadence_round_trips_in_its_field_positions() {
-        let mut task = parse_task(FULL, "f").unwrap();
+        let mut task = crate::history::fixture(FULL, "f").unwrap();
         task.every = Some(crate::periodic::Interval::parse("2w").unwrap());
         task.last_done = Some("2026-09-01T08:00:00Z".into());
-        let text = serialize_task(&task);
+        let text = crate::history::fixture_text(&task);
         assert!(
             text.contains("size: m\nevery: 2w\n"),
             "every follows the shape fields: {text}"
@@ -1103,17 +1201,17 @@ mod tests {
             text.contains("updated: 2026-08-29T14:02:11Z\nlast_done: 2026-09-01T08:00:00Z\n"),
             "last_done follows updated: {text}"
         );
-        let back = parse_task(&text, "f").unwrap();
+        let back = crate::history::fixture(&text, "f").unwrap();
         assert_eq!(back.every, task.every);
         assert_eq!(back.last_done, task.last_done);
     }
 
     #[test]
     fn cadence_is_omitted_when_absent() {
-        let task = parse_task(FULL, "f").unwrap();
+        let task = crate::history::fixture(FULL, "f").unwrap();
         assert_eq!(task.every, None);
         assert_eq!(task.last_done, None);
-        let text = serialize_task(&task);
+        let text = crate::history::fixture_text(&task);
         assert!(
             !text.contains("every:") && !text.contains("last_done:"),
             "{text}"
@@ -1123,38 +1221,41 @@ mod tests {
     #[test]
     fn rejects_a_bad_cadence_and_a_bare_anchor() {
         let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
-        assert!(parse_task(&with("every: 30m"), "f").is_err());
-        assert!(parse_task(&with("every: 0d"), "f").is_err());
-        assert!(parse_task(&with("last_done: 2026-09-01T08:00:00Z"), "f").is_err());
-        assert!(parse_task(&with("every: 30d\nlast_done: nonsense"), "f").is_err());
-        assert!(parse_task(&with("every: 1d\nlast_done: 9999-12-31T00:00:00Z"), "f").is_err());
+        assert!(crate::history::fixture(&with("every: 30m"), "f").is_err());
+        assert!(crate::history::fixture(&with("every: 0d"), "f").is_err());
+        assert!(crate::history::fixture(&with("last_done: 2026-09-01T08:00:00Z"), "f").is_err());
+        assert!(crate::history::fixture(&with("every: 30d\nlast_done: nonsense"), "f").is_err());
+        assert!(
+            crate::history::fixture(&with("every: 1d\nlast_done: 9999-12-31T00:00:00Z"), "f")
+                .is_err()
+        );
     }
 
     #[test]
     fn defer_round_trips_after_every_and_is_omitted_when_absent() {
-        let mut task = parse_task(FULL, "f").unwrap();
+        let mut task = crate::history::fixture(FULL, "f").unwrap();
         assert_eq!(task.defer, None);
-        assert!(!serialize_task(&task).contains("defer:"));
+        assert!(!crate::history::fixture_text(&task).contains("defer:"));
         task.defer = Some(crate::defer::Defer::parse("2026-11-10").unwrap());
-        let text = serialize_task(&task);
+        let text = crate::history::fixture_text(&task);
         assert!(
             text.contains("size: m\ndefer: 2026-11-10\n"),
             "defer follows the shape fields: {text}"
         );
-        let back = parse_task(&text, "f").unwrap();
+        let back = crate::history::fixture(&text, "f").unwrap();
         assert_eq!(back.defer, task.defer);
     }
 
     #[test]
     fn defer_shape_parses_independently_of_cadence_status() {
         let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
-        let t = parse_task(&with("defer: 2026-11-10"), "f").unwrap();
+        let t = crate::history::fixture(&with("defer: 2026-11-10"), "f").unwrap();
         assert_eq!(t.defer.unwrap().to_string(), "2026-11-10");
-        let t = parse_task(&with("defer: \"2026-11-10\""), "f").unwrap();
+        let t = crate::history::fixture(&with("defer: \"2026-11-10\""), "f").unwrap();
         assert_eq!(t.defer.unwrap().to_string(), "2026-11-10");
-        assert!(parse_task(&with("defer: 2026-11-10T00:00:00Z"), "f").is_err());
-        assert!(parse_task(&with("defer: soon"), "f").is_err());
-        let task = parse_task(&with("every: 30d\ndefer: 2026-11-10"), "f").unwrap();
+        assert!(crate::history::fixture(&with("defer: 2026-11-10T00:00:00Z"), "f").is_err());
+        assert!(crate::history::fixture(&with("defer: soon"), "f").is_err());
+        let task = crate::history::fixture(&with("every: 30d\ndefer: 2026-11-10"), "f").unwrap();
         let error = crate::defer::validate(&task).unwrap_err().to_string();
         assert!(
             error.contains("defer and every cannot both be set"),
@@ -1164,23 +1265,36 @@ mod tests {
     #[test]
     fn parent_roundtrips_after_depends() {
         let with_parent = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000002");
-        let t = parse_task(&with_parent, "x").unwrap();
+        let t = crate::history::fixture(&with_parent, "x").unwrap();
         assert_eq!(t.parent.as_ref().unwrap().to_string(), "sci-000002");
-        assert_eq!(serialize_task(&t), with_parent);
+        assert_eq!(crate::history::fixture_text(&t), with_parent);
         let own = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000001");
         assert!(
-            parse_task(&own, "x").is_ok(),
+            crate::history::fixture(&own, "x").is_ok(),
             "self-parent is a hierarchy rule, not a format rule"
         );
     }
     #[test]
     fn rejects_bad_values() {
-        assert!(parse_task(&MINIMAL.replace("tags: []", "tags: []\ncolor: red"), "x").is_err());
-        assert!(parse_task(&MINIMAL.replace("priority: 2\n", ""), "x").is_err());
-        assert!(parse_task(&MINIMAL.replace("priority: 2", "priority: 7"), "x").is_err());
-        assert!(parse_task(&MINIMAL.replace("status: idea", "status: soon"), "x").is_err());
-        assert!(parse_task(&MINIMAL.replace("depends: []", "depends: [nope]"), "x").is_err());
-        assert!(parse_task(&MINIMAL.replace("tags: []", "tags: []\nstep: only"), "x").is_err());
+        assert!(
+            crate::history::fixture(&MINIMAL.replace("tags: []", "tags: []\ncolor: red"), "x")
+                .is_err()
+        );
+        assert!(crate::history::fixture(&MINIMAL.replace("priority: 2\n", ""), "x").is_err());
+        assert!(
+            crate::history::fixture(&MINIMAL.replace("priority: 2", "priority: 7"), "x").is_err()
+        );
+        assert!(
+            crate::history::fixture(&MINIMAL.replace("status: idea", "status: soon"), "x").is_err()
+        );
+        assert!(
+            crate::history::fixture(&MINIMAL.replace("depends: []", "depends: [nope]"), "x")
+                .is_err()
+        );
+        assert!(
+            crate::history::fixture(&MINIMAL.replace("tags: []", "tags: []\nstep: only"), "x")
+                .is_err()
+        );
     }
 
     #[test]
@@ -1189,11 +1303,11 @@ mod tests {
                     awaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z\n\
                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
                     closed: 2026-10-17T10:00:00Z\ndepends: []\ntags: []\n---\n";
-        let task = parse_task(text, "sci-000001.md").unwrap();
+        let task = crate::history::fixture(text, "sci-000001.md").unwrap();
         assert!(task.awaiting_user);
         assert_eq!(task.reviewed_at.as_deref(), Some("2026-10-17T09:00:00Z"));
         assert_eq!(task.closed.as_deref(), Some("2026-10-17T10:00:00Z"));
-        let written = serialize_task(&task);
+        let written = crate::history::fixture_text(&task);
         assert!(written.contains("\nawaiting_user: true\n"), "{written}");
         assert!(
             written.contains("\nreviewed_at: 2026-10-17T09:00:00Z\n"),
@@ -1203,21 +1317,26 @@ mod tests {
             written.contains("\nclosed: 2026-10-17T10:00:00Z\n"),
             "{written}"
         );
-        assert_eq!(parse_task(&written, "sci-000001.md").unwrap(), task);
+        assert_eq!(
+            crate::history::fixture(&written, "sci-000001.md").unwrap(),
+            task
+        );
         let mut cleared = task.clone();
         cleared.awaiting_user = false;
         cleared.reviewed_at = None;
         cleared.closed = None;
-        let written = serialize_task(&cleared);
+        let written = crate::history::fixture_text(&cleared);
         for key in ["awaiting_user", "reviewed_at", "closed"] {
             assert!(
                 !written.contains(key),
                 "{key} written when unset: {written}"
             );
         }
-        assert!(parse_task(&text.replace("2026-10-17T09:00:00Z", "soon"), "f").is_err());
         assert!(
-            parse_task(
+            crate::history::fixture(&text.replace("2026-10-17T09:00:00Z", "soon"), "f").is_err()
+        );
+        assert!(
+            crate::history::fixture(
                 &text.replace("2026-10-17T10:00:00Z", "2026-13-45T00:00:00Z"),
                 "f"
             )
@@ -1230,14 +1349,14 @@ mod tests {
         let text = "---\nid: sci-000001\ntitle: T\nstatus: idea\npriority: 2\nreviewed: true\n\
                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
                     depends: []\ntags: []\n---\n";
-        let task = parse_task(text, "sci-000001.md").unwrap();
+        let task = crate::history::fixture(text, "sci-000001.md").unwrap();
         assert!(task.reviewed);
-        assert!(serialize_task(&task).contains("\nreviewed: true\n"));
+        assert!(crate::history::fixture_text(&task).contains("\nreviewed: true\n"));
         let mut cleared = task.clone();
         cleared.reviewed = false;
-        assert!(!serialize_task(&cleared).contains("reviewed"));
+        assert!(!crate::history::fixture_text(&cleared).contains("reviewed"));
         assert!(
-            !parse_task(&serialize_task(&cleared), "sci-000001.md")
+            !crate::history::fixture(&crate::history::fixture_text(&cleared), "sci-000001.md")
                 .unwrap()
                 .reviewed
         );
@@ -1250,33 +1369,33 @@ mod tests {
         let text = "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nreviewed: true\n\
                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
                     depends: []\ntags: []\n---\n";
-        let task = parse_task(text, "sci-000001.md").unwrap();
+        let task = crate::history::fixture(text, "sci-000001.md").unwrap();
         assert!(task.reviewed);
         assert!(validate_task(&task).is_ok());
     }
 
     #[test]
     fn parallel_round_trips_and_is_omitted_when_false() {
-        let mut t = parse_task(MINIMAL, "x").unwrap();
+        let mut t = crate::history::fixture(MINIMAL, "x").unwrap();
         assert!(!t.parallel, "absent key reads as false");
         assert!(
-            !serialize_task(&t).contains("parallel"),
+            !crate::history::fixture_text(&t).contains("parallel"),
             "false is never written"
         );
 
         t.parallel = true;
-        let text = serialize_task(&t);
+        let text = crate::history::fixture_text(&t);
         assert!(
             text.contains("\nparallel: true\n"),
             "emitted unquoted: {text}"
         );
-        assert!(parse_task(&text, "x").unwrap().parallel);
+        assert!(crate::history::fixture(&text, "x").unwrap().parallel);
     }
 
     #[test]
     fn parallel_accepts_both_spellings_and_rejects_anything_else() {
         // frontmatter::parse discards quoting, so the quoted forms are indistinguishable
-        // from the bare words by the time parse_task sees them.
+        // from the bare words by the time parse_physical sees them.
         for (value, expected) in [
             ("true", true),
             ("\"true\"", true),
@@ -1285,14 +1404,14 @@ mod tests {
         ] {
             let text = MINIMAL.replace("depends: []", &format!("parallel: {value}\ndepends: []"));
             assert_eq!(
-                parse_task(&text, "x").unwrap().parallel,
+                crate::history::fixture(&text, "x").unwrap().parallel,
                 expected,
                 "parallel: {value}"
             );
         }
         for bad in ["maybe", "1", "True", "yes"] {
             let text = MINIMAL.replace("depends: []", &format!("parallel: {bad}\ndepends: []"));
-            let err = parse_task(&text, "x").unwrap_err().to_string();
+            let err = crate::history::fixture(&text, "x").unwrap_err().to_string();
             assert!(
                 err.contains("parallel must be true or false"),
                 "parallel: {bad} gave {err}"
@@ -1303,74 +1422,78 @@ mod tests {
     #[test]
     fn parallel_false_in_a_file_is_dropped_on_the_next_write() {
         let text = MINIMAL.replace("depends: []", "parallel: false\ndepends: []");
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert!(!t.parallel);
-        assert!(!serialize_task(&t).contains("parallel"));
+        assert!(!crate::history::fixture_text(&t).contains("parallel"));
     }
 
     #[test]
     fn lane_round_trips_after_parallel_and_is_omitted_when_false() {
-        let mut t = parse_task(MINIMAL, "x").unwrap();
+        let mut t = crate::history::fixture(MINIMAL, "x").unwrap();
         assert!(!t.lane, "absent key reads as false");
         assert!(
-            !serialize_task(&t).contains("lane"),
+            !crate::history::fixture_text(&t).contains("lane"),
             "false is never written"
         );
 
         t.parallel = true;
         t.lane = true;
-        let text = serialize_task(&t);
+        let text = crate::history::fixture_text(&t);
         assert!(
             text.contains("\nparallel: true\nlane: true\n"),
             "unquoted, right after parallel: {text}"
         );
-        assert!(parse_task(&text, "x").unwrap().lane);
+        assert!(crate::history::fixture(&text, "x").unwrap().lane);
 
         let bad = MINIMAL.replace("depends: []", "lane: yes\ndepends: []");
-        let err = parse_task(&bad, "x").unwrap_err().to_string();
+        let err = crate::history::fixture(&bad, "x").unwrap_err().to_string();
         assert!(err.contains("lane must be true or false"), "{err}");
     }
 
     #[test]
     fn needs_round_trip_after_parallel_and_are_omitted_when_empty() {
-        let t = parse_task(MINIMAL, "x").unwrap();
+        let t = crate::history::fixture(MINIMAL, "x").unwrap();
         assert!(t.needs.is_empty(), "absent key reads as empty");
-        assert!(!serialize_task(&t).contains("needs"));
+        assert!(!crate::history::fixture_text(&t).contains("needs"));
 
         let text = MINIMAL.replace(
             "priority: 2\n",
             "priority: 2\nparallel: true\nneeds: [quiet, owner]\n",
         );
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(t.needs, ["quiet", "owner"]);
-        let out = serialize_task(&t);
+        let out = crate::history::fixture_text(&t);
         assert!(
             out.contains("\nparallel: true\nneeds: [quiet, owner]\ncreated: "),
             "written after parallel: {out}"
         );
-        assert_eq!(parse_task(&out, "x").unwrap(), t);
+        assert_eq!(crate::history::fixture(&out, "x").unwrap(), t);
     }
 
     #[test]
     fn needs_empty_list_is_dropped_and_bad_values_are_refused() {
         let empty = MINIMAL.replace("tags: []", "tags: []\nneeds: []");
-        let t = parse_task(&empty, "x").unwrap();
+        let t = crate::history::fixture(&empty, "x").unwrap();
         assert!(t.needs.is_empty());
-        assert!(!serialize_task(&t).contains("needs"));
+        assert!(!crate::history::fixture_text(&t).contains("needs"));
 
         let upper = MINIMAL.replace("tags: []", "tags: []\nneeds: [Quiet]");
-        let err = parse_task(&upper, "x").unwrap_err().to_string();
+        let err = crate::history::fixture(&upper, "x")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("need \"Quiet\""), "{err}");
 
         let scalar = MINIMAL.replace("tags: []", "tags: []\nneeds: quiet");
-        let err = parse_task(&scalar, "x").unwrap_err().to_string();
+        let err = crate::history::fixture(&scalar, "x")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("needs must be a list"), "{err}");
     }
 
     #[test]
     fn rejects_non_utc_timestamp() {
         assert!(
-            parse_task(
+            crate::history::fixture(
                 &MINIMAL.replace(
                     "created: 2026-08-29T14:02:11Z",
                     "created: 2026-08-29T14:02:11+02:00"
@@ -1384,7 +1507,7 @@ mod tests {
     #[test]
     fn rejects_invalid_note_owner() {
         assert!(
-            parse_task(
+            crate::history::fixture(
                 &format!("{MINIMAL}\n## Notes\n\n- 2026-08-29T15:10:44Z (bad owner): text\n"),
                 "x"
             )
@@ -1400,7 +1523,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_notes_delimiter() {
         assert!(
-            parse_task(
+            crate::history::fixture(
                 &format!("{MINIMAL}\n## Notes\n\n- 2026-08-29T15:10:44Z (k): a\n\n## Notes\n"),
                 "x"
             )
@@ -1412,7 +1535,7 @@ mod tests {
     fn rejects_non_normalized_doc_paths() {
         for path in ["/docs/specs/x.md", "docs/specs/./x.md", "docs/specs//x.md"] {
             assert!(
-                parse_task(
+                crate::history::fixture(
                     &MINIMAL.replace("tags: []", &format!("tags: []\nspec: {path}")),
                     "x"
                 )
@@ -1451,26 +1574,28 @@ mod tests {
     #[test]
     fn rejects_body_notes_paths() {
         assert!(
-            parse_task(
+            crate::history::fixture(
                 &format!("{MINIMAL}\nbody\n\n## Notes\n\nnot a bullet\n"),
                 "x"
             )
             .is_err()
         );
-        assert!(parse_task(&format!("{MINIMAL}\n## Notes\n\n- bad line\n"), "x").is_err());
+        assert!(
+            crate::history::fixture(&format!("{MINIMAL}\n## Notes\n\n- bad line\n"), "x").is_err()
+        );
         assert!(validate_body("x\n## Notes\ny").is_err());
         assert!(validate_body("x\n### Notes\ny").is_ok());
         assert!(validate_note_text("a\nb").is_err());
         assert!(validate_note_text("").is_err());
         assert!(
-            parse_task(
+            crate::history::fixture(
                 &MINIMAL.replace("tags: []", "tags: []\nspec: docs/specs/../plans/x.md"),
                 "x"
             )
             .is_err()
         );
         assert!(
-            parse_task(
+            crate::history::fixture(
                 &MINIMAL.replace("tags: []", "tags: []\nspec: docs/specs/sub/x.md"),
                 "x"
             )
@@ -1480,11 +1605,11 @@ mod tests {
 
     #[test]
     fn rejects_invalid_task_and_dependency_ids() {
-        let mut task = parse_task(MINIMAL, "x").unwrap();
+        let mut task = crate::history::fixture(MINIMAL, "x").unwrap();
         task.id.hex = "bad".into();
         assert!(validate_task(&task).is_err());
 
-        let mut task = parse_task(MINIMAL, "x").unwrap();
+        let mut task = crate::history::fixture(MINIMAL, "x").unwrap();
         task.depends.push(TaskId {
             prefix: "b".into(),
             hex: "000001".into(),
@@ -1494,12 +1619,12 @@ mod tests {
 
     #[test]
     fn stamps_round_trip_between_updated_and_last_done() {
-        let mut task = parse_task(FULL, "f").unwrap();
+        let mut task = crate::history::fixture(FULL, "f").unwrap();
         task.every = Some(crate::periodic::Interval::parse("2w").unwrap());
         task.last_done = Some("2026-09-01T08:00:00Z".into());
         task.started = Some("2026-08-30T09:00:00Z".into());
         task.completed = Some("2026-09-01T08:00:00Z".into());
-        let text = serialize_task(&task);
+        let text = crate::history::fixture_text(&task);
         assert!(
             text.contains(
                 "updated: 2026-08-29T14:02:11Z\nstarted: 2026-08-30T09:00:00Z\n\
@@ -1507,17 +1632,17 @@ mod tests {
             ),
             "stamps follow updated and precede last_done: {text}"
         );
-        let back = parse_task(&text, "f").unwrap();
+        let back = crate::history::fixture(&text, "f").unwrap();
         assert_eq!(back.started, task.started);
         assert_eq!(back.completed, task.completed);
     }
 
     #[test]
     fn stamps_are_omitted_when_absent() {
-        let task = parse_task(FULL, "f").unwrap();
+        let task = crate::history::fixture(FULL, "f").unwrap();
         assert_eq!(task.started, None);
         assert_eq!(task.completed, None);
-        let text = serialize_task(&task);
+        let text = crate::history::fixture_text(&task);
         assert!(
             !text.contains("started:") && !text.contains("completed:"),
             "{text}"
@@ -1527,14 +1652,14 @@ mod tests {
     #[test]
     fn rejects_an_unparsable_stamp() {
         let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
-        assert!(parse_task(&with("started: yesterday"), "f").is_err());
-        assert!(parse_task(&with("completed: 2026-13-45T00:00:00Z"), "f").is_err());
+        assert!(crate::history::fixture(&with("started: yesterday"), "f").is_err());
+        assert!(crate::history::fixture(&with("completed: 2026-13-45T00:00:00Z"), "f").is_err());
     }
 
     #[test]
     fn completed_on_an_open_record_parses() {
         let text = FULL.replace("size: m\n", "size: m\ncompleted: 2026-09-01T08:00:00Z\n");
-        let task = parse_task(&text, "f").unwrap();
+        let task = crate::history::fixture(&text, "f").unwrap();
         assert_eq!(task.status, Status::Todo);
         assert_eq!(task.completed.as_deref(), Some("2026-09-01T08:00:00Z"));
     }
@@ -1542,14 +1667,14 @@ mod tests {
     #[test]
     fn source_round_trips_bare_and_sits_after_tags() {
         let text = MINIMAL.replace("tags: []", "tags: []\nsource: keep-note-42");
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(t.source.as_deref(), Some("keep-note-42"));
-        let out = serialize_task(&t);
+        let out = crate::history::fixture_text(&t);
         assert!(
             out.contains("tags: []\nsource: keep-note-42\n---\n"),
             "{out}"
         );
-        assert_eq!(parse_task(&out, "x").unwrap(), t);
+        assert_eq!(crate::history::fixture(&out, "x").unwrap(), t);
     }
 
     #[test]
@@ -1558,9 +1683,9 @@ mod tests {
             "tags: [world-index, cut-12]",
             "tags: [world-index, cut-12]\nsource: \"mail:<42@example.org>\"",
         );
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(t.source.as_deref(), Some("mail:<42@example.org>"));
-        let out = serialize_task(&t);
+        let out = crate::history::fixture_text(&t);
         // written after tags, before spec, quoted because of the colon
         assert!(
             out.contains(
@@ -1568,26 +1693,27 @@ mod tests {
             ),
             "{out}"
         );
-        assert_eq!(parse_task(&out, "x").unwrap(), t);
+        assert_eq!(crate::history::fixture(&out, "x").unwrap(), t);
     }
 
     #[test]
     fn source_is_omitted_when_absent() {
-        let t = parse_task(MINIMAL, "x").unwrap();
+        let t = crate::history::fixture(MINIMAL, "x").unwrap();
         assert_eq!(t.source, None);
-        assert!(!serialize_task(&t).contains("source:"));
+        assert!(!crate::history::fixture_text(&t).contains("source:"));
     }
 
     #[test]
     fn rejects_empty_or_multiline_source() {
         let err =
-            parse_task(&MINIMAL.replace("tags: []", "tags: []\nsource: \"\""), "x").unwrap_err();
+            crate::history::fixture(&MINIMAL.replace("tags: []", "tags: []\nsource: \"\""), "x")
+                .unwrap_err();
         assert!(
             err.to_string().contains("source must not be empty"),
             "{err}"
         );
 
-        let mut t = parse_task(MINIMAL, "x").unwrap();
+        let mut t = crate::history::fixture(MINIMAL, "x").unwrap();
         t.source = Some("a\nb".into());
         let err = validate_task(&t).unwrap_err();
         assert!(
@@ -1608,9 +1734,9 @@ mod tests {
             "tags: []",
             "tags: []\nsource: keep-note-42\nmodel: claude-fable-5-1\nspec: docs/specs/x.md",
         );
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(t.model.as_deref(), Some("claude-fable-5-1"));
-        let out = serialize_task(&t);
+        let out = crate::history::fixture_text(&t);
         assert!(
             out.contains("source: keep-note-42\nmodel: claude-fable-5-1\nspec: docs/specs/x.md\n"),
             "{out}"
@@ -1620,26 +1746,27 @@ mod tests {
     #[test]
     fn model_with_a_colon_is_quoted_on_write_and_unquoted_on_read() {
         let text = MINIMAL.replace("tags: []", "tags: []\nmodel: \"urn:x:y\"");
-        let t = parse_task(&text, "x").unwrap();
+        let t = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(t.model.as_deref(), Some("urn:x:y"));
-        let out = serialize_task(&t);
+        let out = crate::history::fixture_text(&t);
         assert!(out.contains("model: \"urn:x:y\"\n"), "{out}");
     }
 
     #[test]
     fn model_is_omitted_when_absent() {
-        let t = parse_task(MINIMAL, "x").unwrap();
+        let t = crate::history::fixture(MINIMAL, "x").unwrap();
         assert_eq!(t.model, None);
-        assert!(!serialize_task(&t).contains("model:"));
+        assert!(!crate::history::fixture_text(&t).contains("model:"));
     }
 
     #[test]
     fn rejects_empty_or_multiline_model() {
         let err =
-            parse_task(&MINIMAL.replace("tags: []", "tags: []\nmodel: \"\""), "x").unwrap_err();
+            crate::history::fixture(&MINIMAL.replace("tags: []", "tags: []\nmodel: \"\""), "x")
+                .unwrap_err();
         assert!(err.to_string().contains("model must not be empty"), "{err}");
 
-        let mut t = parse_task(MINIMAL, "x").unwrap();
+        let mut t = crate::history::fixture(MINIMAL, "x").unwrap();
         t.model = Some("a\nb".into());
         let err = validate_task(&t).unwrap_err();
         assert!(

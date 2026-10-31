@@ -4,7 +4,7 @@ use crate::attachments::{self, Ledger};
 use crate::claims::{ClaimSnapshot, ClaimStore};
 use crate::commands::{self, append_note, append_stamped_note};
 use crate::error::{Error, Result};
-use crate::format::{serialize_task, validate_task};
+use crate::format::{serialize_physical, validate_task};
 use crate::hierarchy;
 use crate::model::{Relation, Status, Task, TaskId};
 use crate::registry::Registry;
@@ -145,8 +145,13 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         target_root: ctx.target.root.clone(),
         source_digest: digest(source_text.as_bytes()),
         source_text,
-        target_text: serialize_task(&target),
-        tombstone_text: serialize_task(&tombstone),
+        target_text: serialize_physical(&crate::history::physical_for_save(&target, |archive| {
+            ctx.source.project.read_archive(id, archive)
+        })?),
+        tombstone_text: serialize_physical(&crate::history::physical_for_save(
+            &tombstone,
+            |archive| ctx.source.project.read_archive(id, archive),
+        )?),
         attachments,
         source_park,
         target_park,

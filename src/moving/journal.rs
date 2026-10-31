@@ -240,13 +240,29 @@ impl Journal {
             .map_err(|error| journal_error(path, error))
     }
 
+    pub fn logical_records(
+        &self,
+    ) -> Result<(crate::model::Task, crate::model::Task, crate::model::Task)> {
+        let load = |text: &str, id: &str| {
+            crate::history::load_logical(
+                crate::format::parse_physical(text, &format!("{id}.md"))?,
+                |archive| {
+                    let project = crate::repo::Project::locate(&self.source_root)?;
+                    project.read_archive(&self.source_id(), archive)
+                },
+            )
+        };
+        Ok((
+            load(&self.source_text, &self.source)?,
+            load(&self.target_text, &self.target)?,
+            load(&self.tombstone_text, &self.source)?,
+        ))
+    }
+
     fn validate_records(&self) -> Result<()> {
         use crate::attachments::{Ledger, ledger};
-        use crate::format::parse_task;
         use crate::model::Status;
-        let source = parse_task(&self.source_text, &format!("{}.md", self.source))?;
-        let target = parse_task(&self.target_text, &format!("{}.md", self.target))?;
-        let tombstone = parse_task(&self.tombstone_text, &format!("{}.md", self.source))?;
+        let (source, target, tombstone) = self.logical_records()?;
         let refuse = || {
             Error::Validation("journal records do not describe one move preserving the source fields, history and attachment ledger".into())
         };
@@ -351,9 +367,9 @@ pub(super) mod tests {
     use crate::rename::inventory::digest;
 
     pub(in crate::moving) fn sample() -> Journal {
-        use crate::format::{parse_task, serialize_task};
+        use crate::history::{fixture, fixture_text};
         let source_text = "---\nid: dots-00000a\ntitle: A\nstatus: todo\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: []\ntags: []\n---\n".to_string();
-        let source = parse_task(&source_text, "dots-00000a.md").unwrap();
+        let source = fixture(&source_text, "dots-00000a.md").unwrap();
         let mut target = source.clone();
         target.id = TaskId::parse("wali-00000b").unwrap();
         target.moved_from = Some(source.id.clone());
@@ -371,8 +387,8 @@ pub(super) mod tests {
             target_root: "/target".into(),
             source_digest: digest(source_text.as_bytes()),
             source_text,
-            target_text: serialize_task(&target),
-            tombstone_text: serialize_task(&tombstone),
+            target_text: fixture_text(&target),
+            tombstone_text: fixture_text(&tombstone),
             attachments: vec![],
             source_park: None,
             source_escalation: None,

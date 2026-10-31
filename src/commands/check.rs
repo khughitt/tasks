@@ -107,8 +107,13 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     let (records, parse_errors) = ctx.project.scan_lenient_with_raw();
     let mut growth_rows: Vec<_> = records
         .iter()
-        .map(|(task, raw)| crate::growth::measure(task, raw, 0))
-        .collect();
+        .map(|(task, raw)| {
+            let bytes = crate::history::archived_bytes(task, |archive| {
+                ctx.project.read_archive(&task.id, archive)
+            })?;
+            Ok(crate::growth::measure(task, raw, bytes))
+        })
+        .collect::<Result<Vec<_>>>()?;
     growth_rows.sort_by(|left, right| {
         right
             .record_bytes
@@ -838,7 +843,7 @@ mod tests {
             }
         }
         text.push_str("---\n");
-        crate::format::parse_task(&text, "fixture").unwrap()
+        crate::history::fixture(&text, "fixture").unwrap()
     }
 
     #[test]

@@ -143,7 +143,7 @@ created: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: [{}]\ntag
             depends.join(", "),
             to.map(|to| format!("moved_to: {to}\n")).unwrap_or_default(),
         );
-        crate::format::parse_task(&text, &format!("tasks/{id}.md")).unwrap()
+        crate::history::fixture(&text, &format!("tasks/{id}.md")).unwrap()
     }
 
     #[test]

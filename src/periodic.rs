@@ -65,6 +65,7 @@ mod tests {
 
     fn periodic(status: Status, every: Option<&str>, last_done: Option<&str>) -> Task {
         Task {
+            note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
             title: "Sweep".into(),

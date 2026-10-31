@@ -19,6 +19,7 @@ mod git;
 mod growth;
 mod halt;
 mod hierarchy;
+mod history;
 mod holds;
 mod inventory;
 mod lanes;

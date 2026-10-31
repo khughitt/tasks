@@ -53,7 +53,7 @@ mod tests {
 created: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n",
             status.as_str(),
         );
-        crate::format::parse_task(&text, &format!("tasks/{id}.md")).unwrap()
+        crate::history::fixture(&text, &format!("tasks/{id}.md")).unwrap()
     }
 
     fn id(text: &str) -> TaskId {

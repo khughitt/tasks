@@ -132,7 +132,7 @@ mod tests {
             (&mut s.journal.target_text, "wali-00000b", false),
             (&mut s.journal.tombstone_text, "dots-00000a", true),
         ] {
-            let mut task = crate::format::parse_task(text, &format!("{id}.md")).unwrap();
+            let mut task = crate::history::fixture(text, &format!("{id}.md")).unwrap();
             task.notes.insert(0, attached.clone());
             if tombstone {
                 crate::commands::append_note(
@@ -142,7 +142,7 @@ mod tests {
                 )
                 .unwrap();
             }
-            *text = crate::format::serialize_task(&task);
+            *text = crate::history::fixture_text(&task);
         }
         s.journal.source_digest = digest(s.journal.source_text.as_bytes());
         s.source = FileState::Digest(s.journal.source_digest.clone());

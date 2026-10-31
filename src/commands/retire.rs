@@ -137,12 +137,13 @@ fn reject_open_copies(project: &Project) -> Result<()> {
             }
             let raw = std::fs::read_to_string(&path).map_err(|e| unreadable(&path, &e))?;
             let file = format!("tasks/{}", path.file_name().unwrap().to_string_lossy());
-            let task = crate::format::parse_task(&raw, &file).map_err(|e| unreadable(&path, &e))?;
-            if task.status.is_open() {
+            let task =
+                crate::format::parse_physical(&raw, &file).map_err(|e| unreadable(&path, &e))?;
+            if task.status().is_open() {
                 open.push(format!(
                     "{} ({}) in {}",
-                    task.id,
-                    task.status.as_str(),
+                    task.id(),
+                    task.status().as_str(),
                     root.display()
                 ));
             }

@@ -2,7 +2,7 @@ use super::{Ctx, apply_fields, id_out, load, save, transition};
 use crate::attachments::parse_ledger_note;
 use crate::cli::EditArgs;
 use crate::error::{Error, Result};
-use crate::format::parse_task;
+use crate::format::parse_physical;
 use crate::model::{Note, Status, Task, TaskId};
 use crate::output::Output;
 use crate::resolve::{DocKind, Resolver};
@@ -418,7 +418,11 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     super::guard_write(&ctx.registry, &ctx.shorthand, &original).map_err(keep)?;
 
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
-    let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;
+    let physical = parse_physical(&edited_raw, &tmp_display).map_err(keep)?;
+    let mut edited = crate::history::load_logical(physical, |archive| {
+        ctx.project.read_archive(&original.id, archive)
+    })
+    .map_err(keep)?;
     check_invariants(&original, &edited).map_err(keep)?;
     crate::review::stamp_edited(&original, &mut edited);
     // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it
@@ -500,7 +504,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ))));
     }
     // Lanes-needs spec §4.2: only names this save adds must be declared (the grammar
-    // was checked by `parse_task`); one the vocabulary has since dropped may stay or go.
+    // was checked by `parse_physical`); one the vocabulary has since dropped may stay or go.
     let added: Vec<String> = edited
         .needs
         .iter()
@@ -608,7 +612,7 @@ mod tests {
     #[test]
     fn moved_pointers_are_immutable_in_the_editor() {
         let record = |extra: &str| {
-            crate::format::parse_task(
+            crate::history::fixture(
                 &format!(
                     "---\nid: wali-00000b\ntitle: T\nstatus: todo\npriority: 2\n\
     created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n"

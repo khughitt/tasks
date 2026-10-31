@@ -241,7 +241,7 @@ mod tests {
     }
 
     fn task_needing(id: &str, needs: &str) -> Task {
-        crate::format::parse_task(
+        crate::history::fixture(
             &format!(
                 "---\nid: {id}\ntitle: T\nstatus: todo\npriority: 2\nneeds: [{needs}]\n\
                  created: 2026-10-03T00:00:00Z\nupdated: 2026-10-03T00:00:00Z\n\
