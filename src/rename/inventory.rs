@@ -110,7 +110,7 @@ impl Inventory {
                 });
             }
             let source = std::fs::read_to_string(&path)?;
-            validate_task_file(&path, &source)?;
+            validate_task_file(&path, &source, &id)?;
             let rewritten = super::rewrite::rewrite_prefix(&source, &project.prefix, target)
                 .map_err(|error| error.with_suffix(&format!(" in tasks/{name}")))?;
             let attachments =
@@ -367,16 +367,15 @@ impl Inventory {
     }
 }
 
-pub(crate) fn validate_task_file(path: &Path, text: &str) -> Result<()> {
+pub(crate) fn validate_task_file(path: &Path, text: &str, archive_owner: &TaskId) -> Result<()> {
     let file = path.display().to_string();
     let physical = crate::format::parse_physical(text, &file)?;
-    let id = physical.id().clone();
     let records = path
         .parent()
         .and_then(Path::parent)
         .ok_or_else(|| Error::Validation("task record has no explicit records root".into()))?;
     let task = crate::history::load_logical(physical, |archive| {
-        crate::repo::Project::open(records)?.read_archive(&id, archive)
+        crate::repo::Project::open(records)?.read_archive(archive_owner, archive)
     })?;
     if path.file_stem().and_then(|name| name.to_str()) != Some(task.id.to_string().as_str()) {
         return Err(Error::Parse {

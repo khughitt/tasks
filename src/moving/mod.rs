@@ -72,6 +72,13 @@ fn record_state(path: &Path) -> Result<FileState> {
 
 pub fn snapshot(ctx: &MoveCtx, journal: &Journal) -> Result<Snapshot> {
     journal.validate(&Journal::path(&ctx.source_id)?)?;
+    if journal
+        .source_records
+        .as_ref()
+        .is_some_and(|records| records != &ctx.source.project.records)
+    {
+        return Err(Error::MovePending("source records location changed; restore the journal's pinned source pairing before retrying".into()));
+    }
     preflight::validate_childless(ctx)?;
     if journal
         .target_park
@@ -136,8 +143,8 @@ pub fn snapshot(ctx: &MoveCtx, journal: &Journal) -> Result<Snapshot> {
 pub fn output(ctx: &MoveCtx, journal: &Journal, recovery: &str) -> MoveOut {
     let mut paths = BTreeMap::new();
     for (root, id) in [
-        (&journal.source_root, &journal.source),
-        (&journal.target_root, &journal.target),
+        (&ctx.source.project.records, &journal.source),
+        (&ctx.target.records, &journal.target),
     ] {
         let mut entries = vec![format!("tasks/{id}.md")];
         entries.extend(
@@ -273,6 +280,10 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     }
     for attachment in &journal.attachments {
         verify_attachment(&ctx.target, &target, attachment)?;
+        if attachment.retain_source {
+            verify_attachment(&ctx.source.project, &source, attachment)?;
+            continue;
+        }
         let path = attachment_path(&ctx.source.project, &source, &attachment.name)?;
         match attachments::entry_state(&path)? {
             EntryState::File(_) => {
@@ -306,6 +317,16 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     }
     if stop_after("cleanup") {
         return Ok(out);
+    }
+    for (project, id) in [(&ctx.source.project, &source), (&ctx.target, &target)] {
+        let record = project.read_task(id)?;
+        let (_, problems) = attachments::audit_task(project, &record)?;
+        if let Some(problem) = problems
+            .iter()
+            .find(|problem| problem.severity == attachments::Severity::Error)
+        {
+            return Err(Error::MovePending(format!("{id}: {}", problem.detail)));
+        }
     }
     journal.remove()?;
     Ok(out)

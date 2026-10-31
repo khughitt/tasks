@@ -263,3 +263,558 @@ fn archive_invalid_segment() {
         assert_eq!(std::fs::read_to_string(&record).unwrap(), raw, "{failure}");
     }
 }
+
+fn editor(root: &Path, body: &str) -> String {
+    let path = root.join("editor.py");
+    let capture = serde_json::to_string(root.join("editor-input.txt").to_str().unwrap()).unwrap();
+    std::fs::write(&path, format!("from pathlib import Path\nimport sys\np = Path(sys.argv[1])\ntext = p.read_text()\nPath({capture}).write_text(text)\n{body}\n")).unwrap();
+    format!(
+        "python3 '{}'",
+        path.display().to_string().replace('\'', "'\\''")
+    )
+}
+
+#[test]
+fn archive_editor_compact_buffer() {
+    let (env, root, id, before, name, bytes) = fixture();
+    let active = std::fs::read_to_string(raw_path(&root, &id)).unwrap();
+    let command = editor(
+        &root,
+        "p.write_text(text.replace('\\n---\\n', '\\n---\\n\\nEdited body\\n', 1))",
+    );
+    env.cmd(&root)
+        .env("EDITOR", command)
+        .args(["edit", &id, "--editor"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read_to_string(root.join("editor-input.txt")).unwrap(),
+        active
+    );
+    assert!(!active.contains("archived first sentinel"));
+    let shown = env.json(&root, &["show", &id]);
+    assert_eq!(shown["task"]["body"], "Edited body");
+    assert_eq!(
+        &shown["task"]["notes"].as_array().unwrap()[..3],
+        before["notes"].as_array().unwrap()
+    );
+    assert_eq!(
+        std::fs::read(root.join(format!("tasks/files/{id}/{name}"))).unwrap(),
+        bytes
+    );
+}
+
+#[test]
+fn archive_editor_stale_and_protected() {
+    // Different byte segments may represent identical Notes: history equivalence alone
+    // must not let an editor reorder their protected descriptors.
+    let mut env = TestEnv::new();
+    let root = env.init("dot");
+    let id = env.json(&root, &["add", "Equivalent"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let original = std::fs::read_to_string(raw_path(&root, &id)).unwrap();
+    let prefix = &original[..original.find("## Notes").unwrap()];
+    let mut descriptors = Vec::new();
+    let mut suffix = String::from("## Notes\n\n");
+    std::fs::create_dir_all(root.join(format!("tasks/files/{id}"))).unwrap();
+    for ending in ["\n", "\r\n"] {
+        let bytes = format!(
+            "## Notes{ending}{ending}- 2026-10-01T00:00:00Z (fixture): equivalent-history-sentinel{ending}"
+        );
+        let hash = digest(bytes.as_bytes());
+        let name = format!("notes-{hash}.notes");
+        descriptors.push(format!("\"v1:{hash}:1\""));
+        std::fs::write(root.join(format!("tasks/files/{id}/{name}")), &bytes).unwrap();
+        suffix.push_str(&format!(
+            "- 2026-10-02T00:00:00Z (fixture): attached: {name} ({} bytes)\n",
+            bytes.len()
+        ));
+    }
+    let line = format!("note_archives: [{}]", descriptors.join(", "));
+    let active = format!(
+        "{}{suffix}",
+        prefix.replacen("\n---\n", &format!("\n{line}\n---\n"), 1)
+    );
+    std::fs::write(raw_path(&root, &id), &active).unwrap();
+    env.json(&root, &["show", &id]);
+    descriptors.reverse();
+    let changed = format!("note_archives: [{}]", descriptors.join(", "));
+    let command = editor(
+        &root,
+        &format!(
+            "p.write_text(text.replace({}, {}))",
+            serde_json::to_string(&line).unwrap(),
+            serde_json::to_string(&changed).unwrap()
+        ),
+    );
+    let out = env
+        .cmd(&root)
+        .env("EDITOR", command)
+        .args(["edit", &id, "--editor"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "descriptor reorder must fail even when logical Notes are equal"
+    );
+    assert_eq!(
+        std::fs::read_to_string(raw_path(&root, &id)).unwrap(),
+        active
+    );
+    for entry in std::fs::read_dir(root.join("tasks")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.to_string_lossy().ends_with(".edit.md") {
+            assert!(
+                !std::fs::read_to_string(path)
+                    .unwrap()
+                    .contains("equivalent-history-sentinel")
+            );
+        }
+    }
+
+    for tamper in ["segment", "source"] {
+        let (env, root, id, _, name, _) = fixture();
+        let active = std::fs::read_to_string(raw_path(&root, &id)).unwrap();
+        let body = if tamper == "segment" {
+            format!(
+                "Path({}).write_bytes(b'changed')",
+                serde_json::to_string(
+                    root.join(format!("tasks/files/{id}/{name}"))
+                        .to_str()
+                        .unwrap()
+                )
+                .unwrap()
+            )
+        } else {
+            format!(
+                "Path({}).write_text(text.replace('title: Archived', 'title: Concurrent'))",
+                serde_json::to_string(raw_path(&root, &id).to_str().unwrap()).unwrap()
+            )
+        };
+        let command = editor(&root, &body);
+        let out = env
+            .cmd(&root)
+            .env("EDITOR", command)
+            .args(["edit", &id, "--editor"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{tamper}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("editor-input.txt")).unwrap(),
+            active
+        );
+        for entry in std::fs::read_dir(root.join("tasks")).unwrap() {
+            let path = entry.unwrap().path();
+            if path.to_string_lossy().ends_with(".edit.md") {
+                assert!(
+                    !std::fs::read_to_string(path)
+                        .unwrap()
+                        .contains("archived first sentinel")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn archive_move_pinned_journal() {
+    for boundary in [
+        "journal",
+        "attachments",
+        "destination",
+        "tombstone",
+        "cleanup",
+    ] {
+        let (mut env, root, id, _, first, first_bytes) = fixture();
+        let target = env.init("dst");
+        let ordinary = root.join("ordinary.txt");
+        std::fs::write(&ordinary, b"ordinary evidence").unwrap();
+        env.json(&root, &["attach", &id, ordinary.to_str().unwrap()]);
+        // The ordinary attach ledger entry is now archived too.
+        let (second, second_bytes) = archive_inline(&root, &id, false);
+        let before = env.json(&root, &["show", &id])["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let out = env
+            .cmd(&root)
+            .env("TASKS_MOVE_STOP_AFTER", boundary)
+            .args(["move", &id, "--to", "dst"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{boundary}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let moved: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let new_id = moved["id"].as_str().unwrap();
+        let journal = env
+            .home
+            .path()
+            .join(format!(".local/state/tasks/move/{id}.toml"));
+        let journal_text = std::fs::read_to_string(&journal).unwrap();
+        let value: toml::Value = toml::from_str(&journal_text).unwrap();
+        let entries = value["attachments"].as_array().unwrap();
+        let names: std::collections::BTreeSet<_> = entries
+            .iter()
+            .map(|a| a["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            std::collections::BTreeSet::from([first.as_str(), second.as_str(), "ordinary.txt"])
+        );
+        for entry in entries {
+            assert_eq!(
+                entry["retain_source"].as_bool(),
+                Some(entry["name"].as_str() != Some("ordinary.txt"))
+            );
+        }
+        assert_eq!(value["source_records"].as_str(), root.to_str());
+        if boundary == "journal" {
+            assert!(!raw_path(&target, new_id).exists());
+            for corruption in [
+                "missing",
+                "extra",
+                "disposition",
+                "detach",
+                "prefix",
+                "unpinned",
+            ] {
+                let mut bad = value.clone();
+                match corruption {
+                    "missing" => {
+                        bad["attachments"].as_array_mut().unwrap().remove(0);
+                    }
+                    "extra" => {
+                        let mut extra = bad["attachments"][0].clone();
+                        extra["name"] = toml::Value::String("extra.txt".into());
+                        extra["retain_source"] = toml::Value::Boolean(false);
+                        bad["attachments"].as_array_mut().unwrap().push(extra);
+                    }
+                    "disposition" => {
+                        bad["attachments"][0]["retain_source"] = toml::Value::Boolean(false);
+                    }
+                    "detach" => {
+                        bad["tombstone_text"] = toml::Value::String(format!(
+                            "{}- 2026-10-31T00:00:00Z (fixture): detached: {first}: forged\n",
+                            bad["tombstone_text"].as_str().unwrap()
+                        ));
+                    }
+                    "prefix" => {
+                        let changed = format!(
+                            "{}- 2026-10-31T00:00:00Z (fixture): changed history\n",
+                            bad["source_text"].as_str().unwrap()
+                        );
+                        bad["source_digest"] = toml::Value::String(digest(changed.as_bytes()));
+                        bad["source_text"] = toml::Value::String(changed);
+                    }
+                    "unpinned" => {
+                        bad.as_table_mut().unwrap().remove("source_records");
+                    }
+                    _ => unreachable!(),
+                }
+                std::fs::write(&journal, toml::to_string(&bad).unwrap()).unwrap();
+                assert!(
+                    !env.cmd(&root)
+                        .args(["move", &id, "--to", "dst"])
+                        .output()
+                        .unwrap()
+                        .status
+                        .success(),
+                    "{corruption}"
+                );
+                assert_eq!(
+                    std::fs::read(root.join(format!("tasks/files/{id}/{first}"))).unwrap(),
+                    first_bytes
+                );
+            }
+            std::fs::write(&journal, &journal_text).unwrap();
+        }
+        if boundary == "attachments" {
+            let source_archive = root.join(format!("tasks/files/{id}/{first}"));
+            assert!(
+                target
+                    .join(format!("tasks/files/{new_id}/{first}"))
+                    .exists()
+            );
+            std::fs::remove_file(&source_archive).unwrap();
+            assert!(
+                !env.cmd(&root)
+                    .args(["move", &id, "--to", "dst"])
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+            assert!(!raw_path(&target, new_id).exists());
+            std::fs::write(source_archive, &first_bytes).unwrap();
+        }
+        env.json(&root, &["move", &id, "--to", "dst"]);
+        assert!(!journal.exists());
+        for (name, bytes) in [(&first, &first_bytes), (&second, &second_bytes)] {
+            assert_eq!(
+                &std::fs::read(root.join(format!("tasks/files/{id}/{name}"))).unwrap(),
+                bytes
+            );
+            assert_eq!(
+                &std::fs::read(target.join(format!("tasks/files/{new_id}/{name}"))).unwrap(),
+                bytes
+            );
+        }
+        assert!(!root.join(format!("tasks/files/{id}/ordinary.txt")).exists());
+        let source = env.json(&root, &["show", &id]);
+        let destination = env.json(&target, &["show", new_id]);
+        for shown in [&source, &destination] {
+            assert_eq!(
+                &shown["task"]["notes"].as_array().unwrap()[..before.len()],
+                before
+            );
+        }
+        let detach_notes: Vec<_> = source["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|n| n["text"].as_str().filter(|t| t.starts_with("detached:")))
+            .collect();
+        assert_eq!(detach_notes.len(), 1);
+        assert!(detach_notes[0].contains("ordinary.txt"));
+        // Each later tombstone retains its independent immutable copies as well.
+        let third = env.init("last");
+        let next = env.json(&target, &["move", new_id, "--to", "last"]);
+        let next_id = next["id"].as_str().unwrap();
+        assert_eq!(
+            std::fs::read(third.join(format!("tasks/files/{next_id}/{first}"))).unwrap(),
+            first_bytes
+        );
+        assert_eq!(
+            std::fs::read(target.join(format!("tasks/files/{new_id}/{first}"))).unwrap(),
+            first_bytes
+        );
+    }
+}
+
+#[test]
+fn archive_detach_rename_eligibility() {
+    let (env, root, id, _, name, bytes) = fixture();
+    let before = std::fs::read(raw_path(&root, &id)).unwrap();
+    let out = env
+        .cmd(&root)
+        .args(["detach", &id, &name, "remove"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("protected"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(raw_path(&root, &id)).unwrap(), before);
+    assert_eq!(
+        std::fs::read(root.join(format!("tasks/files/{id}/{name}"))).unwrap(),
+        bytes
+    );
+    let path = format!("tasks/files/{id}/{name}");
+    assert_eq!(
+        env.json(&root, &["attachments", &path])["attachments"][0]["eligible"],
+        true
+    );
+    env.json(&root, &["rename", "dot", "new"]);
+    let new_id = id.replacen("dot-", "new-", 1);
+    assert_eq!(
+        std::fs::read(root.join(format!("tasks/files/{new_id}/{name}"))).unwrap(),
+        bytes
+    );
+    env.json(&root, &["rename", "dot", "new", "--adopt"]);
+    env.json(&root, &["show", &new_id]);
+    std::fs::write(
+        root.join(format!("tasks/files/{new_id}/{name}")),
+        b"tampered",
+    )
+    .unwrap();
+    assert!(
+        !env.cmd(&root)
+            .args(["attachments", &format!("tasks/files/{new_id}/{name}")])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn archive_metadata_only_other_checkout() {
+    let (env, root, id, _, name, _) = fixture();
+    env.json(&root, &["done", &id, "finished"]);
+    let sibling = env.home.path().join("sibling");
+    common::isolated_worktree(&env, &root, &sibling);
+    std::fs::remove_file(sibling.join(format!("tasks/files/{id}/{name}"))).unwrap();
+    // Stale-copy inspection needs the sibling's physical metadata, not its archive.
+    env.json(&root, &["note", &id, "current observation"]);
+    // Retirement inspects closed status in every checkout without requiring archives.
+    env.json(&root, &["retire", "--reason", "complete"]);
+}
+
+#[test]
+fn archive_linked_and_detached_storage() {
+    for kind in ["linked", "detached"] {
+        let (mut env, root, id, _, name, bytes) = fixture();
+        let code = env.home.path().join("code");
+        std::fs::create_dir_all(&code).unwrap();
+        let out = common::git_fixture::command(env.home.path(), &code)
+            .args(["init", "-q", "-b", "main"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        common::git_fixture::assert_repo(env.home.path(), &code);
+        let records = if kind == "linked" {
+            let config = root.join("tasks/.config.toml");
+            let text = std::fs::read_to_string(&config).unwrap();
+            std::fs::write(
+                &config,
+                format!(
+                    "{text}\n[checkout]\npath = {}\n",
+                    serde_json::to_string(code.to_str().unwrap()).unwrap()
+                ),
+            )
+            .unwrap();
+            env.json(
+                &root,
+                &[
+                    "init",
+                    "--prefix",
+                    "dot",
+                    "--checkout",
+                    code.to_str().unwrap(),
+                    "--force",
+                ],
+            );
+            root.clone()
+        } else {
+            let base = env.home.path().join("records");
+            let records = base.join("dot");
+            std::fs::create_dir_all(&records).unwrap();
+            std::fs::rename(root.join("tasks"), records.join("tasks")).unwrap();
+            env.json(
+                &code,
+                &[
+                    "init",
+                    "--prefix",
+                    "dot",
+                    "--records",
+                    base.to_str().unwrap(),
+                    "--force",
+                ],
+            );
+            records
+        };
+        env.json(&code, &["show", &id]);
+        env.json(&code, &["note", &id, "from the code checkout"]);
+        let destination = env.init("dst");
+        let moved = env.json(&code, &["move", &id, "--to", "dst"]);
+        let new_id = moved["id"].as_str().unwrap();
+        assert!(
+            moved["paths"]
+                .as_object()
+                .unwrap()
+                .contains_key(records.to_str().unwrap()),
+            "{kind}: paths must resolve from the records root: {moved}"
+        );
+        assert_eq!(
+            std::fs::read(records.join(format!("tasks/files/{id}/{name}"))).unwrap(),
+            bytes,
+            "{kind}"
+        );
+        assert_eq!(
+            std::fs::read(destination.join(format!("tasks/files/{new_id}/{name}"))).unwrap(),
+            bytes,
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn archive_ordinary_inflight_journal_defaults() {
+    let mut env = TestEnv::new();
+    let root = env.init("dot");
+    let target = env.init("dst");
+    let id = env.json(&root, &["add", "Ordinary move"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let ordinary = root.join("ordinary.txt");
+    std::fs::write(&ordinary, b"ordinary").unwrap();
+    env.json(&root, &["attach", &id, ordinary.to_str().unwrap()]);
+    let out = env
+        .cmd(&root)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &id, "--to", "dst"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let moved: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let new_id = moved["id"].as_str().unwrap();
+    let journal = env
+        .home
+        .path()
+        .join(format!(".local/state/tasks/move/{id}.toml"));
+    let text = std::fs::read_to_string(&journal).unwrap();
+    assert!(!text.contains("source_records"));
+    std::fs::write(&journal, text.replace("retain_source = false\n", "")).unwrap();
+    env.json(&root, &["move", &id, "--to", "dst"]);
+    assert_eq!(
+        std::fs::read(target.join(format!("tasks/files/{new_id}/ordinary.txt"))).unwrap(),
+        b"ordinary"
+    );
+}
+
+#[test]
+fn archive_rename_interruption_recovery() {
+    for phase in [
+        "inventory",
+        "file:0",
+        "attachments",
+        "files",
+        "config",
+        "registry",
+        "store",
+        "claims",
+    ] {
+        let (env, root, id, before, name, bytes) = fixture();
+        let boundary = if phase == "attachments" {
+            format!("attachments:{}", id.split_once('-').unwrap().1)
+        } else {
+            phase.into()
+        };
+        let out = env
+            .cmd(&root)
+            .env("TASKS_RENAME_STOP_AFTER", &boundary)
+            .args(["rename", "dot", "new"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{phase}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        env.json(&root, &["rename", "dot", "new"]);
+        env.json(&root, &["rename", "dot", "new", "--adopt"]);
+        let new_id = id.replacen("dot-", "new-", 1);
+        let shown = env.json(&root, &["show", &new_id]);
+        assert_eq!(
+            &shown["task"]["notes"].as_array().unwrap()[..3],
+            before["notes"].as_array().unwrap()
+        );
+        assert_eq!(
+            std::fs::read(root.join(format!("tasks/files/{new_id}/{name}"))).unwrap(),
+            bytes,
+            "{phase}"
+        );
+    }
+}

@@ -53,8 +53,12 @@ pub fn run(
     if !matches!(stage, Stage::Refuse(_)) {
         for path in inventory::task_paths(&project.tasks_dir())? {
             let text = std::fs::read_to_string(&path)?;
-            let task = inventory::validate_task_file(&path, &text)
-                .and_then(|()| crate::format::parse_physical(&text, &path.display().to_string()));
+            let task = crate::format::parse_physical(&text, &path.display().to_string()).and_then(
+                |physical| {
+                    inventory::validate_task_file(&path, &text, physical.id())?;
+                    Ok(physical)
+                },
+            );
             match task {
                 Ok(task) if task.id().prefix == new => {
                     tasks.insert(task.id().to_string());

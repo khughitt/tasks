@@ -177,6 +177,16 @@ pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Out
     let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     attachments::validate_name(&name)?;
+    if task
+        .note_archives
+        .iter()
+        .any(|archive| archive.file_name() == name)
+    {
+        return Err(Error::Validation(format!(
+            "{}: {name} is protected immutable note history and cannot be detached",
+            task.id
+        )));
+    }
     if let Some(entry) = task
         .refs
         .iter()

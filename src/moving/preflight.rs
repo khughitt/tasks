@@ -120,15 +120,22 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
             continue;
         }
         let bytes = attachment_bytes(&ctx.source.project, id, &name)?.ok_or_else(|| Error::Validation(format!("{id}: attachment_missing: {name} is attached but its file is missing; restore it or run `tasks detach {id} {name} \"missing\"`")))?;
+        let retain_source = source
+            .note_archives
+            .iter()
+            .any(|archive| archive.file_name() == name);
         attachments.push(JournalAttachment {
+            retain_source,
             name: name.clone(),
             sha256: digest(&bytes),
         });
-        append_note(
-            &mut tombstone,
-            &owner,
-            &attachments::detached_note(&name, &format!("moved to {}", target.id)),
-        )?;
+        if !retain_source {
+            append_note(
+                &mut tombstone,
+                &owner,
+                &attachments::detached_note(&name, &format!("moved to {}", target.id)),
+            )?;
+        }
     }
     validate_record(&ctx.source.project, &ctx.registry, &tombstone)?;
     let store = ClaimStore::load(&ctx.source.project.prefix)?;
@@ -139,6 +146,8 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         park
     });
     Ok(Journal {
+        source_records: (!source.note_archives.is_empty())
+            .then(|| ctx.source.project.records.clone()),
         source: id.to_string(),
         target: target.id.to_string(),
         source_root: ctx.source.project.root.clone(),

@@ -374,6 +374,11 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         &original_raw,
         || fastrand::u32(..0x100_0000),
     )?;
+    if !original.note_archives.is_empty() {
+        ctx.warnings.push(format!(
+            "note archive descriptors are protected; full history is available through `tasks show {}`", original.id
+        ));
+    }
     let tmp_display = tmp.display().to_string();
     let suffix = format!(" (edit kept at {tmp_display})");
     let keep = |error: Error| error.with_suffix(&suffix);
@@ -419,6 +424,12 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
 
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let physical = parse_physical(&edited_raw, &tmp_display).map_err(keep)?;
+    if physical.archives != original.note_archives {
+        return Err(keep(Error::Validation(format!(
+            "note archive descriptors are protected; use `tasks show {}` for full history",
+            original.id
+        ))));
+    }
     let mut edited = crate::history::load_logical(physical, |archive| {
         ctx.project.read_archive(&original.id, archive)
     })

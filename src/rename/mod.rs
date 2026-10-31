@@ -151,7 +151,21 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     if recovery != Recovery::Fresh {
         // Resumed records may already use the target prefix and skip the file-write pass.
         for path in inventory::task_paths(&project.tasks_dir())? {
-            inventory::validate_task_file(&path, &std::fs::read_to_string(&path)?)?;
+            let text = std::fs::read_to_string(&path)?;
+            let physical = crate::format::parse_physical(&text, &path.display().to_string())?;
+            let inventory = snapshot
+                .inventory
+                .as_ref()
+                .expect("validated recovery inventory");
+            let entry = inventory
+                .entries
+                .iter()
+                .find(|entry| entry.hex == physical.id().hex)
+                .ok_or_else(|| {
+                    Error::Validation("record is absent from the rename inventory".into())
+                })?;
+            let owner = archive_owner(&project, invocation, entry)?;
+            inventory::validate_task_file(&path, &text, &owner)?;
         }
     }
     let inventory = if recovery == Recovery::Fresh {
@@ -222,7 +236,8 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                     source.display()
                 )));
             }
-            inventory::validate_task_file(&source, &text)?;
+            let owner = archive_owner(&project, invocation, entry)?;
+            inventory::validate_task_file(&source, &text, &owner)?;
             let rewritten = rewrite::rewrite_prefix(&text, &invocation.source, &invocation.target)?;
             if digest(rewritten.as_bytes()) != entry.to {
                 return Err(Error::Validation(format!(
@@ -387,6 +402,30 @@ fn verify_bytes(path: &std::path::Path, expected: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+// An interrupted rename may leave a record filename and its pinned attachment owner different.
+fn archive_owner(
+    project: &Project,
+    invocation: &Invocation,
+    entry: &InventoryEntry,
+) -> Result<crate::model::TaskId> {
+    let source = crate::model::TaskId::parse(&format!("{}-{}", invocation.source, entry.hex))?;
+    let target = crate::model::TaskId::parse(&format!("{}-{}", invocation.target, entry.hex))?;
+    if !entry.attachments {
+        return Ok(source);
+    }
+    use crate::attachments::{DirState, dir_state, task_dir};
+    match (
+        dir_state(&task_dir(project, &source))?,
+        dir_state(&task_dir(project, &target))?,
+    ) {
+        (DirState::Directory, DirState::Absent) => Ok(source),
+        (DirState::Absent, DirState::Directory) => Ok(target),
+        _ => Err(Error::Validation(
+            "archive storage disagrees with the pinned rename inventory".into(),
+        )),
+    }
 }
 
 /// Moves `tasks/files/<source>-<hex>` to the target name when the baseline says it

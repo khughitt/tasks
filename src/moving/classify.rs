@@ -65,6 +65,12 @@ pub fn classify(s: &Snapshot) -> Recovery {
         }
         let here = s.source_files.get(&attachment.name) == Some(&want);
         let there = s.target_files.get(&attachment.name) == Some(&want);
+        if attachment.retain_source && !here {
+            return Recovery::Refuse(format!(
+                "required source archive {} is missing; restore exact source bytes before retrying",
+                attachment.name
+            ));
+        }
         if !here && !there {
             return Recovery::Refuse(format!(
                 "attachment {} has no copy with its journal digest in {} or {}; restore it from a verified backup, then rerun",
@@ -147,6 +153,7 @@ mod tests {
         s.journal.source_digest = digest(s.journal.source_text.as_bytes());
         s.source = FileState::Digest(s.journal.source_digest.clone());
         s.journal.attachments = vec![JournalAttachment {
+            retain_source: false,
             name: "shot.png".into(),
             sha256: digest(b"png"),
         }];
