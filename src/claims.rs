@@ -1121,6 +1121,9 @@ pub fn proves_ownership(
     if nearest.pid != pid || nearest.start != pid_start {
         return false;
     }
+    if boundary.harness == "agy" {
+        return false;
+    }
     if boundary.harness == "codex" {
         if crate::relay::resolve::hint_for("codex", get).is_err() {
             return false;
@@ -1428,6 +1431,29 @@ mod tests {
             "testhost",
             Some(PROOF_BOOT),
             &contradicted
+        ));
+    }
+
+    #[test]
+    fn a_proof_is_refused_at_an_agy_boundary_because_conversations_share_one_process() {
+        // Parent and invoke_subagent child conversations run in one agy process and publish
+        // distinct agy:<conv> session rows on that shared PID. Until tasks-75a0fe compares a
+        // verified conversation hint, process evidence alone cannot prove which conversation
+        // owns the claim.
+        let claim = claim_of("agy:conv-1", Some(42), Some(900));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("agy", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("agy", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-1")])
         ));
     }
 

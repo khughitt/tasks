@@ -22650,21 +22650,54 @@ EOF\n\
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // 2. Under an agy ancestor whose tool shells are setsid children, tasks resolves
-    //    agy:<conv> with process proof, continues a held claim across separate setsid tool
-    //    shells after the registry file is gone, and refuses fresh acquisition without the
-    //    registry rather than falling back to sid:<pid>.
+    // 2. Under an agy ancestor whose tool shells are setsid children:
+    //    - with a single agy:<conv> row in agents.json, tasks resolves agy:<conv> on the
+    //      long-lived agy PID, keeps the claim live after the starting setsid tool shell
+    //      exits, and closes a held claim from a later setsid tool shell via ByIdentity;
+    //    - when an invoke_subagent child adds a second agy:<child> row on that shared agy PID,
+    //      or when agents.json is gone, continuation refuses rather than granting shared-PID
+    //      ownership proof, while TASKS_SESSION=<exact held session> recovers owner closure
+    //      and TASKS_SESSION=<other> still refuses as foreign.
     let agy_script = format!(
         "{}\nwrite_registry\n\
+         echo \"SHIM=$$\"\n\
          run_tool() {{\n\
            python3 -c 'import os, sys; os.setsid(); os.execvp(\"sh\", [\"sh\", \"-c\", sys.argv[1]])' \"$1\"\n\
          }}\n\
          run_tool '\"$TASKS_BIN\" start {agy_held}' || exit 71\n\
          run_tool '\"$TASKS_BIN\" start {agy_closed}' || exit 72\n\
+         run_tool '\"$TASKS_BIN\" show {agy_held} > \"$RELAY_STATE_DIR/show.json\"' || exit 73\n\
+         run_tool '\"$TASKS_BIN\" done {agy_closed} landed' || exit 74\n\
+         cp \"{store_path}\" \"{store_path}.live\"\n\
+         start=$(awk '{{print $22}}' \"/proc/$$/stat\")\n\
+         boot=$(cat /proc/sys/kernel/random/boot_id)\n\
+         host=$(cat /proc/sys/kernel/hostname)\n\
+         cat > \"$RELAY_STATE_DIR/agents.json\" <<EOF\n\
+{{\"schema\":2,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":3,\
+\"agents\":{{\
+\"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\":{{\"id\":\"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\
+\"harness\":\"agy\",\"sessionId\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"scope\":\"session\",\
+\"cwd\":\"/w\",\"repoRoot\":null,\"remote\":null,\"projectKey\":\"k\",\"project\":\"p\",\
+\"state\":\"working\",\"updatedAt\":1,\
+\"process\":{{\"platform\":\"linux\",\"host\":\"$host\",\"bootId\":\"$boot\",\"pid\":$$,\"start\":\"$start\"}}}},\
+\"agy:b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e\":{{\"id\":\"agy:b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e\",\
+\"harness\":\"agy\",\"sessionId\":\"b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e\",\"scope\":\"session\",\
+\"cwd\":\"/w\",\"repoRoot\":null,\"remote\":null,\"projectKey\":\"k\",\"project\":\"p\",\
+\"state\":\"working\",\"updatedAt\":2,\
+\"process\":{{\"platform\":\"linux\",\"host\":\"$host\",\"bootId\":\"$boot\",\"pid\":$$,\"start\":\"$start\"}}}}\
+}}}}\n\
+EOF\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         if run_tool '\"$TASKS_BIN\" done {agy_held} stolen-by-shared-pid' 2>\"$RELAY_STATE_DIR/ambig.err\"; then exit 75; fi\n\
+         grep -q 'several relay agents match' \"$RELAY_STATE_DIR/ambig.err\" || exit 76\n\
+         grep -q 'tasks show' \"$RELAY_STATE_DIR/ambig.err\" || exit 77\n\
+         if run_tool 'TASKS_SESSION=agy:b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e \"$TASKS_BIN\" done {agy_held} foreign'; then exit 78; fi\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
-         run_tool '\"$TASKS_BIN\" done {agy_closed} landed' || exit 73\n\
-         if run_tool '\"$TASKS_BIN\" start {agy_unregistered}'; then exit 74; fi\n",
+         if run_tool '\"$TASKS_BIN\" done {agy_held} without-registry'; then exit 79; fi\n\
+         if run_tool '\"$TASKS_BIN\" start {agy_unregistered}'; then exit 80; fi\n\
+         run_tool 'TASKS_SESSION=agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d \"$TASKS_BIN\" done {agy_held} recovered' || exit 81\n",
         shim_env(&state, "agy", "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"),
+        store_path = env.claim_store("sci").display(),
     );
     let out = common::harness_shim(&dir, env.home.path(), "agy", &agy_script);
     assert_eq!(
@@ -22674,10 +22707,32 @@ EOF\n\
         out.status.code(),
         String::from_utf8_lossy(&out.stderr)
     );
-    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let shim_pid: u32 = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("SHIM="))
+        .expect("shim pid")
+        .parse()
+        .unwrap();
+    let show: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(state.join("show.json")).unwrap()).unwrap();
+    assert_eq!(show["claim"]["live"], true, "{show}");
+    assert_eq!(
+        show["claim"]["session"],
+        "agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    );
+    assert_eq!(show["claim"]["pid"], shim_pid);
+    let store =
+        std::fs::read_to_string(format!("{}.live", env.claim_store("sci").display())).unwrap();
     assert!(
-        store.contains("session = \"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\""),
+        store.contains("session = \"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\"")
+            && store.contains(&format!("pid = {shim_pid}\n"))
+            && !store.contains("sid:"),
         "{store}"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &agy_held])["task"]["status"],
+        "done"
     );
     assert_eq!(
         env.json(&dir, &["show", &agy_closed])["task"]["status"],

@@ -708,8 +708,12 @@ Codex proof-only continuation now requires a valid concrete `CODEX_THREAD_ID`
 matching the held claim, plus the existing process, host and boot evidence.
 A sibling, absent thread, session-only export, or malformed native value cannot
 prove ownership. This deliberately removes the former thread-less process-proof
-fallback. Exact resolved identity matches still work. A legitimate owner blocked
-by missing thread data can inspect `tasks show <id>` and set `TASKS_SESSION` to
+fallback. Exact resolved identity matches still work. Under `agy`, parent and subagent
+conversations likewise share one `agy` process while no conversation hint is compared
+yet (tasks-75a0fe), so proof-only continuation is refused at an `agy` boundary as well;
+single-conversation `agy` sessions continue across `setsid` tool shells via resolved
+registry identity. A legitimate owner blocked
+by missing thread or conversation data can inspect `tasks show <id>` and set `TASKS_SESSION` to
 that exact held session; set `TASKS_SESSION_PID` only for an actual long-lived
 process, never the command PID. Parentage and root association do not authorize
 foreign claims. Normal workers release with `done` or `park --waiting-on agent`

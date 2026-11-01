@@ -299,10 +299,13 @@ hold:
 3. For Codex, both native values are valid and a present concrete
    `CODEX_THREAD_ID` matches `claim.session`, under §6.2.1 normalization. A shared
    process, root-only export, absent thread or sibling thread cannot prove a
-   concrete worker. Other harnesses retain the scoped-hint noncontradiction rule.
-   This intentionally removes the historical Codex no-hint proof fallback; a
-   legitimate owner can recover with exact held `TASKS_SESSION` from `tasks show`,
-   without fabricating a thread or command PID.
+   concrete worker. For `agy`, parent and `invoke_subagent` child conversations share
+   one `agy` process without a compared conversation hint yet (`tasks-75a0fe`), so
+   proof-only continuation is refused there (`ByIdentity` still continues across
+   `setsid` tool shells while one `agy` row matches in the registry). Other harnesses
+   retain the scoped-hint noncontradiction rule. This intentionally removes shared-PID
+   no-hint proof fallbacks; a legitimate owner can recover with exact held
+   `TASKS_SESSION` from `tasks show`, without fabricating a thread or command PID.
 
 Condition 2 must be the *nearest* boundary and not any ancestor, or the proof admits a
 caller it should refuse: if a Claude session owns a claim and launches a Codex session
@@ -331,8 +334,9 @@ and `codex:<id>` are one session for a `codex` boundary.
 
 The normalization covers exactly these known representations. Any other difference is a
 genuine session mismatch and contradicts the proof; it is never treated as a change of
-notation. An `opencode` boundary has no native variable, and an `agy` boundary compares
-none yet (`tasks-75a0fe`), so condition 3 is vacuous there.
+notation. An `opencode` boundary has no native variable and its rows do not share a
+process handle, so condition 3 is vacuous there; an `agy` boundary refuses proof-only
+continuation until `tasks-75a0fe` compares its conversation hint.
 
 #### 6.2.2 Ordering
 
