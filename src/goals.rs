@@ -3,12 +3,14 @@
 //! over one registry scan and this host's claim snapshot.
 
 use crate::claims::{ClaimSnapshot, Reason, WaitingOn};
+use crate::dependency::Verdict;
 use crate::error::Result;
 use crate::hierarchy;
-use crate::model::{Origin, Status, Task};
+use crate::model::{Origin, Status, Task, TaskId};
 use crate::palette::Rgb;
 use crate::registry::Registry;
 use serde::Serialize;
+use std::collections::BTreeSet;
 use time::OffsetDateTime;
 
 /// A `doing` record untouched this long is stalled (§5.4). Fixed: no option changes it.
@@ -27,6 +29,18 @@ pub struct Pieces {
     pub total: usize,
     #[serde(skip_serializing_if = "is_zero")]
     pub ideas: usize,
+}
+
+/// A goal's dependencies outside its own subtree (§5.2a): prerequisites, reported apart
+/// from progress so a goal whose pieces are all done but whose prerequisites are not never
+/// reads as finished. `total` counts distinct targets, `open` those not yet satisfied, and
+/// `unresolved` those no record answers (never satisfied, never open).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Dependencies {
+    pub open: usize,
+    pub total: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unresolved: usize,
 }
 
 /// One attention flag: how many records raise it, and the one to open first.
@@ -73,6 +87,8 @@ pub struct GoalRow {
     pub last_activity: String,
     pub pieces: Pieces,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Dependencies>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attention: Option<Attention>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<String>,
@@ -94,6 +110,49 @@ pub fn pieces(descendants: &[&Task]) -> Pieces {
         }
     }
     out
+}
+
+/// The distinct dependency targets of the goal record and of its counted pieces (§5.2's
+/// `total`), followed through moves, that lie outside the goal's subtree; None when there
+/// are none. `lookup` reads one record by canonical id, so a target in a project outside
+/// the scanned scope is judged the same as one inside it.
+pub fn dependencies(
+    goal: &Task,
+    descendants: &[&Task],
+    registry: &Registry,
+    mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
+) -> Result<Option<Dependencies>> {
+    let subtree: BTreeSet<TaskId> = std::iter::once(goal)
+        .chain(descendants.iter().copied())
+        .map(|task| registry.canonical_id(&task.id))
+        .collect();
+    let sources = std::iter::once(goal).chain(descendants.iter().copied().filter(|task| {
+        matches!(
+            task.status,
+            Status::Done | Status::Todo | Status::Doing | Status::Blocked
+        )
+    }));
+    let mut seen = BTreeSet::new();
+    let mut out = Dependencies::default();
+    for source in sources {
+        for stored in &source.depends {
+            let found = crate::dependency::resolve(registry, stored, &mut lookup)?;
+            let target = match &found {
+                Some(task) => registry.canonical_id(&task.id),
+                None => registry.canonical_id(stored),
+            };
+            if subtree.contains(&target) || !seen.insert(target) {
+                continue;
+            }
+            out.total += 1;
+            match crate::dependency::verdict(found.as_ref()) {
+                Verdict::Satisfied => {}
+                Verdict::Open => out.open += 1,
+                Verdict::Unresolved => out.unresolved += 1,
+            }
+        }
+    }
+    Ok((out.total > 0).then_some(out))
 }
 
 /// The newest `updated` stamp among the goal and all its descendants, whatever their
@@ -255,12 +314,14 @@ pub fn attention(
 }
 
 /// The selected rows, open ones first by subtree activity, then total, then id; closed
-/// ones after, newest close first, then id.
+/// ones after, newest close first, then id. Open dependencies change neither order nor
+/// flags (§5.2a). `lookup` reads one record by canonical id for [`dependencies`].
 pub fn goal_rows(
     all: &[Task],
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
+    mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
 ) -> Result<Vec<GoalRow>> {
     let mut open: Vec<(OffsetDateTime, GoalRow)> = Vec::new();
     let mut closed: Vec<(OffsetDateTime, GoalRow)> = Vec::new();
@@ -272,7 +333,10 @@ pub fn goal_rows(
         if !hierarchy::is_goal(task, !descendants.is_empty()) {
             continue;
         }
-        let row = |closed: Option<String>, attention: Option<Attention>| -> Result<GoalRow> {
+        let row = |closed: Option<String>,
+                   attention: Option<Attention>,
+                   dependencies: Option<Dependencies>|
+         -> Result<GoalRow> {
             Ok(GoalRow {
                 id: task.id.to_string(),
                 title: task.title.clone(),
@@ -283,20 +347,26 @@ pub fn goal_rows(
                 project_color: None,
                 last_activity: last_activity(task, &descendants)?,
                 pieces: pieces(&descendants),
+                dependencies,
                 attention,
                 closed,
             })
         };
         match task.status {
             Status::Idea | Status::Todo | Status::Doing | Status::Blocked => {
-                let row = row(None, attention(task, all, claims, registry, now)?)?;
+                let row = row(
+                    None,
+                    attention(task, all, claims, registry, now)?,
+                    dependencies(task, &descendants, registry, &mut lookup)?,
+                )?;
                 open.push((crate::time::parse(&row.last_activity)?, row));
             }
             Status::Done => {
                 let stamp = closed_at(task);
                 let at = crate::time::parse(stamp)?;
                 if now - at < CLOSED_WINDOW {
-                    closed.push((at, row(Some(stamp.to_string()), None)?));
+                    let dependencies = dependencies(task, &descendants, registry, &mut lookup)?;
+                    closed.push((at, row(Some(stamp.to_string()), None, dependencies)?));
                 }
             }
             Status::Shelved | Status::Dropped | Status::Moved => {}

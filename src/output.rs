@@ -2520,6 +2520,21 @@ pub fn goals_table(
         }
         text
     };
+    // Prerequisites outside the subtree, shown only while one is not yet satisfied (§5.2a).
+    let progress = |row: &crate::goals::GoalRow| {
+        let mut text = progress(&row.pieces);
+        if let Some(deps) = row
+            .dependencies
+            .as_ref()
+            .filter(|deps| deps.open + deps.unresolved > 0)
+        {
+            text.push_str(&format!(" · {}/{} deps open", deps.open, deps.total));
+            if deps.unresolved > 0 {
+                text.push_str(&format!(", {} unresolved", deps.unresolved));
+            }
+        }
+        text
+    };
     let attention = |row: &crate::goals::GoalRow| {
         let Some(flags) = &row.attention else {
             return String::new();
@@ -2555,7 +2570,7 @@ pub fn goals_table(
                 present::id(&row.id, row.project_color).paint(painter),
                 present::status(row.status).paint(painter),
                 present::priority(row.priority).paint(painter),
-                progress(&row.pieces),
+                progress(row),
                 present::date(&row.last_activity).paint(painter),
                 present::title(&row.title, row.project_color).paint(painter),
                 attention(row),
@@ -2571,7 +2586,7 @@ pub fn goals_table(
                 dim(&row.id),
                 dim(row.status.as_str()),
                 dim(&format!("P{}", row.priority)),
-                dim(&progress(&row.pieces)),
+                dim(&progress(row)),
                 dim(crate::time::day(
                     row.closed.as_deref().unwrap_or(&row.last_activity),
                 )),

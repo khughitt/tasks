@@ -209,7 +209,9 @@ subtree until `tasks unblock`. A lane cannot nest inside a lane.
 `tasks goals` is a report, not a picker: across every registered project it lists the
 goals with a `user` or `mixed` origin, most recently active first, with progress counted
 over each goal's descendants only (a dependency is never a piece) and flags for stalled,
-blocked and waiting-on-you work inside it.
+blocked and waiting-on-you work inside it. A goal's dependencies outside its subtree are
+counted apart, as `dependencies` in JSON and `8/8 · 26/33 deps open` in the pretty row,
+so a goal whose remaining work sits in prerequisites never reads as finished.
 
 A need (`--need <name>`, declared under `[needs]` in tasks/.config.toml) names a shared
 resource a step uses. An exclusive need serves one session at a time; see [Claims](#claims).

@@ -85,7 +85,8 @@ mean those documents were verified.
    and running `tasks start <id>` there.
    `tasks goals` is the person's goals report, not a picker: goals with a `user` or
    `mixed` origin across every registered project, most recently active first, with
-   progress over each goal's descendants only and stalled, blocked and waiting-on-you
+   progress over each goal's descendants only, its open dependencies outside the subtree
+   counted apart (`8/8 · 26/33 deps open`), and stalled, blocked and waiting-on-you
    flags. When filing a goal the user described, set `--origin user` (or `mixed`) so it
    appears there.
    `tasks blockers` ranks open prerequisites by the open work that depends on them,

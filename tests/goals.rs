@@ -191,6 +191,77 @@ fn moved_piece_leaves_goal_progress() {
     assert_eq!(row(&out, &g)["pieces"]["total"], 1);
 }
 
+// Open dependencies (§5.2a): reported apart from progress, never counted as pieces.
+
+#[test]
+fn dependencies_count_targets_outside_the_subtree_once() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let finished = add(&env, &aa, "finished", &["--parent", &g]);
+    let open = add(&env, &aa, "open", &["--parent", &g]);
+    let dropped = add(&env, &aa, "dropped", &["--parent", &g]);
+    let outside = add(&env, &aa, "outside", &[]);
+    let x = add(&env, &bb, "X", &[]);
+    let y = add(&env, &bb, "Y", &[]);
+    let z = add(&env, &bb, "Z", &[]);
+    let w = add(&env, &bb, "W", &[]);
+    // The goal record: one open, one done, one dropped target.
+    env.json(&aa, &["dep", &g, "--on", &x, "--on", &y, "--on", &z]);
+    // A done piece: the same open target again, and a sibling inside the subtree.
+    env.json(&aa, &["dep", &finished, "--on", &x, "--on", &open]);
+    // An open piece: a same-project task outside the subtree.
+    env.json(&aa, &["dep", &open, "--on", &outside]);
+    // A dropped piece is abandoned work: its dependencies are not counted.
+    env.json(&aa, &["dep", &dropped, "--on", &w]);
+    env.json(&aa, &["done", &finished, "--force"]);
+    env.json(&aa, &["drop", &dropped, "no"]);
+    env.json(&bb, &["done", &y]);
+    env.json(&bb, &["drop", &z, "no"]);
+    let out = goals(&env, &aa, &[]);
+    let goal = row(&out, &g);
+    assert_eq!(goal["pieces"], serde_json::json!({"done": 1, "total": 2}));
+    assert_eq!(
+        goal["dependencies"],
+        serde_json::json!({"open": 2, "total": 4}),
+        "{goal}"
+    );
+    // Narrowing the scope never changes a listed goal's numbers.
+    let narrow = goals(&env, &bb, &["--project", "aa"]);
+    assert_eq!(row(&narrow, &g)["dependencies"], goal["dependencies"]);
+}
+
+#[test]
+fn unresolved_dependency_is_counted_apart_and_never_satisfied() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, _) = goal_with_child(&env, &aa, "G");
+    set_field(&aa, &g, "depends", Some("[aa-ffffff]"));
+    let out = goals(&env, &aa, &[]);
+    assert_eq!(
+        row(&out, &g)["dependencies"],
+        serde_json::json!({"open": 0, "total": 1, "unresolved": 1})
+    );
+}
+
+#[test]
+fn closed_goal_reports_open_dependencies_too() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let (g, piece) = goal_with_child(&env, &aa, "G");
+    let x = add(&env, &bb, "X", &[]);
+    env.json(&aa, &["dep", &g, "--on", &x]);
+    env.json(&aa, &["done", &piece]);
+    env.json(&aa, &["done", &g, "--force"]);
+    let out = goals(&env, &aa, &[]);
+    assert_eq!(
+        row(&out, &g)["dependencies"],
+        serde_json::json!({"open": 1, "total": 1})
+    );
+}
+
 #[test]
 fn idea_only_goal_lists_with_zero_total() {
     let mut env = TestEnv::new();
@@ -346,7 +417,7 @@ fn json_omits_unset_fields() {
     let (g, _) = goal_with_child(&env, &aa, "G");
     let out = goals(&env, &aa, &[]);
     let goal = row(&out, &g);
-    for key in ["closed", "attention", "color"] {
+    for key in ["closed", "attention", "color", "dependencies"] {
         assert!(goal.get(key).is_none(), "{key} in {goal}");
     }
     assert!(out["observed_at"].is_string());
@@ -641,6 +712,41 @@ fn pretty_row_shows_status_progress_and_flags() {
     assert!(line.contains(" doing "), "{line}");
     assert!(line.contains("1/3 +2 ideas"), "{line}");
     assert!(line.contains(&format!("1 stalled ({leaf}, 4d)")), "{line}");
+}
+
+#[test]
+fn pretty_progress_names_open_dependencies() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let (g, piece) = goal_with_child(&env, &aa, "G");
+    env.json(&aa, &["done", &piece]);
+    let x = add(&env, &bb, "X", &[]);
+    let y = add(&env, &bb, "Y", &[]);
+    env.json(&aa, &["dep", &g, "--on", &x, "--on", &y]);
+    let text = pretty(&env, &aa);
+    assert!(line_of(&text, &g).contains("1/1 · 2/2 deps open"), "{text}");
+    env.json(&bb, &["done", &x]);
+    env.json(&bb, &["done", &y]);
+    let text = pretty(&env, &aa);
+    let line = line_of(&text, &g);
+    assert!(
+        !line.contains("deps"),
+        "satisfied dependencies stay quiet: {line}"
+    );
+}
+
+#[test]
+fn pretty_names_unresolved_dependencies() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, _) = goal_with_child(&env, &aa, "G");
+    set_field(&aa, &g, "depends", Some("[aa-ffffff]"));
+    let text = pretty(&env, &aa);
+    assert!(
+        line_of(&text, &g).contains("0/1 · 0/1 deps open, 1 unresolved"),
+        "{text}"
+    );
 }
 
 #[test]

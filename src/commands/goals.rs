@@ -9,7 +9,9 @@ pub fn run(mut ctx: ReadCtx) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;
-    let goals = crate::goals::goal_rows(&all, &claims, &ctx.registry, now)?;
+    let goals = crate::goals::goal_rows(&all, &claims, &ctx.registry, now, |id| {
+        super::list::scan_lookup(&ctx, &all, id)
+    })?;
     let colors = ctx.project_colors();
     let mut out = Output::Goals(GoalsOut {
         observed_at,
