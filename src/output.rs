@@ -1673,7 +1673,12 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             o.tasks.iter().any(|row| row.needs_review == Some(true)),
         ),
         Output::Quiet(o) => quiet_table(&o.tasks, painter, layout),
-        Output::Goals(_) => quiet_table(&[], painter, layout),
+        Output::Goals(o) => goals_table(
+            &o.goals,
+            painter,
+            layout,
+            crate::time::parse(&o.observed_at).expect("observed_at is a stamp this run wrote"),
+        ),
         Output::Claims(o) => {
             use crate::table::{Column, Row};
             let columns = [
@@ -2479,6 +2484,123 @@ pub fn parked_table(
         .map(|row| parked_row(row, painter, review))
         .collect();
     crate::table::render(&parked_columns(), &built, layout, widths, painter)
+}
+
+/// The pretty goals view (goals-view spec §5.5): open rows, then a separator and the
+/// recently closed rows, dimmed. Fixed columns line up across both sections.
+pub fn goals_table(
+    rows: &[crate::goals::GoalRow],
+    painter: &Painter,
+    layout: &crate::table::Layout,
+    now: time::OffsetDateTime,
+) -> String {
+    use crate::table::{Column, Row};
+    if rows.is_empty() {
+        return "no goals you asked for; goals without an origin are not shown \
+                (tasks edit <id> --origin user)"
+            .into();
+    }
+    let columns = [
+        Column::fixed("id"),
+        Column::fixed("status"),
+        Column::fixed("P"),
+        Column::fixed("progress"),
+        Column::fixed("active"),
+        Column::wrap("title", 20, Some(50)),
+        Column::fixed("attention"),
+    ];
+    let progress = |pieces: &crate::goals::Pieces| {
+        let mut text = if pieces.total == 0 {
+            "-".to_string()
+        } else {
+            format!("{}/{}", pieces.done, pieces.total)
+        };
+        if pieces.ideas > 0 {
+            text.push_str(&format!(" +{} ideas", pieces.ideas));
+        }
+        text
+    };
+    let attention = |row: &crate::goals::GoalRow| {
+        let Some(flags) = &row.attention else {
+            return String::new();
+        };
+        let mut parts = Vec::new();
+        if let Some(flag) = &flags.stalled {
+            let since =
+                crate::time::parse(&flag.since).expect("since was parsed when the flag was built");
+            let days = (now - since).whole_days();
+            let text = format!("{} stalled ({}, {days}d)", flag.count, flag.first);
+            parts.push(painter.paint(Style::Error, &text));
+        }
+        if let Some(flag) = &flags.blocked {
+            let lane = if flags.paused_lane.as_deref() == Some(flag.first.as_str()) {
+                ", paused lane"
+            } else {
+                ""
+            };
+            let text = format!("{} blocked ({}{lane})", flag.count, flag.first);
+            parts.push(painter.paint(Style::Error, &text));
+        }
+        if let Some(flag) = &flags.you {
+            let text = format!("{} you ({})", flag.count, flag.first);
+            parts.push(painter.paint(Style::Emphasis, &text));
+        }
+        parts.join(" · ")
+    };
+    let open: Vec<Row> = rows
+        .iter()
+        .filter(|row| row.closed.is_none())
+        .map(|row| {
+            Row::new(vec![
+                present::id(&row.id, row.project_color).paint(painter),
+                present::status(row.status).paint(painter),
+                present::priority(row.priority).paint(painter),
+                progress(&row.pieces),
+                present::date(&row.last_activity).paint(painter),
+                present::title(&row.title, row.project_color).paint(painter),
+                attention(row),
+            ])
+        })
+        .collect();
+    let closed: Vec<Row> = rows
+        .iter()
+        .filter(|row| row.closed.is_some())
+        .map(|row| {
+            let dim = |text: &str| painter.paint(Style::Chrome, text);
+            Row::new(vec![
+                dim(&row.id),
+                dim(row.status.as_str()),
+                dim(&format!("P{}", row.priority)),
+                dim(&progress(&row.pieces)),
+                dim(crate::time::day(
+                    row.closed.as_deref().unwrap_or(&row.last_activity),
+                )),
+                dim(&row.title),
+                String::new(),
+            ])
+        })
+        .collect();
+    let widths = crate::table::shared_widths(&columns, &[&open, &closed], layout.headers);
+    let mut text = crate::table::render(&columns, &open, layout, Some(&widths), painter);
+    if !closed.is_empty() {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&painter.paint(Style::Chrome, "── closed in the last 14 days ──"));
+        text.push('\n');
+        let rest = crate::table::Layout {
+            headers: false,
+            ..*layout
+        };
+        text.push_str(&crate::table::render(
+            &columns,
+            &closed,
+            &rest,
+            Some(&widths),
+            painter,
+        ));
+    }
+    text
 }
 
 pub fn quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &crate::table::Layout) -> String {

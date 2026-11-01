@@ -46,6 +46,9 @@ pub struct Attention {
     pub blocked: Option<Flag>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub you: Option<Flag>,
+    /// Pretty-only: the paused lane counted under `blocked`, so the row can name it.
+    #[serde(skip)]
+    pub paused_lane: Option<String>,
 }
 
 impl Attention {
@@ -230,13 +233,15 @@ pub fn attention(
             you.push(Hit::new(id(), effective_at(task, claims))?);
         }
     }
-    if let Some(lane) = hierarchy::paused_lane(all, goal, registry) {
+    let paused_lane = hierarchy::paused_lane(all, goal, registry);
+    if let Some(lane) = paused_lane {
         blocked.push(Hit::new(lane.id.to_string(), effective_at(lane, claims))?);
     }
     let out = Attention {
         stalled: flag(stalled),
         blocked: flag(blocked),
         you: flag(you),
+        paused_lane: paused_lane.map(|lane| lane.id.to_string()),
     };
     Ok((!out.is_empty()).then_some(out))
 }

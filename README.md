@@ -206,6 +206,11 @@ efforts. The first paragraph of its body is its guidance in `prime` and `tasks l
 `next --under <lane>` picks within it, and `tasks block <lane> "<why>"` pauses its
 subtree until `tasks unblock`. A lane cannot nest inside a lane.
 
+`tasks goals` is a report, not a picker: across every registered project it lists the
+goals with a `user` or `mixed` origin, most recently active first, with progress counted
+over each goal's descendants only (a dependency is never a piece) and flags for stalled,
+blocked and waiting-on-you work inside it.
+
 A need (`--need <name>`, declared under `[needs]` in tasks/.config.toml) names a shared
 resource a step uses. An exclusive need serves one session at a time; see [Claims](#claims).
 
@@ -379,6 +384,7 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
     tasks park <id> "rerun the preflight" --reason quiet --waiting-on user --minutes 50  # needs an idle host
     tasks quiet                      # what could run tonight, across every project; -n 1 for the top
+    tasks goals                      # the goals you asked for, across projects: progress, activity, attention
     tasks list --parked --waiting-on user --all-projects  # everything waiting on you, with its next step
     tasks --pretty --headers list     # label each column of a pretty table
     tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
@@ -1487,8 +1493,8 @@ apart from the title beside it; the nearer a colour is to white, the less the tw
 existing styling; status, priority, dates, tags, and metadata keep their own roles.
 Project colors obey the color controls above and never appear in stored task IDs. JSON
 carries the color, whatever the color controls say, as lowercase `"color": "#rrggbb"` on
-`projects` rows, on `where`'s `project`, and on `resolve`'s resolved rows, so another tool
-can paint a project without reading its config. The key is omitted when the project sets
+`projects` rows, on `where`'s `project`, on `resolve`'s resolved rows, and on `goals` rows,
+so another tool can paint a project without reading its config. The key is omitted when the project sets
 none or is unreachable; `resolve` also omits it, with a warning, when a config cannot be
 read, where `projects` and `where` fail with the config error. Pretty `show`, `next` and
 `groups` likewise leave another project's name uncolored, with a warning, when its config

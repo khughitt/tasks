@@ -608,3 +608,92 @@ fn dependency_wait_is_not_flagged() {
     add(&env, &aa, "second", &["--parent", &g, "--depends", &first]);
     assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
 }
+
+// Pretty output (§5.5).
+
+fn pretty(env: &TestEnv, dir: &Path) -> String {
+    env.pretty(dir, &["goals", "--color", "never"])
+}
+
+fn line_of<'a>(text: &'a str, id: &str) -> &'a str {
+    text.lines()
+        .find(|line| line.split_whitespace().next() == Some(id))
+        .unwrap_or_else(|| panic!("no line for {id}: {text}"))
+}
+
+#[test]
+fn pretty_row_shows_status_progress_and_flags() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let done = add(&env, &aa, "done", &["--parent", &g]);
+    env.json(&aa, &["done", &done]);
+    add(&env, &aa, "todo", &["--parent", &g]);
+    let leaf = add(&env, &aa, "stalled", &["--parent", &g]);
+    for title in ["idea one", "idea two"] {
+        add(&env, &aa, title, &["--parent", &g, "--status", "idea"]);
+    }
+    doing(&env, &aa, "aa", &g);
+    doing(&env, &aa, "aa", &leaf);
+    set_field(&aa, &leaf, "updated", Some(&ago(4)));
+    let text = pretty(&env, &aa);
+    let line = line_of(&text, &g);
+    assert!(line.contains(" doing "), "{line}");
+    assert!(line.contains("1/3 +2 ideas"), "{line}");
+    assert!(line.contains(&format!("1 stalled ({leaf}, 4d)")), "{line}");
+}
+
+#[test]
+fn pretty_shows_dash_for_zero_total() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let lane = add(&env, &aa, "Lane", &["--lane", "--origin", "user"]);
+    let text = pretty(&env, &aa);
+    let cells: Vec<&str> = line_of(&text, &lane).split_whitespace().collect();
+    assert_eq!(cells[3], "-", "{text}");
+}
+
+#[test]
+fn pretty_closed_section_follows_open_rows() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (open, _) = goal_with_child(&env, &aa, "Open");
+    let (closed, piece) = goal_with_child(&env, &aa, "Closed");
+    env.json(&aa, &["done", &piece]);
+    env.json(&aa, &["done", &closed]);
+    let text = pretty(&env, &aa);
+    let at = |needle: &str| {
+        text.find(needle)
+            .unwrap_or_else(|| panic!("no {needle}: {text}"))
+    };
+    let separator = at("── closed in the last 14 days ──");
+    assert!(at(&open) < separator, "{text}");
+    assert!(separator < at(&closed), "{text}");
+}
+
+#[test]
+fn pretty_paused_lane_is_named() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let lane = add(&env, &aa, "L", &["--lane", "--origin", "agent"]);
+    let g = add(&env, &aa, "G", &["--origin", "user", "--parent", &lane]);
+    add(&env, &aa, "piece", &["--parent", &g]);
+    env.json(&aa, &["block", &lane, "why"]);
+    let text = pretty(&env, &aa);
+    assert!(
+        line_of(&text, &g).contains(&format!("1 blocked ({lane}, paused lane)")),
+        "{text}"
+    );
+}
+
+#[test]
+fn pretty_empty_says_why() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    add(&env, &aa, "Not a goal", &[]);
+    assert_eq!(
+        pretty(&env, &aa).trim_end(),
+        "no goals you asked for; goals without an origin are not shown \
+         (tasks edit <id> --origin user)"
+    );
+}

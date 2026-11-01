@@ -83,6 +83,11 @@ mean those documents were verified.
    or `--group <name>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
+   `tasks goals` is the person's goals report, not a picker: goals with a `user` or
+   `mixed` origin across every registered project, most recently active first, with
+   progress over each goal's descendants only and stalled, blocked and waiting-on-you
+   flags. When filing a goal the user described, set `--origin user` (or `mixed`) so it
+   appears there.
    `tasks blockers` ranks open prerequisites by the open work that depends on them,
    directly and transitively (`-n` defaults to 20; `--project`, `--group` or
    `--all-projects` widen the dependents counted). It is a report, not a picker, and
@@ -253,8 +258,8 @@ of the color than titles (barely lighter for a near-white color). `claims` stays
 uncolored. Unassigned or unreachable projects keep existing styling; other columns keep
 their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
 controls apply; stored IDs are unchanged. JSON carries the color as lowercase
-`color: "#rrggbb"` on `projects` rows, `where`'s `project`, and resolved `resolve` rows
-(omitted when unset or unreachable, and by `resolve` with a warning when a config cannot
+`color: "#rrggbb"` on `projects` rows, `where`'s `project`, resolved `resolve` rows, and
+`goals` rows (omitted when unset or unreachable, and by `resolve` with a warning when a config cannot
 be read): read it there, never from config files.
 
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
