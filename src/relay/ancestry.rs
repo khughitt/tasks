@@ -32,10 +32,11 @@ pub enum Scope {
 /// A `comm` that names its harness outright, and the agent `harness` relay publishes for
 /// it. A Claude Code process can also be a versioned binary; see `harness_of`. No `tty`
 /// predicate applies: a headless harness must not become a shell caller.
-pub const HARNESS_COMMS: [(&str, &str); 3] = [
+pub const HARNESS_COMMS: [(&str, &str); 4] = [
     ("claude", "claude-code"),
     ("codex", "codex"),
     ("opencode", "opencode"),
+    ("agy", "agy"),
 ];
 
 /// `argv[1]` of the Claude Code processes that host sessions without being one.
@@ -546,5 +547,28 @@ mod tests {
             walk(5, &tree),
             Scope::Unknown { file: "stat", .. }
         ));
+    }
+
+    #[test]
+    fn an_agy_tool_shell_resolves_its_agy_ancestor_without_reading_exe_or_cmdline() {
+        // Each run_command shell under agy is a setsid child of the agy process; tasks runs
+        // beneath that shell, so walk starts at the shell and stops at agy.
+        let interactive = Tree::default()
+            .row(30, "bash", 20)
+            .row(20, "agy", 10)
+            .row(10, "zsh", 1)
+            .row(1, "init", 0);
+        assert_eq!(describe(&walk(30, &interactive)), "harness 20 agy");
+        assert!(interactive.exe_reads.borrow().is_empty());
+        assert!(interactive.cmdline_reads.borrow().is_empty());
+
+        let headless = Tree::default()
+            .row(30, "bash", 20)
+            .row(20, "agy", 10)
+            .row(10, "python3", 1)
+            .row(1, "init", 0);
+        assert_eq!(describe(&walk(30, &headless)), "harness 20 agy");
+        assert!(headless.exe_reads.borrow().is_empty());
+        assert!(headless.cmdline_reads.borrow().is_empty());
     }
 }

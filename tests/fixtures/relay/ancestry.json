@@ -21,7 +21,7 @@
       "rows": [
         { "pid": 900, "ppid": 800, "comm": "node", "tty": null, "exe": null, "argv": null },
         { "pid": 800, "ppid": 790, "comm": "2.1.280", "tty": true, "exe": "/home/user/.local/share/claude/versions/2.1.280", "argv": ["/home/user/.local/share/claude/versions/2.1.280", "--session-id", "9a2732d5-47a7-432b-a3c7-3f7bc08ac4f1"] },
-        { "pid": 790, "ppid": 780, "comm": "2.1.280", "tty": null, "exe": null, "argv": null },
+        { "pid": 790, "ppid": 780, "comm": "2.1.280", "tty": null, "exe": null, "argv": ["claude", "bg-pty-host"] },
         { "pid": 780, "ppid": 700, "comm": "claude", "tty": null, "exe": null, "argv": null },
         { "pid": 700, "ppid": 1, "comm": "systemd", "tty": null, "exe": null, "argv": null } ],
       "session": 800, "terminal": null },
@@ -32,6 +32,13 @@
         { "pid": 500, "ppid": 400, "comm": "claude", "tty": true, "exe": null, "argv": null },
         { "pid": 400, "ppid": 1, "comm": "zsh", "tty": true, "exe": null, "argv": null } ],
       "session": 600, "terminal": 500 },
+    { "name": "version-binary-interactive", "source": "measured 2026-10-22, Claude Code 2.1.304 started by its versioned path", "harness": "claude-code",
+      "rows": [
+        { "pid": 610, "ppid": 600, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 600, "ppid": 400, "comm": "2.1.304", "tty": true, "exe": "/home/user/.local/share/claude/versions/2.1.304", "argv": ["/home/user/.local/share/claude/versions/2.1.304"] },
+        { "pid": 400, "ppid": 300, "comm": "zsh", "tty": true, "exe": null, "argv": ["/bin/zsh"] },
+        { "pid": 300, "ppid": 1, "comm": "kitty", "tty": null, "exe": null, "argv": null } ],
+      "session": 600, "terminal": 600 },
     { "name": "nested-headless-claude", "source": "measured 2026-09-23, claude -p inside an interactive session", "harness": "claude-code",
       "rows": [
         { "pid": 700, "ppid": 690, "comm": "node", "tty": null, "exe": null, "argv": null },
@@ -98,6 +105,18 @@
         { "pid": 42885, "ppid": 42878, "comm": "node", "tty": "ttys000", "exe": null, "argv": null },
         { "pid": 42878, "ppid": 35113, "comm": "opencode", "tty": "ttys000", "exe": null, "argv": null },
         { "pid": 35113, "ppid": 35112, "comm": "-zsh", "tty": "ttys000", "exe": null, "argv": null } ],
-      "session": 42878, "terminal": 42878 }
-  ]
+      "session": 42878, "terminal": 42878 },
+    { "name": "interactive-agy", "source": "agy 1.4.12 hook probe 2026-11-01 (relay-7b8340 agy-hook-probe.json)", "harness": "agy",
+      "rows": [
+        {"pid": 1056822, "ppid": 1053172, "comm": "python3", "tty": true, "exe": "/usr/bin/python3.14", "argv": ["/usr/bin/python3", "<probe-root>/bin/hook.py", "<probe-root>/runs/r2-interactive", "PreToolUse", "ptu"]},
+        {"pid": 1053172, "ppid": 1053168, "comm": "agy", "tty": true, "exe": "<home>/.local/bin/agy", "argv": ["<home>/.local/bin/agy", "--model", "gemini-3.8-flash-low"]},
+        {"pid": 1053168, "ppid": 1053166, "comm": "bash", "tty": true, "exe": "/usr/bin/bash", "argv": ["/bin/bash", "--noprofile", "--norc", "-c", "<home>/.local/bin/agy --model gemini-3.8-flash-low; echo AGY_EXITED $?; sleep 3600"]},
+        {"pid": 1053166, "ppid": 1053156, "comm": "tmux: server", "tty": null, "exe": "/usr/bin/tmux", "argv": ["tmux", "-L", "relayprobe-r2-interactive-1053156", "-f", "/dev/null", "new-session", "-d", "-s", "probe", "-x", "200", "-y", "50", "-c", "<probe-root>/runs/r2-interactive/workspace", "/bin/bash", "--noprofile", "--norc", "-c", "<home>/.local/bin/agy --model gemini-3.8-flash-low; echo AGY_EXITED $?; sleep 3600"]} ],
+      "session": 1053172, "terminal": 1053172 },
+    { "name": "headless-agy", "source": "agy 1.4.12 hook probe 2026-11-01 (relay-7b8340 agy-hook-probe.json)", "harness": "agy",
+      "rows": [
+        {"pid": 1048695, "ppid": 1047941, "comm": "python3", "tty": null, "exe": "/usr/bin/python3.14", "argv": ["/usr/bin/python3", "<probe-root>/bin/hook.py", "<probe-root>/runs/r1-headless", "PreToolUse", "ptu"]},
+        {"pid": 1047941, "ppid": 1047936, "comm": "agy", "tty": null, "exe": "<home>/.local/bin/agy", "argv": ["<home>/.local/bin/agy", "-p", "Do exactly these steps, then reply DONE. Step 1: call run_command with CommandLine \"echo parent_ok\". Step 2: call invoke_subagent with TypeName \"self\" and a prompt telling the subagent to call run_command with CommandLine \"echo child_ok\" and reply with its output. Do nothing else.", "--model", "gemini-3.8-flash-low", "--dangerously-skip-permissions"]},
+        {"pid": 1047936, "ppid": 1047924, "comm": "python3", "tty": null, "exe": "/usr/bin/python3.14", "argv": ["python3", "bin/probe.py", "headless", "r1-headless", "--timeout", "300", "--", "-p", "Do exactly these steps, then reply DONE. Step 1: call run_command with CommandLine \"echo parent_ok\". Step 2: call invoke_subagent with TypeName \"self\" and a prompt telling the subagent to call run_command with CommandLine \"echo child_ok\" and reply with its output. Do nothing else.", "--model", "gemini-3.8-flash-low", "--dangerously-skip-permissions"]} ],
+      "session": 1047941, "terminal": null } ]
 }

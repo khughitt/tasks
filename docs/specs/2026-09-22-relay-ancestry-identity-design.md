@@ -115,8 +115,8 @@ Before the registry is opened, tasks walks its own ancestry on Linux:
 `/proc/self/stat` → ppid → `/proc/<ppid>/stat`, upward, starting at the parent and
 stopping at pid 1. At each level it reads `comm`, `ppid` and `starttime`.
 
-A level whose `comm` is exactly `claude`, `codex` or `opencode` is a harness ancestor —
-the same three names relay's own adapters match (`src/adapters/*.js`). The tty
+A level whose `comm` is exactly `claude`, `codex`, `opencode` or `agy` is a harness ancestor —
+the same names relay's own adapters match (`src/adapters/*.js`). The tty
 predicate those adapters apply belongs to qualified process resolution, not to this
 test: a headless harness must not silently become a shell caller.
 
@@ -153,7 +153,7 @@ A candidate agent matches the nearest harness ancestor when **all** hold:
 - `agent.process` is non-null and `agent.process.platform` is `"linux"`,
 - `agent.process.host` equals tasks' hostname,
 - `agent.harness` equals the ancestor's `comm` under the explicit mapping
-  `claude → claude-code`, `codex → codex`, `opencode → opencode`,
+  `claude → claude-code`, `codex → codex`, `opencode → opencode`, `agy → agy`,
 - `agent.process.pid` equals the ancestor pid,
 - `agent.process.start` equals the ancestor's `starttime` as canonical decimal text,
 - `agent.process.bootId` equals `/proc/sys/kernel/random/boot_id`.
@@ -179,6 +179,7 @@ Only the variables belonging to that harness are compared:
 | `claude` | `CLAUDE_CODE_SESSION_ID` | must equal the matched `sessionId` |
 | `codex` | `CODEX_SESSION_ID`, `CODEX_THREAD_ID` | validate both; thread when present, otherwise session, must equal the matched `sessionId` |
 | `opencode` | none | no native variable exists; nothing is compared |
+| `agy` | none | no native variable is compared yet (`tasks-75a0fe`) |
 
 A variable belonging to a *different* harness is ignored, because a nested harness
 inherits its parent's environment: a `codex` process started inside a Claude session
@@ -330,7 +331,8 @@ and `codex:<id>` are one session for a `codex` boundary.
 
 The normalization covers exactly these known representations. Any other difference is a
 genuine session mismatch and contradicts the proof; it is never treated as a change of
-notation. An `opencode` boundary has no native variable, so condition 3 is vacuous there.
+notation. An `opencode` boundary has no native variable, and an `agy` boundary compares
+none yet (`tasks-75a0fe`), so condition 3 is vacuous there.
 
 #### 6.2.2 Ordering
 

@@ -952,4 +952,49 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.session, "codex:s2");
     }
+
+    #[test]
+    fn an_agy_row_resolves_its_own_session_and_leaves_other_harnesses_working() {
+        let rows = || {
+            vec![
+                agent("agy", "conv-1", "linux", 77, 1500, BOOT),
+                agent("codex", "s1", "linux", 42, 900, BOOT),
+            ]
+        };
+        let codex = go(
+            ancestor("codex", 42, 900),
+            rows(),
+            &env(&[("CODEX_THREAD_ID", "s1")]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(codex.session, "codex:s1");
+
+        let noisy = env(&[("CLAUDE_CODE_SESSION_ID", "x"), ("CODEX_SESSION_ID", "y")]);
+        let agy = go(ancestor("agy", 77, 1500), rows(), &noisy)
+            .unwrap()
+            .unwrap();
+        assert_eq!(agy.session, "agy:conv-1");
+        assert_eq!(agy.root_session, None);
+        assert_eq!((agy.pid, agy.pid_start), (77, 1500));
+
+        // Two agy conversations sharing one agy process (parent + subagent) refuse as
+        // ambiguous rather than attributing one conversation's claim to the other.
+        let shared = go(
+            ancestor("agy", 77, 1500),
+            vec![
+                agent("agy", "conv-1", "linux", 77, 1500, BOOT),
+                agent("agy", "conv-2", "linux", 77, 1500, BOOT),
+            ],
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            shared.contains("several relay agents match pid 77")
+                && shared.contains("agy:conv-1")
+                && shared.contains("agy:conv-2"),
+            "{shared}"
+        );
+    }
 }

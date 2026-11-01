@@ -29,7 +29,7 @@ pub struct Snapshot {
     pub agents: Vec<Agent>,
 }
 
-const HARNESSES: [&str; 3] = ["claude-code", "codex", "opencode"];
+const HARNESSES: [&str; 4] = ["claude-code", "codex", "opencode", "agy"];
 /// relay's `integer()` is `Number.isSafeInteger(v) && v >= 0`, so its numeric fields stop
 /// at 2^53 - 1. `start` is exempt: it travels as decimal *text* through `parseStart` and
 /// uses the full u64 range.
@@ -729,10 +729,57 @@ mod tests {
                 other_harness("opencode"),
                 "expected \"process\"",
             ),
+            ("agy:w1", other_harness("agy"), "expected \"session\""),
         ];
         for (key, agent, expected) in cases {
             let error = parse(&snapshot_json(key, &agent)).unwrap_err().to_string();
             assert!(error.contains(expected), "{key} {agent}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_snapshot_accepts_an_agy_session_row_without_root_or_background() {
+        let agy = agent_json(&[
+            ("id", "\"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\""),
+            ("harness", "\"agy\""),
+            ("sessionId", "\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\""),
+            ("scope", "\"session\""),
+        ]);
+        let codex = agent_json(&[]);
+        let text = format!(
+            r#"{{"schema":2,"generation":"11111111-2222-4333-8444-555555555555",
+               "revision":8,"agents":{{"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d":{agy},"codex:s1":{codex}}}}}"#
+        );
+        let snapshot = parse(&text).unwrap();
+        assert_eq!(snapshot.agents.len(), 2);
+        let row = &snapshot.agents[0];
+        assert_eq!(row.id, "agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d");
+        assert_eq!(row.harness, "agy");
+        assert_eq!(row.session_id, "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d");
+        assert_eq!(row.scope, "session");
+
+        let process_scope = agent_json(&[
+            ("id", "\"agy:s1\""),
+            ("harness", "\"agy\""),
+            ("sessionId", "\"s1\""),
+            ("scope", "\"process\""),
+        ]);
+        let error = parse(&snapshot_json("agy:s1", &process_scope))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("expected \"session\""), "{error}");
+
+        for root in ["\"codex:r\"", "null"] {
+            let with_root = agent_json(&[
+                ("id", "\"agy:s1\""),
+                ("harness", "\"agy\""),
+                ("sessionId", "\"s1\""),
+                ("root", root),
+            ]);
+            let error = parse(&snapshot_json("agy:s1", &with_root))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("not a worker row"), "{root}: {error}");
         }
     }
 }

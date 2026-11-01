@@ -679,7 +679,7 @@ session, so headless, nested and background sessions (`claude -p`, `claude --bg`
 `codex exec`) each claim as themselves.
 
 With it on, `tasks` walks its own process ancestry to the nearest harness process —
-`claude`, `codex` or `opencode`, or a versioned Claude Code binary under claude/versions/,
+`claude`, `codex`, `opencode` or `agy`, or a versioned Claude Code binary under claude/versions/,
 which is how a background session runs; Claude Code's own daemon and pty host are not
 sessions and are refused — and looks that process up in relay's agent registry, matching on
 host, boot id, pid and process start time, and requiring the registry's harness to agree

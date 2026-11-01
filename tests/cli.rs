@@ -22607,6 +22607,89 @@ fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
 }
 
 #[test]
+fn an_acceptance_agy_row_coexists_with_other_harnesses_and_resolves_under_agy() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let codex_task = id_of(env.json(&dir, &["add", "Codex work", "-p", "2"]));
+    let agy_held = id_of(env.json(&dir, &["add", "Agy held", "-p", "2"]));
+    let agy_closed = id_of(env.json(&dir, &["add", "Agy closed", "-p", "2"]));
+    let agy_unregistered = id_of(env.json(&dir, &["add", "Agy missing registry", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // 1. A live agy:<conv> row in agents.json must not make relay-identity checks fail in
+    //    other harnesses' sessions.
+    let codex_script = format!(
+        "RELAY_STATE_DIR={state}\nexport RELAY_STATE_DIR TASKS_BIN\n\
+         start=$(awk '{{print $22}}' \"/proc/$$/stat\")\n\
+         boot=$(cat /proc/sys/kernel/random/boot_id)\n\
+         host=$(cat /proc/sys/kernel/hostname)\n\
+         mkdir -p \"$RELAY_STATE_DIR\" && chmod 700 \"$RELAY_STATE_DIR\"\n\
+         cat > \"$RELAY_STATE_DIR/agents.json\" <<EOF\n\
+{{\"schema\":2,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":2,\
+\"agents\":{{\
+\"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\":{{\"id\":\"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\
+\"harness\":\"agy\",\"sessionId\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"scope\":\"session\",\
+\"cwd\":\"/w\",\"repoRoot\":null,\"remote\":null,\"projectKey\":\"k\",\"project\":\"p\",\
+\"state\":\"working\",\"updatedAt\":1,\
+\"process\":{{\"platform\":\"linux\",\"host\":\"$host\",\"bootId\":\"$boot\",\"pid\":999999,\"start\":\"1\"}}}},\
+\"codex:s1\":{{\"id\":\"codex:s1\",\"harness\":\"codex\",\"sessionId\":\"s1\",\"scope\":\"session\",\
+\"cwd\":\"/w\",\"repoRoot\":null,\"remote\":null,\"projectKey\":\"k\",\"project\":\"p\",\
+\"state\":\"working\",\"updatedAt\":2,\
+\"process\":{{\"platform\":\"linux\",\"host\":\"$host\",\"bootId\":\"$boot\",\"pid\":$$,\"start\":\"$start\"}}}}\
+}}}}\n\
+EOF\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         CODEX_THREAD_ID=s1 \"$TASKS_BIN\" start {codex_task}\n",
+        state = state.display(),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &codex_script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "codex start failed with agy row in snapshot: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 2. Under an agy ancestor whose tool shells are setsid children, tasks resolves
+    //    agy:<conv> with process proof, continues a held claim across separate setsid tool
+    //    shells after the registry file is gone, and refuses fresh acquisition without the
+    //    registry rather than falling back to sid:<pid>.
+    let agy_script = format!(
+        "{}\nwrite_registry\n\
+         run_tool() {{\n\
+           python3 -c 'import os, sys; os.setsid(); os.execvp(\"sh\", [\"sh\", \"-c\", sys.argv[1]])' \"$1\"\n\
+         }}\n\
+         run_tool '\"$TASKS_BIN\" start {agy_held}' || exit 71\n\
+         run_tool '\"$TASKS_BIN\" start {agy_closed}' || exit 72\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         run_tool '\"$TASKS_BIN\" done {agy_closed} landed' || exit 73\n\
+         if run_tool '\"$TASKS_BIN\" start {agy_unregistered}'; then exit 74; fi\n",
+        shim_env(&state, "agy", "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "agy", &agy_script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "agy start/done failed (code {:?}): {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(
+        store.contains("session = \"agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\""),
+        "{store}"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &agy_closed])["task"]["status"],
+        "done"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &agy_unregistered])["task"]["status"],
+        "todo"
+    );
+}
+
+#[test]
 fn an_unreadable_registry_fails_instead_of_reading_empty() {
     use std::os::unix::fs::PermissionsExt;
     let mut env = TestEnv::new();

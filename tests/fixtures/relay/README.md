@@ -1,7 +1,7 @@
 # Vendored relay fixtures
 
 `ancestry.json` is relay's cross-language contract for the session-process rule, copied
-byte for byte from relay `test/fixtures/ancestry.json` at revision `45f4c47`. Its own
+byte for byte from relay `test/fixtures/ancestry.json` at revision `7e2a625`. Its own
 `schema` field is the fixture format version, not the registry schema.
 
 `src/relay/ancestry.rs` runs every chain through tasks' walk. Refresh it only by copying
