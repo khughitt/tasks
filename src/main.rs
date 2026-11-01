@@ -16,6 +16,7 @@ mod filter;
 mod format;
 mod frontmatter;
 mod git;
+mod goals;
 mod growth;
 mod halt;
 mod hierarchy;
@@ -252,6 +253,7 @@ fn main() {
                 | cli::Command::Tree { .. }
                 | cli::Command::Tags { .. }
                 | cli::Command::Quiet { .. }
+                | cli::Command::Goals { .. }
                 | cli::Command::Claims { .. }
         )
     {

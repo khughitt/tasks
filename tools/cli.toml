@@ -30,7 +30,7 @@ grammar = "<n>d | <n>w"
 meaning = "a duration; 0d disables an age check"
 
 [vocabulary.values.harness]
-set = ["claude-code", "codex", "opencode"]
+set = ["claude-code", "codex", "opencode", "agy"]
 
 [vocabulary.values.color]
 set = ["auto", "always", "never"]
@@ -801,6 +801,15 @@ path = ["quiet"]
 summary = "Work parked waiting for an idle host, as resume briefs"
 options = [
   { shared = "limit", value = "int" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["goals"]
+summary = "The goals you asked for across projects: progress, recent activity, and what needs attention"
+options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
@@ -1680,6 +1689,16 @@ options = [
   { names = ["--continue"], value = "string" },
   { names = ["--dataset"], value = "string", required = true },
   { names = ["--source"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["recheck"]
+summary = "Re-check one store location and record what the store holds there, settling an unmatched holdings intent"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
 ]
 
 [[cli.science.commands]]
@@ -2870,7 +2889,7 @@ protocol = "harness hook: stdout is the reply, exit code is the guard's"
 summary = "Dispatch one harness hook event to the subscribers and guards"
 args = [{ name = "event", value = "string", required = true }]
 options = [
-  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode"], required = true, repeatable = false },
+  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode", "agy"], required = true, repeatable = false },
   { names = ["--outer-ms"], value = "int" },
   { names = ["--subscribers"], value = "path" },
 ]
@@ -3073,3 +3092,15 @@ args = [
 path = ["rm"]
 summary = "Harvest, inspect, unlock and remove a managed worktree"
 args = [{name = "target", value = "path", required = true}]
+
+# Minimal sweep adoption; existing survey, repair and guard modes are outside this inventory.
+[cli.git-index-health]
+project = "ops"
+tier = "automation"
+default_output = "pretty"
+env = "GIT-INDEX-HEALTH"
+protocol = "one-shot textual sweep: non-ok results and complete coverage/count summary"
+
+[[cli.git-index-health.commands]]
+path = []
+options = [{names = ["--sweep"], value = "none"}]

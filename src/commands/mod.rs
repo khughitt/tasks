@@ -11,6 +11,7 @@ pub mod doc;
 pub mod docs;
 pub mod edit;
 pub mod feedback;
+pub mod goals;
 pub mod graph;
 pub mod group;
 pub mod init;
@@ -2362,6 +2363,18 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 group,
             };
             quiet::run(open_read_ctx(dir, &scope)?, limit)
+        }
+        Command::Goals {
+            project,
+            all_projects: _,
+            group,
+        } => {
+            let scope = ScopeArgs {
+                all_projects: project.is_none() && group.is_none(),
+                project,
+                group,
+            };
+            goals::run(open_read_ctx(dir, &scope)?)
         }
         Command::Feedback {
             project,

@@ -498,6 +498,10 @@ impl Output {
                 .tasks
                 .iter_mut()
                 .for_each(|row| row.project_color = color_of(colors, &row.id)),
+            Output::Goals(o) => o
+                .goals
+                .iter_mut()
+                .for_each(|row| row.project_color = color_of(colors, &row.id)),
             Output::Tree(o) => paint_tree(colors, &mut o.nodes),
             Output::Blockers(o) => o
                 .blockers
@@ -1023,6 +1027,15 @@ pub struct QuietOut {
     pub warnings: Vec<String>,
 }
 
+/// `tasks goals` (goals-view spec §5.5).
+#[derive(Serialize)]
+pub struct GoalsOut {
+    pub observed_at: String,
+    pub park_evidence: ParkEvidence,
+    pub goals: Vec<crate::goals::GoalRow>,
+    pub warnings: Vec<String>,
+}
+
 /// Which date a pretty row shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DateColumn {
@@ -1412,6 +1425,7 @@ pub enum Output {
     List(ListOut),
     Parked(ParkedOut),
     Quiet(QuietOut),
+    Goals(GoalsOut),
     Claims(ClaimsOut),
     Prime(Box<PrimeOut>),
     Lanes(LanesOut),
@@ -1659,6 +1673,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             o.tasks.iter().any(|row| row.needs_review == Some(true)),
         ),
         Output::Quiet(o) => quiet_table(&o.tasks, painter, layout),
+        Output::Goals(_) => quiet_table(&[], painter, layout),
         Output::Claims(o) => {
             use crate::table::{Column, Row};
             let columns = [
@@ -2172,6 +2187,7 @@ pub fn needs_theme(out: &Output) -> bool {
             | Output::Tree(_)
             | Output::Parked(_)
             | Output::Quiet(_)
+            | Output::Goals(_)
             | Output::Projects(_)
             | Output::Show(_)
             | Output::Next(_)
@@ -2189,6 +2205,7 @@ pub fn shows_priority(out: &Output) -> bool {
             | Output::Blockers(_)
             | Output::Tree(_)
             | Output::Quiet(_)
+            | Output::Goals(_)
             | Output::Show(_)
             | Output::Next(_)
     )
@@ -2547,6 +2564,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::List(o) => o.warnings.clone(),
         Output::Parked(o) => o.warnings.clone(),
         Output::Quiet(o) => o.warnings.clone(),
+        Output::Goals(o) => o.warnings.clone(),
         Output::Claims(_) => Vec::new(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Lanes(o) => o.warnings.clone(),
