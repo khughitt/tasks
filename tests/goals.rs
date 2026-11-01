@@ -3,7 +3,7 @@
 //! runs under TestEnv's isolated environment.
 
 mod common;
-use common::{TestEnv, id_of};
+use common::{TestEnv, id_of, write_claim};
 use serde_json::Value;
 use std::path::Path;
 
@@ -362,4 +362,249 @@ fn json_carries_project_color() {
     std::fs::write(&config, format!("color = \"#7AA2F7\"\n{text}")).unwrap();
     let (g, _) = goal_with_child(&env, &aa, "G");
     assert_eq!(row(&goals(&env, &aa, &[]), &g)["color"], "#7aa2f7");
+}
+
+// Attention flags (§5.4).
+
+/// Makes `id` doing, then drops every claim the CLI's short-lived process wrote, so no
+/// claim can suppress a stall.
+fn doing(env: &TestEnv, dir: &Path, prefix: &str, id: &str) {
+    env.json(dir, &["edit", id, "--status", "doing"]);
+    let _ = std::fs::remove_file(env.claim_store(prefix));
+}
+
+/// Starts and parks `id` with the given park flags.
+fn park(env: &TestEnv, dir: &Path, id: &str, flags: &[&str]) {
+    env.json(dir, &["start", id]);
+    let mut args = vec!["park", id, "the next step"];
+    args.extend_from_slice(flags);
+    env.json(dir, &args);
+}
+
+/// Rewrites the `at = "…"` line of `id`'s park in `prefix`'s claim store.
+fn set_park_at(env: &TestEnv, prefix: &str, id: &str, stamp: &str) {
+    let path = env.claim_store(prefix);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut inside = false;
+    let mut found = false;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if line.starts_with('[') {
+                inside = line.contains("parks") && line.contains(id);
+            }
+            if inside && line.starts_with("at = ") {
+                found = true;
+                format!("at = \"{stamp}\"")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    assert!(found, "no park for {id} in {text}");
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+}
+
+fn attention(out: &Value, id: &str) -> Value {
+    row(out, id)
+        .get("attention")
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn doing_leaf_untouched_for_three_days_is_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, old) = goal_with_child(&env, &aa, "G");
+    let recent = add(&env, &aa, "recent", &["--parent", &g]);
+    doing(&env, &aa, "aa", &old);
+    doing(&env, &aa, "aa", &recent);
+    let stamp = ago(4);
+    set_field(&aa, &old, "updated", Some(&stamp));
+    set_field(&aa, &recent, "updated", Some(&ago(2)));
+    let out = goals(&env, &aa, &[]);
+    assert_eq!(
+        attention(&out, &g)["stalled"],
+        serde_json::json!({"count": 1, "first": old, "since": stamp})
+    );
+}
+
+#[test]
+fn live_claim_suppresses_stall() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    doing(&env, &aa, "aa", &leaf);
+    set_field(&aa, &leaf, "updated", Some(&ago(4)));
+    write_claim(&env, "aa", &leaf, "someone-else", true);
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn user_park_counts_as_you_not_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    park(&env, &aa, &leaf, &["--waiting-on", "user"]);
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &leaf, &stamp);
+    set_field(&aa, &leaf, "updated", Some(&stamp));
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert!(flags.get("stalled").is_none(), "{flags}");
+    assert_eq!(
+        flags["you"],
+        serde_json::json!({"count": 1, "first": leaf, "since": stamp})
+    );
+}
+
+#[test]
+fn dependency_and_quiet_parks_never_stall() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, waits) = goal_with_child(&env, &aa, "G");
+    let quiet = add(&env, &aa, "quiet", &["--parent", &g]);
+    park(&env, &aa, &waits, &["--reason", "dependency"]);
+    park(&env, &aa, &quiet, &["--reason", "quiet", "--minutes", "30"]);
+    let stamp = ago(5);
+    for id in [&waits, &quiet] {
+        set_park_at(&env, "aa", id, &stamp);
+        set_field(&aa, id, "updated", Some(&stamp));
+    }
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn agent_park_stalls_by_park_age() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    park(&env, &aa, &leaf, &[]);
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &leaf, &stamp);
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert_eq!(
+        flags["stalled"],
+        serde_json::json!({"count": 1, "first": leaf, "since": stamp})
+    );
+}
+
+#[test]
+fn old_doing_parent_with_recent_child_is_not_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let s = add(&env, &aa, "S", &["--parent", &g]);
+    let child = add(&env, &aa, "child", &["--parent", &s]);
+    doing(&env, &aa, "aa", &s);
+    set_field(&aa, &s, "updated", Some(&ago(5)));
+    set_field(&aa, &child, "updated", Some(&ago(0)));
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn old_doing_parent_with_quiet_subtree_is_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let s = add(&env, &aa, "S", &["--parent", &g]);
+    let child = add(&env, &aa, "child", &["--parent", &s]);
+    doing(&env, &aa, "aa", &s);
+    let newest = ago(5);
+    set_field(&aa, &s, "updated", Some(&newest));
+    set_field(&aa, &child, "updated", Some(&ago(6)));
+    set_field(&aa, &g, "updated", Some(&ago(6)));
+    assert_eq!(
+        attention(&goals(&env, &aa, &[]), &g)["stalled"],
+        serde_json::json!({"count": 1, "first": s, "since": newest})
+    );
+}
+
+#[test]
+fn held_claim_in_subtree_keeps_old_parent_from_stalling() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let s = add(&env, &aa, "S", &["--parent", &g]);
+    let child = add(&env, &aa, "child", &["--parent", &s]);
+    doing(&env, &aa, "aa", &s);
+    for id in [&g, &s, &child] {
+        set_field(&aa, id, "updated", Some(&ago(6)));
+    }
+    write_claim(&env, "aa", &child, "someone-else", true);
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn blocked_descendant_flags_blocked() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    env.json(&aa, &["block", &leaf, "why"]);
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert_eq!(flags["blocked"]["count"], 1);
+    assert_eq!(flags["blocked"]["first"], leaf.as_str());
+}
+
+#[test]
+fn goal_inside_paused_lane_names_the_lane() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let lane = add(&env, &aa, "L", &["--lane", "--origin", "agent"]);
+    let g = add(&env, &aa, "G", &["--origin", "user", "--parent", &lane]);
+    add(&env, &aa, "piece", &["--parent", &g]);
+    env.json(&aa, &["block", &lane, "why"]);
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert_eq!(flags["blocked"]["count"], 1);
+    assert_eq!(flags["blocked"]["first"], lane.as_str());
+}
+
+#[test]
+fn awaiting_user_idea_counts_as_you() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let idea = add(&env, &aa, "idea", &["--parent", &g, "--status", "idea"]);
+    env.json(
+        &aa,
+        &["note", &idea, "asked", "--reviewed", "--awaiting-user"],
+    );
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert_eq!(flags["you"]["count"], 1);
+    assert_eq!(flags["you"]["first"], idea.as_str());
+}
+
+#[test]
+fn shelved_descendant_raises_no_flag() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    add(&env, &aa, "other", &["--parent", &g]);
+    park(&env, &aa, &leaf, &["--waiting-on", "user"]);
+    // Shelving clears the park; restore it, as a park left behind on this host would be.
+    let store = std::fs::read_to_string(env.claim_store("aa")).unwrap();
+    env.json(&aa, &["shelve", &leaf, "--defer", "2099-01-01", "later"]);
+    std::fs::write(env.claim_store("aa"), store).unwrap();
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn closed_goal_has_no_attention() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    env.json(&aa, &["block", &leaf, "why"]);
+    env.json(&aa, &["done", &g, "closed anyway", "--force"]);
+    let out = goals(&env, &aa, &[]);
+    assert!(row(&out, &g).get("closed").is_some());
+    assert_eq!(attention(&out, &g), Value::Null);
+}
+
+#[test]
+fn dependency_wait_is_not_flagged() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, first) = goal_with_child(&env, &aa, "G");
+    add(&env, &aa, "second", &["--parent", &g, "--depends", &first]);
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
 }
