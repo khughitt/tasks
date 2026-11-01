@@ -137,11 +137,13 @@ pub fn dependencies(
     for source in sources {
         for stored in &source.depends {
             let found = crate::dependency::resolve(registry, stored, &mut lookup)?;
+            // Only a record that answers can be inside the subtree: an unresolved target is
+            // never ordinary sequencing, so it is keyed by its stored id and always counted.
             let target = match &found {
                 Some(task) => registry.canonical_id(&task.id),
                 None => registry.canonical_id(stored),
             };
-            if subtree.contains(&target) || !seen.insert(target) {
+            if (found.is_some() && subtree.contains(&target)) || !seen.insert(target) {
                 continue;
             }
             out.total += 1;

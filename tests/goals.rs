@@ -246,6 +246,35 @@ fn unresolved_dependency_is_counted_apart_and_never_satisfied() {
 }
 
 #[test]
+fn dependency_on_a_piece_moved_out_of_reach_is_unresolved() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    let moved = add(&env, &aa, "moved", &["--parent", &g]);
+    let sibling = add(&env, &aa, "sibling", &["--parent", &g]);
+    env.json(&aa, &["dep", &sibling, "--on", &moved]);
+    env.json(&aa, &["edit", &moved, "--no-parent"]);
+    env.json(&aa, &["move", &moved, "--to", "bb"]);
+    // Within reach, the moved record is an outside prerequisite like any other.
+    let out = goals(&env, &aa, &["--project", "aa"]);
+    assert_eq!(
+        row(&out, &g)["dependencies"],
+        serde_json::json!({"open": 1, "total": 1})
+    );
+    // Out of reach, no record answers: unresolved, never dropped as inside the subtree,
+    // even when the tombstone still names the goal as its parent (an older or hand-edited
+    // record; the CLI unparents before a move).
+    set_field(&aa, &moved, "parent", Some(&g));
+    std::fs::remove_dir_all(&bb).unwrap();
+    let out = goals(&env, &aa, &["--project", "aa"]);
+    assert_eq!(
+        row(&out, &g)["dependencies"],
+        serde_json::json!({"open": 0, "total": 1, "unresolved": 1})
+    );
+}
+
+#[test]
 fn closed_goal_reports_open_dependencies_too() {
     let mut env = TestEnv::new();
     let aa = env.init("aa");
