@@ -2506,7 +2506,7 @@ pub fn goals_table(
         Column::fixed("P"),
         Column::fixed("progress"),
         Column::fixed("active"),
-        Column::wrap("title", 20, Some(50)),
+        Column::wrap("title", 20, None),
         Column::fixed("attention"),
     ];
     let progress = |pieces: &crate::goals::Pieces| {

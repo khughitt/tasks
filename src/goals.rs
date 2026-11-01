@@ -158,9 +158,19 @@ fn flag(hits: Vec<Hit>) -> Option<Flag> {
         })
 }
 
+/// Parked on this host waiting on the user, or on a dependency or a quiet host: the wait
+/// names who or what moves it next, so it is not stalled (§5.4).
+fn waits_on_named(task: &Task, claims: &ClaimSnapshot) -> bool {
+    claims.park(&task.id).is_some_and(|park| {
+        park.waiting_on == WaitingOn::User
+            || matches!(park.reason, Some(Reason::Dependency | Reason::Quiet))
+    })
+}
+
 /// Whether a `doing` record is stalled, and since when. A goal record (it has descendants
 /// or is a lane) is judged by its whole subtree: stalled only when nothing in it is newer
-/// than `STALL_AFTER` and nothing in it is held; `since` is the subtree's newest stamp.
+/// than `STALL_AFTER`, nothing in it is held, and no active record in it waits on
+/// something named; `since` is the subtree's newest stamp.
 fn stalled_since<'a>(
     task: &'a Task,
     all: &'a [Task],
@@ -168,19 +178,17 @@ fn stalled_since<'a>(
     registry: &Registry,
     now: OffsetDateTime,
 ) -> Result<Option<Hit<'a>>> {
-    if let Some(park) = claims.park(&task.id)
-        && (park.waiting_on == WaitingOn::User
-            || matches!(park.reason, Some(Reason::Dependency | Reason::Quiet)))
-    {
+    if waits_on_named(task, claims) {
         return Ok(None);
     }
     let descendants = hierarchy::descendants(all, &task.id, registry);
     let hit = if hierarchy::is_goal(task, !descendants.is_empty()) {
         let subtree: Vec<&Task> = std::iter::once(task).chain(descendants).collect();
-        if subtree
-            .iter()
-            .any(|record| claims.held(&record.id).is_some())
-        {
+        // Someone holds it, or its work waits on something named: not stalled.
+        if subtree.iter().any(|record| {
+            claims.held(&record.id).is_some()
+                || (hierarchy::is_active(record) && waits_on_named(record, claims))
+        }) {
             return Ok(None);
         }
         let mut newest = Hit::new(task.id.to_string(), effective_at(task, claims))?;

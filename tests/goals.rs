@@ -697,3 +697,59 @@ fn pretty_empty_says_why() {
          (tasks edit <id> --origin user)"
     );
 }
+
+// Final review round 1.
+
+#[test]
+fn doing_goal_waiting_on_user_park_is_not_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    doing(&env, &aa, "aa", &g);
+    park(
+        &env,
+        &aa,
+        &leaf,
+        &["--waiting-on", "user", "--reason", "review"],
+    );
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &leaf, &stamp);
+    for id in [&g, &leaf] {
+        set_field(&aa, id, "updated", Some(&stamp));
+    }
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert!(flags.get("stalled").is_none(), "{flags}");
+    assert_eq!(flags["you"]["first"], leaf.as_str());
+}
+
+#[test]
+fn doing_goal_waiting_on_quiet_park_is_not_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    doing(&env, &aa, "aa", &g);
+    park(&env, &aa, &leaf, &["--reason", "quiet", "--minutes", "30"]);
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &leaf, &stamp);
+    for id in [&g, &leaf] {
+        set_field(&aa, id, "updated", Some(&stamp));
+    }
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn pretty_title_uses_a_wide_terminal() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let title = "A deliberately long goal title that runs well past fifty columns on one line";
+    let g = add(&env, &aa, title, &["--origin", "user"]);
+    add(&env, &aa, "piece", &["--parent", &g]);
+    let out = env
+        .cmd(&aa)
+        .env("COLUMNS", "200")
+        .args(["--pretty", "goals", "--color", "never"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(line_of(&text, &g).contains(title), "{text}");
+}
