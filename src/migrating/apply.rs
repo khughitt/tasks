@@ -4,9 +4,12 @@
 //! tree) and checks that each is clean; G10 removes the journal only after that.
 
 use super::MigrateCtx;
-use super::classify::{CarriedState, ClosedState, Phase, Snapshot};
+use super::classify::{
+    CarriedState, ClosedState, CompletionSnapshot, ListedState, Phase, RecordRead, Snapshot,
+    carries, closing_note, moved_out, note_suffix, retained,
+};
 use super::journal::MigrationJournal;
-use super::list::Decision;
+use super::list::{Decision, LoadedList};
 use crate::attachments;
 use crate::claims::ClaimStore;
 use crate::error::{Error, Result};
@@ -16,8 +19,9 @@ use crate::moving::{attachment_state, record_state};
 use crate::output::{CarriedOut, ClosedOut, DroppedOut, InboundOut, MigrateOut, WokenOut};
 use crate::rename::inventory::digest;
 use crate::repo::{Project, atomic_write};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
+use std::path::PathBuf;
 
 fn id(text: &str) -> TaskId {
     TaskId::parse(text).expect("validated journal id")
@@ -125,6 +129,274 @@ pub fn snapshot(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<Snapshot
     Ok(Snapshot { carried, closed })
 }
 
+/// `id`'s record read for the journal-less classification: parsed, but with its archived
+/// note segments left unresolved (their presence is judged per attachment).
+fn read_record(project: &Project, id: &TaskId) -> Result<RecordRead> {
+    let raw = match std::fs::read_to_string(project.task_path(id)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(RecordRead::Absent);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let physical = match crate::format::parse_physical(&raw, &format!("tasks/{id}.md")) {
+        Ok(physical) => physical,
+        Err(error) => return Ok(RecordRead::Unreadable(error.to_string())),
+    };
+    if physical.id() != id {
+        return Ok(RecordRead::Unreadable(format!(
+            "its id field is {}",
+            physical.id()
+        )));
+    }
+    let inline = physical.inline_notes.clone();
+    Ok(RecordRead::Present(Box::new(physical.assemble(inline))))
+}
+
+fn record_path(records: &std::path::Path, id: &str) -> PathBuf {
+    records.join(format!("tasks/{id}.md"))
+}
+
+fn file_path(records: &std::path::Path, id: &str, name: &str) -> PathBuf {
+    records.join(format!("tasks/files/{id}/{name}"))
+}
+
+/// The paths a run of this list owns, derived without its journal (spec §4.5 "Commits"):
+/// every listed record, and for each carried tombstone its new record and, on both sides,
+/// each attachment file it moved out or retains. Same layout as
+/// `MigrationJournal::owned_paths`.
+fn completion_paths(
+    ctx: &MigrateCtx,
+    listed: &[ListedState],
+) -> BTreeMap<PathBuf, BTreeSet<PathBuf>> {
+    let (source, target) = (&ctx.source.project.records, &ctx.target.records);
+    let mut owned: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
+    for state in listed {
+        if TaskId::parse(&state.id).is_err() {
+            continue;
+        }
+        owned
+            .entry(source.clone())
+            .or_default()
+            .insert(record_path(source, &state.id));
+        let RecordRead::Present(task) = &state.record else {
+            continue;
+        };
+        let Some(to) = &task.moved_to else {
+            continue;
+        };
+        let to = to.to_string();
+        let names: BTreeSet<String> = moved_out(task).into_iter().chain(retained(task)).collect();
+        for name in &names {
+            owned
+                .entry(source.clone())
+                .or_default()
+                .insert(file_path(source, &state.id, name));
+        }
+        let at_target = owned.entry(target.clone()).or_default();
+        at_target.insert(record_path(target, &to));
+        for name in &names {
+            at_target.insert(file_path(target, &to, name));
+        }
+    }
+    owned
+}
+
+/// What `classify_without_journal` reads (spec §4.5, without a journal): each listed
+/// record and the successor record its tombstone names, the source state of every
+/// attachment the tombstone moved out or retains, this host's source store entries, the
+/// successor records that carry the list's sha256, and, once any record carries it, the
+/// owned paths left uncommitted.
+pub fn completion_snapshot(ctx: &MigrateCtx, list: &LoadedList) -> Result<CompletionSnapshot> {
+    let source = &ctx.source.project;
+    let store = ClaimStore::load(&source.prefix)?;
+    let suffix = note_suffix(list);
+    let mut listed = Vec::new();
+    for entry in &list.list.tasks {
+        let decision = Decision::parse(&entry.decision);
+        let reason =
+            super::project::reason_text(&list.list, entry.reason.as_deref().unwrap_or("").trim())
+                .to_string();
+        let Ok(parsed) = TaskId::parse(entry.id.trim()) else {
+            listed.push(ListedState {
+                id: entry.id.clone(),
+                decision,
+                reason,
+                record: RecordRead::Unreadable("not a task id".into()),
+                target: None,
+                source_files: BTreeMap::new(),
+                park: false,
+                escalation: false,
+            });
+            continue;
+        };
+        let listed_id = ctx.registry.canonical_id(&parsed);
+        let record = read_record(source, &listed_id)?;
+        let mut target = None;
+        let mut source_files = BTreeMap::new();
+        if let RecordRead::Present(task) = &record
+            && let Some(to) = &task.moved_to
+        {
+            let to = ctx.registry.canonical_id(to);
+            target = Some(if to.prefix == ctx.target.prefix {
+                read_record(&ctx.target, &to)?
+            } else {
+                RecordRead::Absent
+            });
+            for name in moved_out(task).into_iter().chain(retained(task)) {
+                let state = attachment_state(source, &listed_id, &name)?;
+                source_files.insert(name, state);
+            }
+        }
+        listed.push(ListedState {
+            id: listed_id.to_string(),
+            decision,
+            reason,
+            record,
+            target,
+            source_files,
+            park: store.park(&listed_id).is_some(),
+            escalation: store.escalation(&listed_id).is_some(),
+        });
+    }
+    let mut successor_carriers = Vec::new();
+    for id in ctx.target.task_files()? {
+        let raw = std::fs::read_to_string(ctx.target.task_path(&id))?;
+        if !raw.contains(&suffix) {
+            continue;
+        }
+        if let RecordRead::Present(task) = read_record(&ctx.target, &id)?
+            && carries(&task, &suffix)
+        {
+            successor_carriers.push(id.to_string());
+        }
+    }
+    let any_carries = !successor_carriers.is_empty()
+        || listed.iter().any(
+            |state| matches!(&state.record, RecordRead::Present(task) if carries(task, &suffix)),
+        );
+    let uncommitted = if any_carries {
+        super::commit::uncommitted(&completion_paths(ctx, &listed))?
+    } else {
+        Vec::new()
+    };
+    Ok(CompletionSnapshot {
+        source: source.prefix.clone(),
+        successor: ctx.target.prefix.clone(),
+        source_records: source.records.clone(),
+        listed,
+        successor_carriers,
+        uncommitted,
+    })
+}
+
+/// The report of a run the journal-less classification found `complete` (spec §4.7),
+/// rebuilt from the records: new ids from the tombstones, parents and rewrites from the new
+/// records, reasons from the list, released and still-open ids from the drop and close
+/// notes. `park` says whether the successor's store holds a park for the new id now; the
+/// pairs' inbound and woken dependents are not recorded and are left empty.
+pub fn completed_output(
+    ctx: &MigrateCtx,
+    list: &LoadedList,
+    snapshot: &CompletionSnapshot,
+) -> Result<MigrateOut> {
+    let suffix = note_suffix(list);
+    let target_store = ClaimStore::load(&ctx.target.prefix)?;
+    let mut carried = Vec::new();
+    let mut dropped = Vec::new();
+    let mut closed = Vec::new();
+    for state in &snapshot.listed {
+        let RecordRead::Present(task) = &state.record else {
+            unreachable!("a complete run has every listed record");
+        };
+        match state.decision {
+            Some(Decision::Carry) => {
+                let (Some(to), Some(RecordRead::Present(target))) = (&task.moved_to, &state.target)
+                else {
+                    unreachable!("a complete carry has its tombstone and new record");
+                };
+                let mut attachments: Vec<String> =
+                    moved_out(task).into_iter().chain(retained(task)).collect();
+                attachments.sort();
+                attachments.dedup();
+                carried.push(CarriedOut {
+                    from: state.id.clone(),
+                    id: Some(to.to_string()),
+                    parent: target.parent.as_ref().map(ToString::to_string),
+                    rewrites: target
+                        .notes
+                        .iter()
+                        .filter_map(|note| {
+                            note.text
+                                .strip_prefix("migration: ")?
+                                .strip_suffix(&suffix)
+                                .map(String::from)
+                        })
+                        .collect(),
+                    attachments,
+                    park: target_store.park(to).is_some(),
+                });
+            }
+            Some(decision) => {
+                let (released, open_depends) =
+                    closing_note(task, decision, &snapshot.successor, &state.reason, &suffix)
+                        .expect("a complete drop or close has its note");
+                if decision == Decision::Drop {
+                    dropped.push(DroppedOut {
+                        id: state.id.clone(),
+                        reason: state.reason.clone(),
+                        released,
+                    });
+                } else {
+                    closed.push(ClosedOut {
+                        id: state.id.clone(),
+                        reason: state.reason.clone(),
+                        open_depends,
+                        released,
+                    });
+                }
+            }
+            None => unreachable!("a complete run decided every entry"),
+        }
+    }
+    let paths = shown_paths(completion_paths(ctx, &snapshot.listed));
+    Ok(MigrateOut {
+        source: snapshot.source.clone(),
+        successor: snapshot.successor.clone(),
+        list: format!("sha256:{}", list.sha256),
+        recovery: "complete".into(),
+        carried,
+        dropped,
+        closed,
+        inbound: Vec::new(),
+        woken: Vec::new(),
+        unread_projects: Vec::new(),
+        paths,
+        warnings: ctx.source.warnings.clone(),
+        refusals: Vec::new(),
+        body_changes: Vec::new(),
+    })
+}
+
+/// The report's `paths`: each owned path relative to its records directory.
+fn shown_paths(owned: BTreeMap<PathBuf, BTreeSet<PathBuf>>) -> BTreeMap<String, Vec<String>> {
+    owned
+        .into_iter()
+        .map(|(records, paths)| {
+            let shown = paths
+                .iter()
+                .map(|path| {
+                    path.strip_prefix(&records)
+                        .expect("owned paths lie under their records directory")
+                        .display()
+                        .to_string()
+                })
+                .collect();
+            (records.display().to_string(), shown)
+        })
+        .collect()
+}
+
 /// The run's report (spec §4.7), from the journal alone, so a fresh run, a resume and an
 /// `--explain` of a pending run report the same rows.
 pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> Result<MigrateOut> {
@@ -159,22 +431,7 @@ pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> R
             Decision::Carry => unreachable!("validated journal decision"),
         }
     }
-    let paths = journal
-        .owned_paths()
-        .into_iter()
-        .map(|(records, paths)| {
-            let shown = paths
-                .iter()
-                .map(|path| {
-                    path.strip_prefix(&records)
-                        .expect("owned paths lie under their records directory")
-                        .display()
-                        .to_string()
-                })
-                .collect();
-            (records.display().to_string(), shown)
-        })
-        .collect();
+    let paths = shown_paths(journal.owned_paths());
     Ok(MigrateOut {
         source: journal.source.clone(),
         successor: journal.successor.clone(),

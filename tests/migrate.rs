@@ -2183,3 +2183,496 @@ fn explain_of_a_refused_pending_run_assigns_no_ids() {
     std::fs::write(&p.list, &original).unwrap();
     assert_eq!(env.json(&p.forge, &["migrate", l])["recovery"], "resumed");
 }
+
+// ---- Completion without a journal (plan Task 6, spec §4.5, §4.6, §5 case 13) ----
+
+fn store_of(env: &TestEnv, prefix: &str) -> toml::Value {
+    let path = env.claim_store(prefix);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => toml::from_str(&text).unwrap(),
+        Err(_) => toml::Value::Table(toml::Table::new()),
+    }
+}
+
+fn write_store(env: &TestEnv, prefix: &str, store: &toml::Value) {
+    std::fs::write(env.claim_store(prefix), toml::to_string(store).unwrap()).unwrap();
+}
+
+/// Removes `id`'s entry from the `kind` table (`parks` or `escalations`) of `prefix`'s store.
+fn remove_entry(env: &TestEnv, prefix: &str, kind: &str, id: &str) {
+    let mut store = store_of(env, prefix);
+    let table = store[kind].as_table_mut().unwrap();
+    assert!(
+        table.remove(id).is_some(),
+        "{prefix} has no {kind} entry {id}"
+    );
+    write_store(env, prefix, &store);
+}
+
+fn add_escalation(env: &TestEnv, prefix: &str, id: &str) {
+    let mut store = store_of(env, prefix);
+    let table = store.as_table_mut().unwrap();
+    let escalations = table
+        .entry("escalations")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    escalations.as_table_mut().unwrap().insert(
+        id.into(),
+        toml::Value::Table(toml::Table::from_iter([
+            ("level".into(), toml::Value::String("high".into())),
+            (
+                "at".into(),
+                toml::Value::String("2026-10-09T00:00:00Z".into()),
+            ),
+            ("session".into(), toml::Value::String("codex:test".into())),
+        ])),
+    );
+    write_store(env, prefix, &store);
+}
+
+/// Everything a rerun could write: both trees and both claim stores.
+fn state(
+    env: &TestEnv,
+    dirs: &[&std::path::Path],
+) -> Vec<std::collections::BTreeMap<String, Vec<u8>>> {
+    let mut out: Vec<_> = dirs.iter().map(|dir| snapshot(dir)).collect();
+    for prefix in ["forge", "forge2"] {
+        let mut stores = std::collections::BTreeMap::new();
+        if let Ok(bytes) = std::fs::read(env.claim_store(prefix)) {
+            stores.insert(prefix.to_string(), bytes);
+        }
+        out.push(stores);
+    }
+    out
+}
+
+/// A rerun with no journal reports `complete` and writes nothing; so does `--explain`.
+fn assert_complete(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    list: &std::path::Path,
+    dirs: &[&std::path::Path],
+) -> serde_json::Value {
+    assert!(!migration_journal(env, "forge").exists());
+    let before = state(env, dirs);
+    let preview = explain(env, dir, list);
+    assert_eq!(preview["recovery"], "complete", "{preview}");
+    let out = env.json(dir, &["migrate", list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "complete", "{out}");
+    assert_eq!(out["list"], format!("sha256:{}", list_sha(list)));
+    assert_eq!(state(env, dirs), before, "a complete rerun writes nothing");
+    assert!(!migration_journal(env, "forge").exists());
+    out
+}
+
+fn refused(env: &TestEnv, dir: &std::path::Path, list: &std::path::Path) -> String {
+    let (kind, detail) = fail_detail(env, dir, &["migrate", list.to_str().unwrap()]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(!migration_journal(env, "forge").exists());
+    detail
+}
+
+/// A list deciding every open task of `forge` the same way.
+fn uniform_list(
+    env: &TestEnv,
+    forge: &std::path::Path,
+    ids: &[&str],
+    decision: &str,
+) -> std::path::PathBuf {
+    let (mut text, _) = draft_home(env, forge);
+    for id in ids {
+        text = decide(&text, id, decision, "reason = \"finished elsewhere\"\n");
+    }
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    list
+}
+
+#[test]
+fn reruns_after_success_report_complete() {
+    // Spec §5 case 13, first sentences; and case 11's "another rerun reports complete".
+    let mut env = TestEnv::new();
+    let m = mixed(&mut env);
+    let digests_before = std::fs::read_to_string(&m.list).unwrap();
+    let out = env.json(&m.forge, &["migrate", m.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "fresh");
+    let again = assert_complete(&env, &m.forge, &m.list, &[&m.forge, &m.forge2]);
+    // The new ids are read back from the tombstones.
+    for from in [&m.a, &m.b, &m.r, &m.d] {
+        assert_eq!(new_id(&again, from), new_id(&out, from), "{again}");
+    }
+    assert_eq!(carried_row(&again, &m.b)["parent"], m.s.as_str());
+    assert_eq!(again["dropped"][0]["id"], m.g.as_str(), "{again}");
+    assert_eq!(again["dropped"][0]["reason"], "superseded by forge2");
+    assert_eq!(again["closed"][0]["id"], m.c.as_str(), "{again}");
+    assert_eq!(again["closed"][0]["reason"], "done in forge");
+    // Every listed digest changed, yet the rerun did not refuse as stale.
+    for id in [&m.g, &m.a, &m.b, &m.c] {
+        let raw = std::fs::read(m.forge.join(format!("tasks/{id}.md"))).unwrap();
+        let now = format!("sha256:{:x}", Sha256::digest(&raw));
+        assert!(!digests_before.contains(&now), "{id}");
+    }
+
+    for decision in ["drop", "close"] {
+        let mut env = TestEnv::new();
+        let forge = env.init("forge");
+        let forge2 = env.init("forge2");
+        let x = id_of(env.json(&forge, &["add", "X"]));
+        let y = id_of(env.json(&forge, &["add", "Y"]));
+        let list = uniform_list(&env, &forge, &[&x, &y], decision);
+        let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+        assert_eq!(out["recovery"], "fresh", "{decision}: {out}");
+        let again = assert_complete(&env, &forge, &list, &[&forge, &forge2]);
+        let key = if decision == "drop" {
+            "dropped"
+        } else {
+            "closed"
+        };
+        let rows: Vec<&str> = again[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        let mut want = vec![x.as_str(), y.as_str()];
+        want.sort();
+        let mut rows = rows;
+        rows.sort();
+        assert_eq!(rows, want, "{decision}: {again}");
+        assert_eq!(again["carried"], serde_json::json!([]), "{again}");
+    }
+}
+
+/// An all-carry list: A with an attachment and a park, in two committed projects.
+struct CarryOne {
+    forge: std::path::PathBuf,
+    forge2: std::path::PathBuf,
+    a: String,
+    list: std::path::PathBuf,
+}
+
+fn carry_one(env: &mut TestEnv) -> CarryOne {
+    let forge = committed_project(env, "forge");
+    let forge2 = committed_project(env, "forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let shot = env.home.path().join("image.png");
+    std::fs::write(&shot, b"bytes").unwrap();
+    env.json(&forge, &["attach", &a, shot.to_str().unwrap()]);
+    env.json(&forge, &["park", &a, "continue"]);
+    let list = uniform_list(env, &forge, &[], "carry");
+    let text = decide(&std::fs::read_to_string(&list).unwrap(), &a, "carry", "");
+    std::fs::write(&list, text).unwrap();
+    CarryOne {
+        forge,
+        forge2,
+        a,
+        list,
+    }
+}
+
+/// The new id, read from the tombstone the run wrote.
+fn moved_to(forge: &std::path::Path, id: &str) -> String {
+    let raw = std::fs::read_to_string(forge.join(format!("tasks/{id}.md"))).unwrap();
+    raw.lines()
+        .find_map(|line| line.strip_prefix("moved_to: "))
+        .unwrap_or_else(|| panic!("{id} is not a tombstone:\n{raw}"))
+        .trim()
+        .to_string()
+}
+
+fn commit_all(dir: &std::path::Path) {
+    git_out(dir, &["add", "-A", "--", "tasks"]);
+    git_out(dir, &["commit", "-qm", "finish the migration by hand"]);
+}
+
+#[test]
+fn journal_lost_after_tombstones_refuses_until_finished_by_hand() {
+    // Spec §5 case 13 with the manual finish of §4.6.
+    let mut env = TestEnv::new();
+    let c = carry_one(&mut env);
+    apply_until(&env, &c.forge, &c.list, "tombstones");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let a2 = moved_to(&c.forge, &c.a);
+    let source_file = c.forge.join(format!("tasks/files/{}/image.png", c.a));
+    let before = state(&env, &[&c.forge, &c.forge2]);
+    let detail = refused(&env, &c.forge, &c.list);
+    assert_eq!(
+        state(&env, &[&c.forge, &c.forge2]),
+        before,
+        "a refusal writes nothing"
+    );
+    assert!(
+        detail.contains(&format!("tasks/files/{}/image.png", c.a)),
+        "{detail}"
+    );
+    assert!(detail.contains(&format!("{} park", c.a)), "{detail}");
+    assert!(
+        detail.contains(&format!("tasks/{a2}.md")),
+        "uncommitted: {detail}"
+    );
+    let preview = explain(&env, &c.forge, &c.list);
+    assert_eq!(preview["recovery"], "refuse", "{preview}");
+
+    // The manual finish: the attachment, verified against the destination copy.
+    let copy = std::fs::read(c.forge2.join(format!("tasks/files/{a2}/image.png"))).unwrap();
+    assert_eq!(std::fs::read(&source_file).unwrap(), copy);
+    std::fs::remove_file(&source_file).unwrap();
+    std::fs::remove_dir(source_file.parent().unwrap()).unwrap();
+    // The park: the destination holds the expected entry, so the source entry goes.
+    let source = store_of(&env, "forge");
+    let mut expected = source["parks"][c.a.as_str()].clone();
+    expected["worktree"] = toml::Value::String(c.forge2.display().to_string());
+    assert_eq!(store_of(&env, "forge2")["parks"][a2.as_str()], expected);
+    remove_entry(&env, "forge", "parks", &c.a);
+    let detail = refused(&env, &c.forge, &c.list);
+    assert!(!detail.contains("still in the source"), "{detail}");
+    assert!(!detail.contains(&format!("{} park", c.a)), "{detail}");
+    assert!(detail.contains(&format!("tasks/{}.md", c.a)), "{detail}");
+    commit_all(&c.forge);
+    commit_all(&c.forge2);
+    let out = assert_complete(&env, &c.forge, &c.list, &[&c.forge, &c.forge2]);
+    assert_eq!(new_id(&out, &c.a), a2);
+    assert_clean(&env, &c.forge);
+    assert_clean(&env, &c.forge2);
+
+    // Lost after G8: only the commits remain, and they are named.
+    let mut env = TestEnv::new();
+    let c = carry_one(&mut env);
+    apply_until(&env, &c.forge, &c.list, "cleanup");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let a2 = moved_to(&c.forge, &c.a);
+    let detail = refused(&env, &c.forge, &c.list);
+    for path in [
+        c.forge.join(format!("tasks/{}.md", c.a)),
+        c.forge.join(format!("tasks/files/{}/image.png", c.a)),
+        c.forge2.join(format!("tasks/{a2}.md")),
+        c.forge2.join(format!("tasks/files/{a2}/image.png")),
+    ] {
+        assert!(
+            detail.contains(&path.display().to_string()),
+            "{path:?}: {detail}"
+        );
+    }
+    assert!(!detail.contains(&format!("{} park", c.a)), "{detail}");
+    assert!(!detail.contains("still in the source"), "{detail}");
+    commit_all(&c.forge);
+    commit_all(&c.forge2);
+    assert_complete(&env, &c.forge, &c.list, &[&c.forge, &c.forge2]);
+}
+
+#[test]
+fn archived_history_stays_and_completes() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    env.json(&forge, &["note", &a, "archived sentinel"]);
+    let (name, bytes) = common::archive_inline(&forge, &a, false);
+    env.json(&forge, &["note", &a, "inline after the archive"]);
+    let before = note_texts(&shown(&env, &forge, &a));
+    let list = uniform_list(&env, &forge, &[], "carry");
+    std::fs::write(
+        &list,
+        decide(&std::fs::read_to_string(&list).unwrap(), &a, "carry", ""),
+    )
+    .unwrap();
+    let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    let a2 = new_id(&out, &a);
+    let segment = forge.join(format!("tasks/files/{a}/{name}"));
+    assert_eq!(
+        std::fs::read(&segment).unwrap(),
+        bytes,
+        "retained with its digest"
+    );
+    assert_eq!(
+        std::fs::read(forge2.join(format!("tasks/files/{a2}/{name}"))).unwrap(),
+        bytes
+    );
+    let tombstone = note_texts(&shown(&env, &forge, &a));
+    assert_eq!(
+        &tombstone[..before.len()],
+        before.as_slice(),
+        "history reads in full"
+    );
+    assert!(tombstone.contains(&"archived sentinel".to_string()));
+    assert_complete(&env, &forge, &list, &[&forge, &forge2]);
+    // A retained segment that goes missing is unfinished, never cleanup.
+    std::fs::remove_file(&segment).unwrap();
+    let detail = refused(&env, &forge, &list);
+    assert!(detail.contains(&name), "{detail}");
+    std::fs::write(&segment, &bytes).unwrap();
+    assert_complete(&env, &forge, &list, &[&forge, &forge2]);
+}
+
+#[test]
+fn conflicting_destination_park_is_kept() {
+    // Park: resumed and parked again in the successor after the journal was lost.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    env.json(&forge, &["park", &a, "continue"]);
+    let list = uniform_list(&env, &forge, &[], "carry");
+    std::fs::write(
+        &list,
+        decide(&std::fs::read_to_string(&list).unwrap(), &a, "carry", ""),
+    )
+    .unwrap();
+    apply_until(&env, &forge, &list, "tombstones");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let a2 = moved_to(&forge, &a);
+    env.json(&forge2, &["start", &a2]);
+    env.json(&forge2, &["park", &a2, "a newer next step"]);
+    let newer = store_of(&env, "forge2")["parks"][a2.as_str()].clone();
+    assert_eq!(newer["next_step"].as_str(), Some("a newer next step"));
+    let detail = refused(&env, &forge, &list);
+    assert!(detail.contains(&format!("{a} park")), "{detail}");
+    // The manual finish stops at the conflict; the person removes the source entry.
+    remove_entry(&env, "forge", "parks", &a);
+    assert_complete(&env, &forge, &list, &[&forge, &forge2]);
+    assert_eq!(store_of(&env, "forge2")["parks"][a2.as_str()], newer);
+
+    // Escalation: its expected entry has no worktree; a differing one is kept the same way.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    env.json(&forge, &["park", &a, "continue"]);
+    add_escalation(&env, "forge", &a);
+    let list = uniform_list(&env, &forge, &[], "carry");
+    std::fs::write(
+        &list,
+        decide(&std::fs::read_to_string(&list).unwrap(), &a, "carry", ""),
+    )
+    .unwrap();
+    apply_until(&env, &forge, &list, "tombstones");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let a2 = moved_to(&forge, &a);
+    let carried = store_of(&env, "forge2")["escalations"][a2.as_str()].clone();
+    assert_eq!(carried, store_of(&env, "forge")["escalations"][a.as_str()]);
+    assert!(carried.get("worktree").is_none(), "{carried}");
+    let mut changed = store_of(&env, "forge2");
+    changed["escalations"][a2.as_str()]["session"] = toml::Value::String("codex:newer".into());
+    write_store(&env, "forge2", &changed);
+    // The park matches its expected entry and is finished first.
+    remove_entry(&env, "forge", "parks", &a);
+    let detail = refused(&env, &forge, &list);
+    assert!(detail.contains(&format!("{a} escalation")), "{detail}");
+    assert!(!detail.contains(&format!("{a} park")), "{detail}");
+    remove_entry(&env, "forge", "escalations", &a);
+    assert_complete(&env, &forge, &list, &[&forge, &forge2]);
+    assert_eq!(
+        store_of(&env, "forge2")["escalations"][a2.as_str()]["session"].as_str(),
+        Some("codex:newer")
+    );
+}
+
+#[test]
+fn all_drop_with_park_and_escalation_finishes_by_hand() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let x = id_of(env.json(&forge, &["add", "X"]));
+    let y = id_of(env.json(&forge, &["add", "Y"]));
+    env.json(&forge, &["park", &x, "continue"]);
+    add_escalation(&env, "forge", &y);
+    let list = uniform_list(&env, &forge, &[&x, &y], "drop");
+    let store2 = std::fs::read(env.claim_store("forge2")).ok();
+    apply_until(&env, &forge, &list, "closures");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let detail = refused(&env, &forge, &list);
+    assert!(detail.contains(&format!("{x} park")), "{detail}");
+    assert!(detail.contains(&format!("{y} escalation")), "{detail}");
+    // The manual finish for dropped tasks: each record is dropped with this list's sha256.
+    let suffix = format!(" list: sha256:{}", list_sha(&list));
+    for id in [&x, &y] {
+        let task = shown(&env, &forge, id);
+        assert_eq!(task["status"], "dropped");
+        assert!(note_texts(&task).last().unwrap().ends_with(&suffix));
+    }
+    remove_entry(&env, "forge", "parks", &x);
+    remove_entry(&env, "forge", "escalations", &y);
+    assert_complete(&env, &forge, &list, &[&forge, &forge2]);
+    assert_eq!(std::fs::read(env.claim_store("forge2")).ok(), store2);
+}
+
+#[test]
+fn uncommitted_paths_matter_only_where_commit_is_on() {
+    // Plan Review Focus 5: forge opts in to record commits, forge2 does not.
+    let forge2_repo = |env: &mut TestEnv| {
+        let root = env.init("forge2");
+        git_out(&root, &["init", "-q", "-b", "main"]);
+        let config = root.join("tasks/.config.toml");
+        let text = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(&config, format!("{text}\n[git]\ncommit = false\n")).unwrap();
+        git_out(&root, &["add", "-A"]);
+        git_out(&root, &["commit", "-qm", "init"]);
+        root
+    };
+    let setup = |env: &mut TestEnv| {
+        let forge = committed_project(env, "forge");
+        let forge2 = forge2_repo(env);
+        phased_in(env, forge, forge2)
+    };
+
+    // A full run commits forge only, and its rerun is complete with forge2 still dirty.
+    let mut env = TestEnv::new();
+    let p = setup(&mut env);
+    let before2 = commits(&p.forge2);
+    let out = env.json(&p.forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "fresh", "{out}");
+    assert_eq!(commits(&p.forge2), before2, "forge2 gets no commit");
+    assert_eq!(porcelain(&p.forge), "");
+    assert_ne!(porcelain(&p.forge2), "");
+    assert_complete(&env, &p.forge, &p.list, &[&p.forge, &p.forge2]);
+
+    // Lost after G8: only forge's paths are named; committing them completes the run.
+    let mut env = TestEnv::new();
+    let p = setup(&mut env);
+    apply_until(&env, &p.forge, &p.list, "cleanup");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let a2 = moved_to(&p.forge, &p.a);
+    let detail = refused(&env, &p.forge, &p.list);
+    assert!(
+        detail.contains(
+            &p.forge
+                .join(format!("tasks/{}.md", p.d))
+                .display()
+                .to_string()
+        ),
+        "{detail}"
+    );
+    assert!(!detail.contains(&a2), "{detail}");
+    commit_all(&p.forge);
+    assert_ne!(porcelain(&p.forge2), "");
+    assert_complete(&env, &p.forge, &p.list, &[&p.forge, &p.forge2]);
+}
+
+#[test]
+fn mixed_list_journal_lost_after_destination_refuses() {
+    let mut env = TestEnv::new();
+    let m = mixed(&mut env);
+    apply_until(&env, &m.forge, &m.list, "destination");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let carriers: Vec<String> = std::fs::read_dir(m.forge2.join("tasks"))
+        .unwrap()
+        .filter_map(|entry| {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            let id = name.strip_suffix(".md")?.to_string();
+            (id != m.s).then_some(id)
+        })
+        .collect();
+    assert_eq!(carriers.len(), 4, "{carriers:?}");
+    let before = state(&env, &[&m.forge, &m.forge2]);
+    let detail = refused(&env, &m.forge, &m.list);
+    assert_eq!(state(&env, &[&m.forge, &m.forge2]), before);
+    let (carry, rest) = detail
+        .split_once("not carrying")
+        .unwrap_or_else(|| panic!("{detail}"));
+    for id in &carriers {
+        assert!(carry.contains(id.as_str()), "{id}: {detail}");
+    }
+    for id in [&m.g, &m.a, &m.b, &m.c, &m.r, &m.d] {
+        assert!(rest.contains(id.as_str()), "{id}: {detail}");
+    }
+    assert_eq!(explain(&env, &m.forge, &m.list)["recovery"], "refuse");
+}

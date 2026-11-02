@@ -1,7 +1,9 @@
 use super::{open_ctx, reject_retired};
 use crate::claims::MutationLock;
 use crate::error::{Error, Result};
-use crate::migrating::classify::{MigrationRecovery, Phase, classify_with_journal};
+use crate::migrating::classify::{
+    MigrationRecovery, Phase, classify_with_journal, classify_without_journal,
+};
 use crate::migrating::journal::MigrationJournal;
 use crate::migrating::list::{Decision, DecisionList, LoadedList};
 use crate::migrating::{MigrateCtx, apply, draft, list, preflight, project};
@@ -63,6 +65,11 @@ pub fn run(
     let mut ctx = open(dir, &loaded.list.successor)?;
     if let Some(journal) = MigrationJournal::load(&ctx.source.project.prefix)? {
         return Ok(Output::Migrate(explain_pending(&ctx, &journal, &loaded)?));
+    }
+    if let Some(mut out) = explain_finished(&ctx, &loaded)? {
+        out.warnings
+            .extend(preflight::reason_warnings(&loaded.list));
+        return Ok(Output::Migrate(out));
     }
     let (projection, refusals) = project::explain(&mut ctx, &loaded)?;
     let mut out = MigrateOut {
@@ -139,6 +146,38 @@ fn explain_pending(
     Ok(out)
 }
 
+/// `--explain` with no journal: the report of a run the records show `complete`, or a
+/// `refuse` naming what a run that lost its journal left unfinished; `None` when no record
+/// carries the list's sha256 and the list is reviewed as a fresh one.
+fn explain_finished(ctx: &MigrateCtx, loaded: &LoadedList) -> Result<Option<MigrateOut>> {
+    let snapshot = apply::completion_snapshot(ctx, loaded)?;
+    match classify_without_journal(loaded, &snapshot) {
+        MigrationRecovery::Fresh => Ok(None),
+        MigrationRecovery::Complete => Ok(Some(apply::completed_output(ctx, loaded, &snapshot)?)),
+        MigrationRecovery::Refuse(reason) => Ok(Some(MigrateOut {
+            source: ctx.source.project.prefix.clone(),
+            successor: ctx.target.prefix.clone(),
+            list: format!("sha256:{}", loaded.sha256),
+            recovery: "refuse".into(),
+            carried: Vec::new(),
+            dropped: Vec::new(),
+            closed: Vec::new(),
+            inbound: Vec::new(),
+            woken: Vec::new(),
+            unread_projects: Vec::new(),
+            paths: Default::default(),
+            warnings: ctx.source.warnings.clone(),
+            refusals: vec![RefusalOut {
+                id: ctx.source.project.prefix.clone(),
+                rule: "pending_operation".into(),
+                settle: reason,
+            }],
+            body_changes: Vec::new(),
+        })),
+        MigrationRecovery::Resume(_) => unreachable!("only a journal resumes"),
+    }
+}
+
 /// A pending rename, move or other migration naming either project; `own` is this
 /// source's journal, which is the run being continued.
 fn reject_other_operations(ctx: &MigrateCtx, own: Option<&MigrationJournal>) -> Result<()> {
@@ -195,7 +234,9 @@ fn apply_list(dir: Option<&Path>, path: &Path, loaded: &LoadedList) -> Result<Ou
     ))
 }
 
-/// Resume a pending run of this source, or preflight the list and start one.
+/// Resume a pending run of this source; with no journal, recognise a finished run from the
+/// records before the staleness check (whose digests a finished run has changed), or
+/// preflight the list and start one.
 fn decide(ctx: &mut MigrateCtx, path: &Path, loaded: &LoadedList) -> Result<MigrateOut> {
     let journal = MigrationJournal::load(&ctx.source.project.prefix)?;
     reject_other_operations(ctx, journal.as_ref())?;
@@ -206,6 +247,13 @@ fn decide(ctx: &mut MigrateCtx, path: &Path, loaded: &LoadedList) -> Result<Migr
             MigrationRecovery::Refuse(reason) => Err(Error::MovePending(reason)),
             other => unreachable!("a journal never classifies as {other:?}"),
         };
+    }
+    let snapshot = apply::completion_snapshot(ctx, loaded)?;
+    match classify_without_journal(loaded, &snapshot) {
+        MigrationRecovery::Fresh => {}
+        MigrationRecovery::Complete => return apply::completed_output(ctx, loaded, &snapshot),
+        MigrationRecovery::Refuse(reason) => return Err(Error::MovePending(reason)),
+        MigrationRecovery::Resume(_) => unreachable!("only a journal resumes"),
     }
     match project::preflight(ctx, loaded)? {
         Ok(projection) => {

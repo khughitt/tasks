@@ -952,7 +952,7 @@ impl Project {
         Ok((task, raw))
     }
 
-    fn task_files(&self) -> Result<Vec<TaskId>> {
+    pub(crate) fn task_files(&self) -> Result<Vec<TaskId>> {
         let mut ids = Vec::new();
         for entry in std::fs::read_dir(self.tasks_dir())? {
             let path = entry?.path();

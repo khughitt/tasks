@@ -386,6 +386,52 @@ pub fn write_doc(dir: &std::path::Path, rel: &str, text: &str) {
     std::fs::write(p, text).unwrap();
 }
 
+/// Moves `id`'s whole notes section into a synthetic note-archive segment attachment
+/// (`crlf` rewrites its line endings first) and leaves one inline `attached:` note for it.
+/// Returns the segment's file name and bytes. Constructs physical records directly, since
+/// no public command produces archives yet.
+pub fn archive_inline(root: &Path, id: &str, crlf: bool) -> (String, Vec<u8>) {
+    use sha2::{Digest, Sha256};
+    let record = root.join(format!("tasks/{id}.md"));
+    let raw = std::fs::read_to_string(&record).unwrap();
+    let split = raw.find("## Notes").unwrap();
+    let section = if crlf {
+        raw[split..].replace('\n', "\r\n")
+    } else {
+        raw[split..].to_string()
+    };
+    let count = section
+        .lines()
+        .filter(|line| line.starts_with("- "))
+        .count();
+    let hash = format!("{:x}", Sha256::digest(section.as_bytes()));
+    let name = format!("notes-{hash}.notes");
+    let descriptor = format!("v1:{hash}:{count}");
+    let mut prefix = raw[..split].to_string();
+    if let Some(line) = prefix
+        .lines()
+        .find(|line| line.starts_with("note_archives: "))
+    {
+        let replacement = format!("{}, \"{descriptor}\"]", line.strip_suffix(']').unwrap());
+        prefix = prefix.replacen(line, &replacement, 1);
+    } else {
+        prefix = prefix.replacen(
+            "\n---\n",
+            &format!("\nnote_archives: [\"{descriptor}\"]\n---\n"),
+            1,
+        );
+    }
+    let dir = root.join(format!("tasks/files/{id}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(&name), &section).unwrap();
+    let active = format!(
+        "{prefix}## Notes\n\n- 2026-10-31T00:00:00Z (fixture): attached: {name} ({} bytes)\n",
+        section.len()
+    );
+    std::fs::write(&record, active).unwrap();
+    (name, section.into_bytes())
+}
+
 pub fn id_of(value: serde_json::Value) -> String {
     value["id"].as_str().unwrap().to_string()
 }

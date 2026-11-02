@@ -1,13 +1,17 @@
-//! Recovery classification (spec §4.5 "Classification"), pure and closed as `move`'s. This
-//! is the path with a journal; the journal-less path decides `Fresh`, `Complete` or
-//! `Refuse` from the records alone.
+//! Recovery classification (spec §4.5 "Classification"), pure and closed as `move`'s, with
+//! two entry paths: `classify_with_journal` decides `Resume` or `Refuse` from a pending
+//! run's journal; `classify_without_journal` decides `Fresh`, `Complete` or `Refuse` from
+//! the records, the cleanup state and the commits alone (its snapshot is read by
+//! `apply::completion_snapshot`).
 
 use super::journal::MigrationJournal;
-use super::list::LoadedList;
+use super::list::{Decision, LoadedList};
 use crate::claims::{Escalation, Park};
+use crate::model::{Status, Task};
 use crate::moving::classify::FileState;
 use crate::rename::inventory::digest;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 /// The apply phases G2-G9, in order; G10 (removing the journal) follows the last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,12 +44,11 @@ impl Phase {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationRecovery {
-    // `Fresh` and `Complete` are the journal-less classification's verdicts (plan Task 6).
-    #[allow(dead_code)]
+    /// No record carries the list's sha256: preflight the list and start a run.
     Fresh,
     /// Continue from this phase: every earlier phase's effects are present.
     Resume(Phase),
-    #[allow(dead_code)]
+    /// The records, the cleanup and the commits all show the end state; nothing to write.
     Complete,
     Refuse(String),
 }
@@ -82,6 +85,284 @@ pub struct Snapshot {
 
 fn sha(text: &str) -> FileState {
     FileState::Digest(digest(text.as_bytes()))
+}
+
+/// One record as the journal-less classification reads it: parsed without resolving its
+/// archived note segments, so `notes` holds the inline notes only (every migration note is
+/// appended inline) and `note_archives` the descriptors.
+#[derive(Debug, Clone)]
+pub enum RecordRead {
+    Absent,
+    /// Present but not a record of this id: the parse error or mismatch.
+    Unreadable(String),
+    Present(Box<Task>),
+}
+
+/// What is on disk for one entry of the decision list, read without a journal.
+#[derive(Debug, Clone)]
+pub struct ListedState {
+    /// The listed id, canonical when it parses; as written otherwise.
+    pub id: String,
+    /// `None` for an entry without one of the three decisions.
+    pub decision: Option<Decision>,
+    /// The entry's reason text, `[reasons]` keys resolved (empty for a carry).
+    pub reason: String,
+    pub record: RecordRead,
+    /// The successor record the tombstone's `moved_to` names, when it names one.
+    pub target: Option<RecordRead>,
+    /// The source state of every attachment the tombstone marks moved out
+    /// (`moved_out`) or retains as a note-archive segment (`retained`).
+    pub source_files: BTreeMap<String, FileState>,
+    /// This host's source store holds a park or an escalation keyed by the listed id.
+    pub park: bool,
+    pub escalation: bool,
+}
+
+/// Everything `classify_without_journal` reads, gathered by `apply::completion_snapshot`.
+#[derive(Debug, Clone)]
+pub struct CompletionSnapshot {
+    pub source: String,
+    pub successor: String,
+    /// The source records directory, for naming attachment paths.
+    pub source_records: PathBuf,
+    /// Parallel to the list's `[[task]]` entries.
+    pub listed: Vec<ListedState>,
+    /// Successor records whose notes carry the list's sha256, by id.
+    pub successor_carriers: Vec<String>,
+    /// The run's owned paths (derived from the list and the records) that are not clean,
+    /// under records directories that set `[git] commit`.
+    pub uncommitted: Vec<PathBuf>,
+}
+
+/// ` list: sha256:<hex>`, the suffix of every migration note of this list (spec §4.4).
+pub fn note_suffix(list: &LoadedList) -> String {
+    format!(" list: sha256:{}", list.sha256)
+}
+
+/// Some note of `task` carries the list's sha256.
+pub fn carries(task: &Task, suffix: &str) -> bool {
+    task.notes.iter().any(|note| note.text.ends_with(suffix))
+}
+
+/// The attachments a tombstone's ledger marks `detached: <name>: moved to <new id>`.
+pub fn moved_out(task: &Task) -> Vec<String> {
+    let Some(to) = &task.moved_to else {
+        return Vec::new();
+    };
+    let tail = format!(": moved to {to}");
+    let names: BTreeSet<String> = task
+        .notes
+        .iter()
+        .filter_map(|note| {
+            let name = note.text.strip_prefix("detached: ")?.strip_suffix(&tail)?;
+            crate::attachments::validate_name(name).ok()?;
+            Some(name.to_string())
+        })
+        .collect();
+    names.into_iter().collect()
+}
+
+/// The note-archive segment attachments a record's `note_archives` names.
+pub fn retained(task: &Task) -> Vec<String> {
+    task.note_archives
+        .iter()
+        .map(|archive| archive.file_name())
+        .collect()
+}
+
+/// The dependents a drop or close note released and the dependencies it left open, read
+/// from the note `<verb> in migration to <succ>: <reason>[; released: …][; still open: …]`
+/// followed by `suffix`. `None` when `task` has no such note.
+pub fn closing_note(
+    task: &Task,
+    decision: Decision,
+    successor: &str,
+    reason: &str,
+    suffix: &str,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let verb = match decision {
+        Decision::Drop => "dropped",
+        Decision::Close => "closed",
+        Decision::Carry => return None,
+    };
+    let head = format!("{verb} in migration to {successor}: {reason}");
+    let ids = |text: &str| -> Vec<String> { text.split(", ").map(String::from).collect() };
+    task.notes.iter().rev().find_map(|note| {
+        let middle = note.text.strip_prefix(&head)?.strip_suffix(suffix)?;
+        let (released, open) = match middle.split_once("; still open: ") {
+            Some((released, open)) => (released, ids(open)),
+            None => (middle, Vec::new()),
+        };
+        let released = match released {
+            "" => Vec::new(),
+            text => ids(text.strip_prefix("; released: ")?),
+        };
+        Some((released, open))
+    })
+}
+
+/// Spec §4.5, without a journal: `Complete` only when every listed record shows its
+/// decision's end state with this list's sha256, every carried attachment the tombstone
+/// moved out is gone from the source while every note-archive segment it names is present
+/// with its descriptor's digest, no listed id has a park or escalation in the source store,
+/// and no owned path is uncommitted where `[git] commit` is set; `Fresh` when no record
+/// carries the sha256; otherwise `Refuse`, naming every unfinished item.
+pub fn classify_without_journal(
+    list: &LoadedList,
+    snapshot: &CompletionSnapshot,
+) -> MigrationRecovery {
+    let suffix = note_suffix(list);
+    let mut carrying = Vec::new();
+    let mut not_carrying = Vec::new();
+    for listed in &snapshot.listed {
+        match &listed.record {
+            RecordRead::Present(task) if carries(task, &suffix) => {
+                carrying.push(listed.id.clone());
+            }
+            RecordRead::Present(_) => not_carrying.push(listed.id.clone()),
+            RecordRead::Absent => not_carrying.push(format!("{} (missing)", listed.id)),
+            RecordRead::Unreadable(detail) => {
+                not_carrying.push(format!("{} (unreadable: {detail})", listed.id));
+            }
+        }
+    }
+    carrying.extend(snapshot.successor_carriers.iter().cloned());
+    if carrying.is_empty() {
+        return MigrationRecovery::Fresh;
+    }
+    if !not_carrying.is_empty() {
+        return unfinished(
+            list,
+            vec![format!(
+                "records carrying this list's sha256: {}; records not carrying it: {}",
+                carrying.join(", "),
+                not_carrying.join(", ")
+            )],
+        );
+    }
+    let mut items = Vec::new();
+    let mut targets = BTreeSet::new();
+    let source_file = |id: &str, name: &str| {
+        snapshot
+            .source_records
+            .join(format!("tasks/files/{id}/{name}"))
+    };
+    for listed in &snapshot.listed {
+        let RecordRead::Present(task) = &listed.record else {
+            unreachable!("every listed record carries the sha256 here");
+        };
+        let id = &listed.id;
+        match listed.decision {
+            Some(Decision::Carry) => {
+                let Some(to) = task
+                    .moved_to
+                    .as_ref()
+                    .filter(|_| task.status == Status::Moved)
+                else {
+                    items.push(format!(
+                        "{id} carries this list's sha256 but is {}, not a tombstone",
+                        task.status.as_str()
+                    ));
+                    continue;
+                };
+                if !task
+                    .notes
+                    .iter()
+                    .any(|note| note.text == format!("moved to {to}{suffix}"))
+                {
+                    items.push(format!(
+                        "{id}'s tombstone does not note `moved to {to}` with this list's sha256"
+                    ));
+                }
+                targets.insert(to.to_string());
+                match &listed.target {
+                    Some(RecordRead::Present(target))
+                        if target.moved_from.as_ref().map(ToString::to_string).as_ref()
+                            == Some(id)
+                            && target
+                                .notes
+                                .iter()
+                                .any(|note| note.text == format!("moved from {id}{suffix}")) => {}
+                    Some(RecordRead::Present(_)) => items.push(format!(
+                        "{to} does not point back to {id} with this list's sha256"
+                    )),
+                    Some(RecordRead::Absent) | None => items.push(format!(
+                        "{id}'s tombstone points to {to}, which is not a {} record",
+                        snapshot.successor
+                    )),
+                    Some(RecordRead::Unreadable(detail)) => {
+                        items.push(format!("{to} is unreadable: {detail}"));
+                    }
+                }
+                for name in moved_out(task) {
+                    if listed.source_files.get(&name) != Some(&FileState::Absent) {
+                        items.push(format!(
+                            "attachment {} is still in the source (moved to {to})",
+                            source_file(id, &name).display()
+                        ));
+                    }
+                }
+                for archive in &task.note_archives {
+                    let name = archive.file_name();
+                    if listed.source_files.get(&name)
+                        != Some(&FileState::Digest(archive.sha256.clone()))
+                    {
+                        items.push(format!(
+                            "note-archive segment {} is missing or differs from its descriptor's digest; restore it from a verified copy",
+                            source_file(id, &name).display()
+                        ));
+                    }
+                }
+            }
+            Some(decision @ (Decision::Drop | Decision::Close)) => {
+                let (want, verb) = if decision == Decision::Drop {
+                    (Status::Dropped, "drop")
+                } else {
+                    (Status::Done, "close")
+                };
+                if task.status != want
+                    || closing_note(task, decision, &snapshot.successor, &listed.reason, &suffix)
+                        .is_none()
+                {
+                    items.push(format!(
+                        "{id} carries this list's sha256 but is {} without the {verb} note the list decides",
+                        task.status.as_str()
+                    ));
+                }
+            }
+            None => items.push(format!(
+                "{id} carries this list's sha256 but its list entry decides nothing"
+            )),
+        }
+        for (held, kind) in [(listed.park, "park"), (listed.escalation, "escalation")] {
+            if held {
+                items.push(format!("{id} {kind} in {}'s store", snapshot.source));
+            }
+        }
+    }
+    for carrier in &snapshot.successor_carriers {
+        if !targets.contains(carrier) {
+            items.push(format!(
+                "{carrier} carries this list's sha256 but no tombstone points to it"
+            ));
+        }
+    }
+    for path in &snapshot.uncommitted {
+        items.push(format!("uncommitted {}", path.display()));
+    }
+    if items.is_empty() {
+        MigrationRecovery::Complete
+    } else {
+        unfinished(list, items)
+    }
+}
+
+fn unfinished(list: &LoadedList, items: Vec<String>) -> MigrationRecovery {
+    MigrationRecovery::Refuse(format!(
+        "a migration by this list (sha256:{}) is unfinished and has no journal on this host (lost mid-run, or run on another host and not fully synced): {}; finish it by hand, item by item: remove a source attachment only when the tombstone marks it `detached: <name>: moved to <new id>` and the destination copy has the same sha256, and never remove a note-archive segment; for a carried task's source store entry, write the entry re-keyed to the new id when the destination has none, remove the source entry when the destination's equals it, and change neither store when they differ until you have reconciled them; remove a dropped or closed task's source store entry; commit uncommitted paths by pathspec; then rerun the same `tasks migrate`",
+        list.sha256,
+        items.join("; ")
+    ))
 }
 
 pub fn classify_with_journal(
@@ -331,6 +612,136 @@ mod tests {
     fn refuses(j: &MigrationJournal, s: &Snapshot, name: &str) {
         match classify_with_journal(j, s, &list("list")) {
             MigrationRecovery::Refuse(reason) => assert!(reason.contains(name), "{reason}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn task(id: &str, status: &str, notes: &[&str]) -> Task {
+        let text = SOURCE
+            .replace("forge-00000a", id)
+            .replace("status: todo", &format!("status: {status}"));
+        let physical = crate::format::parse_physical(&text, "t").unwrap();
+        let mut task = physical.assemble(Vec::new());
+        for note in notes {
+            crate::commands::append_note(&mut task, "o", note).unwrap();
+        }
+        task
+    }
+
+    fn closed_state(id: &str, decision: Decision, record: RecordRead) -> ListedState {
+        ListedState {
+            id: id.into(),
+            decision: Some(decision),
+            reason: "gone".into(),
+            record,
+            target: None,
+            source_files: BTreeMap::new(),
+            park: false,
+            escalation: false,
+        }
+    }
+
+    fn completion(listed: Vec<ListedState>) -> CompletionSnapshot {
+        CompletionSnapshot {
+            source: "forge".into(),
+            successor: "forge2".into(),
+            source_records: "/s".into(),
+            listed,
+            successor_carriers: vec![],
+            uncommitted: vec![],
+        }
+    }
+
+    #[test]
+    fn closing_notes_read_released_and_still_open_ids() {
+        let suffix = " list: sha256:00";
+        let note = |text: &str| task("forge-00000c", "done", &[text]);
+        let read = |t: &Task| closing_note(t, Decision::Close, "forge2", "gone; x", suffix);
+        assert_eq!(
+            read(&note(
+                "closed in migration to forge2: gone; x list: sha256:00"
+            )),
+            Some((vec![], vec![]))
+        );
+        assert_eq!(
+            read(&note(
+                "closed in migration to forge2: gone; x; released: ops-00000a, ops-00000b; still open: ops-00000c list: sha256:00"
+            )),
+            Some((
+                vec!["ops-00000a".to_string(), "ops-00000b".to_string()],
+                vec!["ops-00000c".to_string()]
+            ))
+        );
+        assert_eq!(
+            read(&note(
+                "closed in migration to forge2: gone; x list: sha256:01"
+            )),
+            None
+        );
+        assert_eq!(
+            read(&note(
+                "closed in migration to forge2: gone; x; extra list: sha256:00"
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn without_a_journal_the_records_decide() {
+        let l = list("list");
+        let suffix = note_suffix(&l);
+        let dropped = format!("dropped in migration to forge2: gone{suffix}");
+        let fresh = completion(vec![closed_state(
+            "forge-00000c",
+            Decision::Drop,
+            RecordRead::Present(Box::new(task("forge-00000c", "todo", &[]))),
+        )]);
+        assert_eq!(
+            classify_without_journal(&l, &fresh),
+            MigrationRecovery::Fresh
+        );
+        let done = completion(vec![closed_state(
+            "forge-00000c",
+            Decision::Drop,
+            RecordRead::Present(Box::new(task("forge-00000c", "dropped", &[&dropped]))),
+        )]);
+        assert_eq!(
+            classify_without_journal(&l, &done),
+            MigrationRecovery::Complete
+        );
+        // The sha256 with the wrong outcome.
+        let wrong = completion(vec![closed_state(
+            "forge-00000c",
+            Decision::Close,
+            RecordRead::Present(Box::new(task("forge-00000c", "dropped", &[&dropped]))),
+        )]);
+        match classify_without_journal(&l, &wrong) {
+            MigrationRecovery::Refuse(reason) => {
+                assert!(reason.contains("forge-00000c carries"), "{reason}")
+            }
+            other => panic!("{other:?}"),
+        }
+        // A store entry or an uncommitted path keeps a final record set unfinished.
+        let mut parked = done.clone();
+        parked.listed[0].escalation = true;
+        let mut dirty = done.clone();
+        dirty.uncommitted.push("/s/tasks/forge-00000c.md".into());
+        for (snapshot, name) in [
+            (parked, "forge-00000c escalation"),
+            (dirty, "uncommitted /s/tasks/forge-00000c.md"),
+        ] {
+            match classify_without_journal(&l, &snapshot) {
+                MigrationRecovery::Refuse(reason) => assert!(reason.contains(name), "{reason}"),
+                other => panic!("{other:?}"),
+            }
+        }
+        // A successor record no tombstone points to.
+        let mut stray = done;
+        stray.successor_carriers.push("forge2-00000b".into());
+        match classify_without_journal(&l, &stray) {
+            MigrationRecovery::Refuse(reason) => {
+                assert!(reason.contains("forge2-00000b carries"), "{reason}")
+            }
             other => panic!("{other:?}"),
         }
     }
