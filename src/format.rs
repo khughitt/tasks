@@ -64,11 +64,22 @@ impl PhysicalTask {
     pub fn id(&self) -> &TaskId {
         &self.metadata.id
     }
+    pub fn title(&self) -> &str {
+        &self.metadata.title
+    }
+
     pub fn status(&self) -> Status {
         self.metadata.status
     }
     pub fn updated(&self) -> &str {
         &self.metadata.updated
+    }
+    pub fn parent(&self) -> Option<&TaskId> {
+        self.metadata.parent.as_ref()
+    }
+    /// The body as the record stores it: what reading the record back gives.
+    pub fn body(&self) -> &str {
+        &self.metadata.body
     }
 
     pub(crate) fn assemble(mut self, notes: Vec<Note>) -> Task {

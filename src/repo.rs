@@ -964,7 +964,7 @@ impl Project {
         Ok((task, raw))
     }
 
-    fn task_files(&self) -> Result<Vec<TaskId>> {
+    pub(crate) fn task_files(&self) -> Result<Vec<TaskId>> {
         let mut ids = Vec::new();
         for entry in std::fs::read_dir(self.tasks_dir())? {
             let path = entry?.path();
@@ -1058,6 +1058,7 @@ impl Project {
         crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
+        crate::migrating::freeze::check_stored(registry, self, task)?;
         let path = self.task_path(&task.id);
         let raw = serialize_physical(&self.physical_for_save(task)?);
         before_write()?;
@@ -1394,6 +1395,8 @@ impl Project {
         // A new record has no children, so these refuse only a lane.
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
+        // `add`'s write path: a new record has nothing to restore.
+        crate::migrating::freeze::check_write(registry, self, None, task)?;
         for _ in 0..16 {
             task.id = TaskId {
                 prefix: self.prefix.clone(),

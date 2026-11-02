@@ -746,10 +746,24 @@ not an undo; follow the [manual rollback procedure](../../docs/specs/2026-09-08-
 
 ## Retiring a project
 
-A project that is over declares it: settle every open task (close or drop it, or move it
-to the successor with `tasks move <id> --to <successor>`; re-file with
-`--source <old id>` and drop the source when the task should change), then
-`tasks retire [--successor <prefix>] --reason "<one line>"`
+A project that is over declares it. With a successor, migrate the open work in one list:
+`tasks migrate --to <succ> --draft <file>` writes an entry per open task. Fill every
+decision yourself: `carry`, `drop` or `close` with a `reason`, plus the keys a refusal
+asks for (`parent`, `rm_depends`, `release`, `links = "drop"`, `body`). Run
+`tasks migrate <file> --explain --pretty` until it has no refusals and show it to the
+user, who checks it. Commit the list in the source records (recommended
+`docs/notes/<date>-<prefix>-succession.toml`), run `tasks migrate <file>`, then
+`tasks retire --successor <succ> --reason "<one line>"`. Rerun the same `tasks migrate <file>`
+after any interruption: while pending, both projects are frozen except the exact repair
+commands a refusal names, and the run is forward-only (no rollback). The freeze holds only
+on the host running it, so keep other hosts from writing to either project until the run
+completes and its records have synced. If the journal is lost mid-run, the refusal names
+what is unfinished and the manual finish is §4.6 of the successor-migration design spec (2026-11-02, in the tasks project's records directory under docs/specs; `tasks where` names the directory).
+A journal lost right after attachments were copied, before any record was written, reruns
+as fresh; `tasks check` then reports the first run's copies as `attachment_orphan`: detach
+or remove them. Without a successor, settle each task (close or drop it, or move one with
+`tasks move <id> --to <prefix>`; re-file with `--source <old id>` when it should change), then
+`tasks retire --reason "<one line>"`
 in its registered checkout. Every write to it is refused afterwards with `retired_project`,
 from every checkout; its ids keep resolving, `--all-projects` and `--group` reads leave it
 out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle

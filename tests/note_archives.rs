@@ -1,6 +1,6 @@
 mod common;
 
-use common::TestEnv;
+use common::{TestEnv, archive_inline};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -11,47 +11,6 @@ fn digest(bytes: &[u8]) -> String {
 
 fn raw_path(root: &Path, id: &str) -> PathBuf {
     root.join(format!("tasks/{id}.md"))
-}
-
-// Construct synthetic physical records before the public archive producer exists.
-fn archive_inline(root: &Path, id: &str, crlf: bool) -> (String, Vec<u8>) {
-    let raw = std::fs::read_to_string(raw_path(root, id)).unwrap();
-    let split = raw.find("## Notes").unwrap();
-    let section = if crlf {
-        raw[split..].replace('\n', "\r\n")
-    } else {
-        raw[split..].to_string()
-    };
-    let count = section
-        .lines()
-        .filter(|line| line.starts_with("- "))
-        .count();
-    let hash = digest(section.as_bytes());
-    let name = format!("notes-{hash}.notes");
-    let descriptor = format!("v1:{hash}:{count}");
-    let mut prefix = raw[..split].to_string();
-    if let Some(line) = prefix
-        .lines()
-        .find(|line| line.starts_with("note_archives: "))
-    {
-        let replacement = format!("{}, \"{descriptor}\"]", line.strip_suffix(']').unwrap());
-        prefix = prefix.replacen(line, &replacement, 1);
-    } else {
-        prefix = prefix.replacen(
-            "\n---\n",
-            &format!("\nnote_archives: [\"{descriptor}\"]\n---\n"),
-            1,
-        );
-    }
-    let dir = root.join(format!("tasks/files/{id}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(&name), &section).unwrap();
-    let active = format!(
-        "{prefix}## Notes\n\n- 2026-10-31T00:00:00Z (fixture): attached: {name} ({} bytes)\n",
-        section.len()
-    );
-    std::fs::write(raw_path(root, id), active).unwrap();
-    (name, section.into_bytes())
 }
 
 fn fixture() -> (TestEnv, PathBuf, String, Value, String, Vec<u8>) {

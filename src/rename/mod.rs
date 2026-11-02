@@ -44,14 +44,18 @@ pub(crate) fn dir_identity(path: &std::path::Path) -> Result<std::path::PathBuf>
 /// Observation is repeated here after lock acquisition; explain needs none of the locks.
 pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> Result<RenameOut> {
     let snapshot = observe(registry, invocation, Inventory::load(&invocation.source)?)?;
-    let pending = crate::moving::journal::Journal::pending()?
+    let source = registry.canonical_prefix(&invocation.source).to_string();
+    let target = registry.canonical_prefix(&invocation.target).to_string();
+    let pending = match crate::moving::journal::Journal::pending()?
         .into_iter()
-        .find(|journal| {
-            journal.names_prefix(registry.canonical_prefix(&invocation.source))
-                || journal.names_prefix(registry.canonical_prefix(&invocation.target))
-        });
-    let recovery = if let Some(journal) = pending {
-        let error = journal.pending_error();
+        .find(|journal| journal.names_prefix(&source) || journal.names_prefix(&target))
+    {
+        Some(journal) => Some(journal.pending_error()),
+        None => crate::migrating::journal::pending_naming(&source, None)?
+            .or(crate::migrating::journal::pending_naming(&target, None)?)
+            .map(|journal| journal.pending_error()),
+    };
+    let recovery = if let Some(error) = pending {
         if !explain {
             return Err(error);
         }

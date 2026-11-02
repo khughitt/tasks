@@ -10,6 +10,39 @@ use time::OffsetDateTime;
 /// Rejects a `parent` that is foreign, missing, or would make `task` its own ancestor.
 /// Reads ancestors from disk, so it is the write-path check; `check` uses `parent_cycle`.
 pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    validate_parent_among(project, registry, task, &[])
+}
+
+/// A record of `project` as it will stand: one of `projected` (records not yet written,
+/// which win), else the one on disk. `None` when neither holds it.
+fn projected_read(
+    project: &Project,
+    projected: &[Task],
+    registry: &Registry,
+    id: &TaskId,
+) -> Result<Option<Task>> {
+    if let Some(task) = projected
+        .iter()
+        .find(|task| registry.canonical_id(&task.id) == *id)
+    {
+        return Ok(Some(task.clone()));
+    }
+    match project.read_task(id) {
+        Ok(task) => Ok(Some(task)),
+        Err(Error::TaskNotFound(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// `validate_parent` over the project as it will stand once `projected` is written: a
+/// parent or ancestor may be one of those records. With `projected` empty, it is the
+/// write-path check.
+pub fn validate_parent_among(
+    project: &Project,
+    registry: &Registry,
+    task: &Task,
+    projected: &[Task],
+) -> Result<()> {
     let Some(stored_parent) = &task.parent else {
         return Ok(());
     };
@@ -24,13 +57,17 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
     if parent == task_id {
         return Err(Error::Cycle(format!("{parent} -> {parent}")));
     }
-    if !project.task_path(&parent).is_file() {
+    let projected_parent = projected
+        .iter()
+        .any(|record| registry.canonical_id(&record.id) == parent);
+    if !projected_parent && !project.task_path(&parent).is_file() {
         return Err(Error::UnresolvableId(format!(
             "parent {parent} does not exist"
         )));
     }
     // A recurrence or deferred task is never a goal, so nothing may hang beneath one.
-    let parent_record = project.read_task(&parent)?;
+    let parent_record = projected_read(project, projected, registry, &parent)?
+        .ok_or_else(|| Error::TaskNotFound(parent.to_string()))?;
     crate::tombstone::refuse_reference(&parent_record, "parent")?;
     crate::moving::journal::refuse_pending_id(&parent)?;
     if parent_record.every.is_some() {
@@ -52,10 +89,8 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
             path.push(id);
             return Err(Error::Cycle(join(&path)));
         }
-        let ancestor = match project.read_task(&id) {
-            Ok(ancestor) => ancestor,
-            Err(Error::TaskNotFound(_)) => break,
-            Err(error) => return Err(error),
+        let Some(ancestor) = projected_read(project, projected, registry, &id)? else {
+            break;
         };
         path.push(id);
         current = ancestor
@@ -73,6 +108,18 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
 /// and the project is scanned only when the record's subtree could newly meet a lane, so
 /// ordinary writes inside a lane stay cheap; nesting already on disk is `check`'s to report.
 pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    validate_lanes_among(project, registry, task, &[])
+}
+
+/// `validate_lanes` over the project as it will stand once `projected` is written: an
+/// ancestor or descendant may be one of those records. `task` itself is judged against
+/// what is on disk, so a projected record not yet written has no stored copy.
+pub fn validate_lanes_among(
+    project: &Project,
+    registry: &Registry,
+    task: &Task,
+    projected: &[Task],
+) -> Result<()> {
     let task_id = registry.canonical_id(&task.id);
     // A record not yet on disk has no children, and any lane above it is new nesting.
     let stored = match project.read_task(&task_id) {
@@ -90,7 +137,7 @@ pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Re
     if !became_lane && !moved {
         return Ok(());
     }
-    let above = lane_above(project, registry, task)?;
+    let above = lane_above(project, registry, task, projected)?;
     if task.lane
         && let Some(outer) = &above
     {
@@ -102,7 +149,16 @@ pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Re
     if stored.is_none() || (!became_lane && above.is_none()) {
         return Ok(());
     }
-    let all = project.scan()?;
+    let mut all: Vec<Task> = project
+        .scan()?
+        .into_iter()
+        .filter(|stored| {
+            !projected
+                .iter()
+                .any(|record| registry.canonical_id(&record.id) == stored.id)
+        })
+        .collect();
+    all.extend(projected.iter().cloned());
     let Some(inner) = descendants(&all, &task_id, registry)
         .into_iter()
         .find(|descendant| descendant.lane)
@@ -119,7 +175,12 @@ pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Re
 }
 
 /// The nearest lane above `task` on disk. A loop or a missing parent ends the walk.
-fn lane_above(project: &Project, registry: &Registry, task: &Task) -> Result<Option<TaskId>> {
+fn lane_above(
+    project: &Project,
+    registry: &Registry,
+    task: &Task,
+    projected: &[Task],
+) -> Result<Option<TaskId>> {
     let mut seen = HashSet::new();
     let mut current = task
         .parent
@@ -129,10 +190,8 @@ fn lane_above(project: &Project, registry: &Registry, task: &Task) -> Result<Opt
         if !seen.insert(id.clone()) {
             break;
         }
-        let ancestor = match project.read_task(&id) {
-            Ok(ancestor) => ancestor,
-            Err(Error::TaskNotFound(_)) => break,
-            Err(error) => return Err(error),
+        let Some(ancestor) = projected_read(project, projected, registry, &id)? else {
+            break;
         };
         if ancestor.lane {
             return Ok(Some(id));

@@ -484,6 +484,22 @@ pub enum Command {
         #[arg(long)]
         explain: bool,
     },
+    /// Carry, drop or close every open task of a project into its successor from a reviewed decision list
+    #[command(group(clap::ArgGroup::new("what").required(true).args(["list", "draft"])))]
+    Migrate {
+        /// The reviewed decision list to explain or apply.
+        #[arg(value_name = "PATH", conflicts_with = "draft")]
+        list: Option<std::path::PathBuf>,
+        /// The successor project (with --draft; a list names its own).
+        #[arg(long, value_name = "PREFIX", conflicts_with = "list", add = ArgValueCandidates::new(crate::complete::prefixes))]
+        to: Option<String>,
+        /// Write a draft decision list to this new path.
+        #[arg(long, value_name = "PATH", requires = "to", conflicts_with = "explain")]
+        draft: Option<std::path::PathBuf>,
+        /// Validate the list and report its consequences, without locks or writes.
+        #[arg(long)]
+        explain: bool,
+    },
     /// Remove a prefix from the registry. Project files are left untouched.
     Unregister {
         #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]
@@ -1144,6 +1160,7 @@ impl Command {
             Command::Detach { .. } => "detach",
             Command::Feedback { .. } => "feedback",
             Command::Move { .. } => "move",
+            Command::Migrate { .. } => "migrate",
             _ => return None,
         })
     }

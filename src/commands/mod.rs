@@ -17,7 +17,8 @@ pub mod group;
 pub mod init;
 pub mod lanes;
 pub mod list;
-mod move_;
+mod migrate;
+pub(crate) mod move_;
 pub mod park;
 pub mod parked;
 pub mod projects;
@@ -820,6 +821,15 @@ pub fn reject_pending_rename(project: &Project) -> Result<()> {
 }
 
 pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()> {
+    match pending_rename_at(root, prefix)? {
+        Some(detail) => Err(Error::Validation(detail)),
+        None => Ok(()),
+    }
+}
+
+/// The refusal text of an unfinished rename naming this root or prefix, if there is one;
+/// every other failure (an unreadable inventory) is an error.
+pub fn pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<Option<String>> {
     let root = root.map(crate::rename::root_identity).transpose()?;
     for inventory in crate::rename::inventory::Inventory::pending()? {
         let inventory_root = crate::rename::root_identity(&inventory.root)?;
@@ -827,13 +837,26 @@ pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()>
             || inventory.source == prefix
             || inventory.target == prefix
         {
-            return Err(Error::Validation(format!(
+            return Ok(Some(format!(
                 "a rename of {:?} to {:?} is unfinished; finish it with `tasks rename {} {}` or roll it back (see the design doc)",
                 inventory.source, inventory.target, inventory.source, inventory.target
             )));
         }
     }
-    Ok(())
+    Ok(None)
+}
+
+/// The refusal text of a pending move naming this prefix, if there is one.
+pub fn pending_move(prefix: &str) -> Result<Option<String>> {
+    for journal in crate::moving::journal::Journal::pending()? {
+        if journal.names_prefix(prefix) {
+            return Ok(Some(match journal.pending_error() {
+                Error::MovePending(detail) => detail,
+                other => unreachable!("pending_error is move_pending, got {other:?}"),
+            }));
+        }
+    }
+    Ok(None)
 }
 
 pub fn reject_pending_operations(root: Option<&Path>, prefix: &str) -> Result<()> {
@@ -842,6 +865,9 @@ pub fn reject_pending_operations(root: Option<&Path>, prefix: &str) -> Result<()
         if journal.names_prefix(prefix) {
             return Err(journal.pending_error());
         }
+    }
+    if let Some(journal) = crate::migrating::journal::pending_naming(prefix, None)? {
+        return Err(journal.pending_error());
     }
     Ok(())
 }
@@ -1193,7 +1219,11 @@ pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
 fn load_with_raw(ctx: &mut Ctx, id: &TaskId) -> Result<(Task, String)> {
     let (task, raw) = match ctx.project.read_task_with_raw(id) {
         Ok(found) => found,
-        Err(Error::TaskNotFound(_)) => return Err(missing_record(ctx, id)?),
+        Err(Error::TaskNotFound(_)) => {
+            // An id a pending run reserves but has not written yet is frozen too.
+            crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(id))?;
+            return Err(missing_record(ctx, id)?);
+        }
         Err(error) => return Err(error),
     };
     refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
@@ -1445,10 +1475,20 @@ pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
 
 /// Appends a note stamped with the harness session provenance, when the environment names one.
 pub fn append_stamped_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str) -> Result<()> {
+    append_stamped_note_to(&mut ctx.warnings, task, by, text)
+}
+
+/// `append_stamped_note` for a caller that collects its warnings without a `Ctx`.
+pub(crate) fn append_stamped_note_to(
+    warnings: &mut Vec<String>,
+    task: &mut Task,
+    by: &str,
+    text: &str,
+) -> Result<()> {
     append_note(task, by, text)?;
     match crate::provenance::resolve_from(|name| std::env::var_os(name)) {
         Ok(provenance) => task.notes.last_mut().expect("just appended").provenance = provenance,
-        Err(diagnostic) => ctx.warnings.push(diagnostic),
+        Err(diagnostic) => warnings.push(diagnostic),
     }
     Ok(())
 }
@@ -1637,7 +1677,7 @@ fn provenance_var(name: &str) -> Result<Option<String>> {
 }
 
 /// The model the harness reports for this completion, from `TASKS_MODEL`.
-fn completion_model() -> Result<Option<String>> {
+pub(crate) fn completion_model() -> Result<Option<String>> {
     provenance_var("TASKS_MODEL")
 }
 
@@ -1651,6 +1691,62 @@ pub fn creation_agent(explicit: Option<&str>) -> Result<Option<String>> {
         }
         None => provenance_var("TASKS_AGENT"),
     }
+}
+
+/// When a recurrence completed at `now` comes due again.
+fn next_due(now: &str, every: crate::periodic::Interval) -> Result<time::OffsetDateTime> {
+    crate::periodic::add(crate::time::parse(now)?, every).ok_or_else(|| {
+        Error::Validation(format!(
+            "completing now plus every {every} is not a representable timestamp"
+        ))
+    })
+}
+
+/// The field effects of a status change to `to` stamped at `now`, with no checks and no
+/// notes: `transition` runs its checks first, and `migrate` renders a drop or close
+/// through this (successor-migration spec §4.4). `model` is recorded on a completion.
+pub(crate) fn apply_status_effects(
+    task: &mut Task,
+    to: Status,
+    now: &str,
+    model: Option<String>,
+) -> Result<()> {
+    let completing = to == Status::Done && task.status != Status::Done;
+    let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
+    if to == Status::Doing && task.started.is_none() {
+        task.started = Some(now.to_string());
+    }
+    if completing {
+        task.model = model;
+        task.completed = Some(now.to_string());
+    } else if task.status == Status::Done && to != Status::Done {
+        task.completed = None;
+    }
+    // Wait-aware spec §3.3: every close stamps `closed`; a reopen clears it. `move` never
+    // passes through here, so a tombstone carries none.
+    if closing {
+        task.closed = Some(now.to_string());
+    } else if matches!(task.status, Status::Done | Status::Dropped) && to.is_open() {
+        task.closed = None;
+    }
+    if task.status != to {
+        // spec §2.2: a deferral is spent by a status change.
+        task.defer = None;
+        if task.status == Status::Shelved {
+            task.wake_on.clear();
+        }
+        // Review-state spec §3.2: a status change spends a review; a return to idea
+        // arrives unreviewed.
+        task.reviewed = false;
+        task.reviewed_at = None;
+        task.awaiting_user = false;
+    }
+    task.status = to;
+    if completing && let Some(every) = task.every {
+        next_due(now, every)?;
+        task.last_done = Some(now.to_string());
+    }
+    Ok(())
 }
 
 pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
@@ -1736,42 +1832,14 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     // One instant for everything this transition stamps, so a recurring completion's
     // `completed` and `last_done` agree to the second (spec §3).
     let now = crate::time::now();
-    if to == Status::Doing && task.started.is_none() {
-        task.started = Some(now.clone());
-    }
-    if completing {
-        task.model = completion_model()?;
-        task.completed = Some(now.clone());
-    } else if task.status == Status::Done && to != Status::Done {
-        task.completed = None;
-    }
-    // Wait-aware spec §3.3: every close stamps `closed`; a reopen clears it. `move` never
-    // passes through here, so a tombstone carries none.
-    if closing {
-        task.closed = Some(now.clone());
-    } else if matches!(task.status, Status::Done | Status::Dropped) && to.is_open() {
-        task.closed = None;
-    }
-    if task.status != to {
-        // spec §2.2: a deferral is spent by a status change.
-        task.defer = None;
-        if task.status == Status::Shelved {
-            task.wake_on.clear();
-        }
-        // Review-state spec §3.2: a status change spends a review; a return to idea
-        // arrives unreviewed.
-        task.reviewed = false;
-        task.reviewed_at = None;
-        task.awaiting_user = false;
-    }
-    task.status = to;
+    let model = if completing {
+        completion_model()?
+    } else {
+        None
+    };
+    apply_status_effects(task, to, &now, model)?;
     if completing && let Some(every) = task.every {
-        let next = crate::periodic::add(crate::time::parse(&now)?, every).ok_or_else(|| {
-            Error::Validation(format!(
-                "completing now plus every {every} is not a representable timestamp"
-            ))
-        })?;
-        task.last_done = Some(now);
+        let next = next_due(&now, every)?;
         let owner = owner_name(&ctx.project)?;
         append_stamped_note(
             ctx,
@@ -1817,6 +1885,8 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, task)?;
+    // The migration freeze, before the claim store moves: `write_task` checks it again.
+    crate::migrating::freeze::check_stored(&ctx.registry, &ctx.project, task)?;
     let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {
@@ -2068,6 +2138,12 @@ fn dispatch(cli: Cli) -> Result<Output> {
             adopt,
         } => rename::run(dir, old, new, explain, adopt),
         Command::Move { id, to, explain } => move_::run(dir, &id, &to, explain),
+        Command::Migrate {
+            list,
+            to,
+            draft,
+            explain,
+        } => migrate::run(dir, list, to, draft, explain),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Retire { successor, reason } => {
             let project = open_ctx(dir)?.project;

@@ -405,6 +405,8 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks group rm vf                # delete the group; its projects stay registered
     tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project
     tasks move dots-5760ef --to wali --explain  # diagnose without locks or writes
+    tasks migrate --to mind6 --draft list.toml  # decide every open task of a retiring project, then
+    tasks migrate list.toml --explain --pretty  #   review it, and `tasks migrate list.toml` to apply
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
     tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
@@ -1003,6 +1005,37 @@ journal, `move_incomplete` for a reachable missing or mismatched counterpart, an
 `move_counterpart_unreachable` when it cannot inspect the counterpart.
 Recovery covers process interruption, not power loss; parks on other hosts stay keyed
 to the old id. See [recovery limits and manual undo](docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
+
+### Migrating to a successor
+
+`tasks migrate --to <successor> --draft <file>` writes a decision list for every open
+task of the project in tree order, each with an empty `decision`. Fill every entry:
+`carry`, or `drop` / `close` with a `reason`. Carry keys settle what a refusal asks:
+`parent` (a carried id, a successor task, or `none`), `rm_depends`, `links = "drop"`,
+and a replacement `body`. A drop or close lists in `release` every open dependent it
+frees, in every reachable project, the successor included; tasks the list also drops or
+closes are not dependents. A close also lists carried dependents, by their source ids,
+since their edge now resolves to a done record; a drop does not, and each carried
+dependent instead names the dropped task in its `rm_depends`. `tasks migrate <file>
+--explain` reports every refusal at once without locks or writes; `--pretty` prints the
+review in this order: refusals, the successor tree of carried tasks (new parents marked),
+drops grouped by reason with released dependents, closes with reasons, woken shelves,
+outside dependents of carried tasks, removed edges and dropped links, then body diffs. Show that review to the user, commit the list in the source records
+(recommended `docs/notes/<date>-<prefix>-succession.toml`), run `tasks migrate <file>`,
+then `tasks retire --successor <successor>`.
+
+`migrate` writes through the same journaled protocol as `move`, for the whole list.
+Rerun the same `tasks migrate <file>` after any interruption: while a run is pending,
+both projects are frozen except the exact repair commands a refusal names, and the run
+only goes forward (there is no rollback command). The freeze holds only on the host
+running the migration: keep other hosts from writing to either project until the run
+completes and its records have synced. If the host-local journal is lost mid-run, the
+refusal names what is unfinished and the manual finish is in the successor-migration design spec (2026-11-02, in the tasks project's records directory under docs/specs; `tasks where` names the directory), section 4.6. A
+journal lost right after attachments were copied but before any record was written
+reruns as fresh; `check` then reports the first run's copies as `attachment_orphan`:
+detach or remove them. The output (`MigrateOut`) lists, per carried task, its new id,
+parent, rewrites, attachments and park, and per dropped or closed task its reason and
+released dependents; every note the run writes carries `list: sha256:<digest>`.
 
 ### Task references
 
@@ -1656,7 +1689,7 @@ Opt in per project in tasks/.config.toml:
 - Absent or false keeps manual commits; any other key in `[git]` is a config error.
 - Each write commits its records and attachment changes, once per git working tree, plus anything the repository's pre-commit hook stages; staging by another git process while the commit runs can land in it.
 - Configuration changes are not committed automatically: `init`, `rename`, `retire` and `unretire` leave tasks/.config.toml for you to commit, or for `tasks commit` to sweep. `init --records` warns, naming the path and `tasks commit`, when it wrote or changed a `[git] commit` config in a git repository; unchanged bytes give no warning.
-- Subjects are `chore(tasks): <verb> <id>[ <id>…]`; `add` and `feedback` append the title, with the subject capped at 72 characters, with no trailer.
+- Subjects are `chore(tasks): <verb> <id>[ <id>…]`; `add` and `feedback` append the title, with the subject capped at 72 characters, with no trailer. `migrate` instead writes `chore(tasks): migrate <source> to <successor> (<n> tasks)`, `<n>` counting the listed tasks, with that commit's ids in the body.
 - `commit_unavailable:` means git is missing or the root is outside git; `commit_deferred:` means staged changes, detached HEAD or an in-progress git operation; `commit_failed:` means a git operation or hook failed.
 - A successful write still exits 0 when its commit is skipped or fails; `cleanup needs attention:` means cleanup failed or the index could not be checked, so inspect the named paths and index.
 - Clear the warning's cause, then run `tasks commit [--project <p>]` to recover or sweep every uncommitted file under tasks/ into one commit; it ignores the switch and exits 1 when it cannot commit.

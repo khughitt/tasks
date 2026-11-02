@@ -383,13 +383,15 @@ impl Journal {
     }
 }
 
+/// The freeze every record write passes: a pending move, or a pending migration (its
+/// listed and new ids), naming `id` refuses.
 pub fn refuse_pending_id(id: &TaskId) -> Result<()> {
     for journal in Journal::pending()? {
         if journal.names_id(id) {
             return Err(journal.pending_error());
         }
     }
-    Ok(())
+    crate::migrating::journal::refuse_pending_id(id)
 }
 
 fn validate_digest(path: &Path, field: &str, value: &str) -> Result<()> {

@@ -61,6 +61,91 @@ pub struct MoveOut {
     pub warnings: Vec<String>,
 }
 
+/// One reason a decision list cannot run, and the list key or command that settles it.
+#[derive(Serialize)]
+pub struct RefusalOut {
+    pub id: String,
+    pub rule: String,
+    pub settle: String,
+}
+
+#[derive(Serialize)]
+pub struct BodyChange {
+    pub id: String,
+    pub diff: String,
+}
+
+#[derive(Serialize)]
+pub struct CarriedOut {
+    pub from: String,
+    /// Assigned only when a run is being resumed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub parent: Option<String>,
+    pub rewrites: Vec<String>,
+    pub attachments: Vec<String>,
+    pub park: bool,
+}
+
+#[derive(Serialize)]
+pub struct DroppedOut {
+    pub id: String,
+    pub reason: String,
+    pub released: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ClosedOut {
+    pub id: String,
+    pub reason: String,
+    pub open_depends: Vec<String>,
+    pub released: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct InboundOut {
+    pub id: String,
+    pub dependents: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct WokenOut {
+    pub id: String,
+    pub shelves: Vec<String>,
+}
+
+/// `tasks migrate <list>`: spec §4.7. `refusals` and `body_changes` appear on `--explain`.
+#[derive(Serialize)]
+pub struct MigrateOut {
+    pub source: String,
+    pub successor: String,
+    /// `sha256:<64 hex>` of the list file.
+    pub list: String,
+    pub recovery: String,
+    pub carried: Vec<CarriedOut>,
+    pub dropped: Vec<DroppedOut>,
+    pub closed: Vec<ClosedOut>,
+    pub inbound: Vec<InboundOut>,
+    pub woken: Vec<WokenOut>,
+    pub unread_projects: Vec<String>,
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub refusals: Vec<RefusalOut>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub body_changes: Vec<BodyChange>,
+    /// Titles for the pretty review, keyed by v1 id and, where assigned, new id. Not JSON.
+    #[serde(skip)]
+    pub titles: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Serialize)]
+pub struct DraftOut {
+    pub path: String,
+    pub tasks: usize,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct RenameOut {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1410,6 +1495,8 @@ pub enum Output {
     Init(InitOut),
     Rename(RenameOut),
     Move(MoveOut),
+    MigrateDraft(DraftOut),
+    Migrate(MigrateOut),
     Id(IdOut),
     Commit(CommitOut),
     Add(AddOut),
@@ -1481,6 +1568,169 @@ fn halt_line(halts: &[HaltRow]) -> String {
     format!("halt: {named}; allowed: halt work, linked work, or equally urgent priority{missing}\n")
 }
 
+/// The migration review the user reads (spec §4.8): refusals, the successor tree for the
+/// carried tasks, drops with the dependents they release, closes, removed edges and dropped
+/// links, then body diffs.
+fn migrate_review(o: &MigrateOut) -> String {
+    let named = |id: &str| match o.titles.get(id) {
+        Some(title) => format!("{id} {title}"),
+        None => id.to_string(),
+    };
+    let named_all = |ids: &[String]| ids.iter().map(|i| named(i)).collect::<Vec<_>>().join(", ");
+    let mut text = format!("{} → {} ({})", o.source, o.successor, o.recovery);
+    if !o.refusals.is_empty() {
+        text.push_str("\n\nrefusals:");
+        for r in &o.refusals {
+            text.push_str(&format!("\n  {} [{}]: {}", r.id, r.rule, r.settle));
+        }
+    }
+    if !o.carried.is_empty() {
+        text.push_str("\n\ncarried:");
+        let label = |row: &CarriedOut| {
+            let mut label = row.id.as_ref().map_or_else(
+                || named(&row.from),
+                |id| format!("{} -> {id}", named(&row.from)),
+            );
+            if row.park {
+                label.push_str(" [parked]");
+            }
+            if !row.attachments.is_empty() {
+                label.push_str(&format!(" [{} attachments]", row.attachments.len()));
+            }
+            if row.rewrites.iter().any(|r| {
+                r.starts_with("parent set to")
+                    || r.contains("overridden; set to")
+                    || r.contains("not carried; set to")
+            }) {
+                label.push_str(" (new parent)");
+            }
+            label
+        };
+        let carried_parent = |row: &CarriedOut| {
+            row.parent
+                .as_deref()
+                .and_then(|p| p.strip_prefix("new:"))
+                .map(str::to_string)
+        };
+        // Roots first: the successor's top level, then each successor parent.
+        let mut places: Vec<Option<&str>> = Vec::new();
+        for row in &o.carried {
+            if carried_parent(row).is_none() && !places.contains(&row.parent.as_deref()) {
+                places.push(row.parent.as_deref());
+            }
+        }
+        places.sort();
+        fn walk(
+            text: &mut String,
+            o: &MigrateOut,
+            from: &str,
+            depth: usize,
+            label: &dyn Fn(&CarriedOut) -> String,
+            carried_parent: &dyn Fn(&CarriedOut) -> Option<String>,
+        ) {
+            for row in o
+                .carried
+                .iter()
+                .filter(|row| carried_parent(row).as_deref() == Some(from))
+            {
+                text.push_str(&format!("\n{}{}", "  ".repeat(depth), label(row)));
+                walk(text, o, &row.from, depth + 1, label, carried_parent);
+            }
+        }
+        for place in places {
+            let depth = match place {
+                None => 1,
+                Some(parent) => {
+                    text.push_str(&format!("\n  under {parent}:"));
+                    2
+                }
+            };
+            for row in o
+                .carried
+                .iter()
+                .filter(|row| carried_parent(row).is_none() && row.parent.as_deref() == place)
+            {
+                text.push_str(&format!("\n{}{}", "  ".repeat(depth), label(row)));
+                walk(&mut text, o, &row.from, depth + 1, &label, &carried_parent);
+            }
+        }
+    }
+    if !o.dropped.is_empty() {
+        text.push_str("\n\ndropped:");
+        let mut reasons: std::collections::BTreeMap<&str, Vec<&DroppedOut>> = Default::default();
+        for d in &o.dropped {
+            reasons.entry(d.reason.as_str()).or_default().push(d);
+        }
+        for (reason, rows) in reasons {
+            text.push_str(&format!("\n  {reason}:"));
+            for d in rows {
+                text.push_str(&format!("\n    {}", named(&d.id)));
+                if !d.released.is_empty() {
+                    text.push_str(&format!(" (released: {})", named_all(&d.released)));
+                }
+            }
+        }
+    }
+    if !o.closed.is_empty() {
+        text.push_str("\n\nclosed:");
+        for c in &o.closed {
+            text.push_str(&format!("\n  {}: {}", named(&c.id), c.reason));
+            if !c.released.is_empty() {
+                text.push_str(&format!(" (released: {})", named_all(&c.released)));
+            }
+            if !c.open_depends.is_empty() {
+                text.push_str(&format!(
+                    " (open dependencies: {})",
+                    c.open_depends.join(", ")
+                ));
+            }
+        }
+    }
+    if !o.woken.is_empty() {
+        text.push_str("\n\nwoken shelves:");
+        for w in &o.woken {
+            text.push_str(&format!("\n  {}: {}", named(&w.id), w.shelves.join(", ")));
+        }
+    }
+    if !o.inbound.is_empty() {
+        text.push_str("\n\noutside dependents of carried tasks:");
+        for i in &o.inbound {
+            text.push_str(&format!(
+                "\n  {}: {}",
+                named(&i.id),
+                i.dependents.join(", ")
+            ));
+        }
+    }
+    let removed: Vec<(&str, &str)> = o
+        .carried
+        .iter()
+        .flat_map(|row| {
+            row.rewrites
+                .iter()
+                .filter(|r| r.starts_with("removed ") || r.contains(" dropped (not in "))
+                .map(move |r| (row.from.as_str(), r.as_str()))
+        })
+        .collect();
+    if !removed.is_empty() {
+        text.push_str("\n\nremoved:");
+        for (from, what) in removed {
+            text.push_str(&format!("\n  {}: {what}", named(from)));
+        }
+    }
+    if !o.body_changes.is_empty() {
+        text.push_str("\n\nbody:");
+        for change in &o.body_changes {
+            text.push_str(&format!(
+                "\n{}:\n{}",
+                change.id,
+                change.diff.trim_end_matches('\n')
+            ));
+        }
+    }
+    text
+}
+
 fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> String {
     match out {
         Output::AttachmentEligibility(out) => out
@@ -1532,6 +1782,8 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
             text
         }
+        Output::MigrateDraft(o) => format!("{}: {} tasks to decide", o.path, o.tasks),
+        Output::Migrate(o) => migrate_review(o),
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Commit(o) => {
@@ -2696,6 +2948,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Retire(o) => o.warnings.clone(),
         Output::Rename(o) => o.warnings.clone(),
         Output::Move(o) => o.warnings.clone(),
+        Output::MigrateDraft(o) => o.warnings.clone(),
+        Output::Migrate(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Commit(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),

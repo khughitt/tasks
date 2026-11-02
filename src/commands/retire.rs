@@ -4,10 +4,11 @@
 
 use crate::claims::{ClaimStore, MutationLock};
 use crate::error::{Error, Result};
+use crate::model::Task;
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project, Retirement, validate_retirement};
 use crate::scope::Origin;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn retire(here: Project, successor: Option<String>, reason: String) -> Result<Retirement> {
     let _lock = MutationLock::acquire(&here.prefix)?;
@@ -103,9 +104,10 @@ fn reject_live_claims(project: &Project) -> Result<()> {
     Ok(())
 }
 
-/// Every checkout's tasks/, the registered one included: a todo filed in a worktree and
-/// never merged is open work too. Anything that cannot be read stops the retirement.
-fn reject_open_copies(project: &Project) -> Result<()> {
+/// Every open record in every checkout's tasks/, the registered one included, as
+/// (checkout root, record, raw text): a todo filed in a worktree and never merged is open
+/// work too. Anything that cannot be read is an error.
+pub(crate) fn open_copies(project: &Project) -> Result<Vec<(PathBuf, Task, String)>> {
     let unreadable = |what: &Path, e: &dyn std::fmt::Display| {
         Error::UnreadableCheckout(format!("{}: {e}", what.display()))
     };
@@ -140,15 +142,27 @@ fn reject_open_copies(project: &Project) -> Result<()> {
             let task =
                 crate::format::parse_physical(&raw, &file).map_err(|e| unreadable(&path, &e))?;
             if task.status().is_open() {
-                open.push(format!(
-                    "{} ({}) in {}",
-                    task.id(),
-                    task.status().as_str(),
-                    root.display()
-                ));
+                open.push((root.clone(), task.assemble(Vec::new()), raw));
             }
         }
     }
+    Ok(open)
+}
+
+/// Every checkout's tasks/, the registered one included: a todo filed in a worktree and
+/// never merged is open work too. Anything that cannot be read stops the retirement.
+fn reject_open_copies(project: &Project) -> Result<()> {
+    let open: Vec<String> = open_copies(project)?
+        .into_iter()
+        .map(|(root, task, _)| {
+            format!(
+                "{} ({}) in {}",
+                task.id,
+                task.status.as_str(),
+                root.display()
+            )
+        })
+        .collect();
     if open.is_empty() {
         Ok(())
     } else {
