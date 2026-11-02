@@ -93,7 +93,7 @@ pub fn write(ctx: &MigrateCtx, path: &Path) -> Result<DraftOut> {
         table["digest"] = value(format!("sha256:{:x}", Sha256::digest(&bytes)));
         table["decision"] = value("");
         let mut comment = String::from("\n");
-        for line in context(ctx, task, &tasks, &everything, &claims, &resolver) {
+        for line in context(ctx, task, &tasks, &everything, &claims, &resolver)? {
             comment.push_str("# ");
             comment.push_str(&line);
             comment.push('\n');
@@ -139,7 +139,7 @@ fn context(
     everything: &BTreeMap<String, Task>,
     claims: &ClaimSnapshot,
     resolver: &Resolver,
-) -> Vec<String> {
+) -> Result<Vec<String>> {
     let mut lines = vec![
         format!("{}  [{}]", task.title, task.status.as_str()),
         format!("priority: {}", task.priority),
@@ -189,28 +189,39 @@ fn context(
             park.next_step
         ));
     }
-    lines.extend(unresolved(ctx, task, resolver));
-    lines
+    lines.extend(unresolved(ctx, task, resolver)?);
+    Ok(lines)
 }
 
 /// Spec, plan, step and local reference entries that do not resolve in the successor,
 /// with any `[ref:<handle>]` citation of them in the body.
-fn unresolved(ctx: &MigrateCtx, task: &Task, resolver: &Resolver) -> Vec<String> {
+fn unresolved(ctx: &MigrateCtx, task: &Task, resolver: &Resolver) -> Result<Vec<String>> {
     let mut lines = Vec::new();
     let project = &ctx.target.prefix;
+    let mut plan_resolves = true;
     for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
-        if let Some(path) = path
-            && !matches!(crate::format::external_doc(path), Ok(Some(_)))
-            && let Err(error) = resolver.resolve_doc(kind, path)
-        {
-            lines.push(format!(
-                "{} {path} does not resolve in {project}: {error}",
-                kind.name()
-            ));
+        let Some(path) = path else { continue };
+        if crate::format::external_doc(path)?.is_some() {
+            continue;
+        }
+        match resolver.resolve_doc(kind, path) {
+            Ok(_) => {}
+            // The document is not there (or not addressable) in the successor: a fact
+            // for the reader. Any other error is a failure to look, and stops the draft.
+            Err(error @ (Error::DocNotFound(_) | Error::Ambiguous(_) | Error::Validation(_))) => {
+                plan_resolves &= kind != DocKind::Plan;
+                lines.push(format!(
+                    "{} {path} does not resolve in {project}: {error}",
+                    kind.name()
+                ));
+            }
+            Err(error) => return Err(error),
         }
     }
     if let (Some(plan), Some(step)) = (&task.plan, &task.step)
-        && !matches!(resolver.step_exists(plan, step), Ok(true))
+        && plan_resolves
+        && crate::format::external_doc(plan)?.is_none()
+        && !resolver.step_exists(plan, step)?
     {
         lines.push(format!("step {step:?} of {plan} not found in {project}"));
     }
@@ -225,11 +236,10 @@ fn unresolved(ctx: &MigrateCtx, task: &Task, resolver: &Resolver) -> Vec<String>
         if entry.relation == Relation::Output {
             continue;
         }
-        let Ok(crate::refs::Location::Path(path)) = crate::refs::location(&entry.reference) else {
+        let crate::refs::Location::Path(path) = crate::refs::location(&entry.reference)? else {
             continue;
         };
-        let missing = matches!(resolver.locate_entry(path), Ok(LocatedEntry::Missing));
-        if missing {
+        if matches!(resolver.locate_entry(path)?, LocatedEntry::Missing) {
             let cite = if cited.contains(&entry.handle.as_str()) {
                 format!(" (cited as [ref:{}])", entry.handle)
             } else {
@@ -241,5 +251,5 @@ fn unresolved(ctx: &MigrateCtx, task: &Task, resolver: &Resolver) -> Vec<String>
             ));
         }
     }
-    lines
+    Ok(lines)
 }

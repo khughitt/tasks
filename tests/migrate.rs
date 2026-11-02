@@ -182,3 +182,155 @@ fn migrate_open_refusals_match_move() {
     assert!(detail.contains("migrate"), "{detail}");
     assert!(!list.exists());
 }
+
+fn comment_above(text: &str, id: &str) -> String {
+    let at = text.find(&format!("id = \"{id}\"")).unwrap();
+    let head = text[..at].rfind("[[task]]").unwrap();
+    let start = text[..head]
+        .rfind("\n\n")
+        .map(|n| n + 2)
+        .unwrap_or_default();
+    text[start..head].to_string()
+}
+
+fn draft(env: &TestEnv, dir: &std::path::Path, name: &str) -> (String, String) {
+    let list = dir.join(name);
+    let out = env.json(
+        dir,
+        &[
+            "migrate",
+            "--to",
+            "forge2",
+            "--draft",
+            list.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(out["warnings"], serde_json::json!([]));
+    (std::fs::read_to_string(&list).unwrap(), name.to_string())
+}
+
+#[test]
+fn draft_comments_carry_claims_parks_dependents_and_unresolved_links() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let ops_dir = env.init("ops");
+    for dir in ["docs/specs", "docs/plans", "docs/notes"] {
+        std::fs::create_dir_all(forge.join(dir)).unwrap();
+    }
+    std::fs::write(forge.join("docs/specs/design.md"), "# Design\n").unwrap();
+    std::fs::write(
+        forge.join("docs/plans/work.md"),
+        "# Plan\n\n### Task 1: one\n",
+    )
+    .unwrap();
+    std::fs::write(forge.join("docs/notes/b.md"), "brief\n").unwrap();
+    let claimed = id_of(env.json(&forge, &["add", "Claimed one"]));
+    env.json(&forge, &["start", &claimed]);
+    let parked = id_of(env.json(&forge, &["add", "Parked one"]));
+    env.json(&forge, &["start", &parked]);
+    env.json(&forge, &["park", &parked, "resume the parser"]);
+    let needed = id_of(env.json(&forge, &["add", "Needed one"]));
+    let linked = id_of(env.json(
+        &forge,
+        &[
+            "add",
+            "Linked one",
+            "--spec",
+            "docs/specs/design.md",
+            "--plan",
+            "docs/plans/work.md",
+            "--step",
+            "Task 1: one",
+            "--body",
+            "Read [ref:brief] first.",
+            "--ref",
+            "brief (input): docs/notes/b.md",
+        ],
+    ));
+    let dependent = id_of(env.json(&ops_dir, &["add", "Waits on forge", "--depends", &needed]));
+
+    let (text, _) = draft(&env, &forge, "list.toml");
+    let claim = comment_above(&text, &claimed);
+    assert!(claim.contains("LIVE CLAIM"), "{claim}");
+    let park = comment_above(&text, &parked);
+    assert!(
+        park.contains("parked by") && park.contains("resume the parser"),
+        "{park}"
+    );
+    let need = comment_above(&text, &needed);
+    assert!(
+        need.contains(&format!("open dependent in another project: {dependent}")),
+        "{need}"
+    );
+    // spec, plan, step and ref all resolve in the successor only if present there.
+    let missing = comment_above(&text, &linked);
+    assert!(
+        missing.contains("spec docs/specs/design.md does not resolve in forge2"),
+        "{missing}"
+    );
+    assert!(
+        missing.contains("plan docs/plans/work.md does not resolve in forge2"),
+        "{missing}"
+    );
+    assert!(
+        missing
+            .contains("ref brief docs/notes/b.md does not exist in forge2 (cited as [ref:brief])"),
+        "{missing}"
+    );
+
+    // Once the successor holds them, the draft says nothing about them.
+    for dir in ["docs/specs", "docs/plans", "docs/notes"] {
+        std::fs::create_dir_all(forge2.join(dir)).unwrap();
+    }
+    std::fs::write(forge2.join("docs/specs/design.md"), "# Design\n").unwrap();
+    std::fs::write(
+        forge2.join("docs/plans/work.md"),
+        "# Plan\n\n### Task 1: one\n",
+    )
+    .unwrap();
+    std::fs::write(forge2.join("docs/notes/b.md"), "brief\n").unwrap();
+    let (text, _) = draft(&env, &forge, "again.toml");
+    assert!(
+        !comment_above(&text, &linked).contains("does not"),
+        "{}",
+        comment_above(&text, &linked)
+    );
+    // A plan present but without the step is reported as a missing step.
+    std::fs::write(forge2.join("docs/plans/work.md"), "# Plan\n").unwrap();
+    let (text, _) = draft(&env, &forge, "step.toml");
+    assert!(
+        comment_above(&text, &linked)
+            .contains("step \"Task 1: one\" of docs/plans/work.md not found")
+    );
+}
+
+#[test]
+fn draft_stops_on_a_resolver_error_instead_of_commenting_it_away() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    std::fs::create_dir_all(forge.join("docs/notes")).unwrap();
+    std::fs::write(forge.join("docs/notes/b.md"), "brief\n").unwrap();
+    env.json(
+        &forge,
+        &["add", "Linked", "--ref", "brief (input): docs/notes/b.md"],
+    );
+    // A symlink loop in the successor is not "absent": looking at it fails with ELOOP.
+    std::fs::create_dir_all(forge2.join("docs/notes")).unwrap();
+    std::os::unix::fs::symlink("b.md", forge2.join("docs/notes/b.md")).unwrap();
+    let list = forge.join("list.toml");
+    let out = env
+        .cmd(&forge)
+        .args([
+            "migrate",
+            "--to",
+            "forge2",
+            "--draft",
+            list.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(!list.exists(), "a failed draft writes nothing");
+}
