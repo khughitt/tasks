@@ -238,6 +238,71 @@ fn checkout_path(records: &Path, raw: Option<CheckoutConfig>) -> Result<Option<(
         .map_err(|problem| Error::Config(format!("{CONFIG_REL}: [checkout] path: {problem}")))
 }
 
+/// The document roots and the `[git] commit` switch a config declares, with their
+/// defaults: one reading for `Project::from_config` and `Project::plan_detached`, so a
+/// planned config and the project it opens as cannot disagree.
+fn doc_layout(config: &Config) -> Result<(Vec<String>, Vec<String>, bool)> {
+    Ok((
+        doc_roots("spec_dirs", config.spec_dirs.clone(), DEFAULT_SPEC_DIRS)?,
+        doc_roots("plan_dirs", config.plan_dirs.clone(), DEFAULT_PLAN_DIRS)?,
+        config.git.as_ref().is_some_and(|git| git.commit),
+    ))
+}
+
+/// A detached pairing's config write, computed before anything is written
+/// (relocation design §4.5): `init` writes it after every refusal and computation,
+/// saves the registry, and restores it when that save fails.
+pub struct DetachedPlan {
+    /// `<records>/tasks/.config.toml`.
+    pub config: PathBuf,
+    /// The config's bytes before the command; `None` when it did not exist.
+    pub before: Option<Vec<u8>>,
+    /// The text to write; `None` when the bytes would not change.
+    pub after: Option<String>,
+    /// The checkout the config declared before a relocation rewrote it.
+    pub relocated_from: Option<PathBuf>,
+    /// The first spec directory, relative to the records directory.
+    pub spec_dir: PathBuf,
+    /// The first plan directory, relative to the records directory.
+    pub plan_dir: PathBuf,
+    /// The planned config's `[git] commit`.
+    pub commit_records: bool,
+}
+
+impl DetachedPlan {
+    fn records(&self) -> &Path {
+        self.config
+            .parent()
+            .and_then(Path::parent)
+            .expect("the config path is <records>/tasks/.config.toml")
+    }
+
+    /// Creates `<records>/tasks` and the first spec and plan directories, then writes the
+    /// planned config (atomic) when it changes.
+    pub fn write(&self) -> Result<()> {
+        let records = self.records();
+        std::fs::create_dir_all(records.join("tasks"))?;
+        std::fs::create_dir_all(records.join(&self.spec_dir))?;
+        std::fs::create_dir_all(records.join(&self.plan_dir))?;
+        if let Some(after) = &self.after {
+            atomic_write(&self.config, after.as_bytes())?;
+        }
+        Ok(())
+    }
+
+    /// Puts the config back as it was before `write`: its previous bytes (atomic), or no
+    /// file when `write` created it. Nothing to do when `write` changed nothing.
+    pub fn restore(&self) -> Result<()> {
+        if self.after.is_none() {
+            return Ok(());
+        }
+        match &self.before {
+            Some(bytes) => atomic_write(&self.config, bytes),
+            None => Ok(std::fs::remove_file(&self.config)?),
+        }
+    }
+}
+
 /// An existing config made detached, as a `toml_edit` edit so its comments and unrelated
 /// tables survive (as `retire` edits `[retired]`): `[checkout]` with `path` and
 /// `kind = "detached"` when the table is absent, and `[git] commit = true` when the table
@@ -576,14 +641,22 @@ impl Project {
         Ok(project)
     }
 
-    /// Writes or adopts the config of a detached project whose records directory is
-    /// `records` (canonical) and whose code checkout is `checkout` (records-detached spec
-    /// §5.1). A new config gets `prefix`, `[git] commit = true` and `[checkout]` with the
-    /// path relative to `records` and `kind = "detached"`. An existing one (a migration, or
-    /// a second host the sync delivered it to) keeps its text: a different prefix or another
-    /// `[checkout]` is refused, a missing `[checkout]` is added and `[git] commit` is set,
-    /// and the file is written only when that changed it. Nothing is written in `checkout`.
-    pub fn init_detached(records: &Path, prefix: &str, checkout: &Path) -> Result<Project> {
+    /// The config a detached project's pairing writes, computed without writing anything
+    /// (records-detached spec §5.1, relocation design §4.5). `records` is the records
+    /// directory, canonical or under the canonical records root when it does not exist
+    /// yet; `checkout` is the validated code checkout. A new config gets `prefix`,
+    /// `[git] commit = true` and `[checkout]` with the path relative to `records` and
+    /// `kind = "detached"`. An existing one (a migration, or a second host the sync
+    /// delivered it to) keeps its text: a different prefix or another `[checkout]` is
+    /// refused, a missing `[checkout]` is added and `[git] commit` is set. The planned
+    /// text is never opened as a `Project`: on a first pairing `records` does not exist,
+    /// and `[checkout] path` cannot be normalized through it.
+    pub fn plan_detached(
+        records: &Path,
+        prefix: &str,
+        checkout: &Path,
+        _force: bool,
+    ) -> Result<DetachedPlan> {
         if !is_valid_prefix(prefix) {
             return Err(Error::Config(format!(
                 "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
@@ -597,8 +670,7 @@ impl Project {
                 checkout.display()
             ))
         })?;
-        std::fs::create_dir_all(records.join("tasks"))?;
-        if config.exists() {
+        let (before, planned) = if config.exists() {
             let existing = Self::open(records)?;
             if existing.prefix != prefix {
                 return Err(Error::Config(format!(
@@ -620,9 +692,7 @@ impl Project {
             }
             let text = std::fs::read_to_string(&config)?;
             let detached = detach_config(&text, path)?;
-            if detached != text {
-                atomic_write(&config, detached.as_bytes())?;
-            }
+            (Some(text.into_bytes()), detached)
         } else {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
@@ -642,12 +712,21 @@ impl Project {
                 git: Some(GitConfig { commit: true }),
             })
             .expect("config serializes");
-            atomic_write(&config, text.as_bytes())?;
-        }
-        let project = Self::open(records)?;
-        std::fs::create_dir_all(project.records.join(&project.spec_dirs[0]))?;
-        std::fs::create_dir_all(project.records.join(&project.plan_dirs[0]))?;
-        Ok(project)
+            (None, text)
+        };
+        let parsed: Config = toml::from_str(&planned)
+            .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
+        let (spec_dirs, plan_dirs, commit_records) = doc_layout(&parsed)?;
+        let after = (before.as_deref() != Some(planned.as_bytes())).then_some(planned);
+        Ok(DetachedPlan {
+            config,
+            before,
+            after,
+            relocated_from: None,
+            spec_dir: PathBuf::from(&spec_dirs[0]),
+            plan_dir: PathBuf::from(&plan_dirs[0]),
+            commit_records,
+        })
     }
 
     /// Opens the project whose `tasks/.config.toml` is under `dir`, the records directory.
@@ -667,6 +746,7 @@ impl Project {
                 config.prefix
             )));
         }
+        let (spec_dirs, plan_dirs, commit_records) = doc_layout(&config)?;
         let (kind, root, checkout) = match checkout_path(&records, config.checkout)? {
             None => (Kind::InTree, records.clone(), records.clone()),
             Some((Kind::Detached, code)) => (Kind::Detached, code.clone(), code),
@@ -678,7 +758,7 @@ impl Project {
             kind,
             checkout,
             worktree: None,
-            commit_records: config.git.is_some_and(|git| git.commit),
+            commit_records,
             prefix: config.prefix,
             color: config
                 .color
@@ -688,8 +768,8 @@ impl Project {
                     })
                 })
                 .transpose()?,
-            spec_dirs: doc_roots("spec_dirs", config.spec_dirs, DEFAULT_SPEC_DIRS)?,
-            plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
+            spec_dirs,
+            plan_dirs,
             tags: tag_dictionary(config.tags)?,
             feedback: feedback_scope(config.feedback)?,
             needs: need_vocabulary(config.needs)?,

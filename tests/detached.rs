@@ -2256,3 +2256,59 @@ fn plain_init_cannot_take_a_pending_relocation() {
     assert_eq!(registry_text(&env), registry);
     assert!(!moved.join("tasks").exists() && !overlay.join("tasks").exists());
 }
+
+#[test]
+fn a_failed_history_step_leaves_no_config_and_no_registry() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    let link = l.code.join(".worktrees");
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(".worktrees", &link).unwrap();
+    let detail = fail_detail(&env, &l.code, &init_records("det", &l.records), "io");
+    assert!(
+        detail.contains("Too many levels of symbolic links"),
+        "{detail}"
+    );
+    assert!(!l.project.join("tasks/.config.toml").exists());
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    assert!(
+        !registry.exists() || !registry_text(&env).contains("det"),
+        "{}",
+        registry_text(&env)
+    );
+}
+
+/// Makes the registry directory read-only for `run`, restoring it before returning `run`'s
+/// result. `None` when the directory stays writable (running as root), so no save can fail.
+fn with_read_only_registry<T>(env: &TestEnv, run: impl FnOnce() -> T) -> Option<T> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = env.home.path().join(".config/tasks");
+    let set = |mode| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode));
+    set(0o555).unwrap();
+    let probe = dir.join(".probe");
+    if std::fs::write(&probe, "").is_ok() {
+        std::fs::remove_file(&probe).unwrap();
+        set(0o755).unwrap();
+        eprintln!("registry directory stays writable (root?); save failure not exercised");
+        return None;
+    }
+    let out = run();
+    set(0o755).unwrap();
+    Some(out)
+}
+
+#[test]
+fn a_registry_save_failure_on_a_first_pairing_leaves_no_config() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    env.init("oth");
+    let registry = registry_text(&env);
+    let Some(detail) = with_read_only_registry(&env, || {
+        fail_detail(&env, &l.code, &init_records("det", &l.records), "io")
+    }) else {
+        return;
+    };
+    assert!(detail.contains("Permission denied"), "{detail}");
+    assert!(!l.project.join("tasks/.config.toml").exists());
+    assert_eq!(registry_text(&env), registry);
+}
