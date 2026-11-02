@@ -85,6 +85,9 @@ pub fn run(
             derived.canonicalize()
         })
         .transpose()?;
+    let config_before = records
+        .as_ref()
+        .map(|derived| std::fs::read(derived.join(crate::repo::CONFIG_REL)).ok());
     let project = match &records {
         Some(derived) => {
             let project = Project::init_detached(derived, &prefix, &root)?;
@@ -125,6 +128,19 @@ pub fn run(
         ));
     }
     warnings.extend(history);
+    if let Some(before) = config_before {
+        let config = project.records.join(crate::repo::CONFIG_REL);
+        if project.commit_records
+            && std::fs::read(&config).ok() != before
+            && inside_git(&project.records)
+        {
+            warnings.push(format!(
+                "{} was written and is not committed; init does not commit configuration, so \
+                 run `tasks commit --project {prefix}` to record it",
+                config.display()
+            ));
+        }
+    }
     if !skill_installed(&project.root) {
         warnings.push(
             "no tasks skill found at user or project level; install skills/tasks (see README)"
@@ -483,4 +499,15 @@ fn validate_records(
         }
     }
     Ok(derived)
+}
+
+/// Whether `dir` is inside a git working tree; a missing git executable counts as outside.
+fn inside_git(dir: &Path) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
