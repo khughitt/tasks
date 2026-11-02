@@ -2676,3 +2676,31 @@ fn mixed_list_journal_lost_after_destination_refuses() {
     }
     assert_eq!(explain(&env, &m.forge, &m.list)["recovery"], "refuse");
 }
+
+#[test]
+fn an_unreadable_successor_record_carrying_the_sha_is_never_fresh() {
+    // Fix round 1: a corrupted new record is still evidence of a lost run.
+    let mut env = TestEnv::new();
+    let p = phased(&mut env);
+    apply_until(&env, &p.forge, &p.list, "destination");
+    std::fs::remove_file(migration_journal(&env, "forge")).unwrap();
+    let records: Vec<_> = std::fs::read_dir(p.forge2.join("tasks"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    assert_eq!(records.len(), 1, "{records:?}");
+    let a2 = records[0]
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let raw = std::fs::read_to_string(&records[0]).unwrap();
+    std::fs::write(&records[0], raw.replacen("---\n", "", 1)).unwrap();
+    let before = state(&env, &[&p.forge, &p.forge2]);
+    let detail = refused(&env, &p.forge, &p.list);
+    assert_eq!(state(&env, &[&p.forge, &p.forge2]), before);
+    assert!(detail.contains(&format!("{a2} (unreadable")), "{detail}");
+    assert_eq!(explain(&env, &p.forge, &p.list)["recovery"], "refuse");
+}

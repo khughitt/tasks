@@ -361,9 +361,7 @@ impl MigrationJournal {
     /// the paths it is given). Derived from the journal alone.
     pub fn owned_paths(&self) -> BTreeMap<PathBuf, BTreeSet<PathBuf>> {
         let mut owned: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
-        let record = |records: &Path, id: &str| records.join(format!("tasks/{id}.md"));
-        let file =
-            |records: &Path, id: &str, name: &str| records.join(format!("tasks/files/{id}/{name}"));
+        let (record, file) = (super::record_path, super::attachment_file);
         for entry in &self.carried {
             let source = owned.entry(self.source_records.clone()).or_default();
             source.insert(record(&self.source_records, &entry.source));

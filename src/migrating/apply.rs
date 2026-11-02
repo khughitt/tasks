@@ -3,13 +3,13 @@
 //! committed before G9, which commits every path the run owns (one commit per git working
 //! tree) and checks that each is clean; G10 removes the journal only after that.
 
-use super::MigrateCtx;
 use super::classify::{
     CarriedState, ClosedState, CompletionSnapshot, ListedState, Phase, RecordRead, Snapshot,
     carries, closing_note, moved_out, note_suffix, retained,
 };
 use super::journal::MigrationJournal;
 use super::list::{Decision, LoadedList};
+use super::{MigrateCtx, attachment_file, record_path};
 use crate::attachments;
 use crate::claims::ClaimStore;
 use crate::error::{Error, Result};
@@ -153,14 +153,6 @@ fn read_record(project: &Project, id: &TaskId) -> Result<RecordRead> {
     Ok(RecordRead::Present(Box::new(physical.assemble(inline))))
 }
 
-fn record_path(records: &std::path::Path, id: &str) -> PathBuf {
-    records.join(format!("tasks/{id}.md"))
-}
-
-fn file_path(records: &std::path::Path, id: &str, name: &str) -> PathBuf {
-    records.join(format!("tasks/files/{id}/{name}"))
-}
-
 /// The paths a run of this list owns, derived without its journal (spec §4.5 "Commits"):
 /// every listed record, and for each carried tombstone its new record and, on both sides,
 /// each attachment file it moved out or retains. Same layout as
@@ -191,12 +183,12 @@ fn completion_paths(
             owned
                 .entry(source.clone())
                 .or_default()
-                .insert(file_path(source, &state.id, name));
+                .insert(attachment_file(source, &state.id, name));
         }
         let at_target = owned.entry(target.clone()).or_default();
         at_target.insert(record_path(target, &to));
         for name in &names {
-            at_target.insert(file_path(target, &to, name));
+            at_target.insert(attachment_file(target, &to, name));
         }
     }
     owned
@@ -260,18 +252,23 @@ pub fn completion_snapshot(ctx: &MigrateCtx, list: &LoadedList) -> Result<Comple
         });
     }
     let mut successor_carriers = Vec::new();
+    let mut successor_unreadable = Vec::new();
     for id in ctx.target.task_files()? {
         let raw = std::fs::read_to_string(ctx.target.task_path(&id))?;
         if !raw.contains(&suffix) {
             continue;
         }
-        if let RecordRead::Present(task) = read_record(&ctx.target, &id)?
-            && carries(&task, &suffix)
-        {
-            successor_carriers.push(id.to_string());
+        match read_record(&ctx.target, &id)? {
+            RecordRead::Present(task) if carries(&task, &suffix) => {
+                successor_carriers.push(id.to_string());
+            }
+            RecordRead::Present(_) | RecordRead::Absent => {}
+            // Its text names this list: evidence of a lost run, never a fresh one.
+            RecordRead::Unreadable(detail) => successor_unreadable.push((id.to_string(), detail)),
         }
     }
     let any_carries = !successor_carriers.is_empty()
+        || !successor_unreadable.is_empty()
         || listed.iter().any(
             |state| matches!(&state.record, RecordRead::Present(task) if carries(task, &suffix)),
         );
@@ -286,6 +283,7 @@ pub fn completion_snapshot(ctx: &MigrateCtx, list: &LoadedList) -> Result<Comple
         source_records: source.records.clone(),
         listed,
         successor_carriers,
+        successor_unreadable,
         uncommitted,
     })
 }

@@ -129,6 +129,9 @@ pub struct CompletionSnapshot {
     pub listed: Vec<ListedState>,
     /// Successor records whose notes carry the list's sha256, by id.
     pub successor_carriers: Vec<String>,
+    /// Successor records whose text holds the list's sha256 suffix but that do not parse
+    /// as their id's record: `(id, detail)`. Counted as carriers, so never `Fresh`.
+    pub successor_unreadable: Vec<(String, String)>,
     /// The run's owned paths (derived from the list and the records) that are not clean,
     /// under records directories that set `[git] commit`.
     pub uncommitted: Vec<PathBuf>,
@@ -227,6 +230,12 @@ pub fn classify_without_journal(
         }
     }
     carrying.extend(snapshot.successor_carriers.iter().cloned());
+    carrying.extend(
+        snapshot
+            .successor_unreadable
+            .iter()
+            .map(|(id, detail)| format!("{id} (unreadable: {detail})")),
+    );
     if carrying.is_empty() {
         return MigrationRecovery::Fresh;
     }
@@ -242,11 +251,8 @@ pub fn classify_without_journal(
     }
     let mut items = Vec::new();
     let mut targets = BTreeSet::new();
-    let source_file = |id: &str, name: &str| {
-        snapshot
-            .source_records
-            .join(format!("tasks/files/{id}/{name}"))
-    };
+    let source_file =
+        |id: &str, name: &str| super::attachment_file(&snapshot.source_records, id, name);
     for listed in &snapshot.listed {
         let RecordRead::Present(task) = &listed.record else {
             unreachable!("every listed record carries the sha256 here");
@@ -346,6 +352,11 @@ pub fn classify_without_journal(
                 "{carrier} carries this list's sha256 but no tombstone points to it"
             ));
         }
+    }
+    for (id, detail) in &snapshot.successor_unreadable {
+        items.push(format!(
+            "{id} names this list's sha256 but is unreadable: {detail}"
+        ));
     }
     for path in &snapshot.uncommitted {
         items.push(format!("uncommitted {}", path.display()));
@@ -648,6 +659,7 @@ mod tests {
             source_records: "/s".into(),
             listed,
             successor_carriers: vec![],
+            successor_unreadable: vec![],
             uncommitted: vec![],
         }
     }
@@ -744,6 +756,88 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn without_a_journal_a_carry_needs_both_halves_of_the_pair() {
+        let l = list("list");
+        let suffix = note_suffix(&l);
+        let tombstone = |notes: &[&str]| {
+            let mut t = task("forge-00000a", "todo", notes);
+            t.status = Status::Moved;
+            t.moved_to = Some(crate::model::TaskId::parse("forge2-00000b").unwrap());
+            t
+        };
+        let new_record = |from: Option<&str>, notes: &[&str]| {
+            let mut t = task("forge2-00000b", "todo", notes);
+            t.moved_from = from.map(|id| crate::model::TaskId::parse(id).unwrap());
+            RecordRead::Present(Box::new(t))
+        };
+        let moved_to = format!("moved to forge2-00000b{suffix}");
+        let moved_from = format!("moved from forge-00000a{suffix}");
+        let carry = |record: Task, target: Option<RecordRead>| {
+            let mut state = closed_state(
+                "forge-00000a",
+                Decision::Carry,
+                RecordRead::Present(Box::new(record)),
+            );
+            state.reason = String::new();
+            state.target = target;
+            let mut snapshot = completion(vec![state]);
+            snapshot.successor_carriers = vec!["forge2-00000b".into()];
+            classify_without_journal(&l, &snapshot)
+        };
+        assert_eq!(
+            carry(
+                tombstone(&[&moved_to]),
+                Some(new_record(Some("forge-00000a"), &[&moved_from]))
+            ),
+            MigrationRecovery::Complete
+        );
+        let refuses = |verdict: MigrationRecovery, name: &str| match verdict {
+            MigrationRecovery::Refuse(reason) => assert!(reason.contains(name), "{reason}"),
+            other => panic!("{other:?}"),
+        };
+        // Not a tombstone.
+        refuses(
+            carry(
+                task("forge-00000a", "todo", &[&moved_to]),
+                Some(new_record(Some("forge-00000a"), &[&moved_from])),
+            ),
+            "forge-00000a carries this list's sha256 but is todo, not a tombstone",
+        );
+        // The tombstone's own note is missing (another note carries the sha256).
+        refuses(
+            carry(
+                tombstone(&[&format!("other{suffix}")]),
+                Some(new_record(Some("forge-00000a"), &[&moved_from])),
+            ),
+            "does not note `moved to forge2-00000b`",
+        );
+        // The new record does not point back.
+        refuses(
+            carry(
+                tombstone(&[&moved_to]),
+                Some(new_record(None, &[&moved_from])),
+            ),
+            "forge2-00000b does not point back to forge-00000a",
+        );
+        // The new record is absent.
+        refuses(
+            carry(tombstone(&[&moved_to]), Some(RecordRead::Absent)),
+            "points to forge2-00000b, which is not a forge2 record",
+        );
+        // An unreadable successor record naming the list is never fresh.
+        let mut snapshot = completion(vec![closed_state(
+            "forge-00000c",
+            Decision::Drop,
+            RecordRead::Present(Box::new(task("forge-00000c", "todo", &[]))),
+        )]);
+        snapshot.successor_unreadable = vec![("forge2-00000b".into(), "bad".into())];
+        refuses(
+            classify_without_journal(&l, &snapshot),
+            "forge2-00000b (unreadable: bad)",
+        );
     }
 
     #[test]
