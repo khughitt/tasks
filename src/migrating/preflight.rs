@@ -260,17 +260,18 @@ pub fn check_list(ctx: &MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>
         }
     }
 
-    // A pending rename or move on either project.
+    // A pending rename or move on either project; any other failure propagates.
     let mut seen = BTreeSet::new();
     for project in [source, &ctx.target] {
-        match crate::commands::reject_pending_operations(Some(&project.root), &project.prefix) {
-            Ok(()) => {}
-            Err(Error::Validation(detail) | Error::MovePending(detail)) => {
-                if seen.insert(detail.clone()) {
-                    refusals.push(refuse(&project.prefix, "pending_operation", detail));
-                }
-            }
-            Err(other) => return Err(other),
+        let pending =
+            match crate::commands::pending_rename_at(Some(&project.root), &project.prefix)? {
+                Some(detail) => Some(detail),
+                None => crate::commands::pending_move(&project.prefix)?,
+            };
+        if let Some(detail) = pending
+            && seen.insert(detail.clone())
+        {
+            refusals.push(refuse(&project.prefix, "pending_operation", detail));
         }
     }
     Ok(refusals)
@@ -290,10 +291,10 @@ pub fn reason_warnings(list: &DecisionList) -> Vec<String> {
         let Some(reason) = entry.reason.as_deref() else {
             continue;
         };
-        let key_shaped = !reason.is_empty()
-            && reason
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        // `^[a-z][a-z0-9-]*$`
+        let mut chars = reason.chars();
+        let key_shaped = chars.next().is_some_and(|c| c.is_ascii_lowercase())
+            && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
         if key_shaped && !list.reasons.contains_key(reason) && seen.insert(reason.to_string()) {
             warnings.push(format!(
                 "reason {reason:?} on {} is not a key of [reasons]; it is recorded as literal text (add the key if a shared reason was meant)",

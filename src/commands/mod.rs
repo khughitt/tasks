@@ -821,6 +821,15 @@ pub fn reject_pending_rename(project: &Project) -> Result<()> {
 }
 
 pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()> {
+    match pending_rename_at(root, prefix)? {
+        Some(detail) => Err(Error::Validation(detail)),
+        None => Ok(()),
+    }
+}
+
+/// The refusal text of an unfinished rename naming this root or prefix, if there is one;
+/// every other failure (an unreadable inventory) is an error.
+pub fn pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<Option<String>> {
     let root = root.map(crate::rename::root_identity).transpose()?;
     for inventory in crate::rename::inventory::Inventory::pending()? {
         let inventory_root = crate::rename::root_identity(&inventory.root)?;
@@ -828,13 +837,26 @@ pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()>
             || inventory.source == prefix
             || inventory.target == prefix
         {
-            return Err(Error::Validation(format!(
+            return Ok(Some(format!(
                 "a rename of {:?} to {:?} is unfinished; finish it with `tasks rename {} {}` or roll it back (see the design doc)",
                 inventory.source, inventory.target, inventory.source, inventory.target
             )));
         }
     }
-    Ok(())
+    Ok(None)
+}
+
+/// The refusal text of a pending move naming this prefix, if there is one.
+pub fn pending_move(prefix: &str) -> Result<Option<String>> {
+    for journal in crate::moving::journal::Journal::pending()? {
+        if journal.names_prefix(prefix) {
+            return Ok(Some(match journal.pending_error() {
+                Error::MovePending(detail) => detail,
+                other => unreachable!("pending_error is move_pending, got {other:?}"),
+            }));
+        }
+    }
+    Ok(None)
 }
 
 pub fn reject_pending_operations(root: Option<&Path>, prefix: &str) -> Result<()> {

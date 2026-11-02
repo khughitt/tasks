@@ -515,7 +515,7 @@ fn key_shaped_unknown_reason_warns_but_is_accepted() {
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
-    let ids: Vec<String> = ["A", "B", "C", "D"]
+    let ids: Vec<String> = ["A", "B", "C", "D", "E", "F", "G"]
         .iter()
         .map(|t| id_of(env.json(&forge, &["add", t])))
         .collect();
@@ -526,6 +526,9 @@ fn key_shaped_unknown_reason_warns_but_is_accepted() {
         "obsolete",
         "done in forge2-abc123",
         "superseded",
+        "Superseded",
+        "a_b",
+        "2fast",
     ];
     for (id, reason) in ids.iter().zip(reasons) {
         text = decide(&text, id, "drop", &format!("reason = \"{reason}\"\n"));
@@ -707,4 +710,92 @@ fn migrate_list_takes_no_to_and_applying_is_refused_until_it_exists() {
     let (kind, detail) = fail_detail(&env, &forge, &["migrate", list.to_str().unwrap()]);
     assert_eq!(kind, "validation");
     assert!(detail.contains("--explain"), "{detail}");
+}
+
+fn setting(out: &serde_json::Value, rule: &str) -> Vec<(String, String)> {
+    out["refusals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["rule"] == rule)
+        .map(|r| {
+            (
+                r["id"].as_str().unwrap().to_string(),
+                r["settle"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn header_not_open_foreign_and_decision_text_refusals() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let b = id_of(env.json(&forge, &["add", "B"]));
+    let closed = id_of(env.json(&forge, &["add", "Closed"]));
+    env.json(&forge, &["done", &closed]);
+    let (text, _) = draft_home(&env, &forge);
+    let mut text = decide(&text, &b, "keep", "");
+    text = text.replace("source = \"forge\"", "source = \"elsewhere\"");
+    for id in [closed.as_str(), "forge2-abc123", "forge-abcdef"] {
+        text.push_str(&format!(
+            "\n[[task]]\nid = \"{id}\"\ndigest = \"sha256:00\"\ndecision = \"carry\"\n"
+        ));
+    }
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let out = explain(&env, &forge, &list);
+    assert_eq!(out["recovery"], "refuse");
+    assert_eq!(setting(&out, "header_mismatch")[0].0, "list");
+    assert_eq!(setting(&out, "header_mismatch").len(), 1, "{out}");
+    assert_eq!(setting(&out, "not_open")[0].0, closed);
+    let foreign: Vec<String> = setting(&out, "foreign_id")
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(foreign, ["forge2-abc123", "forge-abcdef"], "{out}");
+    assert_eq!(setting(&out, "bad_key")[0].0, b);
+    assert!(
+        setting(&out, "bad_key")[0]
+            .1
+            .contains("carry, drop or close")
+    );
+    // A is still the draft's empty decision.
+    assert_eq!(setting(&out, "undecided")[0].0, a);
+}
+
+#[test]
+fn a_pending_move_is_a_refusal_and_an_unreadable_inventory_is_not() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let (text, _) = draft_home(&env, &forge);
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, decide(&text, &a, "carry", "")).unwrap();
+    env.cmd(&forge)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &a, "--to", "forge2"])
+        .assert()
+        .success();
+    let out = explain(&env, &forge, &list);
+    assert_eq!(out["recovery"], "refuse");
+    let pending = setting(&out, "pending_operation");
+    assert_eq!(pending.len(), 1, "{out}");
+    assert!(pending[0].1.contains("pending"), "{out}");
+
+    // An unreadable rename inventory is an error of its own, not a pending operation.
+    let journals = env.home.path().join(".local/state/tasks/move");
+    std::fs::remove_dir_all(&journals).unwrap();
+    let inventories = env.home.path().join(".local/state/tasks/rename");
+    std::fs::create_dir_all(&inventories).unwrap();
+    std::fs::write(inventories.join("zz.toml"), "not = [valid").unwrap();
+    let (kind, _) = fail_detail(
+        &env,
+        &forge,
+        &["migrate", list.to_str().unwrap(), "--explain"],
+    );
+    assert_eq!(kind, "config");
 }
