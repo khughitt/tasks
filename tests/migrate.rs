@@ -3155,13 +3155,30 @@ fn pretty_review_shows_sections_in_order() {
         "{shown}"
     );
     // The tree nests A under G' and marks X's new parent; drops list released dependents.
-    assert!(shown.contains(&format!("\n  {g}\n    {a}\n")), "{shown}");
+    assert!(
+        shown.contains(&format!("\n  {g} Goal G\n    {a} A\n")),
+        "{shown}"
+    );
     assert!(shown[tree..dropped].contains(&a), "{shown}");
     assert!(
         shown[tree..dropped].contains(&format!("under {s}")),
         "{shown}"
     );
     assert!(shown[dropped..closed].contains("gone"), "{shown}");
+    // Titles stand beside ids in every section, and never reach the JSON.
+    assert!(shown[tree..dropped].contains(&format!("{a} A")), "{shown}");
+    assert!(
+        shown[dropped..closed].contains(&format!("{k} K")),
+        "{shown}"
+    );
+    assert!(shown[dropped..closed].contains(&o), "{shown}");
+    assert!(
+        shown[closed..removed].contains(&format!("{c} C")),
+        "{shown}"
+    );
+    assert!(shown[removed..body].contains(&format!("{x} X")), "{shown}");
+    let json = explain(&env, &forge, &list);
+    assert!(json.get("titles").is_none(), "{json}");
     assert!(
         shown[dropped..closed].contains(&format!("released: {o}")),
         "{shown}"

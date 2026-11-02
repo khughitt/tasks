@@ -64,6 +64,10 @@ impl PhysicalTask {
     pub fn id(&self) -> &TaskId {
         &self.metadata.id
     }
+    pub fn title(&self) -> &str {
+        &self.metadata.title
+    }
+
     pub fn status(&self) -> Status {
         self.metadata.status
     }

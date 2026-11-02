@@ -134,6 +134,9 @@ pub struct MigrateOut {
     pub refusals: Vec<RefusalOut>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub body_changes: Vec<BodyChange>,
+    /// Titles for the pretty review, keyed by v1 id and, where assigned, new id. Not JSON.
+    #[serde(skip)]
+    pub titles: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -1569,6 +1572,11 @@ fn halt_line(halts: &[HaltRow]) -> String {
 /// carried tasks, drops with the dependents they release, closes, removed edges and dropped
 /// links, then body diffs.
 fn migrate_review(o: &MigrateOut) -> String {
+    let named = |id: &str| match o.titles.get(id) {
+        Some(title) => format!("{id} {title}"),
+        None => id.to_string(),
+    };
+    let named_all = |ids: &[String]| ids.iter().map(|i| named(i)).collect::<Vec<_>>().join(", ");
     let mut text = format!("{} → {} ({})", o.source, o.successor, o.recovery);
     if !o.refusals.is_empty() {
         text.push_str("\n\nrefusals:");
@@ -1579,10 +1587,10 @@ fn migrate_review(o: &MigrateOut) -> String {
     if !o.carried.is_empty() {
         text.push_str("\n\ncarried:");
         let label = |row: &CarriedOut| {
-            let mut label = row
-                .id
-                .as_ref()
-                .map_or_else(|| row.from.clone(), |id| format!("{} -> {id}", row.from));
+            let mut label = row.id.as_ref().map_or_else(
+                || named(&row.from),
+                |id| format!("{} -> {id}", named(&row.from)),
+            );
             if row.park {
                 label.push_str(" [parked]");
             }
@@ -1656,9 +1664,9 @@ fn migrate_review(o: &MigrateOut) -> String {
         for (reason, rows) in reasons {
             text.push_str(&format!("\n  {reason}:"));
             for d in rows {
-                text.push_str(&format!("\n    {}", d.id));
+                text.push_str(&format!("\n    {}", named(&d.id)));
                 if !d.released.is_empty() {
-                    text.push_str(&format!(" (released: {})", d.released.join(", ")));
+                    text.push_str(&format!(" (released: {})", named_all(&d.released)));
                 }
             }
         }
@@ -1666,9 +1674,9 @@ fn migrate_review(o: &MigrateOut) -> String {
     if !o.closed.is_empty() {
         text.push_str("\n\nclosed:");
         for c in &o.closed {
-            text.push_str(&format!("\n  {}: {}", c.id, c.reason));
+            text.push_str(&format!("\n  {}: {}", named(&c.id), c.reason));
             if !c.released.is_empty() {
-                text.push_str(&format!(" (released: {})", c.released.join(", ")));
+                text.push_str(&format!(" (released: {})", named_all(&c.released)));
             }
             if !c.open_depends.is_empty() {
                 text.push_str(&format!(
@@ -1691,7 +1699,7 @@ fn migrate_review(o: &MigrateOut) -> String {
     if !removed.is_empty() {
         text.push_str("\n\nremoved:");
         for (from, what) in removed {
-            text.push_str(&format!("\n  {from}: {what}"));
+            text.push_str(&format!("\n  {}: {what}", named(from)));
         }
     }
     if !o.body_changes.is_empty() {

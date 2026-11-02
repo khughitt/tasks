@@ -92,6 +92,7 @@ pub fn run(
         warnings: Vec::new(),
         refusals,
         body_changes: Vec::new(),
+        titles: Default::default(),
     };
     if let Some(projection) = projection {
         fill(&mut out, &projection, &loaded.list, &ctx);
@@ -178,6 +179,7 @@ fn explain_finished(ctx: &MigrateCtx, loaded: &LoadedList) -> Result<Option<Migr
                 settle: reason,
             }],
             body_changes: Vec::new(),
+            titles: Default::default(),
         })),
         MigrationRecovery::Resume(_) => unreachable!("only a journal resumes"),
     }
@@ -294,6 +296,8 @@ fn fill(
                 diff: diff.clone(),
             });
         }
+        out.titles
+            .insert(item.from.to_string(), target.title.clone());
         out.carried.push(CarriedOut {
             from: item.from.to_string(),
             id: None,
@@ -326,6 +330,10 @@ fn fill(
             .copied()
             .unwrap_or_default()
             .to_string();
+        if let Ok(record) = crate::format::parse_physical(&item.source_text, &item.id.to_string()) {
+            out.titles
+                .insert(item.id.to_string(), record.title().to_string());
+        }
         match item.decision {
             Decision::Drop => out.dropped.push(DroppedOut {
                 id: item.id.to_string(),

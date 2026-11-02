@@ -373,6 +373,7 @@ pub fn completed_output(
         warnings: ctx.source.warnings.clone(),
         refusals: Vec::new(),
         body_changes: Vec::new(),
+        titles: Default::default(),
     })
 }
 
@@ -459,6 +460,7 @@ pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> R
         warnings: ctx.source.warnings.clone(),
         refusals: Vec::new(),
         body_changes: Vec::new(),
+        titles: Default::default(),
     })
 }
 
