@@ -826,6 +826,11 @@ pub fn shown(map: &BTreeMap<TaskId, TaskId>, text: &str) -> String {
     text
 }
 
+/// A reason a one-line note cannot hold; check_list refuses it as `bad_key`.
+pub fn multi_line(reason: &str) -> bool {
+    reason.contains(['\n', '\r'])
+}
+
 /// The text a `reason` stands for: a `[reasons]` key's text, else the literal.
 pub fn reason_text<'a>(list: &'a DecisionList, reason: &'a str) -> &'a str {
     list.reasons.get(reason).map_or(reason, String::as_str)
@@ -1095,6 +1100,10 @@ fn project_closed_in(
         }
 
         let reason = reason_text(&list.list, entry.reason.as_deref().unwrap_or("").trim());
+        // check_list's `bad_key`: no one-line note can be rendered from it.
+        if multi_line(reason) {
+            continue;
+        }
         let mut note = format!(
             "{} in migration to {succ}: {reason}",
             if decision == Decision::Drop {

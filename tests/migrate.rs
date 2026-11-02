@@ -589,6 +589,50 @@ fn drop_and_close_need_reasons_and_keys_belong_to_their_decision() {
 }
 
 #[test]
+fn a_multi_line_reason_refuses_by_entry_without_hiding_other_refusals() {
+    // A note is one line: a reason holding a line break, literal or through [reasons],
+    // is refused by name instead of aborting the review.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ids: Vec<String> = ["A", "B", "C", "D"]
+        .iter()
+        .map(|t| id_of(env.json(&forge, &["add", t])))
+        .collect();
+    let (text, _) = draft_home(&env, &forge);
+    let text = text.replacen("[reasons]\n", "[reasons]\nsplit = \"one\\rtwo\"\n", 1);
+    let text = decide(&text, &ids[0], "drop", "reason = \"one\\ntwo\"\n");
+    let text = decide(&text, &ids[1], "close", "reason = \"split\"\n");
+    let text = decide(&text, &ids[2], "drop", "reason = \"gone\"\n");
+    let out = explain_text(&env, &forge, &text);
+    let found = rules(&out);
+    for want in [
+        ("bad_key", &ids[0]),
+        ("bad_key", &ids[1]),
+        ("undecided", &ids[3]),
+    ] {
+        assert!(
+            found.contains(&(want.0.to_string(), want.1.clone())),
+            "{want:?} missing from {out}"
+        );
+    }
+    let settles = setting(&out, "bad_key");
+    let of = |id: &str| {
+        settles
+            .iter()
+            .find(|(i, _)| i == id)
+            .map(|(_, s)| s.clone())
+            .unwrap()
+    };
+    assert!(of(&ids[0]).contains("`reason`"), "{out}");
+    assert!(
+        of(&ids[1]).contains("[reasons]") && of(&ids[1]).contains("split"),
+        "{out}"
+    );
+    assert_eq!(row(&out, "dropped", &ids[2])["reason"], "gone", "{out}");
+}
+
+#[test]
 fn close_on_a_recurrence_refuses() {
     let mut env = TestEnv::new();
     let forge = env.init("forge");

@@ -197,6 +197,22 @@ pub fn check_list(ctx: &MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>
                 "set `reason` to a key of [reasons] or text saying why (for close, where the work was done)",
             ));
         }
+        if decision != Decision::Carry
+            && let Some(reason) = entry.reason.as_deref()
+            && super::project::multi_line(super::project::reason_text(&list.list, reason.trim()))
+        {
+            let reason = reason.trim();
+            let key = if list.list.reasons.contains_key(reason) {
+                format!("`[reasons]` key {reason:?}")
+            } else {
+                "`reason`".to_string()
+            };
+            refusals.push(refuse(
+                id,
+                "bad_key",
+                format!("{key} holds a line break; a migration note is one line, so write the reason on a single line"),
+            ));
+        }
         let mut wrong = Vec::new();
         if decision != Decision::Carry {
             for (key, present) in [
