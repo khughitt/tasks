@@ -432,6 +432,40 @@ fn doc_roots(key: &str, configured: Option<Vec<String>>, defaults: &[&str]) -> R
     configured.iter().map(|raw| doc_root(key, raw)).collect()
 }
 
+/// The start path a command opens from (`-C`, or `where PATH`), canonical. A start that
+/// does not exist (`NotFound`: removed, under a removed ancestor, a dangling symlink) is
+/// `checkout_missing` naming it; ENOTDIR, ELOOP, EACCES and every other failure are not
+/// absence and stay `io`. Every local lookup resolves its start here, so the kind means
+/// the same wherever it comes from.
+pub fn canonical_start(start: &Path) -> Result<PathBuf> {
+    start
+        .canonicalize()
+        .map_err(|error| missing_start(error, || format!("{} does not exist", start.display())))
+}
+
+/// The current directory as the start path when no `-C` is given; one deleted out from
+/// under the process is `checkout_missing`, named by what the kernel still records.
+pub fn current_start() -> Result<PathBuf> {
+    std::env::current_dir().map_err(|error| {
+        missing_start(error, || match std::fs::read_link("/proc/self/cwd") {
+            Ok(link) => {
+                let link = link.to_string_lossy();
+                let path = link.strip_suffix(" (deleted)").unwrap_or(&link);
+                format!("the current directory {path} no longer exists")
+            }
+            Err(_) => "the current directory no longer exists".to_string(),
+        })
+    })
+}
+
+fn missing_start(error: std::io::Error, detail: impl FnOnce() -> String) -> Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        Error::CheckoutMissing(detail())
+    } else {
+        error.into()
+    }
+}
+
 impl Project {
     /// Where a session working on this project resumes: the code working tree for a
     /// project found through its link, otherwise the root. Claims, parks, and the owner
@@ -688,7 +722,7 @@ impl Project {
     /// `no_project` whatever state the registry is in; a missing registry is empty and a
     /// malformed one is an error.
     pub fn locate(start: &Path) -> Result<Project> {
-        let start = start.canonicalize()?;
+        let start = canonical_start(start)?;
         let mut directory = Some(start.as_path());
         while let Some(path) = directory {
             if path.join(CONFIG_REL).is_file() {

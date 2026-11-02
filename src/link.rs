@@ -42,7 +42,20 @@ impl GitTree {
             .output()
         {
             Ok(output) => output,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            // A spawn `NotFound` is a missing git executable only while `dir` still
+            // exists: git runs in it, so a directory that vanished fails the same way.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return match dir.symlink_metadata() {
+                    Ok(_) => Ok(None),
+                    Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => {
+                        Err(Error::Io(format!(
+                            "{} disappeared before git rev-parse could run in it",
+                            dir.display()
+                        )))
+                    }
+                    Err(other) => Err(other.into()),
+                };
+            }
             Err(error) => return Err(error.into()),
         };
         if !output.status.success() {
@@ -90,6 +103,9 @@ impl GitTree {
                         obstruction(&marker, &metadata)
                     )));
                 }
+            }
+            if let Some(orphan) = orphaned(dir) {
+                return Err(orphan);
             }
             return Err(Error::Io(failed));
         }
@@ -207,6 +223,56 @@ fn mount_point(stderr: &str) -> Option<PathBuf> {
     let (_, rest) = stderr.split_once("(or any parent up to mount point ")?;
     let line = rest.lines().next()?;
     line.strip_suffix(')').map(PathBuf::from)
+}
+
+/// After git rejected `dir`: `worktree_orphaned` when the nearest `.git` at or above it
+/// is a gitfile (`gitdir: <path>`, relative to the marker's directory when relative)
+/// whose target does not exist. Every other outcome (no marker, a `.git` directory, an
+/// unreadable or unparseable gitfile, a target that exists, a target `lstat` cannot
+/// read) is `None`, and git's own failure stands: corruption and permission failures are
+/// never read as absence. A missing target also follows a main checkout moved without
+/// `git worktree repair` or a deleted main repository, so the detail names both.
+fn orphaned(dir: &Path) -> Option<Error> {
+    use std::os::unix::ffi::OsStrExt;
+    let start = dir.canonicalize().ok()?;
+    let mut nearest = None;
+    for ancestor in start.ancestors() {
+        let marker = ancestor.join(".git");
+        match marker.symlink_metadata() {
+            Ok(metadata) => {
+                nearest = Some((ancestor, marker, metadata));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    let (worktree, marker, metadata) = nearest?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let text = std::fs::read(&marker).ok()?;
+    let written = text.strip_prefix(b"gitdir: ")?;
+    let end = written
+        .iter()
+        .rposition(|byte| *byte != b'\n' && *byte != b'\r')?;
+    let written = Path::new(std::ffi::OsStr::from_bytes(&written[..=end]));
+    let target = worktree.join(written);
+    match target.symlink_metadata() {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return None,
+    }
+    let shown = if written.is_absolute() {
+        written.display().to_string()
+    } else {
+        format!("{} ({})", written.display(), target.display())
+    };
+    Some(Error::WorktreeOrphaned(format!(
+        "worktree {0} is orphaned: its .git file points at {shown}, which does not exist; \
+         if its main checkout moved, run `git worktree repair {0}` in the main checkout; \
+         if the worktree was removed from git, nothing at {0} is tracked any more",
+        worktree.display()
+    )))
 }
 
 /// What to do about the `.git` marker git would not read. Only a directory confirmed
@@ -507,6 +573,18 @@ mod tests {
         assert_eq!(
             relative_path(Path::new("/d/o"), Path::new("/d/o/x")),
             PathBuf::from("x")
+        );
+    }
+
+    #[test]
+    fn a_directory_that_vanished_is_an_error_not_a_missing_git() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone");
+        let error = GitTree::of(&gone).unwrap_err();
+        assert_eq!(error.kind(), "io");
+        assert!(
+            error.to_string().contains(gone.to_str().unwrap()),
+            "{error}"
         );
     }
 

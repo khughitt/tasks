@@ -455,6 +455,22 @@ recognize both kinds. Summary and parked rows include `step` only when set.
 `tasks doc` exports exact UTF-8 body bytes in every format, with warnings on
 stderr and no JSON envelope.
 
+A command whose start path does not exist fails as `checkout_missing`: the `-C`
+directory, the current directory, or the path given to `where` is absent, sits under an
+absent directory, is a dangling symlink, or (for the current directory) was deleted
+while the shell stood in it. The detail names the path, so an indexer can treat a
+removed checkout as gone without a race against its own `lstat`. The kind means what
+`check`'s `checkout_missing` warning means: a checkout path that does not exist.
+`worktree_orphaned` is a separate kind: git rejected a worktree whose `.git` file
+points at a target that does not exist (its admin directory was pruned, or the main
+repository was moved or deleted). The detail names the worktree and the missing target;
+`git worktree repair` in the main checkout recovers a moved repository, and nothing
+local tells that apart from a removed worktree. Every other failure to open a start path
+stays `io`: a path through a regular file, a symlink loop, a permission failure, an
+unreadable or unparseable `.git` file, and every other git rejection, corruption
+included. `--project` skips the local lookup and is unaffected; `--all-projects` and
+`--group` still look at the start path and fail the same way.
+
 Task ids on the command line accept trailing sentence punctuation: a trailing run of
 ASCII periods and commas on any positional id or id-valued flag (`--parent`, `--depends`,
 `dep --on/--rm`, `feedback --recur`) is stripped before validation and alias resolution,

@@ -1907,3 +1907,77 @@ fn docs_lists_a_detached_projects_plan_from_its_records_with_the_linking_tasks()
         );
     }
 }
+
+/// A detached project's worktree whose `.git` file points at an admin directory that no
+/// longer exists: pruned, or its main repository moved or deleted. Read from the worktree
+/// or below it, every local lookup names the worktree, the missing target and the repair.
+#[test]
+fn a_worktree_whose_gitlink_target_is_missing_is_worktree_orphaned() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let admin = l.code.join(".git/worktrees/wt");
+    assert!(admin.is_dir());
+    std::fs::create_dir_all(l.wt.join("sub")).unwrap();
+    std::fs::remove_dir_all(&admin).unwrap();
+    let assert_orphaned = |target: &Path| {
+        for start in [l.wt.clone(), l.wt.join("sub")] {
+            for args in [vec!["list"], vec!["show", "000000"], vec!["where"]] {
+                let detail = fail_detail(&env, &start, &args, "worktree_orphaned");
+                assert!(detail.contains(l.wt.to_str().unwrap()), "{detail}");
+                assert!(detail.contains(target.to_str().unwrap()), "{detail}");
+                assert!(detail.contains("git worktree repair"), "{detail}");
+            }
+        }
+        let c = l.wt.to_str().unwrap();
+        fail_detail(&env, &l.code, &["-C", c, "list"], "worktree_orphaned");
+        fail_detail(&env, &l.code, &["where", c], "worktree_orphaned");
+    };
+    assert_orphaned(&admin);
+    // A relative gitdir, as `worktree.useRelativePaths` writes it, is read from the
+    // marker's directory.
+    std::fs::write(
+        l.wt.join(".git"),
+        "gitdir: ../../../code/.git/worktrees/wt\n",
+    )
+    .unwrap();
+    assert_orphaned(Path::new("../../../code/.git/worktrees/wt"));
+}
+
+/// Metadata git rejects for any reason other than a missing gitlink target is corruption
+/// or a permission failure, never absence: it stays `io`.
+#[test]
+fn a_worktree_with_unreadable_git_metadata_stays_io() {
+    use std::os::unix::fs::PermissionsExt;
+    type Break = (&'static str, fn(&Layout));
+    let breaks: [Break; 4] = [
+        ("garbage gitfile", |l| {
+            std::fs::write(l.wt.join(".git"), "garbage\n").unwrap()
+        }),
+        ("corrupt admin HEAD", |l| {
+            std::fs::write(l.code.join(".git/worktrees/wt/HEAD"), "garbage\n").unwrap()
+        }),
+        ("gitfile pointing at a plain directory", |l| {
+            let plain = l.base.join("plain");
+            std::fs::create_dir_all(&plain).unwrap();
+            std::fs::write(l.wt.join(".git"), format!("gitdir: {}\n", plain.display())).unwrap()
+        }),
+        ("unreadable gitfile", |l| {
+            std::fs::set_permissions(l.wt.join(".git"), std::fs::Permissions::from_mode(0o000))
+                .unwrap()
+        }),
+    ];
+    for (name, break_it) in breaks {
+        let mut env = TestEnv::new();
+        let l = layout(&mut env, "det");
+        register(&env, &l, "det");
+        break_it(&l);
+        // Root reads through any mode; the unreadable case cannot be staged there.
+        if std::fs::read(l.wt.join(".git")).is_err() || name != "unreadable gitfile" {
+            for args in [vec!["list"], vec!["where"]] {
+                assert_eq!(env.fail(&l.wt, &args), "io", "{name}: {args:?}");
+            }
+        }
+        let _ = std::fs::set_permissions(l.wt.join(".git"), std::fs::Permissions::from_mode(0o644));
+    }
+}

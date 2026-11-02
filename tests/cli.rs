@@ -1210,6 +1210,131 @@ fn no_project_is_an_error_and_usage_errors_exit_2() {
     assert_eq!(out.status.code(), Some(2));
 }
 
+/// The kind and detail of a failing command's JSON error.
+fn kind_and_detail(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> (String, String) {
+    let out = env.raw(dir).args(args).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).expect("json error");
+    (
+        v["error"]["kind"].as_str().unwrap().to_string(),
+        v["error"]["detail"].as_str().unwrap().to_string(),
+    )
+}
+
+#[test]
+fn a_start_path_that_does_not_exist_is_checkout_missing_and_names_it() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let base = tempfile::tempdir().unwrap();
+    let base = base.path().canonicalize().unwrap();
+    let absent = base.join("gone");
+    let deeper = base.join("gone/deeper");
+    let dangling = base.join("link");
+    std::os::unix::fs::symlink(base.join("storage/wt"), &dangling).unwrap();
+    for start in [&absent, &deeper, &dangling] {
+        let c = start.to_str().unwrap();
+        for args in [
+            vec!["-C", c, "list"],
+            vec!["-C", c, "show", "zz-000000"],
+            vec!["-C", c, "show", "000000"],
+            vec!["-C", c, "add", "x"],
+            vec!["-C", c, "where"],
+            vec!["-C", c, "list", "--all-projects"],
+            vec!["where", c],
+        ] {
+            let (kind, detail) = kind_and_detail(&env, &root, &args);
+            assert_eq!(kind, "checkout_missing", "{args:?}: {detail}");
+            assert!(detail.contains(c), "{args:?}: {detail}");
+        }
+    }
+    // `where PATH` resolves PATH against an existing -C: the joined path is named.
+    let (kind, detail) = kind_and_detail(
+        &env,
+        &root,
+        &["-C", root.to_str().unwrap(), "where", "nope"],
+    );
+    assert_eq!(kind, "checkout_missing", "{detail}");
+    assert!(
+        detail.contains(root.join("nope").to_str().unwrap()),
+        "{detail}"
+    );
+    // `--project` skips the local lookup and still reads.
+    env.json(
+        &root,
+        &["-C", absent.to_str().unwrap(), "list", "--project", "zz"],
+    );
+}
+
+#[test]
+fn a_deleted_current_directory_is_checkout_missing_and_names_it() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let doomed = root.join("doomed");
+    std::fs::create_dir(&doomed).unwrap();
+    let mut command = std::process::Command::new("sh");
+    command.env_clear();
+    for (key, value) in common::isolated_env(env.home.path()) {
+        command.env(key, value);
+    }
+    let out = command
+        .args(["-c", r#"cd "$1" && rmdir "$1" && exec "$2" list"#, "sh"])
+        .arg(&doomed)
+        .arg(assert_cmd::cargo::cargo_bin("tasks"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "checkout_missing", "{v}");
+    let detail = v["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains(doomed.to_str().unwrap()), "{detail}");
+}
+
+#[test]
+fn a_start_path_that_exists_but_cannot_be_resolved_stays_io() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let base = tempfile::tempdir().unwrap();
+    let base = base.path().canonicalize().unwrap();
+    // A path through a regular file: ENOTDIR.
+    std::fs::write(base.join("file"), "x").unwrap();
+    let through_file = base.join("file/sub");
+    // A symlink loop: ELOOP.
+    std::os::unix::fs::symlink(base.join("loop-b"), base.join("loop-a")).unwrap();
+    std::os::unix::fs::symlink(base.join("loop-a"), base.join("loop-b")).unwrap();
+    let looped = base.join("loop-a");
+    for start in [&through_file, &looped] {
+        let c = start.to_str().unwrap();
+        for args in [vec!["-C", c, "list"], vec!["where", c]] {
+            assert_eq!(kind_and_detail(&env, &root, &args).0, "io", "{args:?}");
+        }
+    }
+    // Below a mode-000 directory: EACCES.
+    let locked = base.join("locked");
+    std::fs::create_dir_all(locked.join("sub")).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root reads through any mode; the case cannot be staged there.
+    let readable = std::fs::read_dir(&locked).is_ok();
+    let c = locked.join("sub");
+    let c = c.to_str().unwrap();
+    let outcomes: Vec<_> = [vec!["-C", c, "list"], vec!["where", c]]
+        .into_iter()
+        .map(|args| {
+            let out = env.raw(&root).args(&args).output().unwrap();
+            (args, out)
+        })
+        .collect();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if readable {
+        return;
+    }
+    for (args, out) in outcomes {
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+        let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(v["error"]["kind"], "io", "{args:?}: {v}");
+    }
+}
+
 #[test]
 fn local_read_prefers_no_project_to_a_malformed_registry() {
     let env = TestEnv::new();

@@ -67,6 +67,14 @@ pub enum Error {
     OpenTasks(String),
     #[error("{0}")]
     UnreadableCheckout(String),
+    /// The start path a command opens from (`-C`, the current directory, or `where PATH`)
+    /// does not exist: removed, a dangling symlink, or a deleted current directory.
+    #[error("{0}")]
+    CheckoutMissing(String),
+    /// Git rejected a worktree whose `.git` file points at a target that does not exist:
+    /// its admin directory was pruned, or its main repository moved or was deleted.
+    #[error("{0}")]
+    WorktreeOrphaned(String),
     #[error("{0}")]
     NotRegisteredCheckout(String),
     #[error("{0}")]
@@ -177,6 +185,8 @@ impl Error {
             Error::AttachmentTooLarge(detail) => Error::AttachmentTooLarge(detail + suffix),
             Error::ClipboardUnavailable(detail) => Error::ClipboardUnavailable(detail + suffix),
             Error::ClipboardNoImage(detail) => Error::ClipboardNoImage(detail + suffix),
+            Error::CheckoutMissing(detail) => Error::CheckoutMissing(detail + suffix),
+            Error::WorktreeOrphaned(detail) => Error::WorktreeOrphaned(detail + suffix),
             Error::Io(detail) => Error::Io(detail + suffix),
             error @ (Error::NoProject(_) | Error::SummaryRequiresJson | Error::SummaryTooLarge) => {
                 error
@@ -215,6 +225,8 @@ impl Error {
             Error::RetiredProject(_) => "retired_project",
             Error::OpenTasks(_) => "open_tasks",
             Error::UnreadableCheckout(_) => "unreadable_checkout",
+            Error::CheckoutMissing(_) => "checkout_missing",
+            Error::WorktreeOrphaned(_) => "worktree_orphaned",
             Error::NotRegisteredCheckout(_) => "not_registered_checkout",
             Error::CheckoutConflict(_) => "checkout_conflict",
             Error::RecordsMoved(_) => "records_moved",

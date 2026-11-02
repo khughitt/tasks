@@ -949,7 +949,7 @@ impl ReadCtx {
 pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
     Ok(match dir {
         Some(dir) => dir.to_path_buf(),
-        None => std::env::current_dir()?,
+        None => crate::repo::current_start()?,
     })
 }
 

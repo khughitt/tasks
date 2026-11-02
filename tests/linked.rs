@@ -657,7 +657,10 @@ fn where_takes_a_path_a_file_and_refuses_a_missing_one() {
         by_file["project"]["prefix"], "nexc",
         "a relative file answers for its directory"
     );
-    assert_eq!(env.fail(&l.code, &["where", "no/such/path"]), "io");
+    assert_eq!(
+        env.fail(&l.code, &["where", "no/such/path"]),
+        "checkout_missing"
+    );
 }
 
 #[test]

@@ -13,11 +13,10 @@ use std::path::{Path, PathBuf};
 /// which reads the registry on every walk hit, would refuse.
 pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
     let start = super::start_dir(dir)?;
-    let path = match path {
+    let path = crate::repo::canonical_start(&match path {
         Some(path) => start.join(path),
         None => start,
-    }
-    .canonicalize()?;
+    })?;
     let dir = if path.is_dir() {
         path
     } else {

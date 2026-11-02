@@ -14,7 +14,7 @@ pub const TEST_PALETTE: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75f
 /// copied, `HOME` is the test home, git gets an identity and no global or system config,
 /// and `GIT_CEILING_DIRECTORIES` and `TMPDIR` are copied when set. `TASKS_PALETTE` keeps
 /// the child from querying the terminal of whoever runs the suite.
-fn isolated_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
+pub fn isolated_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
     let mut vars: Vec<(&'static str, std::ffi::OsString)> = vec![
         ("PATH", std::env::var_os("PATH").expect("PATH is set")),
         ("HOME", home.into()),
