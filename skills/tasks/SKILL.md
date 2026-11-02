@@ -731,7 +731,9 @@ Tools map ids and paths through renames and moves with
 by hand. Before moving a checkout, run `tasks init --prefix <p> --force` there
 on every host while the old root and storage still exist, so storage is recorded.
 For a detached project, use `tasks init --prefix <p> --records <records-root> --force`
-instead, preserving its records pairing.
+instead, preserving its records pairing. After the move, run that same command in the
+new checkout on each host: the first rewrites the synced `[checkout] path`, the others
+re-point their registries.
 
 Adopt a rename already synced from another host with `tasks rename <old> <new> --adopt`
 before starting work there. For a detached project, rename moves

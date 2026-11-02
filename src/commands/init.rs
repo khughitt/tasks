@@ -79,37 +79,9 @@ pub fn run(
         registry.register(&prefix, &root)?;
         None
     };
-    let records = records
-        .map(|derived| {
-            std::fs::create_dir_all(&derived)?;
-            derived.canonicalize()
-        })
-        .transpose()?;
-    let config_before = records
-        .as_ref()
-        .map(|derived| std::fs::read(derived.join(crate::repo::CONFIG_REL)).ok());
-    let project = match &records {
-        Some(derived) => {
-            let project = Project::init_detached(derived, &prefix, &root)?;
-            registry.pair_records(&prefix, derived);
-            project
-        }
-        None => Project::init(&root, &prefix, checkout.as_deref())?,
-    };
-    // A plain init makes the project in-tree or linked: a pairing left from a detached
-    // registration would send `locate` to the old records directory (`records_moved`).
-    let unpaired = match &records {
-        Some(_) => None,
-        None => registry.unpair_records(&prefix),
-    };
     let today = crate::time::day(&crate::time::now()).to_string();
-    let previous = displaced
-        .clone()
-        .map(|root| registry.displaced(&prefix, root));
-    let history = registry.note_root_change(&prefix, previous, &today)?;
-    registry.save()?;
     let mut warnings = Vec::new();
-    if let Some(previous) = displaced {
+    if let Some(previous) = &displaced {
         warnings.push(format!(
             "prefix {prefix:?} was registered to {}",
             previous.display()
@@ -121,35 +93,67 @@ pub fn run(
             dir.display()
         ));
     }
-    if let Some(dir) = unpaired {
-        warnings.push(format!(
-            "prefix {prefix:?} was paired with {}; the pairing is removed",
-            dir.display()
-        ));
-    }
-    warnings.extend(history);
-    if let Some(before) = config_before {
-        let config = project.records.join(crate::repo::CONFIG_REL);
-        if project.commit_records
-            && std::fs::read(&config).ok() != before
-            && inside_git(&project.records)
-        {
-            warnings.push(format!(
-                "{} was written and is not committed; init does not commit configuration, so \
-                 run `tasks commit --project {prefix}` to record it",
-                config.display()
-            ));
+    let previous = displaced.map(|root| registry.displaced(&prefix, root));
+    let (project_root, records) = match records {
+        // Relocation design §4.5: every refusal and computation first, then the config,
+        // then the registry; a failed save puts the config back.
+        Some(derived) => {
+            let plan = Project::plan_detached(&derived, &prefix, &root, force)?;
+            registry.pair_records(&prefix, &derived);
+            warnings.extend(registry.note_root_change(&prefix, previous, &today)?);
+            plan.write()?;
+            if let Err(error) = registry.save() {
+                return Err(match plan.restore() {
+                    Ok(()) => error,
+                    Err(restore) => Error::Config(format!(
+                        "{error}; restoring {} also failed ({restore}): it now names {} while \
+                         the registry does not; rerun this command to complete the re-point",
+                        plan.config.display(),
+                        root.display()
+                    )),
+                });
+            }
+            if let Some(declared) = &plan.relocated_from {
+                warnings.push(format!(
+                    "prefix {prefix:?} was declared at {}; [checkout] path now names {}",
+                    declared.display(),
+                    root.display()
+                ));
+            }
+            if plan.commit_records && plan.after.is_some() && inside_git(&derived) {
+                warnings.push(format!(
+                    "{} was written and is not committed; init does not commit \
+                     configuration, so run `tasks commit --project {prefix}` to record it",
+                    plan.config.display()
+                ));
+            }
+            (root.clone(), Some(derived))
         }
-    }
-    if !skill_installed(&project.root) {
+        None => {
+            let project = Project::init(&root, &prefix, checkout.as_deref())?;
+            // A plain init makes the project in-tree or linked: a pairing left from a
+            // detached registration would send `locate` to the old records directory
+            // (`records_moved`).
+            if let Some(dir) = registry.unpair_records(&prefix) {
+                warnings.push(format!(
+                    "prefix {prefix:?} was paired with {}; the pairing is removed",
+                    dir.display()
+                ));
+            }
+            warnings.extend(registry.note_root_change(&prefix, previous, &today)?);
+            registry.save()?;
+            (project.root, None)
+        }
+    };
+    if !skill_installed(&project_root) {
         warnings.push(
             "no tasks skill found at user or project level; install skills/tasks (see README)"
                 .into(),
         );
     }
     Ok(Output::Init(InitOut {
-        prefix: project.prefix,
-        root: project.root.display().to_string(),
+        prefix,
+        root: project_root.display().to_string(),
         records: records.map(|derived| derived.display().to_string()),
         warnings,
         aliases: Vec::new(),
@@ -448,7 +452,7 @@ fn validate_records(
             root.display()
         )));
     }
-    let mut taken: Vec<_> = crate::locations::scan_checkouts(registry)
+    let mut taken: Vec<_> = crate::locations::scan_declared_checkouts(registry, prefix)
         .strict()?
         .into_iter()
         .filter(|linked| linked.prefix != prefix && linked.checkout == root)
