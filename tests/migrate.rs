@@ -2743,6 +2743,8 @@ struct Frozen {
     d: String,
     b: String,
     s: String,
+    /// Another forge2 goal, not a parent target.
+    p: String,
     x: String,
     y: String,
     z: String,
@@ -2756,6 +2758,7 @@ fn frozen(env: &mut TestEnv) -> Frozen {
     let d = id_of(env.json(&forge, &["add", "D"]));
     let b = id_of(env.json(&forge, &["add", "B"]));
     let s = id_of(env.json(&forge2, &["add", "Goal S"]));
+    let p = id_of(env.json(&forge2, &["add", "Goal P"]));
     let x = id_of(env.json(&ops, &["add", "X", "--depends", &d]));
     let y = id_of(env.json(&ops, &["add", "Y"]));
     let z = id_of(env.json(&ops, &["add", "Z"]));
@@ -2777,6 +2780,7 @@ fn frozen(env: &mut TestEnv) -> Frozen {
         d,
         b,
         s,
+        p,
         x,
         y,
         z,
@@ -2986,6 +2990,23 @@ fn a_parent_target_made_recurring_is_repaired() {
     assert_eq!(setting(&preview, "parent_target").len(), 1, "{preview}");
     // A write to S that leaves it recurring is not the restoring one.
     refuses(&env, &f.forge2, &["edit", &f.s, "--title", "Goal S2"]);
+    // Nor is one that fixes the cadence and changes another field the parent check reads.
+    refuses(
+        &env,
+        &f.forge2,
+        &["edit", &f.s, "--no-every", "--parent", &f.p],
+    );
+    refuses(&env, &f.forge2, &["edit", &f.s, "--no-every", "--lane"]);
+    refuses(
+        &env,
+        &f.forge2,
+        &["edit", &f.s, "--no-every", "--status", "doing"],
+    );
+    refuses(
+        &env,
+        &f.forge2,
+        &["edit", &f.s, "--no-every", "--title", "x"],
+    );
     env.json(&f.forge2, &["edit", &f.s, "--no-every"]);
     refuses(&env, &f.forge2, &["note", &f.s, "x"]);
     let out = env.json(&f.forge, &["migrate", l]);
@@ -2993,4 +3014,73 @@ fn a_parent_target_made_recurring_is_repaired() {
     let b2 = new_id(&out, &f.b);
     assert_eq!(shown(&env, &f.forge2, &b2)["parent"], f.s.as_str());
     assert_clean(&env, &f.forge2);
+}
+
+#[test]
+fn a_lane_made_above_a_parent_target_is_cleared_on_that_ancestor() {
+    // Fix round 1: a carried lane under S, and an ancestor of S made a lane by another
+    // host. The restore clears the ancestor's lane; moving S is not admitted.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge2, &["add", "Goal A"]));
+    let s = id_of(env.json(&forge2, &["add", "Goal S", "--parent", &a]));
+    let l = id_of(env.json(&forge, &["add", "Lane L", "--lane", "--origin", "user"]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &l, "carry", &format!("parent = \"{s}\"\n"));
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let l_arg = list.to_str().unwrap();
+    apply_until(&env, &forge, &list, "journal");
+    refuses(&env, &forge2, &["edit", &a, "--lane", "--origin", "user"]);
+    hand_edit(&forge2, &a, "\ndepends: ", "\nlane: true\ndepends: ");
+    let restore = format!("`tasks edit {a} --no-lane`");
+    let (kind, detail) = fail_detail(&env, &forge, &["migrate", l_arg]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(detail.contains(&restore), "{detail}");
+    assert!(!detail.contains("--no-parent"), "{detail}");
+    refuses(&env, &forge2, &["edit", &s, "--no-parent"]);
+    refuses(&env, &forge2, &["edit", &a, "--no-lane", "--title", "x"]);
+    env.json(&forge2, &["edit", &a, "--no-lane"]);
+    let out = env.json(&forge, &["migrate", l_arg]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    let l2 = new_id(&out, &l);
+    assert_eq!(shown(&env, &forge2, &l2)["parent"], s.as_str());
+    assert_eq!(shown(&env, &forge2, &s)["parent"], a.as_str());
+}
+
+#[test]
+fn a_reopen_that_would_reactivate_another_listed_edge_is_not_named() {
+    // Fix round 1: reopening a closed released dependent that also depends on a carried
+    // task would reactivate that edge too, which the freeze refuses; the resume refusal
+    // must not name it.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let c = id_of(env.json(&forge, &["add", "C"]));
+    let x = id_of(env.json(&ops, &["add", "X", "--depends", &d, "--depends", &c]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(
+        &text,
+        &d,
+        "drop",
+        &format!("reason = \"superseded\"\nrelease = [\"{x}\"]\n"),
+    );
+    let text = decide(&text, &c, "carry", "");
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let l = list.to_str().unwrap();
+    apply_until(&env, &forge, &list, "journal");
+    hand_edit(&ops, &x, "status: todo", "status: dropped");
+    let reopen = format!("`tasks edit {x} --status todo`");
+    let (kind, detail) = fail_detail(&env, &forge, &["migrate", l]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(!detail.contains(&reopen), "{detail}");
+    assert!(
+        detail.contains("no single command") && detail.contains(&c),
+        "{detail}"
+    );
+    refuses(&env, &ops, &["edit", &x, "--status", "todo"]);
 }

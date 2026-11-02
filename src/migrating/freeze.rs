@@ -7,7 +7,9 @@
 //!
 //! - a parent target S (`parent_targets`): a write to S is admitted when S fails the parent
 //!   check before it, fails strictly fewer of its causes after it, introduces none, and
-//!   changes nothing but the fields that check reads ([`PARENT_FIELDS`]);
+//!   changes nothing but `updated` and the fields of the causes it fixes
+//!   ([`Failure::fields`]); a lane above S that a carried lane would nest inside is restored
+//!   by clearing that ancestor's `lane`, changing nothing else on it;
 //! - a (dependent, dropped-or-closed listed id) pair: its state is "the record is open and
 //!   its `depends` names the id", expected present exactly when the journal's `release`
 //!   for the id lists the dependent. A write is admitted when every pair it changes moves
@@ -24,21 +26,6 @@ use crate::output::RefusalOut;
 use crate::registry::Registry;
 use crate::repo::Project;
 use std::collections::{BTreeMap, BTreeSet};
-
-/// The fields a parent target's restoring write may change: what the parent check reads
-/// (status, cadence, deferral, lane, parent) and what changes with them (a reopen's
-/// stamps and review state, the cadence's anchor), plus the `updated` stamp.
-const PARENT_FIELDS: &[Field] = &[
-    Field::Updated,
-    Field::Status,
-    Field::Completed,
-    Field::Closed,
-    Field::Defer,
-    Field::Review,
-    Field::Every,
-    Field::Lane,
-    Field::Parent,
-];
 
 /// What a reopen (`edit --status todo` from done or dropped) rewrites besides `status`.
 const REOPEN_FIELDS: &[Field] = &[
@@ -62,7 +49,6 @@ enum Field {
     /// `every` and its anchor `last_done`, which `--no-every` clears together.
     Every,
     Lane,
-    Parent,
     Depends,
 }
 
@@ -86,7 +72,6 @@ fn same_except(before: &Task, after: &Task, fields: &[Field]) -> bool {
                 moved.last_done.clone_from(&after.last_done);
             }
             Field::Lane => moved.lane = after.lane,
-            Field::Parent => moved.parent.clone_from(&after.parent),
             Field::Depends => moved.depends.clone_from(&after.depends),
         }
     }
@@ -189,22 +174,59 @@ fn restoring(
     let Some(before) = before else {
         return Ok(false);
     };
-    let id = registry.canonical_id(&after.id);
     if registry.canonical_prefix(&project.prefix) == journal.successor
-        && journal.parent_targets.contains(&id.to_string())
+        && restores_parent_target(journal, registry, project, before, after)?
     {
-        let carried = carried_targets(journal)?;
-        let was = failures(project, registry, &carried, before)?;
-        let now = failures(project, registry, &carried, after)?;
+        return Ok(true);
+    }
+    Ok(restores_release(journal, registry, before, after))
+}
+
+/// A write to a parent target that fixes some of its causes and changes only their fields,
+/// or a write to a lane above one that only clears `lane` and fixes that cause.
+fn restores_parent_target(
+    journal: &MigrationJournal,
+    registry: &Registry,
+    project: &Project,
+    before: &Task,
+    after: &Task,
+) -> Result<bool> {
+    let id = registry.canonical_id(&after.id);
+    let carried = carried_targets(journal)?;
+    if journal.parent_targets.contains(&id.to_string()) {
+        let was = failures(project, registry, &carried, before, None)?;
+        let now = failures(project, registry, &carried, after, None)?;
+        let mut fields = vec![Field::Updated];
+        for fixed in was.difference(&now) {
+            fields.extend_from_slice(fixed.fields());
+        }
         if !was.is_empty()
             && now.is_subset(&was)
             && now != was
-            && same_except(before, after, PARENT_FIELDS)
+            && same_except(before, after, &fields)
         {
             return Ok(true);
         }
     }
-    Ok(restores_release(journal, registry, before, after))
+    if !(before.lane && !after.lane && same_except(before, after, &[Field::Updated, Field::Lane])) {
+        return Ok(false);
+    }
+    for target in &journal.parent_targets {
+        let target = match project.read_task(&TaskId::parse(target)?) {
+            Ok(task) => task,
+            Err(Error::TaskNotFound(_)) => continue,
+            Err(error) => return Err(error),
+        };
+        let was = failures(project, registry, &carried, &target, None)?;
+        if !was.contains(&Failure::InsideLane(id.clone())) {
+            continue;
+        }
+        let now = failures(project, registry, &carried, &target, Some(after))?;
+        if now.is_subset(&was) && !now.contains(&Failure::InsideLane(id.clone())) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Whether `task` is an open record whose `depends` names `listed`.
@@ -307,6 +329,18 @@ enum Failure {
 }
 
 impl Failure {
+    /// The fields the restoring write for this cause changes on the parent target, besides
+    /// `updated`. A lane above it is restored on that ancestor, never by moving the target.
+    fn fields(&self) -> &'static [Field] {
+        match self {
+            Failure::Moved | Failure::InsideLane(_) => &[],
+            Failure::Closed(_) => REOPEN_FIELDS,
+            Failure::Recurring => &[Field::Every],
+            Failure::Deferred => &[Field::Defer],
+            Failure::Lane => &[Field::Lane],
+        }
+    }
+
     fn settle(&self, target: &str) -> String {
         match self {
             Failure::Moved => format!(
@@ -325,7 +359,7 @@ impl Failure {
                 "parent target {target} became a lane, which would nest a carried lane; restore it with `tasks edit {target} --no-lane`"
             ),
             Failure::InsideLane(lane) => format!(
-                "parent target {target} is now inside lane {lane}, which would nest a carried lane; restore it with `tasks edit {target} --no-parent`"
+                "parent target {target} is now inside lane {lane}, which would nest a carried lane; restore it with `tasks edit {lane} --no-lane`"
             ),
         }
     }
@@ -333,12 +367,14 @@ impl Failure {
 
 /// The causes for which `target` (one version of a parent target) fails the parent check
 /// preflight made for it: open, not a recurrence, not deferred (a shelf aside), and no
-/// lane at or above it when a carried lane is placed below it.
+/// lane at or above it when a carried lane is placed below it (one cause per lane above).
+/// Ancestors are read from disk, except `overlay`, a record as a write would leave it.
 fn failures(
     project: &Project,
     registry: &Registry,
     carried: &[Task],
     target: &Task,
+    overlay: Option<&Task>,
 ) -> Result<BTreeSet<Failure>> {
     let id = registry.canonical_id(&target.id);
     let mut out = BTreeSet::new();
@@ -372,14 +408,16 @@ fn failures(
             if !seen.insert(ancestor.clone()) {
                 break;
             }
-            let record = match project.read_task(&ancestor) {
-                Ok(record) => record,
-                Err(Error::TaskNotFound(_)) => break,
-                Err(error) => return Err(error),
+            let record = match overlay {
+                Some(task) if registry.canonical_id(&task.id) == ancestor => task.clone(),
+                _ => match project.read_task(&ancestor) {
+                    Ok(record) => record,
+                    Err(Error::TaskNotFound(_)) => break,
+                    Err(error) => return Err(error),
+                },
             };
             if record.lane {
                 out.insert(Failure::InsideLane(ancestor));
-                break;
             }
             current = record.parent.as_ref().map(|p| registry.canonical_id(p));
         }
@@ -415,7 +453,7 @@ pub fn revalidate(
             let id = TaskId::parse(target)?;
             match ctx.target.read_task(&id) {
                 Ok(task) => {
-                    for failure in failures(&ctx.target, &ctx.registry, &carried, &task)? {
+                    for failure in failures(&ctx.target, &ctx.registry, &carried, &task, None)? {
                         out.push(refusal(target, "parent_target", failure.settle(target)));
                     }
                 }
@@ -504,9 +542,17 @@ fn release_changes(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<Vec<R
                             .iter()
                             .any(|dep| registry.canonical_id(dep) == listed) =>
                 {
-                    format!(
-                        "{removed} was closed, so the run would release nothing there; restore it with `tasks edit {removed} --status todo`"
-                    )
+                    let unreleased = reopen_unreleased(journal, registry, task)?;
+                    if unreleased.is_empty() {
+                        format!(
+                            "{removed} was closed, so the run would release nothing there; restore it with `tasks edit {removed} --status todo`"
+                        )
+                    } else {
+                        format!(
+                            "{removed} was closed, so the run would release nothing there; no single command restores it, since reopening it would also reopen its dependency on {}, which the run does not release it from: restore its record from the synced history",
+                            unreleased.join(", ")
+                        )
+                    }
                 }
                 Some(task) if task.status.is_open() => format!(
                     "{removed} no longer depends on {d}, which the run releases it from; restore it with `tasks dep {removed} --on {d}`"
@@ -523,6 +569,37 @@ fn release_changes(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<Vec<R
         }
     }
     Ok(out)
+}
+
+/// The ids whose edges reopening the closed `task` would reactivate against the journal's
+/// expectation: empty exactly when the freeze admits `tasks edit <task> --status todo` as a
+/// restoring write (the reopen is simulated and judged by the freeze's own rule).
+fn reopen_unreleased(
+    journal: &MigrationJournal,
+    registry: &Registry,
+    task: &Task,
+) -> Result<Vec<String>> {
+    let mut reopened = task.clone();
+    let now = crate::time::after(&task.updated)?;
+    crate::commands::apply_status_effects(&mut reopened, Status::Todo, &now, None)?;
+    reopened.updated = now;
+    if restores_release(journal, registry, task, &reopened) {
+        return Ok(Vec::new());
+    }
+    let id = registry.canonical_id(&task.id).to_string();
+    Ok(task
+        .depends
+        .iter()
+        .map(|dep| registry.canonical_id(dep))
+        .filter(|dep| journal.names_id(dep))
+        .filter(|dep| {
+            !journal
+                .release
+                .get(&dep.to_string())
+                .is_some_and(|released| released.contains(&id))
+        })
+        .map(|dep| dep.to_string())
+        .collect())
 }
 
 /// The resume's refusal over revalidation differences: `move_pending`, naming each.
