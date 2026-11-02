@@ -61,6 +61,81 @@ pub struct MoveOut {
     pub warnings: Vec<String>,
 }
 
+/// One reason a decision list cannot run, and the list key or command that settles it.
+#[derive(Serialize)]
+pub struct RefusalOut {
+    pub id: String,
+    pub rule: String,
+    pub settle: String,
+}
+
+#[derive(Serialize)]
+pub struct BodyChange {
+    pub id: String,
+    pub diff: String,
+}
+
+#[derive(Serialize)]
+pub struct CarriedOut {
+    pub from: String,
+    /// Assigned only when a run is being resumed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub parent: Option<String>,
+    pub rewrites: Vec<String>,
+    pub attachments: Vec<String>,
+    pub park: bool,
+}
+
+#[derive(Serialize)]
+pub struct DroppedOut {
+    pub id: String,
+    pub reason: String,
+    pub released: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ClosedOut {
+    pub id: String,
+    pub reason: String,
+    pub open_depends: Vec<String>,
+    pub released: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct InboundOut {
+    pub id: String,
+    pub dependents: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct WokenOut {
+    pub id: String,
+    pub shelves: Vec<String>,
+}
+
+/// `tasks migrate <list>`: spec §4.7. `refusals` and `body_changes` appear on `--explain`.
+#[derive(Serialize)]
+pub struct MigrateOut {
+    pub source: String,
+    pub successor: String,
+    /// `sha256:<64 hex>` of the list file.
+    pub list: String,
+    pub recovery: String,
+    pub carried: Vec<CarriedOut>,
+    pub dropped: Vec<DroppedOut>,
+    pub closed: Vec<ClosedOut>,
+    pub inbound: Vec<InboundOut>,
+    pub woken: Vec<WokenOut>,
+    pub unread_projects: Vec<String>,
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub refusals: Vec<RefusalOut>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub body_changes: Vec<BodyChange>,
+}
+
 #[derive(Serialize)]
 pub struct DraftOut {
     pub path: String,
@@ -1418,6 +1493,7 @@ pub enum Output {
     Rename(RenameOut),
     Move(MoveOut),
     MigrateDraft(DraftOut),
+    Migrate(MigrateOut),
     Id(IdOut),
     Commit(CommitOut),
     Add(AddOut),
@@ -1541,6 +1617,16 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             text
         }
         Output::MigrateDraft(o) => format!("{}: {} tasks to decide", o.path, o.tasks),
+        Output::Migrate(o) => {
+            let mut text = format!("{} → {} ({})", o.source, o.successor, o.recovery);
+            if !o.refusals.is_empty() {
+                text.push_str("\nrefusals:");
+                for r in &o.refusals {
+                    text.push_str(&format!("\n  {} [{}]: {}", r.id, r.rule, r.settle));
+                }
+            }
+            text
+        }
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Commit(o) => {
@@ -2706,6 +2792,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Rename(o) => o.warnings.clone(),
         Output::Move(o) => o.warnings.clone(),
         Output::MigrateDraft(o) => o.warnings.clone(),
+        Output::Migrate(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Commit(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),

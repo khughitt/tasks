@@ -3,6 +3,7 @@
 
 pub mod draft;
 pub mod list;
+pub mod preflight;
 
 use crate::commands::Ctx;
 use crate::registry::Registry;

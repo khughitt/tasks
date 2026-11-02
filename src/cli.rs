@@ -490,8 +490,8 @@ pub enum Command {
         /// The reviewed decision list to explain or apply.
         #[arg(value_name = "PATH", conflicts_with = "draft")]
         list: Option<std::path::PathBuf>,
-        /// The successor project (with --draft).
-        #[arg(long, value_name = "PREFIX", add = ArgValueCandidates::new(crate::complete::prefixes))]
+        /// The successor project (with --draft; a list names its own).
+        #[arg(long, value_name = "PREFIX", conflicts_with = "list", add = ArgValueCandidates::new(crate::complete::prefixes))]
         to: Option<String>,
         /// Write a draft decision list to this new path.
         #[arg(long, value_name = "PATH", requires = "to", conflicts_with = "explain")]
