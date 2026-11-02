@@ -1243,7 +1243,9 @@ Before moving a checkout, run `tasks -C <root> init --prefix <p> --force` on eve
 other host while the old root and storage still exist. Without that record, adoption
 can retain the former root but may lack its storage and warn. A dangling link at an
 unchanged root preserves recorded storage; after a root change it clears the current
-storage record. Former entries remain until unregistering.
+storage record. Former entries remain until unregistering. For a detached project,
+add `--records <records-root>`; after the move, re-point it as
+[Detached projects](#detached-projects) describes.
 
 For a move made before location history was available, backfill the former root in
 that host's `~/.config/tasks/projects.toml`, substituting its absolute paths:
@@ -1341,6 +1343,16 @@ second host runs the same command after the records sync, and only its registry 
 written. `--records` excludes `--checkout`. `--force` repoints as before and keeps
 aliases, groups and location history.
 
+A moved checkout re-points with the same command run in the new checkout, with
+`--force`, on each host. The first host, where the recorded checkout is gone, rewrites
+`[checkout] path` in the records config (keeping its comments) and warns naming the
+previous checkout; init does not commit that config, so commit it in the records
+repository. Every other host, whose synced config already names the new checkout,
+re-points only its registry. Init refuses while the recorded checkout still exists on
+the host. Until a host re-points, its registry-wide reads fail with a `config` error
+naming the command. Init validates the registry, config and history before it writes
+the config, saves the registry last, and puts the config back if that save fails.
+
 The registry gains a `[records]` table beside `[projects]`:
 
 ```toml
@@ -1361,7 +1373,9 @@ Init refuses with:
   or a shared git common directory), is a linked worktree rather than a main checkout,
   or the records root does not exist; or, without `--force`, the prefix is already
   paired with another records directory (with `--force` the pairing is replaced and a
-  warning names the old one).
+  warning names the old one); or the records config declares another detached
+  checkout that still exists on this host, or one that is absent and `--force` was not
+  given.
 - `retired_project`: the existing records config declares `[retired]` and `--force`
   was used.
 

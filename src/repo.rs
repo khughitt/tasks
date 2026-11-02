@@ -303,6 +303,29 @@ impl DetachedPlan {
     }
 }
 
+/// A detached config re-pointed to a moved checkout (relocation design §4.1): the
+/// `[checkout] path` value replaced in place, keeping the key's decor and every comment,
+/// then `detach_config`'s `[git] commit` rule.
+fn relocate_config(text: &str, path: &str) -> Result<String> {
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
+    let Some(value) = doc
+        .get_mut("checkout")
+        .and_then(toml_edit::Item::as_table_like_mut)
+        .and_then(|checkout| checkout.get_mut("path"))
+        .and_then(toml_edit::Item::as_value_mut)
+    else {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [checkout] path is missing"
+        )));
+    };
+    let decor = value.decor().clone();
+    *value = toml_edit::Value::from(path);
+    *value.decor_mut() = decor;
+    detach_config(&doc.to_string(), path)
+}
+
 /// An existing config made detached, as a `toml_edit` edit so its comments and unrelated
 /// tables survive (as `retire` edits `[retired]`): `[checkout]` with `path` and
 /// `kind = "detached"` when the table is absent, and `[git] commit = true` when the table
@@ -655,7 +678,7 @@ impl Project {
         records: &Path,
         prefix: &str,
         checkout: &Path,
-        _force: bool,
+        force: bool,
     ) -> Result<DetachedPlan> {
         if !is_valid_prefix(prefix) {
             return Err(Error::Config(format!(
@@ -670,6 +693,7 @@ impl Project {
                 checkout.display()
             ))
         })?;
+        let mut relocated_from = None;
         let (before, planned) = if config.exists() {
             let existing = Self::open(records)?;
             if existing.prefix != prefix {
@@ -679,9 +703,7 @@ impl Project {
                     existing.prefix
                 )));
             }
-            if existing.kind != Kind::InTree
-                && (existing.kind != Kind::Detached || existing.checkout != checkout)
-            {
+            if existing.kind == Kind::Linked {
                 return Err(Error::Config(format!(
                     "{} already declares a {} checkout at {}; init does not relink an \
                      existing project",
@@ -690,9 +712,37 @@ impl Project {
                     existing.checkout.display()
                 )));
             }
+            // Relocation design §4.1: a detached config naming another checkout is
+            // re-pointed here only when that checkout is gone from this host and the
+            // caller asserts the move with `--force`.
+            if existing.kind == Kind::Detached && existing.checkout != checkout {
+                let declared = &existing.checkout;
+                if std::fs::symlink_metadata(declared).is_ok() {
+                    return Err(Error::Config(format!(
+                        "{} already declares a detached checkout at {}, which still exists \
+                         on this host; init does not re-point a project away from an \
+                         existing checkout",
+                        config.display(),
+                        declared.display()
+                    )));
+                }
+                if !force {
+                    return Err(Error::Config(format!(
+                        "{} declares a detached checkout at {}, which is not on this host; \
+                         add `--force` to re-point {prefix} to {}",
+                        config.display(),
+                        declared.display(),
+                        checkout.display()
+                    )));
+                }
+                relocated_from = Some(declared.clone());
+            }
             let text = std::fs::read_to_string(&config)?;
-            let detached = detach_config(&text, path)?;
-            (Some(text.into_bytes()), detached)
+            let planned = match relocated_from {
+                Some(_) => relocate_config(&text, path)?,
+                None => detach_config(&text, path)?,
+            };
+            (Some(text.into_bytes()), planned)
         } else {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
@@ -722,7 +772,7 @@ impl Project {
             config,
             before,
             after,
-            relocated_from: None,
+            relocated_from,
             spec_dir: PathBuf::from(&spec_dirs[0]),
             plan_dir: PathBuf::from(&plan_dirs[0]),
             commit_records,

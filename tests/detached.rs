@@ -907,8 +907,15 @@ fn init_records_on_an_existing_records_config_adds_checkout_and_enables_commits(
     let other = "prefix = \"det\"\n\n[checkout]\npath = \"../../elsewhere\"\nkind = \"detached\"\n";
     std::fs::write(&config, other).unwrap();
     let detail = fail_detail(&env, &l.code, &args, "config");
-    assert!(detail.contains("does not relink"), "{detail}");
+    assert!(detail.contains("--force"), "{detail}");
     assert_eq!(std::fs::read_to_string(&config).unwrap(), other);
+    // with --force the absent checkout is re-pointed to this one
+    fresh_host();
+    let mut forced = args.to_vec();
+    forced.push("--force");
+    env.json(&l.code, &forced);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("path = \"../../code\""), "{text}");
     // so is a linked [checkout]
     fresh_host();
     std::fs::write(
@@ -2310,5 +2317,157 @@ fn a_registry_save_failure_on_a_first_pairing_leaves_no_config() {
     };
     assert!(detail.contains("Permission denied"), "{detail}");
     assert!(!l.project.join("tasks/.config.toml").exists());
+    assert_eq!(registry_text(&env), registry);
+}
+
+#[test]
+fn init_records_force_relocates_a_moved_checkout() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let config = l.project.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, text.replace("[checkout]", "# keep me\n[checkout]")).unwrap();
+    l.git(&l.records, &["commit", "-qam", "comment"]);
+    let old = l.code.clone();
+    let moved = move_checkout(&l, "moved");
+    let bytes = std::fs::read(&config).unwrap();
+    let registry = registry_text(&env);
+    let detail = fail_detail(&env, &moved, &init_records("det", &l.records), "config");
+    assert!(
+        detail.contains("--force") && detail.contains(&old.display().to_string()),
+        "{detail}"
+    );
+    assert_eq!(std::fs::read(&config).unwrap(), bytes);
+    assert_eq!(registry_text(&env), registry);
+    let out = env.json(&moved, &init_records_force("det", &l.records));
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("path = \"../../moved\""), "{text}");
+    assert!(text.contains("# keep me"), "{text}");
+    assert!(text.contains("kind = \"detached\""), "{text}");
+    let registry = registry_text(&env);
+    assert!(
+        registry.contains(&format!("det = {:?}", moved.display().to_string())),
+        "{registry}"
+    );
+    assert!(registry.contains("[[locations.det.former]]"), "{registry}");
+    assert!(registry.contains(&old.display().to_string()), "{registry}");
+    let warnings: Vec<String> = out["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("was declared at") && w.contains(&old.display().to_string())),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains("was registered to")),
+        "{warnings:?}"
+    );
+    assert_eq!(env.json(&moved, &["where"])["project"]["prefix"], "det");
+    // Rerunning changes nothing.
+    let bytes = std::fs::read(&config).unwrap();
+    let out = env.json(&moved, &init_records_force("det", &l.records));
+    assert_eq!(std::fs::read(&config).unwrap(), bytes);
+    assert!(
+        !out["warnings"].to_string().contains("was declared at"),
+        "{out}"
+    );
+}
+
+#[test]
+fn init_records_force_refuses_to_relocate_away_from_an_existing_checkout() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let config = l.project.join("tasks/.config.toml");
+    let bytes = std::fs::read(&config).unwrap();
+    let registry = registry_text(&env);
+    let unchanged = |env: &TestEnv| {
+        assert_eq!(std::fs::read(&config).unwrap(), bytes);
+        assert_eq!(registry_text(env), registry);
+    };
+    // An unrelated repository while the recorded checkout is live.
+    let u = repo(&l.home, &l.base, "u");
+    let detail = fail_detail(&env, &u, &init_records_force("det", &l.records), "config");
+    assert!(detail.contains("still exists"), "{detail}");
+    unchanged(&env);
+    // A dangling symlink at the recorded path still counts as existing.
+    let old = l.code.clone();
+    let moved = move_checkout(&l, "moved");
+    std::os::unix::fs::symlink(l.base.join("nowhere"), &old).unwrap();
+    let detail = fail_detail(
+        &env,
+        &moved,
+        &init_records_force("det", &l.records),
+        "config",
+    );
+    assert!(detail.contains("still exists"), "{detail}");
+    unchanged(&env);
+    std::fs::remove_file(&old).unwrap();
+    // A subdirectory of the moved checkout is not its top level.
+    std::fs::create_dir_all(moved.join("sub")).unwrap();
+    assert_eq!(
+        env.fail(&moved.join("sub"), &init_records_force("det", &l.records)),
+        "config"
+    );
+    unchanged(&env);
+    // A retired project refuses before any write.
+    let retired = format!(
+        "{}\n[retired]\ndate = \"2026-11-02\"\nreason = \"over\"\n",
+        String::from_utf8(bytes.clone()).unwrap()
+    );
+    std::fs::write(&config, &retired).unwrap();
+    assert_eq!(
+        env.fail(&moved, &init_records_force("det", &l.records)),
+        "retired_project"
+    );
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), retired);
+    assert_eq!(registry_text(&env), registry);
+}
+
+#[test]
+fn relocation_replaces_an_absolute_checkout_path_with_the_relative_form() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let config = l.project.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        text.replace(
+            "path = \"../../code\"",
+            &format!("path = {:?}", l.code.display().to_string()),
+        ),
+    )
+    .unwrap();
+    l.git(&l.records, &["commit", "-qam", "absolute"]);
+    let moved = move_checkout(&l, "moved");
+    env.json(&moved, &init_records_force("det", &l.records));
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("path = \"../../moved\""), "{text}");
+    assert!(!text.contains(&l.code.display().to_string()), "{text}");
+}
+
+#[test]
+fn a_registry_save_failure_during_relocation_restores_the_config() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let moved = move_checkout(&l, "moved");
+    let config = l.project.join("tasks/.config.toml");
+    let bytes = std::fs::read(&config).unwrap();
+    let registry = registry_text(&env);
+    let Some(detail) = with_read_only_registry(&env, || {
+        fail_detail(&env, &moved, &init_records_force("det", &l.records), "io")
+    }) else {
+        return;
+    };
+    assert!(detail.contains("Permission denied"), "{detail}");
+    assert_eq!(std::fs::read(&config).unwrap(), bytes);
     assert_eq!(registry_text(&env), registry);
 }
