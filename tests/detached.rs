@@ -1814,6 +1814,33 @@ fn rename_without_adopt_after_another_host_renamed_names_adopt() {
 }
 
 #[test]
+fn wide_reads_inside_an_unpaired_checkout_warn_with_the_remedy_instead_of_failing() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    write_registry(
+        &env,
+        &format!("[projects]\ndet = {:?}\n", l.code.display().to_string()),
+    );
+    let out = env.json(&l.code, &["projects"]);
+    let row = &out["projects"][0];
+    assert_eq!(row["prefix"], "det", "{out}");
+    assert_eq!(row["reachable"], false, "{out}");
+    let warnings = out["warnings"].to_string();
+    assert!(
+        warnings.contains("tasks init --prefix det --records"),
+        "{out}"
+    );
+    env.json(&l.code, &["list", "--all-projects"]);
+    for args in [
+        &["where"][..],
+        &["list"][..],
+        &["list", "--project", "det"][..],
+    ] {
+        fail_detail(&env, &l.code, args, "records_unpaired");
+    }
+}
+
+#[test]
 fn a_registered_root_without_config_or_pairing_is_records_unpaired_from_every_entry_point() {
     let mut env = TestEnv::new();
     let l = layout(&mut env, "det");
