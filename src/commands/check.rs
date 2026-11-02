@@ -104,6 +104,10 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         .into_iter()
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
         .collect();
+    let migrations: Vec<_> = crate::migrating::journal::MigrationJournal::pending()?
+        .into_iter()
+        .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
+        .collect();
     let (records, parse_errors) = ctx.project.scan_lenient_with_raw();
     let mut growth_rows: Vec<_> = records
         .iter()
@@ -172,6 +176,14 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                     &journal.target
                 }
             ),
+            "move_pending",
+            journal.pending_error().to_string(),
+        ));
+    }
+    for journal in &migrations {
+        warnings.push(finding(
+            None,
+            "tasks/".into(),
             "move_pending",
             journal.pending_error().to_string(),
         ));
@@ -475,6 +487,10 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                     let (source, target) = if is_source { (&task.id, pointer) } else { (pointer, &task.id) };
                     if pending.iter().any(|journal| {
                         same(&journal.source_id(), source) && same(&journal.target_id(), target)
+                    }) || migrations.iter().any(|journal| {
+                        journal.carried.iter().any(|entry| {
+                            source.to_string() == entry.source && target.to_string() == entry.target
+                        })
                     }) {
                         continue;
                     }

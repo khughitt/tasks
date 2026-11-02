@@ -5,6 +5,7 @@ pub mod apply;
 pub mod classify;
 pub mod commit;
 pub mod draft;
+pub mod freeze;
 pub mod journal;
 pub mod list;
 pub mod preflight;

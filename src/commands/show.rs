@@ -47,9 +47,17 @@ pub(super) fn read_record(
         }
         Err(error) => return Err(error),
     };
-    match crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(&found.1.id)) {
+    let id = ctx.registry.canonical_id(&found.1.id);
+    match crate::moving::journal::refuse_pending_id(&id) {
         Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
         result => result?,
+    }
+    // Spec §4.5: a pending migration freezes its whole source and successor.
+    for journal in crate::migrating::journal::MigrationJournal::pending()? {
+        let warning = journal.pending_error().to_string();
+        if journal.names_prefix(&id.prefix) && !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
     }
     Ok(found)
 }

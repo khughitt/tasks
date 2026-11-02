@@ -477,6 +477,11 @@ pub fn run(ctx: &mut MigrateCtx, journal: MigrationJournal, from: Phase) -> Resu
     let recovery = if from == Phase::Journal {
         "fresh"
     } else {
+        // Spec §4.5: before any resumed phase, the inputs outside the journal.
+        let refusals = super::freeze::revalidate(ctx, &journal, from)?;
+        if !refusals.is_empty() {
+            return Err(super::freeze::refusal_error(&journal, &refusals));
+        }
         "resumed"
     };
     let mut out = output(ctx, &journal, recovery)?;

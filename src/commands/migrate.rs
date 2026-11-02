@@ -118,29 +118,34 @@ fn explain_pending(
             loaded,
         ))
     })();
+    // A resumable run still refuses when its preflight inputs changed (spec §4.5).
+    let mut changed = Vec::new();
     let reason = match verdict {
-        Ok(MigrationRecovery::Resume(_)) => None,
+        Ok(MigrationRecovery::Resume(phase)) => {
+            changed = crate::migrating::freeze::revalidate(ctx, journal, phase)?;
+            None
+        }
         Ok(MigrationRecovery::Refuse(reason)) => Some(reason),
         Ok(other) => unreachable!("a journal never classifies as {other:?}"),
         Err(Error::MovePending(reason) | Error::Validation(reason)) => Some(reason),
         Err(error) => return Err(error),
     };
-    let mut out = apply::output(
-        ctx,
-        journal,
-        if reason.is_some() { "refuse" } else { "resume" },
-    )?;
-    if let Some(reason) = reason {
+    let refuse = reason.is_some() || !changed.is_empty();
+    let mut out = apply::output(ctx, journal, if refuse { "refuse" } else { "resume" })?;
+    if refuse {
         // Spec §4.7: new ids are shown only for a `resume` verdict.
         for row in &mut out.carried {
             row.id = None;
         }
+    }
+    if let Some(reason) = reason {
         out.refusals.push(RefusalOut {
             id: journal.source.clone(),
             rule: "pending_operation".into(),
             settle: reason,
         });
     }
+    out.refusals.extend(changed);
     out.warnings
         .extend(preflight::reason_warnings(&loaded.list));
     Ok(out)

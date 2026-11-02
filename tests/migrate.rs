@@ -2704,3 +2704,293 @@ fn an_unreadable_successor_record_carrying_the_sha_is_never_fresh() {
     assert!(detail.contains(&format!("{a2} (unreadable")), "{detail}");
     assert_eq!(explain(&env, &p.forge, &p.list)["recovery"], "refuse");
 }
+
+// ---- The freeze, restoring writes and resume revalidation (plan Task 7, spec §4.5) ----
+
+const PENDING: &str = "a migration of forge to forge2 is pending on this host";
+
+fn refuses(env: &TestEnv, dir: &std::path::Path, args: &[&str]) {
+    let (kind, detail) = fail_detail(env, dir, args);
+    assert_eq!(kind, "move_pending", "{args:?}: {detail}");
+}
+
+/// Writes `record`'s file with `from` replaced by `to`, as another host's synced write
+/// would arrive: no command runs.
+fn hand_edit(dir: &std::path::Path, id: &str, from: &str, to: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains(from), "{id}: {raw}");
+    std::fs::write(&path, raw.replacen(from, to, 1)).unwrap();
+}
+
+fn depends_of(env: &TestEnv, dir: &std::path::Path, id: &str) -> Vec<String> {
+    shown(env, dir, id)["depends"]
+        .as_array()
+        .map(|deps| {
+            deps.iter()
+                .map(|d| d.as_str().unwrap().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Forge D dropped with `release = [x]`, where ops-x depends on D; ops-y and ops-z are
+/// plain; forge B carried under successor goal S. Stopped after `journal`.
+struct Frozen {
+    forge: std::path::PathBuf,
+    forge2: std::path::PathBuf,
+    ops: std::path::PathBuf,
+    d: String,
+    b: String,
+    s: String,
+    x: String,
+    y: String,
+    z: String,
+    list: std::path::PathBuf,
+}
+
+fn frozen(env: &mut TestEnv) -> Frozen {
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let ops = env.init("ops");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let b = id_of(env.json(&forge, &["add", "B"]));
+    let s = id_of(env.json(&forge2, &["add", "Goal S"]));
+    let x = id_of(env.json(&ops, &["add", "X", "--depends", &d]));
+    let y = id_of(env.json(&ops, &["add", "Y"]));
+    let z = id_of(env.json(&ops, &["add", "Z"]));
+    let (text, _) = draft_home(env, &forge);
+    let text = decide(
+        &text,
+        &d,
+        "drop",
+        &format!("reason = \"superseded\"\nrelease = [\"{x}\"]\n"),
+    );
+    let text = decide(&text, &b, "carry", &format!("parent = \"{s}\"\n"));
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    apply_until(env, &forge, &list, "journal");
+    Frozen {
+        forge,
+        forge2,
+        ops,
+        d,
+        b,
+        s,
+        x,
+        y,
+        z,
+        list,
+    }
+}
+
+#[test]
+fn every_write_in_either_project_refuses_while_pending() {
+    // Spec §5 case 11 (write refusals) and §4.5 freeze: the whole source and successor.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let f = id_of(env.json(&forge, &["add", "F"]));
+    env.json(&forge, &["done", &f]);
+    let t = id_of(env.json(&forge2, &["add", "T"]));
+    let p = phased_in(&mut env, forge, forge2);
+    apply_until(&env, &p.forge, &p.list, "journal");
+    for (dir, id) in [(&p.forge, &f), (&p.forge2, &t)] {
+        refuses(&env, dir, &["note", id, "x"]);
+        refuses(&env, dir, &["edit", id, "--title", "renamed"]);
+        refuses(&env, dir, &["add", "New"]);
+        let show = env.json(dir, &["show", id]);
+        assert!(show["warnings"].to_string().contains(PENDING), "{show}");
+        let report = env.check(dir);
+        assert!(
+            report["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["kind"] == "move_pending"
+                    && w["detail"].as_str().unwrap().contains(PENDING)),
+            "{report}"
+        );
+        refuses(&env, dir, &["unretire"]);
+    }
+    refuses(&env, &p.forge2, &["start", &t]);
+    let out = env.json(&p.forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    env.json(&p.forge2, &["note", &t, "after the run"]);
+    env.json(&p.forge, &["add", "After"]);
+    assert_clean(&env, &p.forge2);
+}
+
+#[test]
+fn edges_to_listed_ids_are_frozen_elsewhere() {
+    // Spec §4.5 freeze, third projects: edges to listed ids move in neither direction.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let x = id_of(env.json(&ops, &["add", "X", "--depends", &d]));
+    let y = id_of(env.json(&ops, &["add", "Y"]));
+    let w = id_of(env.json(&ops, &["add", "W", "--depends", &d]));
+    env.json(&ops, &["drop", &w]);
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(
+        &text,
+        &d,
+        "drop",
+        &format!("reason = \"superseded\"\nrelease = [\"{x}\"]\n"),
+    );
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    apply_until(&env, &forge, &list, "journal");
+    let before = snapshot(&ops);
+    refuses(&env, &ops, &["dep", &y, "--on", &d]);
+    refuses(&env, &ops, &["dep", &x, "--rm", &d]);
+    refuses(&env, &ops, &["edit", &y, "--depends", &d]);
+    refuses(&env, &ops, &["add", "New", "--depends", &d]);
+    // Reopening a closed record that depends on D would make it a dependent.
+    refuses(&env, &ops, &["edit", &w, "--status", "todo"]);
+    assert_eq!(snapshot(&ops), before);
+    // Writes that leave every edge to a listed id as it is go through.
+    env.json(&ops, &["note", &x, "unrelated"]);
+    env.json(&ops, &["dep", &y, "--on", &x]);
+    env.json(&ops, &["add", "Other"]);
+    let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    env.json(&ops, &["dep", &y, "--on", &d]);
+}
+
+#[test]
+fn hand_edits_are_repaired_one_command_at_a_time() {
+    // Spec §5 case 12: other hosts' synced edits are caught by resume revalidation, and
+    // each restoring command is admitted by the freeze, in either order.
+    let mut env = TestEnv::new();
+    let f = frozen(&mut env);
+    let l = f.list.to_str().unwrap();
+    refuses(&env, &f.forge2, &["edit", &f.s, "--every", "7d"]);
+    refuses(&env, &f.ops, &["dep", &f.y, "--on", &f.d]);
+    refuses(&env, &f.ops, &["dep", &f.x, "--rm", &f.d]);
+    hand_edit(&f.ops, &f.y, "depends: []", &format!("depends: [{}]", f.d));
+    hand_edit(&f.ops, &f.x, &format!("depends: [{}]", f.d), "depends: []");
+    let rm_y = format!("`tasks dep {} --rm {}`", f.y, f.d);
+    let on_x = format!("`tasks dep {} --on {}`", f.x, f.d);
+    let (kind, detail) = fail_detail(&env, &f.forge, &["migrate", l]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(detail.contains(&rm_y) && detail.contains(&on_x), "{detail}");
+    let preview = explain(&env, &f.forge, &f.list);
+    assert_eq!(preview["recovery"], "refuse", "{preview}");
+    let settles: Vec<String> = setting(&preview, "release_changed")
+        .into_iter()
+        .map(|(_, settle)| settle)
+        .collect();
+    assert_eq!(settles.len(), 2, "{preview}");
+    assert!(settles.iter().any(|s| s.contains(&rm_y)), "{preview}");
+    assert!(settles.iter().any(|s| s.contains(&on_x)), "{preview}");
+    refuses(&env, &f.ops, &["dep", &f.z, "--on", &f.d]);
+    // Reversed order: the removed edge first.
+    env.json(&f.ops, &["dep", &f.x, "--on", &f.d]);
+    let (_, detail) = fail_detail(&env, &f.forge, &["migrate", l]);
+    assert!(
+        detail.contains(&rm_y) && !detail.contains(&on_x),
+        "{detail}"
+    );
+    refuses(&env, &f.ops, &["dep", &f.z, "--on", &f.d]);
+    // Not restoring: the edge is already as the journal expects.
+    refuses(&env, &f.ops, &["dep", &f.x, "--rm", &f.d]);
+    env.json(&f.ops, &["dep", &f.y, "--rm", &f.d]);
+    refuses(&env, &f.ops, &["dep", &f.z, "--on", &f.d]);
+    let out = env.json(&f.forge, &["migrate", l]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    assert_eq!(
+        row(&out, "dropped", &f.d)["released"],
+        serde_json::json!([f.x])
+    );
+    assert_eq!(depends_of(&env, &f.ops, &f.x), vec![f.d.clone()]);
+    assert_eq!(depends_of(&env, &f.ops, &f.y), Vec::<String>::new());
+    assert!(
+        note_texts(&shown(&env, &f.forge, &f.d))
+            .last()
+            .unwrap()
+            .contains(&format!("released: {}", f.x))
+    );
+    let b2 = new_id(&out, &f.b);
+    assert_eq!(shown(&env, &f.forge2, &b2)["parent"], f.s.as_str());
+}
+
+#[test]
+fn a_released_dependent_closed_elsewhere_is_reopened() {
+    // A released dependent closed by another host is restored by reopening it.
+    let mut env = TestEnv::new();
+    let f = frozen(&mut env);
+    let l = f.list.to_str().unwrap();
+    hand_edit(&f.ops, &f.x, "status: todo", "status: dropped");
+    let reopen = format!("`tasks edit {} --status todo`", f.x);
+    let (_, detail) = fail_detail(&env, &f.forge, &["migrate", l]);
+    assert!(detail.contains(&reopen), "{detail}");
+    // Not the restoring write: closing it again, or dropping the edge.
+    refuses(&env, &f.ops, &["dep", &f.x, "--rm", &f.d]);
+    env.json(&f.ops, &["edit", &f.x, "--status", "todo"]);
+    let out = env.json(&f.forge, &["migrate", l]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+}
+
+#[test]
+fn a_successor_dependent_is_repaired_inside_the_frozen_successor() {
+    // A restoring write is judged before the project-wide refusal, so it is admitted in
+    // the frozen successor; any other write there still refuses.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let t = id_of(env.json(&forge2, &["add", "T", "--depends", &d]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(
+        &text,
+        &d,
+        "drop",
+        &format!("reason = \"superseded\"\nrelease = [\"{t}\"]\n"),
+    );
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let l = list.to_str().unwrap();
+    apply_until(&env, &forge, &list, "journal");
+    hand_edit(&forge2, &t, &format!("depends: [{d}]"), "depends: []");
+    let restore = format!("`tasks dep {t} --on {d}`");
+    let (kind, detail) = fail_detail(&env, &forge, &["migrate", l]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(detail.contains(&restore), "{detail}");
+    refuses(&env, &forge2, &["note", &t, "x"]);
+    env.json(&forge2, &["dep", &t, "--on", &d]);
+    refuses(&env, &forge2, &["note", &t, "x"]);
+    let out = env.json(&forge, &["migrate", l]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    assert_eq!(row(&out, "dropped", &d)["released"], serde_json::json!([t]));
+    assert_eq!(depends_of(&env, &forge2, &t), vec![d.clone()]);
+    env.json(&forge2, &["note", &t, "x"]);
+}
+
+#[test]
+fn a_parent_target_made_recurring_is_repaired() {
+    // Spec §5 case 12, parent target half.
+    let mut env = TestEnv::new();
+    let f = frozen(&mut env);
+    let l = f.list.to_str().unwrap();
+    refuses(&env, &f.forge2, &["edit", &f.s, "--every", "7d"]);
+    refuses(&env, &f.forge2, &["note", &f.s, "x"]);
+    hand_edit(&f.forge2, &f.s, "\ndepends: ", "\nevery: 7d\ndepends: ");
+    let restore = format!("`tasks edit {} --no-every`", f.s);
+    let (kind, detail) = fail_detail(&env, &f.forge, &["migrate", l]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(detail.contains(&restore), "{detail}");
+    let preview = explain(&env, &f.forge, &f.list);
+    assert_eq!(setting(&preview, "parent_target").len(), 1, "{preview}");
+    // A write to S that leaves it recurring is not the restoring one.
+    refuses(&env, &f.forge2, &["edit", &f.s, "--title", "Goal S2"]);
+    env.json(&f.forge2, &["edit", &f.s, "--no-every"]);
+    refuses(&env, &f.forge2, &["note", &f.s, "x"]);
+    let out = env.json(&f.forge, &["migrate", l]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    let b2 = new_id(&out, &f.b);
+    assert_eq!(shown(&env, &f.forge2, &b2)["parent"], f.s.as_str());
+    assert_clean(&env, &f.forge2);
+}

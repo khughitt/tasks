@@ -1885,6 +1885,8 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, task)?;
+    // The migration freeze, before the claim store moves: `write_task` checks it again.
+    crate::migrating::freeze::check_stored(&ctx.registry, &ctx.project, task)?;
     let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {
