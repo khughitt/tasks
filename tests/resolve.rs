@@ -1,7 +1,15 @@
 mod common;
-use common::TestEnv;
+use common::{TestEnv, git};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+
+#[test]
+fn resolve_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("resolve_git_fixtures_ignore_hostile_environment") {
+        return;
+    }
+    an_outside_worktree_whose_path_is_not_utf8_resolves_through_git();
+}
 
 fn id_of(v: serde_json::Value) -> String {
     v["id"].as_str().unwrap().to_string()
@@ -360,10 +368,9 @@ fn an_outside_worktree_whose_path_is_not_utf8_resolves_through_git() {
     git(&main, &["add", "-A"]);
     git(&main, &["commit", "-qm", "init"]);
     let top = base.join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
-    let out = std::process::Command::new("git")
+    let out = common::git_fixture::command(env.home.path(), &main)
         .args(["worktree", "add", "-q"])
         .arg(&top)
-        .current_dir(&main)
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
@@ -389,19 +396,6 @@ fn a_malformed_locations_table_is_a_config_error() {
     assert!(out.stdout.is_empty());
     let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(err["error"]["kind"], "config");
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@e")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@e")
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "git {args:?}: {out:?}");
 }
 
 #[test]

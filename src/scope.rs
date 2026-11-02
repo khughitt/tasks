@@ -172,7 +172,7 @@ pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>
     if registry.projects.is_empty() {
         warnings.push("registry is empty".into());
     }
-    match Project::locate(cwd) {
+    match Project::locate_with(registry, cwd) {
         Ok(current) if !registry.projects.contains_key(&current.prefix) => {
             warnings.push(format!(
                 "current project {} is not registered",
@@ -491,5 +491,15 @@ mod tests {
         ));
         let (all, _) = Scope::open_all(&registry, sci.path()).unwrap();
         assert_eq!(all.group(), None);
+
+        let lon = tempfile::tempdir().unwrap();
+        write_config(lon.path(), "lon");
+        let moved = tempfile::tempdir().unwrap();
+        registry.register("lon", lon.path()).unwrap();
+        registry.records.insert("lon".into(), moved.path().into());
+        assert!(matches!(
+            Scope::open_group(&registry, lon.path(), "vf"),
+            Err(Error::RecordsMoved(_))
+        ));
     }
 }

@@ -857,19 +857,31 @@ impl Project {
     /// `no_project` whatever state the registry is in; a missing registry is empty and a
     /// malformed one is an error.
     pub fn locate(start: &Path) -> Result<Project> {
+        Self::locate_with_loader(start, Registry::load)
+    }
+
+    /// `locate` against a `Registry` the caller has already loaded.
+    pub fn locate_with(registry: &Registry, start: &Path) -> Result<Project> {
+        Self::locate_with_loader(start, || Ok(registry))
+    }
+
+    fn locate_with_loader<R: std::borrow::Borrow<Registry>>(
+        start: &Path,
+        load: impl FnOnce() -> Result<R>,
+    ) -> Result<Project> {
         let start = canonical_start(start)?;
         let mut directory = Some(start.as_path());
         while let Some(path) = directory {
             if path.join(CONFIG_REL).is_file() {
                 let project = Self::open(path)?;
-                crate::link::refuse_moved(&Registry::load()?, &project)?;
+                crate::link::refuse_moved(load()?.borrow(), &project)?;
                 return Ok(project);
             }
             directory = path.parent();
         }
         if let Some(tree) = crate::link::GitTree::of(&start)? {
-            let registry = Registry::load()?;
-            if let Some(project) = crate::link::project_of_tree(&registry, &tree)? {
+            let registry = load()?;
+            if let Some(project) = crate::link::project_of_tree(registry.borrow(), &tree)? {
                 return Ok(project);
             }
         }
@@ -1772,9 +1784,10 @@ mod tests {
         let (dir, _) = temp_project();
         let deep = dir.path().join("src/a/b");
         std::fs::create_dir_all(&deep).unwrap();
-        let p = Project::locate(&deep).unwrap();
+        let registry = Registry::default();
+        let p = Project::locate_with(&registry, &deep).unwrap();
         assert_eq!(p.root, dir.path().canonicalize().unwrap());
-        assert!(Project::locate(tempfile::tempdir().unwrap().path()).is_err());
+        assert!(Project::locate_with(&registry, tempfile::tempdir().unwrap().path()).is_err());
     }
 
     #[test]

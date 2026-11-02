@@ -46,6 +46,9 @@ fn common_git_fixtures_ignore_hostile_environment() {
     };
     assert_eq!(read(&main, &["show", "HEAD:README"]), b"main\n");
     assert_eq!(read(&side, &["show", "HEAD:README"]), b"side\n");
+    start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted();
+    start_reports_a_git_worktree_inspection_failure_as_a_warning();
+    prime_warns_about_uncommitted_task_files_only_in_a_git_checkout();
 }
 
 #[test]
@@ -4538,22 +4541,10 @@ fn start_done_drop_block_unblock_transitions() {
 fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    let git = |args: &[&str]| {
-        let output = std::process::Command::new("git")
-            .args(args)
-            .current_dir(&sci)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@e")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@e")
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "git {args:?}: {output:?}");
-    };
-    git(&["init", "-q", "-b", "main"]);
+    git(&sci, &["init", "-q", "-b", "main"]);
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "seed"]);
+    git(&sci, &["add", "-A"]);
+    git(&sci, &["commit", "-qm", "seed"]);
 
     let v = env.json(&sci, &["start", &id]);
     assert!(
@@ -4564,19 +4555,22 @@ fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted()
             .any(|w| w.as_str().unwrap().contains("worktree")),
         "a single-worktree repo has nothing to warn about: {v}"
     );
-    git(&["commit", "-qam", "start"]);
+    git(&sci, &["commit", "-qam", "start"]);
 
-    git(&[
-        "worktree",
-        "add",
-        "-q",
-        "-b",
-        "side",
-        sci.join("wt").to_str().unwrap(),
-    ]);
+    git(
+        &sci,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            sci.join("wt").to_str().unwrap(),
+        ],
+    );
     let other = id_of(env.json(&sci, &["add", "U", "-p", "2"]));
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "add U"]);
+    git(&sci, &["add", "-A"]);
+    git(&sci, &["commit", "-qm", "add U"]);
 
     let v = env.json(&sci, &["start", &other]);
     assert!(
@@ -4626,22 +4620,10 @@ fn start_reports_a_git_worktree_inspection_failure_as_a_warning() {
 
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    let git = |args: &[&str]| {
-        let output = std::process::Command::new("git")
-            .args(args)
-            .current_dir(&sci)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@e")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@e")
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "git {args:?}: {output:?}");
-    };
-    git(&["init", "-q", "-b", "main"]);
+    git(&sci, &["init", "-q", "-b", "main"]);
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "seed"]);
+    git(&sci, &["add", "-A"]);
+    git(&sci, &["commit", "-qm", "seed"]);
 
     let bin = tempfile::tempdir().unwrap();
     let fake_git = bin.path().join("git");
@@ -4785,12 +4767,7 @@ fn prime_all_projects_reports_scope_and_per_project_uncommitted_files() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let fam = env.init("fam");
-    let status = std::process::Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&fam)
-        .status()
-        .unwrap();
-    assert!(status.success());
+    git(&fam, &["init", "-q"]);
     let s = id_of(env.json(&sci, &["add", "S"]));
     let f = id_of(env.json(&fam, &["add", "F"]));
     env.json(&sci, &["start", &s]);
@@ -7487,12 +7464,7 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
     );
 
     let repo = env.init("fam");
-    let status = std::process::Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&repo)
-        .status()
-        .unwrap();
-    assert!(status.success());
+    git(&repo, &["init", "-q"]);
     let id = id_of(env.json(&repo, &["add", "Unfiled"]));
     let text = env.json(&repo, &["prime"])["warnings"][0]
         .as_str()
@@ -7506,12 +7478,7 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
 
     // a project nested inside a larger repository reports project-relative paths
     let outer = tempfile::tempdir().unwrap();
-    let status = std::process::Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(outer.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
+    git(outer.path(), &["init", "-q"]);
     // the directory name has a space: without -z git would quote the whole path
     std::fs::create_dir_all(outer.path().join("sub space")).unwrap();
     let nested = outer.path().join("sub space").canonicalize().unwrap();
@@ -7531,33 +7498,9 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
     // renamed is a dotfile, which the task scanner skips, because renaming a task file
     // would break id == filename and fail prime's scan before the warning is built
     std::fs::write(nested.join("tasks/.keep"), "").unwrap();
-    let add = std::process::Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(&nested)
-        .status()
-        .unwrap();
-    assert!(add.success());
-    let commit = std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@example.com",
-            "commit",
-            "-q",
-            "-m",
-            "seed",
-        ])
-        .current_dir(&nested)
-        .status()
-        .unwrap();
-    assert!(commit.success());
-    let renamed = std::process::Command::new("git")
-        .args(["mv", "tasks/.keep", "tasks/.kept"])
-        .current_dir(&nested)
-        .status()
-        .unwrap();
-    assert!(renamed.success());
+    git(&nested, &["add", "-A"]);
+    git(&nested, &["commit", "-q", "-m", "seed"]);
+    git(&nested, &["mv", "tasks/.keep", "tasks/.kept"]);
     let text = env.json(&nested, &["prime"])["warnings"][0]
         .as_str()
         .unwrap()

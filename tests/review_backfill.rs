@@ -1,6 +1,16 @@
 mod common;
-use common::TestEnv;
+use common::{TestEnv, git};
 use std::path::{Path, PathBuf};
+
+#[test]
+fn review_backfill_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent(
+        "review_backfill_git_fixtures_ignore_hostile_environment",
+    ) {
+        return;
+    }
+    a_deferred_commit_is_reported_and_not_rewritten();
+}
 
 fn id_of(v: serde_json::Value) -> String {
     v["id"].as_str().unwrap().to_string()
@@ -40,15 +50,8 @@ fn backfill_with(
         ])
         .args(["--tasks", bin.to_str().unwrap()])
         .args(extra)
-        .env("HOME", env.home.path())
-        .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_STATE_HOME")
-        .env_remove("TASKS_FORMAT")
-        .env_remove("TASKS_SESSION")
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("CODEX_SESSION_ID")
-        .env_remove("CODEX_THREAD_ID")
-        .env("USER", "tester")
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
         .output()
         .unwrap();
     let code = out.status.code().unwrap();
@@ -374,18 +377,5 @@ fn a_deferred_commit_is_reported_and_not_rewritten() {
         env.read(&f.dir, &file),
         after,
         "a rerun rewrote a record it had set"
-    );
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
     );
 }

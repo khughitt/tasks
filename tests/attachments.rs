@@ -1,6 +1,14 @@
 mod common;
-use common::TestEnv;
+use common::{TestEnv, git};
 use std::path::{Path, PathBuf};
+
+#[test]
+fn attachments_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("attachments_git_fixtures_ignore_hostile_environment") {
+        return;
+    }
+    rename_moves_attachment_directories_with_their_records();
+}
 
 fn id_of(v: serde_json::Value) -> String {
     v["id"].as_str().unwrap().to_string()
@@ -842,19 +850,6 @@ fn check_catches_a_collision_split_by_name_before_and_after_recovery() {
     )
     .unwrap();
     assert!(check_kinds(&env, &dir, "errors").is_empty());
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@e")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@e")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}: {output:?}");
 }
 
 /// A committed project `dot` with one task carrying `a.png` and one without files.
