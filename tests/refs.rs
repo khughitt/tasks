@@ -1778,8 +1778,7 @@ fn move_preflight_refuses_a_destination_fifo_and_changes_nothing() {
         .map(|entry| entry.unwrap().file_name())
         .collect::<std::collections::BTreeSet<_>>();
     let status = |dir: &std::path::Path| {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
+        let out = common::git_fixture::command(env.home.path(), dir)
             .args(["status", "--porcelain"])
             .output()
             .unwrap();

@@ -40,15 +40,8 @@ fn backfill_with(
         ])
         .args(["--tasks", bin.to_str().unwrap()])
         .args(extra)
-        .env("HOME", env.home.path())
-        .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_STATE_HOME")
-        .env_remove("TASKS_FORMAT")
-        .env_remove("TASKS_SESSION")
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("CODEX_SESSION_ID")
-        .env_remove("CODEX_THREAD_ID")
-        .env("USER", "tester")
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
         .output()
         .unwrap();
     let code = out.status.code().unwrap();

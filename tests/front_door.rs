@@ -1,3 +1,5 @@
+mod common;
+use common::git;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -34,16 +36,6 @@ fi
     dir
 }
 
-fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .current_dir(dir)
-        .args(["-c", "core.hooksPath=/dev/null"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-}
-
 fn stage(dir: &Path, path: &str) {
     let file = dir.join(path);
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -53,6 +45,8 @@ fn stage(dir: &Path, path: &str) {
 
 fn hook(dir: &Path, name: &str, globs: &str, remote: &str, refs: &str, fail: bool) -> String {
     let mut child = Command::new("sh")
+        .env_clear()
+        .envs(common::isolated_env(dir))
         .arg(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(".githooks")
@@ -252,4 +246,12 @@ fn front_door_push_requires_ci_coverage_and_preserves_refs() {
             format!("{want}\n{refs}")
         );
     }
+}
+
+#[test]
+fn front_door_git_fixtures_ignore_hostile_environment() {
+    if common::git_fixture::hostile_parent("front_door_git_fixtures_ignore_hostile_environment") {
+        return;
+    }
+    front_door_commit_classifies_every_staged_path();
 }
