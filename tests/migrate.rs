@@ -3209,7 +3209,8 @@ fn pretty_review(env: &TestEnv, dir: &std::path::Path, list: &std::path::Path) -
 #[test]
 fn pretty_review_shows_sections_in_order() {
     // Spec §4.8: refusals, the successor tree, drops, closes, removed edges and dropped
-    // links, then body diffs.
+    // links, then body diffs; woken shelves and outside dependents of carried tasks sit
+    // between the closes and the removed edges.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
@@ -3222,6 +3223,20 @@ fn pretty_review_shows_sections_in_order() {
     let u = id_of(env.json(&forge, &["add", "U needs rm_depends", "--depends", &k]));
     let o = id_of(env.json(&ops, &["add", "O", "--depends", &k]));
     let s = id_of(env.json(&forge2, &["add", "Goal S", "-p", "1"]));
+    let w = id_of(env.json(&ops, &["add", "W"]));
+    env.json(
+        &ops,
+        &[
+            "shelve",
+            &w,
+            "when K lands",
+            "--defer",
+            "2099-01-01",
+            "--wake-on",
+            &k,
+        ],
+    );
+    let i = id_of(env.json(&ops, &["add", "I", "--depends", &a]));
     let (text, _) = draft_home(&env, &forge);
     let mut text = decide(&text, &g, "carry", "");
     text = decide(&text, &a, "carry", "");
@@ -3251,10 +3266,26 @@ fn pretty_review_shows_sections_in_order() {
     let tree = at("carried:");
     let dropped = at("dropped:");
     let closed = at("closed:");
+    let woken = at("woken shelves:");
+    let inbound = at("outside dependents of carried tasks:");
     let removed = at("removed:");
     let body = at("body:");
     assert!(
-        refusals < tree && tree < dropped && dropped < closed && closed < removed && removed < body,
+        refusals < tree
+            && tree < dropped
+            && dropped < closed
+            && closed < woken
+            && woken < inbound
+            && inbound < removed
+            && removed < body,
+        "{shown}"
+    );
+    assert!(
+        shown[woken..inbound].contains(&format!("{k} K: {w}")),
+        "{shown}"
+    );
+    assert!(
+        shown[inbound..removed].contains(&format!("{a} A: {i}")),
         "{shown}"
     );
     // The tree nests A under G' and marks X's new parent; drops list released dependents.
@@ -3275,10 +3306,7 @@ fn pretty_review_shows_sections_in_order() {
         "{shown}"
     );
     assert!(shown[dropped..closed].contains(&o), "{shown}");
-    assert!(
-        shown[closed..removed].contains(&format!("{c} C")),
-        "{shown}"
-    );
+    assert!(shown[closed..woken].contains(&format!("{c} C")), "{shown}");
     assert!(shown[removed..body].contains(&format!("{x} X")), "{shown}");
     let json = explain(&env, &forge, &list);
     assert!(json.get("titles").is_none(), "{json}");
@@ -3286,7 +3314,7 @@ fn pretty_review_shows_sections_in_order() {
         shown[dropped..closed].contains(&format!("released: {o}")),
         "{shown}"
     );
-    assert!(shown[closed..removed].contains("done in forge"), "{shown}");
+    assert!(shown[closed..woken].contains("done in forge"), "{shown}");
     assert!(
         shown[removed..body].contains(&format!("removed dependency {k} (dropped)")),
         "{shown}"
@@ -3309,6 +3337,37 @@ fn pretty_review_shows_sections_in_order() {
     std::fs::write(&list, clean).unwrap();
     let shown = pretty_review(&env, &forge, &list);
     assert!(!shown.contains("refusals:"), "{shown}");
+}
+
+#[test]
+fn pending_and_complete_reviews_name_their_tasks() {
+    // The pretty review of a pending run and of a finished one puts titles beside ids, as
+    // the review of a fresh list does.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "Alpha task"]));
+    let k = id_of(env.json(&forge, &["add", "Kappa task"]));
+    let c = id_of(env.json(&forge, &["add", "Gamma task"]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &a, "carry", "");
+    let text = decide(&text, &k, "drop", "reason = \"gone\"\n");
+    let text = decide(&text, &c, "close", "reason = \"done\"\n");
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    apply_until(&env, &forge, &list, "journal");
+    let titled = |shown: &str| {
+        for (id, title) in [(&a, "Alpha task"), (&k, "Kappa task"), (&c, "Gamma task")] {
+            assert!(shown.contains(&format!("{id} {title}")), "{shown}");
+        }
+    };
+    let pending = pretty_review(&env, &forge, &list);
+    assert!(pending.contains("(resume)"), "{pending}");
+    titled(&pending);
+    env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    let complete = pretty_review(&env, &forge, &list);
+    assert!(complete.contains("(complete)"), "{complete}");
+    titled(&complete);
 }
 
 #[test]

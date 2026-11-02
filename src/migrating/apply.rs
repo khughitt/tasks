@@ -303,10 +303,12 @@ pub fn completed_output(
     let mut carried = Vec::new();
     let mut dropped = Vec::new();
     let mut closed = Vec::new();
+    let mut titles = BTreeMap::new();
     for state in &snapshot.listed {
         let RecordRead::Present(task) = &state.record else {
             unreachable!("a complete run has every listed record");
         };
+        titles.insert(state.id.clone(), task.title.clone());
         match state.decision {
             Some(Decision::Carry) => {
                 let (Some(to), Some(RecordRead::Present(target))) = (&task.moved_to, &state.target)
@@ -373,7 +375,7 @@ pub fn completed_output(
         warnings: ctx.source.warnings.clone(),
         refusals: Vec::new(),
         body_changes: Vec::new(),
-        titles: Default::default(),
+        titles,
     })
 }
 
@@ -400,8 +402,10 @@ fn shown_paths(owned: BTreeMap<PathBuf, BTreeSet<PathBuf>>) -> BTreeMap<String, 
 /// `--explain` of a pending run report the same rows.
 pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> Result<MigrateOut> {
     let mut carried = Vec::new();
+    let mut titles = BTreeMap::new();
     for entry in &journal.carried {
         let target = crate::format::parse_physical(&entry.target_text, &entry.target)?;
+        titles.insert(entry.source.clone(), target.title().to_string());
         carried.push(CarriedOut {
             from: entry.source.clone(),
             id: Some(entry.target.clone()),
@@ -414,6 +418,8 @@ pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> R
     let mut dropped = Vec::new();
     let mut closed = Vec::new();
     for entry in &journal.closed {
+        let record = crate::format::parse_physical(&entry.closed_text, &entry.id)?;
+        titles.insert(entry.id.clone(), record.title().to_string());
         let released = journal.release.get(&entry.id).cloned().unwrap_or_default();
         match entry.decision() {
             Decision::Drop => dropped.push(DroppedOut {
@@ -460,7 +466,7 @@ pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> R
         warnings: ctx.source.warnings.clone(),
         refusals: Vec::new(),
         body_changes: Vec::new(),
-        titles: Default::default(),
+        titles,
     })
 }
 

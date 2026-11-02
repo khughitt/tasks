@@ -1686,6 +1686,22 @@ fn migrate_review(o: &MigrateOut) -> String {
             }
         }
     }
+    if !o.woken.is_empty() {
+        text.push_str("\n\nwoken shelves:");
+        for w in &o.woken {
+            text.push_str(&format!("\n  {}: {}", named(&w.id), w.shelves.join(", ")));
+        }
+    }
+    if !o.inbound.is_empty() {
+        text.push_str("\n\noutside dependents of carried tasks:");
+        for i in &o.inbound {
+            text.push_str(&format!(
+                "\n  {}: {}",
+                named(&i.id),
+                i.dependents.join(", ")
+            ));
+        }
+    }
     let removed: Vec<(&str, &str)> = o
         .carried
         .iter()
