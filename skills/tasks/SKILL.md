@@ -859,7 +859,8 @@ fetch configuration, limits and binary-before-config rollout order.
   the reviewed plan settles the work; a child that still needs design is planned.
   A plan is evidence for a lower complexity rating, not a guarantee; `check` warns
   on an open step without a rating and a doing record without process.
-  `tasks check` warns on any heading left without a task.
+  `tasks check` warns on any heading left without a task; a moved tombstone neither
+  draws that warning for its plan nor covers a heading.
 - **executing-plans / subagent-driven-development**: `tasks start` a step before implementing, `tasks done` when its commit lands.
 - Plan headings are the drift contract: renaming or removing a heading under an open task fails `tasks check`. Update the task in the same change.
 

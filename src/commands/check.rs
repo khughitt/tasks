@@ -212,7 +212,15 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             ),
         ));
     }
-    let linked_plans: BTreeSet<_> = tasks.iter().filter_map(|task| task.plan.as_ref()).collect();
+    // A moved tombstone's plan link is history: the destination owns the live work, so a
+    // plan only tombstones link is not audited for heading coverage here, and a moved step
+    // never covers a heading of a plan a local record still links.
+    let live = |task: &&Task| task.status != Status::Moved;
+    let linked_plans: BTreeSet<_> = tasks
+        .iter()
+        .filter(live)
+        .filter_map(|task| task.plan.as_ref())
+        .collect();
     let mut plan_bodies = BTreeMap::new();
     for plan in linked_plans {
         if (crate::format::external_doc(plan)?.is_some()
@@ -792,7 +800,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
 
     for (plan, text) in &plan_bodies {
         for heading in step_headings(text) {
-            let linked = tasks.iter().any(|task| {
+            let linked = tasks.iter().filter(live).any(|task| {
                 task.plan.as_ref() == Some(plan) && task.step.as_deref() == Some(&heading)
             });
             if !linked {

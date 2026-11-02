@@ -957,6 +957,9 @@ It preserves fields, notes and live attachments, carries this host's park and es
 and leaves a read-only `moved` tombstone. Writes and new references to the tombstone
 refuse with `moved`, naming the destination id. Existing dependents follow the pointer;
 `check` warns `moved_dep` with `tasks dep <id> --on <new> --rm <old>` for their owners.
+A tombstone keeps its spec and plan links and the source keeps its documents, but its plan
+link is history: `check` does not audit a plan only tombstones link for unlinked headings,
+and a moved step does not cover a heading of a plan a local record still links.
 `show` displays the tombstone; `resolve` continues to resolve prefixes and paths only.
 
 Task objects expose optional `moved_to` (the destination id on a source tombstone)

@@ -9,6 +9,7 @@ fn move_git_fixtures_ignore_hostile_environment() {
     move_from_a_source_worktree_refuses();
     move_explain_classifies_source_worktree_refusal();
     correction_i1_move_stamp_keeps_identical_sibling_stale();
+    a_moved_only_plan_read_from_the_main_checkout_is_not_audited_in_a_worktree();
 }
 
 #[test]
@@ -3016,4 +3017,143 @@ fn move_preserves_creation_note_and_occurrence_keys() {
     assert_eq!(after["notes"][0]["harness_session"], "codex:w");
     assert_eq!(after["created"], before["created"]);
     assert_eq!(after["notes"][0]["at"], after["created"]);
+}
+
+fn unlinked_steps(report: &serde_json::Value) -> Vec<String> {
+    report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "unlinked_step")
+        .map(|f| f["detail"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn check_skips_headings_of_plans_only_moved_records_link() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let plans = [
+        ("docs/plans/goal.md", "### Task 1: G\n\n### Task 2: H\n"),
+        ("docs/plans/steps.md", "### Task 1: A\n\n### Task 2: B\n"),
+    ];
+    for dir in [&dots, &wali] {
+        for (path, text) in plans {
+            common::write_doc(dir, path, text);
+        }
+    }
+    // A goal-only link and a moved step: each plan is linked only by a tombstone.
+    let goal = id_of(env.json(&dots, &["add", "Goal", "--plan", "goal"]));
+    let step = id_of(env.json(
+        &dots,
+        &["add", "Step", "--plan", "steps", "--step", "Task 1: A"],
+    ));
+    let moved_step = id_of(env.json(&dots, &["move", &step, "--to", "wali"]));
+    id_of(env.json(&dots, &["move", &goal, "--to", "wali"]));
+
+    let report = env.check(&dots);
+    assert!(unlinked_steps(&report).is_empty(), "{report}");
+    assert!(kinds(&report, "errors").is_empty(), "{report}");
+    // The tombstones keep their links and the source keeps its documents.
+    assert_eq!(
+        env.json(&dots, &["show", &goal])["task"]["plan"],
+        "docs/plans/goal.md"
+    );
+    assert_eq!(
+        env.json(&dots, &["show", &step])["task"]["plan"],
+        "docs/plans/steps.md"
+    );
+    for (path, text) in plans {
+        assert_eq!(std::fs::read_to_string(dots.join(path)).unwrap(), text);
+    }
+
+    // The destination owns the live links and still audits them.
+    let mut unlinked = unlinked_steps(&env.check(&wali));
+    unlinked.sort();
+    assert_eq!(unlinked.len(), 3, "{unlinked:?}");
+    assert!(unlinked.iter().any(|d| d.contains("Task 2: B")));
+    assert!(!unlinked.iter().any(|d| d.contains("Task 1: A")));
+    common::write_doc(&wali, "docs/plans/steps.md", "### Task 2: B\n");
+    let (code, report) = common::check_findings(&env, &wali);
+    assert_eq!(code, 1, "{report}");
+    let missing: Vec<_> = report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "step_missing")
+        .collect();
+    assert_eq!(missing.len(), 1, "{report}");
+    assert_eq!(missing[0]["id"], moved_step);
+}
+
+#[test]
+fn a_moved_step_does_not_cover_a_plan_a_local_record_still_links() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    for dir in [&dots, &wali] {
+        common::write_doc(
+            dir,
+            "docs/plans/shared.md",
+            "### Task 1: A\n\n### Task 2: B\n",
+        );
+    }
+    env.json(
+        &dots,
+        &["add", "Local", "--plan", "shared", "--step", "Task 2: B"],
+    );
+    let step = id_of(env.json(
+        &dots,
+        &["add", "Step", "--plan", "shared", "--step", "Task 1: A"],
+    ));
+    env.json(&dots, &["move", &step, "--to", "wali"]);
+
+    let unlinked = unlinked_steps(&env.check(&dots));
+    assert_eq!(unlinked.len(), 1, "{unlinked:?}");
+    assert!(unlinked[0].contains("Task 1: A"), "{unlinked:?}");
+}
+
+#[test]
+fn a_moved_only_plan_read_from_the_main_checkout_is_not_audited_in_a_worktree() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    for dir in [&dots, &wali] {
+        common::write_doc(
+            dir,
+            "docs/plans/history.md",
+            "### Task 1: A\n\n### Task 2: B\n",
+        );
+    }
+    git(&env, &dots, &["init", "-q", "-b", "main"]);
+    let step = id_of(env.json(
+        &dots,
+        &["add", "Step", "--plan", "history", "--step", "Task 1: A"],
+    ));
+    env.json(&dots, &["move", &step, "--to", "wali"]);
+    git(&env, &dots, &["add", "-A"]);
+    git(&env, &dots, &["commit", "-qm", "seed"]);
+    let side = dots.join("wt");
+    git(
+        &env,
+        &dots,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &dots, &side);
+    // Deleting the plan only in the worktree leaves main's copy for the fallback.
+    std::fs::remove_file(side.join("docs/plans/history.md")).unwrap();
+
+    for dir in [&side, &dots] {
+        let report = env.check(dir);
+        assert!(unlinked_steps(&report).is_empty(), "{report}");
+        assert!(kinds(&report, "errors").is_empty(), "{report}");
+    }
 }
