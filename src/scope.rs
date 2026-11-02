@@ -134,6 +134,9 @@ pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>
             ));
         }
         Ok(_) | Err(Error::NoProject(_)) => {}
+        // Spec §3.2: only a registered root can be unpaired. A portfolio read does not
+        // open the cwd's project, so it reports the remedy and carries on.
+        Err(Error::RecordsUnpaired(detail)) => warnings.push(detail),
         Err(error) => return Err(error),
     }
     Ok(warnings)
