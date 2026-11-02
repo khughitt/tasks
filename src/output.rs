@@ -1516,9 +1516,19 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             None => format!("{} is not retired", o.prefix),
         },
         Output::Move(o) => {
-            let mut text = format!("{} → {}", o.from, o.id);
+            // A refusal before the destination id is known carries an empty id.
+            let mut text = if o.id.is_empty() {
+                format!("{} ({})", o.from, o.recovery)
+            } else {
+                format!("{} → {} ({})", o.from, o.id, o.recovery)
+            };
             for id in &o.inbound {
                 text.push_str(&format!("\n  inbound: {id}"));
+            }
+            for (root, entries) in &o.paths {
+                for entry in entries {
+                    text.push_str(&format!("\n  path: {root}/{entry}"));
+                }
             }
             text
         }

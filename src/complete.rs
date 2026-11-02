@@ -90,12 +90,13 @@ pub fn add_statuses() -> Vec<CompletionCandidate> {
     plain([Status::Idea.as_str(), Status::Todo.as_str()])
 }
 
-/// The statuses `edit --status` sets: every one but shelved, which only `shelve` enters.
+/// The statuses `edit --status` sets: every one but shelved, which only `shelve` enters,
+/// and moved, which only `move` enters.
 pub fn edit_statuses() -> Vec<CompletionCandidate> {
     plain(
         Status::ALL
             .iter()
-            .filter(|status| **status != Status::Shelved)
+            .filter(|status| !matches!(status, Status::Shelved | Status::Moved))
             .map(|status| status.as_str()),
     )
 }

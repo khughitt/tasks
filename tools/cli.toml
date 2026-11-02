@@ -542,7 +542,7 @@ args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--editor"], value = "none" },
   { names = ["--title"], value = "string" },
-  { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped", "moved"], repeatable = false },
+  { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped"], repeatable = false },
   { shared = "force", value = "none" },
   { names = ["--reason"], value = "string" },
   { names = ["--no-parent"], value = "none" },
@@ -1377,6 +1377,46 @@ options = [
   { names = ["--file"], value = "string", repeatable = true },
   { names = ["--acquisition"], value = "none" },
 ]
+
+[[cli.quarry.commands]]
+path = ["term"]
+summary = "Terms in vocabularies and ontologies"
+
+[[cli.quarry.commands]]
+path = ["term", "search"]
+summary = "Search terms by label and synonym"
+args = [
+  { name = "words", value = "string", required = true, variadic = true },
+]
+options = [
+  { names = ["--in"], value = "string", repeatable = true },
+  { names = ["--domain"], value = "string" },
+  { names = ["--exact"], value = "none" },
+  { shared = "limit", value = "int", default = "10" },
+]
+
+[[cli.quarry.commands]]
+path = ["term", "show"]
+verb = "show"
+summary = "Show one term"
+args = [
+  { name = "curie", value = "string", required = true },
+]
+
+[[cli.quarry.commands]]
+path = ["term", "ancestors"]
+summary = "List a term's is_a ancestors"
+args = [
+  { name = "curie", value = "string", required = true },
+]
+
+[[cli.quarry.commands]]
+path = ["skills"]
+summary = "The agent skills this checkout ships"
+
+[[cli.quarry.commands]]
+path = ["skills", "build"]
+summary = "Regenerate the skills' resource notes from the catalog"
 
 # ---- science
 

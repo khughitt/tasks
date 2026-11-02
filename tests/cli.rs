@@ -14483,9 +14483,7 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
             4,
             &["tasks", "edit", "sci-000001", "--status", ""]
         ),
-        [
-            "idea", "todo", "doing", "blocked", "done", "dropped", "moved"
-        ]
+        ["idea", "todo", "doing", "blocked", "done", "dropped"]
     );
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "list", "--status", ""]),

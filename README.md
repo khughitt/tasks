@@ -965,7 +965,10 @@ and a moved step does not cover a heading of a plan a local record still links.
 Task objects expose optional `moved_to` (the destination id on a source tombstone)
 and `moved_from` (the source id on the destination). `status` includes `moved`, a
 closed, read-only status; counts include `moved`, and `total` counts every record.
-Only `move` sets the pointer fields. Older binaries cannot parse these records:
+Only `move` sets the status and the pointer fields: `edit --status` does not accept
+`moved`. A tombstone's refusal names the command to run instead, with only its id
+arguments rewritten to the destination; payloads such as note text, titles and paths
+are kept as typed. Older binaries cannot parse these records:
 update every host reading synced tasks before the first move.
 
 The move output (`MoveOut`) names the paths written in each root. Under `[git] commit`
@@ -984,9 +987,12 @@ it commits each opted-in root; otherwise commit each root its `paths` lists:
 reasons in `warnings`. For an interrupted move, `--explain` reports `resume`;
 performing the recovery reports `resumed`. `id` is empty when refusal happens before
 an id is minted.
-`inbound` reports dependents found in reachable live registered projects; it cannot
-inventory unreachable or retired projects. Rerun the same command after process interruption. A host-local
-journal freezes writes to both ids and both projects' lifecycle commands with
+`inbound` reports dependents found in every reachable registered project, retired ones
+included (wide reads such as `--all-projects` still leave retired projects out); it
+cannot inventory unreachable projects. `--pretty` prints `<from> → <id> (<recovery>)`
+(`<from> (refuse)` when no id was minted), then one `inbound:` line per dependent and
+one `path:` line per path. Rerun the same command after process interruption. A
+host-local journal freezes writes to both ids and both projects' lifecycle commands with
 `move_pending`. Reads remain available. `check` reports `move_pending` for a local
 journal, `move_incomplete` for a reachable missing or mismatched counterpart, and
 `move_counterpart_unreachable` when it cannot inspect the counterpart.
