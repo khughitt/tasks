@@ -70,6 +70,9 @@ impl PhysicalTask {
     pub fn updated(&self) -> &str {
         &self.metadata.updated
     }
+    pub fn parent(&self) -> Option<&TaskId> {
+        self.metadata.parent.as_ref()
+    }
     /// The body as the record stores it: what reading the record back gives.
     pub fn body(&self) -> &str {
         &self.metadata.body

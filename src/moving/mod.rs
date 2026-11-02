@@ -37,6 +37,9 @@ pub fn reject_operations(ctx: &MoveCtx, own: Option<&Journal>) -> Result<()> {
                 return Err(journal.pending_error());
             }
         }
+        if let Some(journal) = crate::migrating::journal::pending_naming(&project.prefix, None)? {
+            return Err(journal.pending_error());
+        }
     }
     Ok(())
 }
@@ -47,7 +50,11 @@ pub fn attachment_path(project: &Project, id: &TaskId, name: &str) -> Result<Pat
     Ok(attachments::task_dir(project, id).join(name))
 }
 
-fn attachment_bytes(project: &Project, id: &TaskId, name: &str) -> Result<Option<Vec<u8>>> {
+pub(crate) fn attachment_bytes(
+    project: &Project,
+    id: &TaskId,
+    name: &str,
+) -> Result<Option<Vec<u8>>> {
     let path = attachment_path(project, id, name)?;
     match attachments::entry_state(&path)? {
         EntryState::Absent => Ok(None),
@@ -56,13 +63,13 @@ fn attachment_bytes(project: &Project, id: &TaskId, name: &str) -> Result<Option
     }
 }
 
-fn attachment_state(project: &Project, id: &TaskId, name: &str) -> Result<FileState> {
+pub(crate) fn attachment_state(project: &Project, id: &TaskId, name: &str) -> Result<FileState> {
     Ok(attachment_bytes(project, id, name)?
         .map(|bytes| FileState::Digest(digest(&bytes)))
         .unwrap_or(FileState::Absent))
 }
 
-fn record_state(path: &Path) -> Result<FileState> {
+pub(crate) fn record_state(path: &Path) -> Result<FileState> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(FileState::Digest(digest(&bytes))),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(FileState::Absent),
@@ -334,7 +341,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     Ok(out)
 }
 
-fn verify_attachment(
+pub(crate) fn verify_attachment(
     project: &Project,
     id: &TaskId,
     attachment: &journal::JournalAttachment,

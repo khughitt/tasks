@@ -697,7 +697,7 @@ fn explain_refuses_a_retired_successor() {
 }
 
 #[test]
-fn migrate_list_takes_no_to_and_applying_is_refused_until_it_exists() {
+fn migrate_list_takes_no_to() {
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -705,11 +705,6 @@ fn migrate_list_takes_no_to_and_applying_is_refused_until_it_exists() {
         &forge,
         &["migrate", "list.toml", "--to", "forge2", "--explain"],
     );
-    let (_, _) = draft_home(&env, &forge);
-    let list = env.home.path().join("list.toml");
-    let (kind, detail) = fail_detail(&env, &forge, &["migrate", list.to_str().unwrap()]);
-    assert_eq!(kind, "validation");
-    assert!(detail.contains("--explain"), "{detail}");
 }
 
 fn setting(out: &serde_json::Value, rule: &str) -> Vec<(String, String)> {
@@ -1579,4 +1574,591 @@ fn refusals_name_unassigned_ids_by_their_v1_id() {
     assert!(settle.contains(&format!("new:{l}")), "{settle}");
     let rest = settle.replace(&outer, "").replace(&format!("new:{l}"), "");
     assert!(!rest.contains("forge2-"), "{settle}");
+}
+
+// ---- Apply (plan Task 5): journal, phases G2-G10, resume, commits, freeze ----
+
+const PHASES: [&str; 8] = [
+    "journal",
+    "attachments",
+    "destination",
+    "store",
+    "tombstones",
+    "closures",
+    "cleanup",
+    "commit",
+];
+
+fn migration_journal(env: &TestEnv, prefix: &str) -> std::path::PathBuf {
+    env.home
+        .path()
+        .join(format!(".local/state/tasks/migrate/{prefix}.toml"))
+}
+
+fn list_sha(path: &std::path::Path) -> String {
+    format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+}
+
+fn shown(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value {
+    env.json(dir, &["show", id])["task"].clone()
+}
+
+fn note_texts(task: &serde_json::Value) -> Vec<String> {
+    task["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["text"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn new_id(out: &serde_json::Value, from: &str) -> String {
+    carried_row(out, from)["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{from} has no new id in {out}"))
+        .to_string()
+}
+
+/// Runs `migrate <list>` stopping after `phase`, asserting success.
+fn apply_until(env: &TestEnv, dir: &std::path::Path, list: &std::path::Path, phase: &str) {
+    env.cmd(dir)
+        .env("TASKS_MIGRATE_STOP_AFTER", phase)
+        .args(["migrate", list.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+fn assert_clean(env: &TestEnv, dir: &std::path::Path) {
+    let report = env.check(dir);
+    assert_eq!(report["errors"], serde_json::json!([]), "{report}");
+    assert_eq!(report["warnings"], serde_json::json!([]), "{report}");
+}
+
+struct Mixed {
+    forge: std::path::PathBuf,
+    forge2: std::path::PathBuf,
+    g: String,
+    a: String,
+    b: String,
+    c: String,
+    s: String,
+    r: String,
+    d: String,
+    list: std::path::PathBuf,
+}
+
+/// Spec §5 case 1, plus a done recurrence R carried and a task D carried with a
+/// replacement body: G dropped, A carried with no parent, B carried under successor goal
+/// S, C closed; A depends on B.
+fn mixed(env: &mut TestEnv) -> Mixed {
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let g = id_of(env.json(&forge, &["add", "Goal G", "-p", "1"]));
+    let b = id_of(env.json(&forge, &["add", "B", "--parent", &g]));
+    let a = id_of(env.json(&forge, &["add", "A", "--parent", &g, "--depends", &b]));
+    let c = id_of(env.json(&forge, &["add", "C", "--parent", &g]));
+    let r = id_of(env.json(&forge, &["add", "R", "--every", "7d"]));
+    env.json(&forge, &["done", &r]);
+    let d = id_of(env.json(&forge, &["add", "D", "--body", "Old body."]));
+    let s = id_of(env.json(&forge2, &["add", "Goal S", "-p", "1"]));
+    let (text, _) = draft_home(env, &forge);
+    let mut text = decide(&text, &g, "drop", "reason = \"superseded by forge2\"\n");
+    text = decide(&text, &a, "carry", "parent = \"none\"\n");
+    text = decide(&text, &b, "carry", &format!("parent = \"{s}\"\n"));
+    text = decide(&text, &c, "close", "reason = \"done in forge\"\n");
+    text = decide(&text, &r, "carry", "");
+    text = decide(
+        &text,
+        &d,
+        "carry",
+        "body = \"\"\"\nReplacement body é.\n\"\"\"\n",
+    );
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    Mixed {
+        forge,
+        forge2,
+        g,
+        a,
+        b,
+        c,
+        s,
+        r,
+        d,
+        list,
+    }
+}
+
+#[test]
+fn mixed_list_applies_end_to_end_and_retire_follows() {
+    // Spec §5 case 1, end to end.
+    let mut env = TestEnv::new();
+    let m = mixed(&mut env);
+    let sha = list_sha(&m.list);
+    let suffix = format!(" list: sha256:{sha}");
+    let r_before = shown(&env, &m.forge, &m.r);
+    let out = env.json(&m.forge, &["migrate", m.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "fresh", "{out}");
+    assert_eq!(out["list"], format!("sha256:{sha}"));
+    assert_eq!(out["source"], "forge");
+    assert_eq!(out["successor"], "forge2");
+    assert!(out.get("refusals").is_none(), "{out}");
+    let a2 = new_id(&out, &m.a);
+    let b2 = new_id(&out, &m.b);
+    let r2 = new_id(&out, &m.r);
+    let d2 = new_id(&out, &m.d);
+    assert_eq!(carried_row(&out, &m.b)["parent"], m.s.as_str());
+    assert_eq!(carried_row(&out, &m.a)["parent"], serde_json::Value::Null);
+    assert_eq!(row(&out, "dropped", &m.g)["reason"], "superseded by forge2");
+    assert_eq!(row(&out, "closed", &m.c)["reason"], "done in forge");
+    assert!(!migration_journal(&env, "forge").exists());
+
+    let a_new = shown(&env, &m.forge2, &a2);
+    assert_eq!(a_new["parent"], serde_json::Value::Null, "{a_new}");
+    assert_eq!(a_new["depends"], serde_json::json!([b2]), "{a_new}");
+    assert_eq!(a_new["moved_from"], m.a.as_str());
+    let b_new = shown(&env, &m.forge2, &b2);
+    assert_eq!(b_new["parent"], m.s.as_str(), "{b_new}");
+    for (old, new) in [(&m.a, &a2), (&m.b, &b2), (&m.r, &r2), (&m.d, &d2)] {
+        let tomb = shown(&env, &m.forge, old);
+        assert_eq!(tomb["status"], "moved", "{tomb}");
+        assert_eq!(tomb["moved_to"], new.as_str(), "{tomb}");
+    }
+    let g = shown(&env, &m.forge, &m.g);
+    assert_eq!(g["status"], "dropped");
+    assert_eq!(
+        note_texts(&g).last().unwrap(),
+        &format!("dropped in migration to forge2: superseded by forge2{suffix}")
+    );
+    let c = shown(&env, &m.forge, &m.c);
+    assert_eq!(c["status"], "done");
+    assert_eq!(
+        note_texts(&c).last().unwrap(),
+        &format!("closed in migration to forge2: done in forge{suffix}")
+    );
+    // Every migration note, on both sides, carries the list's sha256.
+    let mut seen = 0;
+    for (dir, id) in [
+        (&m.forge2, &a2),
+        (&m.forge2, &b2),
+        (&m.forge2, &r2),
+        (&m.forge2, &d2),
+        (&m.forge, &m.a),
+        (&m.forge, &m.b),
+        (&m.forge, &m.r),
+        (&m.forge, &m.d),
+    ] {
+        for text in note_texts(&shown(&env, dir, id)) {
+            if text.starts_with("moved from")
+                || text.starts_with("moved to")
+                || text.starts_with("migration:")
+            {
+                assert!(text.ends_with(&suffix), "{id}: {text}");
+                seen += 1;
+            }
+        }
+    }
+    assert!(seen >= 10, "{seen}");
+    // A carried done recurrence keeps its status, cadence and anchor.
+    let r_new = shown(&env, &m.forge2, &r2);
+    assert_eq!(r_new["status"], "done", "{r_new}");
+    assert_eq!(r_new["every"], r_before["every"]);
+    assert_eq!(r_new["last_done"], r_before["last_done"]);
+    assert!(r_new["last_done"].is_string(), "{r_new}");
+    // Review Focus 4 end to end: the replacement body reads back exactly.
+    assert_eq!(shown(&env, &m.forge2, &d2)["body"], "Replacement body é.");
+    assert_clean(&env, &m.forge);
+    assert_clean(&env, &m.forge2);
+    env.json(
+        &m.forge,
+        &["retire", "--successor", "forge2", "--reason", "migrated"],
+    );
+}
+
+#[test]
+fn parks_travel_or_go() {
+    // Spec §5 case 10, park half.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    env.json(&forge, &["park", &a, "resume the parser"]);
+    env.json(&forge, &["park", &d, "never mind"]);
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &a, "carry", "");
+    let text = decide(&text, &d, "drop", "reason = \"obsolete\"\n");
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    let a2 = new_id(&out, &a);
+    assert_eq!(carried_row(&out, &a)["park"], true);
+    let parked = env.json(&forge2, &["list", "--parked"]);
+    assert!(parked.to_string().contains(&a2), "{parked}");
+    let store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(env.claim_store("forge2")).unwrap()).unwrap();
+    assert_eq!(
+        store["parks"][a2.as_str()]["worktree"].as_str(),
+        Some(forge2.to_str().unwrap())
+    );
+    assert_eq!(
+        store["parks"][a2.as_str()]["next_step"].as_str(),
+        Some("resume the parser")
+    );
+    let source = std::fs::read_to_string(env.claim_store("forge")).unwrap_or_default();
+    assert!(!source.contains(&d) && !source.contains(&a), "{source}");
+}
+
+/// A carried task with an attachment and a park, a dropped task and a closed one.
+struct Phased {
+    forge: std::path::PathBuf,
+    forge2: std::path::PathBuf,
+    a: String,
+    d: String,
+    c: String,
+    list: std::path::PathBuf,
+}
+
+fn phased(env: &mut TestEnv) -> Phased {
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    phased_in(env, forge, forge2)
+}
+
+fn phased_in(env: &mut TestEnv, forge: std::path::PathBuf, forge2: std::path::PathBuf) -> Phased {
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let shot = env.home.path().join("image.png");
+    std::fs::write(&shot, b"bytes").unwrap();
+    env.json(&forge, &["attach", &a, shot.to_str().unwrap()]);
+    env.json(&forge, &["park", &a, "continue"]);
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let c = id_of(env.json(&forge, &["add", "C"]));
+    let (text, _) = draft_home(env, &forge);
+    let text = decide(&text, &a, "carry", "");
+    let text = decide(&text, &d, "drop", "reason = \"obsolete\"\n");
+    let text = decide(&text, &c, "close", "reason = \"finished\"\n");
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    Phased {
+        forge,
+        forge2,
+        a,
+        d,
+        c,
+        list,
+    }
+}
+
+#[test]
+fn every_phase_resumes_to_the_same_ids() {
+    // Spec §5 case 11, journal path.
+    for phase in PHASES {
+        let mut env = TestEnv::new();
+        let p = phased(&mut env);
+        let l = p.list.to_str().unwrap();
+        apply_until(&env, &p.forge, &p.list, phase);
+        let journal = migration_journal(&env, "forge");
+        assert!(journal.exists(), "{phase}");
+        let saved = std::fs::read(&journal).unwrap();
+        let preview = env.json(&p.forge, &["migrate", l, "--explain"]);
+        assert_eq!(preview["recovery"], "resume", "{phase}: {preview}");
+        let planned = new_id(&preview, &p.a);
+        assert_eq!(std::fs::read(&journal).unwrap(), saved, "{phase}");
+        for (dir, id) in [
+            (&p.forge, &p.a),
+            (&p.forge, &p.d),
+            (&p.forge, &p.c),
+            (&p.forge2, &planned),
+        ] {
+            assert_eq!(
+                fail_detail(&env, dir, &["note", id, "x"]).0,
+                "move_pending",
+                "{phase}: note {id}"
+            );
+        }
+        assert_eq!(
+            fail_detail(
+                &env,
+                &p.forge,
+                &["retire", "--successor", "forge2", "--reason", "x"]
+            )
+            .0,
+            "move_pending",
+            "{phase}"
+        );
+        if phase == "journal" {
+            // A pending run continues only with the list it started with.
+            let original = std::fs::read(&p.list).unwrap();
+            std::fs::write(&p.list, [original.as_slice(), b"\n# edited\n"].concat()).unwrap();
+            let (kind, detail) = fail_detail(&env, &p.forge, &["migrate", l]);
+            assert_eq!(kind, "move_pending", "{detail}");
+            assert!(detail.contains("list"), "{detail}");
+            std::fs::write(&p.list, &original).unwrap();
+            // A hand edit to a listed record mid-run refuses.
+            let path = p.forge.join(format!("tasks/{}.md", p.d));
+            let record = std::fs::read(&path).unwrap();
+            std::fs::write(&path, [record.as_slice(), b"\nhand edit\n"].concat()).unwrap();
+            let (kind, detail) = fail_detail(&env, &p.forge, &["migrate", l]);
+            assert_eq!(kind, "move_pending", "{detail}");
+            assert!(detail.contains(&p.d), "{detail}");
+            std::fs::write(&path, &record).unwrap();
+            assert_eq!(std::fs::read(&journal).unwrap(), saved);
+        }
+        let out = env.json(&p.forge, &["migrate", l]);
+        assert_eq!(out["recovery"], "resumed", "{phase}: {out}");
+        let a2 = new_id(&out, &p.a);
+        assert_eq!(a2, planned, "{phase}");
+        assert!(!journal.exists(), "{phase}");
+        assert_eq!(
+            std::fs::read(p.forge2.join(format!("tasks/files/{a2}/image.png"))).unwrap(),
+            b"bytes"
+        );
+        assert!(!p.forge.join(format!("tasks/files/{}", p.a)).exists());
+        assert_eq!(shown(&env, &p.forge, &p.d)["status"], "dropped");
+        assert_eq!(shown(&env, &p.forge, &p.c)["status"], "done");
+        assert!(
+            env.json(&p.forge2, &["list", "--parked"])
+                .to_string()
+                .contains(&a2),
+            "{phase}"
+        );
+        assert_clean(&env, &p.forge);
+        assert_clean(&env, &p.forge2);
+    }
+}
+
+fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
+    let home = tempfile::tempdir().unwrap();
+    let out = common::git_fixture::command(home.path(), dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+    if args.first() == Some(&"init") {
+        common::git_fixture::assert_repo(home.path(), dir);
+    }
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// A project at the top of its own repository with `[git] commit = true`, committed.
+fn committed_project(env: &mut TestEnv, prefix: &str) -> std::path::PathBuf {
+    let root = env.init(prefix);
+    git_out(&root, &["init", "-q", "-b", "main"]);
+    let config = root.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
+    git_out(&root, &["add", "-A"]);
+    git_out(&root, &["commit", "-qm", "init"]);
+    root
+}
+
+fn commits(dir: &std::path::Path) -> usize {
+    git_out(dir, &["rev-list", "--count", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+fn head_files(dir: &std::path::Path) -> Vec<String> {
+    git_out(dir, &["show", "--name-only", "--format=", "HEAD"])
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
+fn porcelain(dir: &std::path::Path) -> String {
+    git_out(dir, &["status", "--porcelain"])
+}
+
+#[test]
+fn commit_phase_resumes_from_the_journal_paths() {
+    let mut env = TestEnv::new();
+    let forge = committed_project(&mut env, "forge");
+    let forge2 = committed_project(&mut env, "forge2");
+    let p = phased_in(&mut env, forge.clone(), forge2.clone());
+    assert_eq!(porcelain(&forge), "");
+    let (before, before2) = (commits(&forge), commits(&forge2));
+    apply_until(&env, &forge, &p.list, "cleanup");
+    assert_eq!(commits(&forge), before, "nothing commits before G9");
+    assert_eq!(commits(&forge2), before2);
+    let out = env.json(&forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    let a2 = new_id(&out, &p.a);
+    assert_eq!(commits(&forge), before + 1);
+    assert_eq!(commits(&forge2), before2 + 1);
+    let mut files = head_files(&forge);
+    files.sort();
+    let mut want = vec![
+        format!("tasks/{}.md", p.a),
+        format!("tasks/{}.md", p.c),
+        format!("tasks/{}.md", p.d),
+        format!("tasks/files/{}/image.png", p.a),
+    ];
+    want.sort();
+    assert_eq!(files, want);
+    let mut files2 = head_files(&forge2);
+    files2.sort();
+    assert_eq!(
+        files2,
+        vec![
+            format!("tasks/files/{a2}/image.png"),
+            format!("tasks/{a2}.md"),
+        ]
+    );
+    assert_eq!(porcelain(&forge), "");
+    assert_eq!(porcelain(&forge2), "");
+    assert!(!migration_journal(&env, "forge").exists());
+}
+
+#[test]
+fn a_failing_pre_commit_hook_keeps_the_journal() {
+    let mut env = TestEnv::new();
+    let forge = committed_project(&mut env, "forge");
+    let forge2 = committed_project(&mut env, "forge2");
+    let p = phased_in(&mut env, forge.clone(), forge2.clone());
+    let hook = forge.join(".git/hooks/pre-commit");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let before = commits(&forge);
+    let (kind, detail) = fail_detail(&env, &forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(detail.contains(&format!("tasks/{}.md", p.d)), "{detail}");
+    assert!(detail.contains("commit_failed"), "{detail}");
+    assert!(migration_journal(&env, "forge").exists());
+    assert_eq!(commits(&forge), before);
+    std::fs::remove_file(&hook).unwrap();
+    let out = env.json(&forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    assert_eq!(commits(&forge), before + 1);
+    assert_eq!(porcelain(&forge), "");
+    assert_eq!(porcelain(&forge2), "");
+    assert!(!migration_journal(&env, "forge").exists());
+}
+
+#[test]
+fn shared_records_repository_gets_one_commit() {
+    // Plan Review Focus 1: detached forge and forge2 whose records live in one repository.
+    let mut env = TestEnv::new();
+    let holder = tempfile::tempdir().unwrap();
+    let base = holder.path().canonicalize().unwrap();
+    let repo = |name: &str| {
+        let dir = base.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        git_out(&dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("README"), "x\n").unwrap();
+        git_out(&dir, &["add", "README"]);
+        git_out(&dir, &["commit", "-qm", "init"]);
+        dir
+    };
+    let records = repo("records");
+    let code = repo("forge-code");
+    let code2 = repo("forge2-code");
+    for (dir, prefix) in [(&code, "forge"), (&code2, "forge2")] {
+        let out = env.json(
+            dir,
+            &[
+                "init",
+                "--prefix",
+                prefix,
+                "--records",
+                records.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            out["records"],
+            records.join(prefix).display().to_string(),
+            "{out}"
+        );
+    }
+    git_out(&records, &["add", "-A"]);
+    git_out(&records, &["commit", "-qm", "projects"]);
+    let p = phased_in(&mut env, code.clone(), code2.clone());
+    assert_eq!(porcelain(&records), "");
+    let before = commits(&records);
+    let out = env.json(&code, &["migrate", p.list.to_str().unwrap()]);
+    let a2 = new_id(&out, &p.a);
+    assert_eq!(
+        commits(&records),
+        before + 1,
+        "one commit for one repository"
+    );
+    let files = head_files(&records);
+    for path in [
+        format!("forge/tasks/{}.md", p.a),
+        format!("forge/tasks/{}.md", p.d),
+        format!("forge/tasks/{}.md", p.c),
+        format!("forge2/tasks/{a2}.md"),
+        format!("forge2/tasks/files/{a2}/image.png"),
+    ] {
+        assert!(files.contains(&path), "{path} not in {files:?}");
+    }
+    assert_eq!(porcelain(&records), "");
+    assert!(!migration_journal(&env, "forge").exists());
+}
+
+#[test]
+fn a_pending_migration_freezes_move_and_lifecycle() {
+    let mut env = TestEnv::new();
+    let p = phased(&mut env);
+    let wali = env.init("wali");
+    let w = id_of(env.json(&wali, &["add", "W"]));
+    apply_until(&env, &p.forge, &p.list, "journal");
+    for to in ["forge", "forge2"] {
+        assert_eq!(
+            fail_detail(&env, &wali, &["move", &w, "--to", to]).0,
+            "move_pending",
+            "move to {to}"
+        );
+    }
+    let (kind, detail) = fail_detail(&env, &p.forge, &["rename", "forge", "fx"]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(detail.contains("migrat"), "{detail}");
+    assert_eq!(
+        fail_detail(&env, &p.forge, &["unregister", "forge2"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &p.forge2, &["retire", "--reason", "x"]).0,
+        "move_pending"
+    );
+    // Another migration naming either project refuses while this one is pending.
+    let wl = env.home.path().join("wali-list.toml");
+    env.json(
+        &wali,
+        &["migrate", "--to", "forge2", "--draft", wl.to_str().unwrap()],
+    );
+    std::fs::write(
+        &wl,
+        decide(
+            &std::fs::read_to_string(&wl).unwrap(),
+            &w,
+            "drop",
+            "reason = \"x\"\n",
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        fail_detail(&env, &wali, &["migrate", wl.to_str().unwrap()]).0,
+        "move_pending"
+    );
+    let out = env.json(&p.forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "resumed");
+    env.json(&wali, &["move", &w, "--to", "forge2"]);
+}
+
+#[test]
+fn a_pending_move_refuses_the_apply() {
+    let mut env = TestEnv::new();
+    let p = phased(&mut env);
+    let wali = env.init("wali");
+    let w = id_of(env.json(&wali, &["add", "W"]));
+    env.cmd(&wali)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &w, "--to", "forge"])
+        .assert()
+        .success();
+    let (kind, detail) = fail_detail(&env, &p.forge, &["migrate", p.list.to_str().unwrap()]);
+    assert_eq!(kind, "move_pending", "{detail}");
+    assert!(!migration_journal(&env, "forge").exists());
 }

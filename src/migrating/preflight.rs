@@ -266,7 +266,16 @@ pub fn check_list(ctx: &MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>
         let pending =
             match crate::commands::pending_rename_at(Some(&project.root), &project.prefix)? {
                 Some(detail) => Some(detail),
-                None => crate::commands::pending_move(&project.prefix)?,
+                None => match crate::commands::pending_move(&project.prefix)? {
+                    Some(detail) => Some(detail),
+                    // Another source's run naming this project; this source's own pending
+                    // run is resumed, never preflighted.
+                    None => crate::migrating::journal::pending_naming(
+                        &project.prefix,
+                        Some(&source.prefix),
+                    )?
+                    .map(|journal| journal.pending_error().to_string()),
+                },
             };
         if let Some(detail) = pending
             && seen.insert(detail.clone())

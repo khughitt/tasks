@@ -27,6 +27,8 @@ pub type Projected = (Vec<Carried>, BTreeMap<TaskId, TaskId>, Vec<RefusalOut>);
 
 pub struct Carried {
     pub from: TaskId,
+    /// The source record's bytes as read.
+    pub source_text: String,
     pub pair: RenderedPair,
     /// One per rewrite, in the order their notes were appended: the note text without its
     /// `migration: ` prefix and ` list: sha256:…` suffix.
@@ -255,7 +257,7 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
     let mut refusals = Vec::new();
     let mut works = Vec::new();
     for (id, entry) in &carry {
-        let pair = build_pair(
+        let mut pair = build_pair(
             &mut ctx.source,
             &ctx.target,
             &eligible[id],
@@ -263,10 +265,18 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
             now,
             &suffix,
         )?;
+        // A carried done recurrence keeps its completion stamps on the carried record; its
+        // tombstone is moved, not closed, and carries neither (as `check` requires).
+        if eligible[id].status == Status::Done {
+            pair.tombstone.completed = None;
+            pair.tombstone.closed = None;
+        }
+        let (_, source_text) = ctx.source.project.read_task_with_raw(id)?;
         works.push(Work {
             entry,
             carried: Carried {
                 from: id.clone(),
+                source_text,
                 pair,
                 rewrites: Vec::new(),
                 body_change: None,
@@ -735,11 +745,11 @@ fn parse_parent(
 }
 
 /// A dropped or closed entry, rendered (spec §4.4 "Dropped and closed tasks").
-// The texts, parks and run inputs are read by the apply of the plan's Task 5.
-#[allow(dead_code)]
 pub struct Closed {
     pub id: TaskId,
     pub decision: Decision,
+    /// The reason's text as the note records it.
+    pub reason: String,
     /// The record's bytes as read.
     pub source_text: String,
     /// The record as the run writes it.
@@ -753,11 +763,12 @@ pub struct Closed {
 }
 
 /// Everything a valid list's run writes and reports, rendered at one time.
-// The texts, parks and run inputs are read by the apply of the plan's Task 5.
-#[allow(dead_code)]
 pub struct Projection {
     /// Lowercase hex sha256 of the list, without `sha256:`.
     pub list_sha: String,
+    /// The one time every record of the run is stamped with.
+    // Kept for the journal-less recovery of the plan's Task 6.
+    #[allow(dead_code)]
     pub now: String,
     pub carried: Vec<Carried>,
     pub closed: Vec<Closed>,
@@ -1115,6 +1126,7 @@ fn project_closed_in(
         closed.push(Closed {
             id: id.clone(),
             decision,
+            reason: reason.to_string(),
             source_text,
             closed_text,
             released,
@@ -1233,8 +1245,6 @@ pub fn explain(
 }
 
 /// `explain` for a run: the projection of a list with no refusal, or every refusal.
-// Read by the apply of the plan's Task 5.
-#[allow(dead_code)]
 pub fn preflight(
     ctx: &mut MigrateCtx,
     list: &LoadedList,

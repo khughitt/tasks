@@ -866,6 +866,9 @@ pub fn reject_pending_operations(root: Option<&Path>, prefix: &str) -> Result<()
             return Err(journal.pending_error());
         }
     }
+    if let Some(journal) = crate::migrating::journal::pending_naming(prefix, None)? {
+        return Err(journal.pending_error());
+    }
     Ok(())
 }
 
@@ -1216,7 +1219,11 @@ pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
 fn load_with_raw(ctx: &mut Ctx, id: &TaskId) -> Result<(Task, String)> {
     let (task, raw) = match ctx.project.read_task_with_raw(id) {
         Ok(found) => found,
-        Err(Error::TaskNotFound(_)) => return Err(missing_record(ctx, id)?),
+        Err(Error::TaskNotFound(_)) => {
+            // An id a pending run reserves but has not written yet is frozen too.
+            crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(id))?;
+            return Err(missing_record(ctx, id)?);
+        }
         Err(error) => return Err(error),
     };
     refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
