@@ -21450,6 +21450,47 @@ fn table_commands() -> Vec<Vec<String>> {
         .collect()
 }
 
+/// `--version` names the commit of the checkout the binary was built from, so a consumer
+/// can compare a host's build with a pinned commit; a build outside a checkout of this
+/// source prints the bare version.
+#[test]
+fn version_names_the_build_commit() {
+    let env = TestEnv::new();
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let git = |args: &[&str]| {
+        let out = common::git_fixture::command(env.home.path(), source)
+            .args(args)
+            .output()
+            .unwrap();
+        out.status.success().then(|| {
+            String::from_utf8(out.stdout)
+                .unwrap()
+                .trim_end()
+                .to_string()
+        })
+    };
+    let toplevel = git(&["rev-parse", "--show-toplevel"])
+        .map(|top| std::path::Path::new(&top).canonicalize().unwrap());
+    let built_from_checkout = toplevel.as_deref() == Some(&*source.canonicalize().unwrap());
+    let out = env.cmd(source).arg("--version").output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let line = String::from_utf8(out.stdout).unwrap();
+    let version = format!("tasks {}", env!("CARGO_PKG_VERSION"));
+    if !built_from_checkout {
+        assert_eq!(line, format!("{version}\n"));
+        return;
+    }
+    let head = git(&["rev-parse", "HEAD"]).unwrap();
+    let sha = line
+        .strip_prefix(&format!("{version} ("))
+        .and_then(|rest| rest.strip_suffix(")\n"))
+        .unwrap_or_else(|| panic!("no build commit in {line:?}"));
+    assert!(
+        sha.len() >= 7 && head.starts_with(sha),
+        "{sha:?} is not a short form of HEAD {head}"
+    );
+}
+
 #[test]
 fn cli_vocabulary_help_version_usage() {
     let mut env = TestEnv::new();

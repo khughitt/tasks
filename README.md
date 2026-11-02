@@ -787,6 +787,11 @@ judges every pid through its own `/proc`. It can prune a claim that another view
 it drops the recorded view when it saves, and it reports that claim as stale. Check
 `tasks --version` for each.
 
+`tasks --version` also names the commit the binary was built from, as in
+`tasks 0.4.0 (1a2b3c4)`, so two builds that share a version number can be told apart.
+A build outside a git checkout of this source (a source archive) prints the version
+alone; read that as an unknown commit. Uncommitted changes in the checkout are not marked.
+
 Enabling relay never rewrites a claim already held: a claim keeps the identity it was
 created with. The level is Linux-only — it needs `/proc` — and it sits *below*
 `TASKS_SESSION` in the ladder, so an explicit `TASKS_SESSION` recovers from every relay
