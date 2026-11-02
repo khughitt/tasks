@@ -49,7 +49,7 @@ impl Shorthand {
         if let Some(prefix) = self.local.get() {
             return Ok(prefix);
         }
-        let project = match Project::locate(&self.start) {
+        let project = match Project::locate_with(registry, &self.start) {
             Ok(project) => project,
             Err(Error::NoProject(_)) => {
                 return Err(Error::InvalidId(
@@ -113,5 +113,39 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(shorthand.parse(&Registry::default(), "sci-2578c3").is_ok());
+    }
+
+    #[test]
+    fn an_unlocated_shorthand_checks_records_moved_against_the_caller_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(
+            dir.path().join(crate::repo::CONFIG_REL),
+            "prefix = \"sci\"\n",
+        )
+        .unwrap();
+        let mut registry = Registry::default();
+        registry.register("sci", dir.path()).unwrap();
+        let shorthand = Shorthand::new(dir.path().to_path_buf());
+        assert_eq!(
+            shorthand.parse(&registry, "2578c3").unwrap(),
+            TaskId::parse("sci-2578c3").unwrap()
+        );
+
+        let moved = tempfile::tempdir().unwrap();
+        let lon = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(lon.path().join("tasks")).unwrap();
+        std::fs::write(
+            lon.path().join(crate::repo::CONFIG_REL),
+            "prefix = \"lon\"\n",
+        )
+        .unwrap();
+        registry.register("lon", lon.path()).unwrap();
+        registry.records.insert("lon".into(), moved.path().into());
+        let shorthand = Shorthand::new(lon.path().to_path_buf());
+        assert!(matches!(
+            shorthand.parse(&registry, "2578c3"),
+            Err(Error::RecordsMoved(_))
+        ));
     }
 }

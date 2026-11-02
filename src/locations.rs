@@ -830,17 +830,30 @@ mod tests {
         let m = resolved(index.resolve(Path::new("/w/old/.worktrees/wt/f"), &mut w));
         assert_eq!(m.via, Via::Storage);
     }
-    fn git(dir: &Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let home = tempfile::tempdir().unwrap();
+        let mut command = std::process::Command::new("git");
+        command
             .args(args)
             .current_dir(dir)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .env("HOME", home.path())
+            .env("LC_ALL", "C")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_AUTHOR_NAME", "t")
             .env("GIT_AUTHOR_EMAIL", "t@e")
             .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@e")
-            .output()
-            .unwrap();
+            .env("GIT_COMMITTER_EMAIL", "t@e");
+        for key in ["GIT_CEILING_DIRECTORIES", "TMPDIR"] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+        let out = command.output().unwrap();
         assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
     #[test]
@@ -851,6 +864,18 @@ mod tests {
         std::fs::create_dir_all(main.join("sub/nested")).unwrap();
         std::fs::write(main.join("sub/nested/f"), "").unwrap();
         git(&main, &["init", "-q"]);
+        assert_eq!(
+            Path::new(&git(&main, &["rev-parse", "--show-toplevel"]))
+                .canonicalize()
+                .unwrap(),
+            main
+        );
+        assert!(
+            Path::new(&git(&main, &["rev-parse", "--absolute-git-dir"]))
+                .canonicalize()
+                .unwrap()
+                .starts_with(&main)
+        );
         git(&main, &["add", "-A"]);
         git(&main, &["commit", "-qm", "init"]);
         let top = base.join("t");
