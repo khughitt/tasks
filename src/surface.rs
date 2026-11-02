@@ -63,8 +63,8 @@ fn kind(arg: &Arg) -> (String, Vec<String>) {
         .map(|n| n.to_string())
         .unwrap_or_default();
     let kind = match name.as_str() {
+        _ if crate::cli::takes_ref(arg) => "ref",
         "N" => "int",
-        "ID" | "REF" => "ref",
         "DIR" | "PATH" => "path",
         "WHEN" => "when",
         "AGE" => "age",

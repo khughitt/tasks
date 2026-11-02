@@ -121,10 +121,9 @@ fn moved_status_cannot_be_set_by_edit() {
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let id = id_of(env.json(&dots, &["add", "T", "-p", "2"]));
-    assert_eq!(
-        env.fail(&dots, &["edit", &id, "--status", "moved"]),
-        "validation"
-    );
+    // moved is outside the set `edit --status` accepts; `move` is the way in.
+    let err = env.usage(&dots, &["edit", &id, "--status", "moved"]);
+    assert!(err.contains("--status") && err.contains("moved"), "{err}");
     let listed = env.json(&dots, &["list", "--status", "moved"]);
     assert_eq!(listed["tasks"].as_array().unwrap().len(), 0);
 }
@@ -342,7 +341,11 @@ fn tombstone_retry_replaces_bare_and_alias_spellings() {
     ] {
         let (kind, detail) = fail_detail(&env, &dots, &["note", &spelling, &spelling]);
         assert_eq!(kind, "moved");
-        assert!(detail.contains(&format!("tasks note {n} {n}")), "{detail}");
+        // Only the id slot is rewritten; the note text keeps its spelling.
+        assert!(
+            detail.contains(&format!("tasks note {n} {spelling}")),
+            "{detail}"
+        );
     }
 }
 
@@ -3156,4 +3159,101 @@ fn a_moved_only_plan_read_from_the_main_checkout_is_not_audited_in_a_worktree() 
         assert!(unlinked_steps(&report).is_empty(), "{report}");
         assert!(kinds(&report, "errors").is_empty(), "{report}");
     }
+}
+
+#[test]
+fn a_tombstone_retry_rewrites_only_the_id_and_keeps_payloads() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "A", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    let suffix = a.strip_prefix("dots-").unwrap();
+    for (args, retry) in [
+        (vec!["note", &a, &a], format!("tasks note {n} {a}")),
+        (
+            vec!["note", suffix, suffix],
+            format!("tasks note {n} {suffix}"),
+        ),
+        (
+            vec!["edit", "--title", &a, &a],
+            format!("tasks edit --title {a} {n}"),
+        ),
+        (vec!["attach", &a, &a], format!("tasks attach {n} {a}")),
+        (vec!["park", &a, &a], format!("tasks park {n} {a}")),
+    ] {
+        let (kind, detail) = fail_detail(&env, &dots, &args);
+        assert_eq!(kind, "moved", "{args:?}");
+        assert!(
+            detail.contains(&format!("run `{retry}` instead")),
+            "{detail}"
+        );
+    }
+}
+
+#[test]
+fn inbound_lists_dependents_in_a_reachable_retired_project() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let x = id_of(env.json(&ops, &["add", "X", "-p", "2", "--depends", &a]));
+    env.json(&ops, &["done", &x, "--force"]);
+    env.json(&ops, &["retire", "--reason", "over"]);
+    let explain = env.json(&dots, &["move", &a, "--to", "wali", "--explain"]);
+    assert_eq!(explain["inbound"], serde_json::json!([x]), "{explain}");
+    let out = env.json(&dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(out["inbound"], serde_json::json!([x]), "{out}");
+    // Wide reads still leave the retired project out.
+    let listed = env.json(&dots, &["list", "--all-projects", "--status", "done"]);
+    assert!(!listed.to_string().contains(&x), "{listed}");
+}
+
+#[test]
+fn pretty_move_names_the_recovery_and_the_changed_paths() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let plan = env.json(&dots, &["move", &a, "--to", "wali", "--explain"]);
+    // Every run draws a fresh destination id, so the expected lines name it as `{N}`.
+    let planned = plan["id"].as_str().unwrap();
+    let mut expected = vec![format!("{a} → {{N}} (fresh)")];
+    for (root, entries) in plan["paths"].as_object().unwrap() {
+        for entry in entries.as_array().unwrap() {
+            let entry = entry.as_str().unwrap().replace(planned, "{N}");
+            expected.push(format!("  path: {root}/{entry}"));
+        }
+    }
+    let expect = |text: &str, n: &str| {
+        let want: Vec<String> = expected.iter().map(|l| l.replace("{N}", n)).collect();
+        assert_eq!(text.lines().collect::<Vec<_>>(), want, "{text}");
+    };
+    let explained = env.pretty(&dots, &["move", &a, "--to", "wali", "--explain"]);
+    let drawn = explained
+        .split(" → ")
+        .nth(1)
+        .unwrap()
+        .split(' ')
+        .next()
+        .unwrap();
+    expect(&explained, drawn);
+    let moved = env.pretty(&dots, &["move", &a, "--to", "wali"]);
+    let n = env.json(&dots, &["show", &a])["task"]["moved_to"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    expect(&moved, &n);
+    let again = env.pretty(&dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(again.trim_end(), format!("{a} → {n} (complete)"), "{again}");
+    // A refusal before an id is drawn names only the source and the verdict.
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2"]));
+    let refused = env.pretty(&dots, &["move", &b, "--to", "nope", "--explain"]);
+    assert_eq!(
+        refused.lines().next(),
+        Some(format!("{b} (refuse)").as_str()),
+        "{refused}"
+    );
 }

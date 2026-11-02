@@ -4,6 +4,14 @@ use std::path::PathBuf;
 
 use crate::complete::ValueSet;
 
+/// Whether `arg` names a task or project: its value name is `ID` or `REF`, the CLI
+/// surface's `ref` kind. A tombstone's retry hint rewrites only these.
+pub fn takes_ref(arg: &clap::Arg) -> bool {
+    arg.get_value_names()
+        .and_then(|names| names.first())
+        .is_some_and(|name| matches!(name.as_str(), "ID" | "REF"))
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "tasks",

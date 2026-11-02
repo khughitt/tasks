@@ -168,7 +168,8 @@ pub fn output(ctx: &MoveCtx, journal: &Journal, recovery: &str) -> MoveOut {
 }
 
 pub fn inbound(ctx: &MoveCtx, out: &mut MoveOut) -> Result<()> {
-    let (scope, warnings) = crate::scope::Scope::open_all(&ctx.registry, &ctx.source.project.root)?;
+    let (scope, warnings) =
+        crate::scope::Scope::open_all_with_retired(&ctx.registry, &ctx.source.project.root)?;
     out.warnings.extend(warnings);
     for task in scope.scan()? {
         if task

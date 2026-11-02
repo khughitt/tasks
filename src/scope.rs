@@ -159,7 +159,15 @@ impl Scope {
     /// is to warn when it lies inside a project the registry does not know.
     pub fn open_all(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)> {
         let members = registry.projects.keys().cloned().collect();
-        Self::open_members(registry, cwd, members, None)
+        Self::open_members(registry, cwd, members, None, false)
+    }
+
+    /// Every reachable registered project, retired ones included. Only an inventory that
+    /// must see history in projects that are over (`move`'s inbound dependents, spec
+    /// 2026-10-08-task-move-design §3.4) reads this; wide reads use `open_all`.
+    pub fn open_all_with_retired(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)> {
+        let members = registry.projects.keys().cloned().collect();
+        Self::open_members(registry, cwd, members, None, true)
     }
 
     /// `--group <name>`: the group's members, walked as `open_all` walks the registry.
@@ -167,7 +175,7 @@ impl Scope {
     /// undeclared name is `unknown_group`.
     pub fn open_group(registry: &Registry, cwd: &Path, name: &str) -> Result<(Scope, Vec<String>)> {
         let members = registry.group(name)?.to_vec();
-        Self::open_members(registry, cwd, members, Some(name.to_string()))
+        Self::open_members(registry, cwd, members, Some(name.to_string()), false)
     }
 
     fn open_members(
@@ -175,6 +183,7 @@ impl Scope {
         cwd: &Path,
         members: Vec<String>,
         group: Option<String>,
+        keep_retired: bool,
     ) -> Result<(Scope, Vec<String>)> {
         let mut warnings = registry_warnings(registry, cwd)?;
         let mut projects = Vec::new();
@@ -195,7 +204,7 @@ impl Scope {
             // A retired project is over (ops lifecycle spec §4): wide reads leave it out
             // without a warning, so it leaves `members` too, which the warnings about
             // absent projects read; `--project` still reads it.
-            if project.retired.is_some() {
+            if project.retired.is_some() && !keep_retired {
                 retired.push(prefix.clone());
             } else {
                 projects.push(project);

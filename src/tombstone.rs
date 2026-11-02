@@ -4,7 +4,7 @@
 use crate::error::{Error, Result};
 use crate::model::{Status, Task, TaskId};
 use crate::registry::Registry;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use std::collections::BTreeSet;
 
 /// A tombstone carries exactly one pointer, to another project; a destination names
@@ -48,10 +48,10 @@ pub fn refuse_write(task: &Task, spells: impl Fn(&str) -> bool, registry: &Regis
     let (Status::Moved, Some(to)) = (task.status, &task.moved_to) else {
         return Ok(());
     };
-    let mut args: Vec<String> = std::env::args()
-        .skip(1)
-        .map(|arg| if spells(&arg) { to.to_string() } else { arg })
-        .collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    for index in id_slots(&args, &spells) {
+        args[index] = to.to_string();
+    }
     let mut alternative = String::new();
     // Reuse the parsed command so ordinary payloads never become feedback flags.
     if let crate::cli::Command::Feedback { summary, .. } = crate::cli::Cli::parse().command {
@@ -87,6 +87,50 @@ pub fn refuse_write(task: &Task, spells: impl Fn(&str) -> bool, registry: &Regis
         task.id,
         args.join(" ")
     )))
+}
+
+/// The positions in `args` (argv after the binary) that spell the tombstone *as an id*:
+/// clap parses them into an argument that takes a ref (`cli::takes_ref`). A payload that happens
+/// to spell it (a note, a title, an attachment path) is not one, so the retry keeps it.
+///
+/// Each candidate is tested alone: it is swapped for a marker no id or flag can spell and
+/// the command is parsed again. A parse that fails means the token sits in a typed slot
+/// (a number, a date), which a task id never fills.
+fn id_slots(args: &[String], spells: impl Fn(&str) -> bool) -> Vec<usize> {
+    const MARKER: &str = "\u{1}tasks-id-slot";
+    let command = crate::cli::Cli::command();
+    (0..args.len())
+        .filter(|&index| spells(&args[index]))
+        .filter(|&index| {
+            let argv = std::iter::once("tasks").chain(
+                args.iter()
+                    .enumerate()
+                    .map(|(i, arg)| if i == index { MARKER } else { arg.as_str() }),
+            );
+            command
+                .clone()
+                .try_get_matches_from(argv)
+                .is_ok_and(|matches| ref_value(&command, &matches, MARKER))
+        })
+        .collect()
+}
+
+/// Whether `value` was parsed into an argument that takes a ref, of the matched command path.
+fn ref_value(command: &clap::Command, matches: &clap::ArgMatches, value: &str) -> bool {
+    let here = command
+        .get_arguments()
+        .filter(|arg| crate::cli::takes_ref(arg))
+        .any(|arg| {
+            matches
+                .get_raw(arg.get_id().as_str())
+                .is_some_and(|mut raw| raw.any(|given| given == value))
+        });
+    here || matches.subcommand().is_some_and(|(name, sub)| {
+        let sub_command = command
+            .find_subcommand(name)
+            .expect("a matched subcommand is defined");
+        ref_value(sub_command, sub, value)
+    })
 }
 
 /// A new dependency or parent must name the live record, never a tombstone.
