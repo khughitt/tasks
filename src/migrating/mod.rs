@@ -4,6 +4,8 @@
 pub mod draft;
 pub mod list;
 pub mod preflight;
+pub mod project;
+pub mod review;
 
 use crate::commands::Ctx;
 use crate::registry::Registry;

@@ -1,12 +1,12 @@
 //! `migrate --draft`: the form the decision list is filled in from.
 
 use super::MigrateCtx;
+use super::project::Link;
 use crate::claims::ClaimSnapshot;
 use crate::error::{Error, Result};
-use crate::model::{Relation, Task, TaskId};
+use crate::model::{Task, TaskId};
 use crate::output::DraftOut;
-use crate::refs::Citation;
-use crate::resolve::{DocKind, LocatedEntry, Resolver};
+use crate::resolve::Resolver;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -196,60 +196,26 @@ fn context(
 /// Spec, plan, step and local reference entries that do not resolve in the successor,
 /// with any `[ref:<handle>]` citation of them in the body.
 fn unresolved(ctx: &MigrateCtx, task: &Task, resolver: &Resolver) -> Result<Vec<String>> {
-    let mut lines = Vec::new();
     let project = &ctx.target.prefix;
-    let mut plan_resolves = true;
-    for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
-        let Some(path) = path else { continue };
-        if crate::format::external_doc(path)?.is_some() {
-            continue;
-        }
-        match resolver.resolve_doc(kind, path) {
-            Ok(_) => {}
-            // The document is not there (or not addressable) in the successor: a fact
-            // for the reader. Any other error is a failure to look, and stops the draft.
-            Err(error @ (Error::DocNotFound(_) | Error::Ambiguous(_) | Error::Validation(_))) => {
-                plan_resolves &= kind != DocKind::Plan;
-                lines.push(format!(
-                    "{} {path} does not resolve in {project}: {error}",
-                    kind.name()
-                ));
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    if let (Some(plan), Some(step)) = (&task.plan, &task.step)
-        && plan_resolves
-        && crate::format::external_doc(plan)?.is_none()
-        && !resolver.step_exists(plan, step)?
-    {
-        lines.push(format!("step {step:?} of {plan} not found in {project}"));
-    }
-    let cited: Vec<&str> = crate::refs::citations(&task.body)
+    let cited = super::project::cited(&task.body);
+    Ok(super::project::unresolved_links(task, resolver)?
         .into_iter()
-        .filter_map(|c| match c {
-            Citation::Handle(h) => Some(h),
-            Citation::Malformed(_) => None,
+        .map(|link| match link {
+            Link::Spec { path, error } => {
+                format!("spec {path} does not resolve in {project}: {error}")
+            }
+            Link::Plan { path, error } => {
+                format!("plan {path} does not resolve in {project}: {error}")
+            }
+            Link::Step { plan, step } => format!("step {step:?} of {plan} not found in {project}"),
+            Link::Ref { handle, reference } => {
+                let cite = if cited.contains(&handle) {
+                    format!(" (cited as [ref:{handle}])")
+                } else {
+                    String::new()
+                };
+                format!("ref {handle} {reference} does not exist in {project}{cite}")
+            }
         })
-        .collect();
-    for entry in &task.refs {
-        if entry.relation == Relation::Output {
-            continue;
-        }
-        let crate::refs::Location::Path(path) = crate::refs::location(&entry.reference)? else {
-            continue;
-        };
-        if matches!(resolver.locate_entry(path)?, LocatedEntry::Missing) {
-            let cite = if cited.contains(&entry.handle.as_str()) {
-                format!(" (cited as [ref:{}])", entry.handle)
-            } else {
-                String::new()
-            };
-            lines.push(format!(
-                "ref {} {} does not exist in {project}{cite}",
-                entry.handle, entry.reference
-            ));
-        }
-    }
-    Ok(lines)
+        .collect())
 }

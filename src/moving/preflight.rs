@@ -1,11 +1,12 @@
 use super::journal::{Journal, JournalAttachment};
 use super::{MoveCtx, attachment_bytes};
 use crate::attachments::{self, Ledger};
-use crate::claims::{ClaimSnapshot, ClaimStore};
-use crate::commands::{self, append_note, append_stamped_note};
+use crate::claims::{ClaimSnapshot, ClaimStore, Escalation, Park};
+use crate::commands::{self, Ctx, append_note, append_stamped_note};
 use crate::error::{Error, Result};
 use crate::format::{serialize_physical, validate_task};
 use crate::hierarchy;
+use crate::history::ArchiveDescriptor;
 use crate::model::{Relation, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::rename::inventory::digest;
@@ -56,45 +57,82 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     commands::reject_retired(&ctx.registry, &ctx.target)?;
     super::reject_operations(ctx, None)?;
     let now = crate::time::after(&source.updated)?;
-    let owner = commands::owner_name(&ctx.source.project)?;
+    let target_id = ctx.target.new_id()?;
+    let pair = build_pair(&mut ctx.source, &ctx.target, &source, target_id, &now, "")?;
+    let target = &pair.target;
+    validate_destination_docs(&ctx.target, &ctx.registry, target, id)?;
+    validate_record(&ctx.target, &ctx.registry, target)?;
+    let destination = commands::open_ctx(Some(&ctx.target.records))?;
+    commands::dep::ensure_acyclic(&destination, target)?;
+    if let Some((other, why)) = collision(&ctx.target, &ctx.registry, id)? {
+        return Err(Error::Validation(format!(
+            "{} already holds {other} for {id} ({why}); inspect it: drop one, or keep the re-file and drop {id}",
+            ctx.target.prefix
+        )));
+    }
+    attachments::check_storage(&ctx.source.project, id)?;
+    attachments::check_storage(&ctx.target, &target.id)?;
+    validate_record(&ctx.source.project, &ctx.registry, &pair.tombstone)?;
+    Ok(Journal {
+        source_records: (!source.note_archives.is_empty())
+            .then(|| ctx.source.project.records.clone()),
+        source: id.to_string(),
+        target: pair.target.id.to_string(),
+        source_root: ctx.source.project.root.clone(),
+        target_root: ctx.target.root.clone(),
+        source_digest: digest(source_text.as_bytes()),
+        source_text,
+        target_text: pair.target_text,
+        tombstone_text: pair.tombstone_text,
+        attachments: pair.attachments,
+        source_park: pair.source_park,
+        target_park: pair.target_park,
+        target_escalation: pair.target_escalation,
+        source_escalation: pair.source_escalation,
+    })
+}
+
+/// A carried record and its tombstone, rendered but not yet validated in the destination.
+pub(crate) struct RenderedPair {
+    pub target: Task,
+    pub target_text: String,
+    pub tombstone: Task,
+    pub tombstone_text: String,
+    pub attachments: Vec<JournalAttachment>,
+    pub source_park: Option<Park>,
+    pub source_escalation: Option<Escalation>,
+    pub target_park: Option<Park>,
+    pub target_escalation: Option<Escalation>,
+    /// The source's archived note segments, read once so a re-render needs no source.
+    archives: Vec<(ArchiveDescriptor, Vec<u8>)>,
+}
+
+/// The construction half of a move (spec §3.2): the new record with `moved_from` and its
+/// note, the tombstone with `moved_to`, its note and the `detached:` notes, the attachment
+/// list, and the park and escalation re-keyed to the destination's resume root. It checks
+/// nothing about the destination and does not ask whether `source` is open: the caller
+/// validates, and may rewrite `target` and call `finish_pair` again. `note_suffix` is
+/// appended to the `moved from`/`moved to` notes (empty for `move`).
+pub(crate) fn build_pair(
+    source_ctx: &mut Ctx,
+    target_project: &Project,
+    source: &Task,
+    target_id: TaskId,
+    now: &str,
+    note_suffix: &str,
+) -> Result<RenderedPair> {
+    let id = &source.id;
+    let owner = commands::owner_name(&source_ctx.project)?;
     let mut target = source.clone();
-    target.id = ctx.target.new_id()?;
+    target.id = target_id;
     target.moved_from = Some(id.clone());
-    target.updated = now.clone();
+    target.updated = now.to_string();
     append_stamped_note(
-        &mut ctx.source,
+        source_ctx,
         &mut target,
         &owner,
-        &format!("moved from {id}"),
+        &format!("moved from {id}{note_suffix}"),
     )?;
-    validate_destination_docs(&ctx.target, &ctx.registry, &target, id)?;
-    validate_record(&ctx.target, &ctx.registry, &target)?;
-    let destination = commands::open_ctx(Some(&ctx.target.records))?;
-    commands::dep::ensure_acyclic(&destination, &target)?;
-    for other in ctx.target.scan()? {
-        let why = if other
-            .moved_from
-            .as_ref()
-            .is_some_and(|from| ctx.registry.canonical_id(from) == *id)
-        {
-            Some("moved_from")
-        } else if other
-            .source
-            .as_deref()
-            .and_then(|s| TaskId::parse(s).ok())
-            .is_some_and(|from| ctx.registry.canonical_id(&from) == *id)
-        {
-            Some("source")
-        } else {
-            None
-        };
-        if let Some(why) = why {
-            return Err(Error::Validation(format!(
-                "{} already holds {} for {id} ({why}); inspect it: drop one, or keep the re-file and drop {id}",
-                ctx.target.prefix, other.id
-            )));
-        }
-    }
     let mut tombstone = source.clone();
     if source.status == Status::Shelved {
         tombstone.wake_on.clear();
@@ -105,21 +143,19 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     tombstone.reviewed_at = None;
     tombstone.awaiting_user = false;
     tombstone.moved_to = Some(target.id.clone());
-    tombstone.updated = now;
+    tombstone.updated = now.to_string();
     append_stamped_note(
-        &mut ctx.source,
+        source_ctx,
         &mut tombstone,
         &owner,
-        &format!("moved to {}", target.id),
+        &format!("moved to {}{note_suffix}", target.id),
     )?;
-    attachments::check_storage(&ctx.source.project, id)?;
-    attachments::check_storage(&ctx.target, &target.id)?;
     let mut attachments = Vec::new();
-    for (name, state) in attachments::ledger(&source) {
+    for (name, state) in attachments::ledger(source) {
         if state != Ledger::Attached {
             continue;
         }
-        let bytes = attachment_bytes(&ctx.source.project, id, &name)?.ok_or_else(|| Error::Validation(format!("{id}: attachment_missing: {name} is attached but its file is missing; restore it or run `tasks detach {id} {name} \"missing\"`")))?;
+        let bytes = attachment_bytes(&source_ctx.project, id, &name)?.ok_or_else(|| Error::Validation(format!("{id}: attachment_missing: {name} is attached but its file is missing; restore it or run `tasks detach {id} {name} \"missing\"`")))?;
         let retain_source = source
             .note_archives
             .iter()
@@ -137,51 +173,113 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
             )?;
         }
     }
-    validate_record(&ctx.source.project, &ctx.registry, &tombstone)?;
-    let store = ClaimStore::load(&ctx.source.project.prefix)?;
+    let store = ClaimStore::load(&source_ctx.project.prefix)?;
     let source_park = store.park(id).cloned();
     let source_escalation = store.escalation(id).cloned();
     let target_park = source_park.clone().map(|mut park| {
-        park.worktree = ctx.target.resume_root().display().to_string();
+        park.worktree = target_project.resume_root().display().to_string();
         park
     });
-    Ok(Journal {
-        source_records: (!source.note_archives.is_empty())
-            .then(|| ctx.source.project.records.clone()),
-        source: id.to_string(),
-        target: target.id.to_string(),
-        source_root: ctx.source.project.root.clone(),
-        target_root: ctx.target.root.clone(),
-        source_digest: digest(source_text.as_bytes()),
-        source_text,
-        target_text: serialize_physical(&crate::history::physical_for_save(&target, |archive| {
-            ctx.source.project.read_archive(id, archive)
-        })?),
-        tombstone_text: serialize_physical(&crate::history::physical_for_save(
-            &tombstone,
-            |archive| ctx.source.project.read_archive(id, archive),
-        )?),
+    let archives = source
+        .note_archives
+        .iter()
+        .map(|archive| {
+            Ok((
+                archive.clone(),
+                source_ctx.project.read_archive(id, archive)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut pair = RenderedPair {
+        target,
+        target_text: String::new(),
+        tombstone,
+        tombstone_text: String::new(),
         attachments,
         source_park,
-        target_park,
         target_escalation: source_escalation.clone(),
         source_escalation,
-    })
+        target_park,
+        archives,
+    };
+    finish_pair(&mut pair)?;
+    Ok(pair)
+}
+
+/// Serialises both records of `pair` as they now stand (after any rewrites).
+pub(crate) fn finish_pair(pair: &mut RenderedPair) -> Result<()> {
+    let archives = &pair.archives;
+    let resolve = |wanted: &ArchiveDescriptor| {
+        archives
+            .iter()
+            .find(|(archive, _)| archive == wanted)
+            .map(|(_, bytes)| bytes.clone())
+            .ok_or_else(|| Error::Validation(format!("{}: archive not read", wanted.file_name())))
+    };
+    pair.target_text =
+        serialize_physical(&crate::history::physical_for_save(&pair.target, resolve)?);
+    pair.tombstone_text = serialize_physical(&crate::history::physical_for_save(
+        &pair.tombstone,
+        resolve,
+    )?);
+    Ok(())
+}
+
+/// A destination record that already holds `id` as its `moved_from` or `source`: moving
+/// `id` there again would make a second copy of one task.
+pub(crate) fn collision(
+    target: &Project,
+    registry: &Registry,
+    id: &TaskId,
+) -> Result<Option<(TaskId, &'static str)>> {
+    for other in target.scan()? {
+        let why = if other
+            .moved_from
+            .as_ref()
+            .is_some_and(|from| registry.canonical_id(from) == *id)
+        {
+            Some("moved_from")
+        } else if other
+            .source
+            .as_deref()
+            .and_then(|s| TaskId::parse(s).ok())
+            .is_some_and(|from| registry.canonical_id(&from) == *id)
+        {
+            Some("source")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            return Ok(Some((other.id, why)));
+        }
+    }
+    Ok(None)
 }
 
 pub(super) fn validate_record(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    validate_record_among(project, registry, task, &[])
+}
+
+/// `validate_record` for a record written together with `projected`: its parent and lane
+/// checks see those records as if they were already on disk.
+pub(crate) fn validate_record_among(
+    project: &Project,
+    registry: &Registry,
+    task: &Task,
+    projected: &[Task],
+) -> Result<()> {
     validate_task(task)?;
     crate::review::validate(task)?;
     crate::defer::validate(task)?;
     project.validate_docs(task)?;
     crate::needs::require_declared(&project.needs, &task.needs)?;
-    hierarchy::validate_parent(project, registry, task)?;
-    hierarchy::validate_lanes(project, registry, task)?;
+    hierarchy::validate_parent_among(project, registry, task, projected)?;
+    hierarchy::validate_lanes_among(project, registry, task, projected)?;
     hierarchy::validate_periodic(project, registry, task)?;
     hierarchy::validate_defer(project, registry, task)
 }
 
-fn validate_destination_docs(
+pub(crate) fn validate_destination_docs(
     project: &Project,
     registry: &Registry,
     task: &Task,

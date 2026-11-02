@@ -1,7 +1,7 @@
 use super::{open_ctx, reject_retired};
 use crate::error::{Error, Result};
-use crate::migrating::{MigrateCtx, draft, list, preflight};
-use crate::output::{MigrateOut, Output};
+use crate::migrating::{MigrateCtx, draft, list, preflight, project};
+use crate::output::{BodyChange, CarriedOut, MigrateOut, Output};
 use std::path::{Path, PathBuf};
 
 /// The source is the checkout the command runs in, the successor a registered project:
@@ -53,8 +53,43 @@ pub fn run(
                 .into(),
         ));
     }
-    let ctx = open(dir, &loaded.list.successor)?;
-    let refusals = preflight::check_list(&ctx, &loaded)?;
+    let mut ctx = open(dir, &loaded.list.successor)?;
+    let mut refusals = preflight::check_list(&ctx, &loaded)?;
+    let mut carried = Vec::new();
+    let mut body_changes = Vec::new();
+    if refusals.is_empty() {
+        let now = project::render_time(&ctx)?;
+        let (projected, map, more) = project::project_carried(&mut ctx, &loaded, &now)?;
+        refusals.extend(more);
+        // A fresh verdict assigns no ids: a new id is shown as `new:<v1 id>`.
+        let shown = |text: &str| {
+            map.iter().fold(text.to_string(), |text, (from, new)| {
+                text.replace(&new.to_string(), &format!("new:{from}"))
+            })
+        };
+        for item in projected {
+            let target = &item.pair.target;
+            if let Some(diff) = &item.body_change {
+                body_changes.push(BodyChange {
+                    id: item.from.to_string(),
+                    diff: diff.clone(),
+                });
+            }
+            carried.push(CarriedOut {
+                from: item.from.to_string(),
+                id: None,
+                parent: target.parent.as_ref().map(|p| shown(&p.to_string())),
+                rewrites: item.rewrites.iter().map(|r| shown(r)).collect(),
+                attachments: item
+                    .pair
+                    .attachments
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect(),
+                park: item.pair.source_park.is_some(),
+            });
+        }
+    }
     let mut warnings = ctx.source.warnings.clone();
     warnings.extend(preflight::reason_warnings(&loaded.list));
     Ok(Output::Migrate(MigrateOut {
@@ -67,7 +102,7 @@ pub fn run(
             "refuse"
         }
         .into(),
-        carried: Vec::new(),
+        carried,
         dropped: Vec::new(),
         closed: Vec::new(),
         inbound: Vec::new(),
@@ -76,6 +111,6 @@ pub fn run(
         paths: Default::default(),
         warnings,
         refusals,
-        body_changes: Vec::new(),
+        body_changes,
     }))
 }

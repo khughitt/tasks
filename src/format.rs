@@ -70,6 +70,10 @@ impl PhysicalTask {
     pub fn updated(&self) -> &str {
         &self.metadata.updated
     }
+    /// The body as the record stores it: what reading the record back gives.
+    pub fn body(&self) -> &str {
+        &self.metadata.body
+    }
 
     pub(crate) fn assemble(mut self, notes: Vec<Note>) -> Task {
         self.metadata.notes = notes;

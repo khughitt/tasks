@@ -799,3 +799,461 @@ fn a_pending_move_is_a_refusal_and_an_unreadable_inventory_is_not() {
     );
     assert_eq!(kind, "config");
 }
+
+/// Writes the list beside the scratch HOME and returns `--explain`'s output.
+fn explain_text(env: &TestEnv, dir: &std::path::Path, text: &str) -> serde_json::Value {
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    explain(env, dir, &list)
+}
+
+fn carried_row<'a>(out: &'a serde_json::Value, from: &str) -> &'a serde_json::Value {
+    out["carried"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["from"] == from)
+        .unwrap_or_else(|| panic!("{from} not carried in {out}"))
+}
+
+fn rewrites_of(out: &serde_json::Value, from: &str) -> Vec<String> {
+    carried_row(out, from)["rewrites"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn carried_child_of_a_dropped_goal_needs_a_parent() {
+    // Spec §5 case 1, validation half.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let g = id_of(env.json(&forge, &["add", "Goal G", "-p", "1"]));
+    let b = id_of(env.json(&forge, &["add", "B", "--parent", &g]));
+    let a = id_of(env.json(&forge, &["add", "A", "--parent", &g, "--depends", &b]));
+    let c = id_of(env.json(&forge, &["add", "C", "--parent", &g]));
+    let s = id_of(env.json(&forge2, &["add", "Successor goal S"]));
+    let (text, _) = draft_home(&env, &forge);
+    let mut text = decide(&text, &g, "drop", "reason = \"superseded\"\n");
+    text = decide(&text, &c, "close", "reason = \"done in forge2\"\n");
+    let bare = decide(&decide(&text, &a, "carry", ""), &b, "carry", "");
+    let out = explain_text(&env, &forge, &bare);
+    assert_eq!(out["recovery"], "refuse");
+    let mut found = rules(&out);
+    found.sort();
+    let mut want = vec![
+        ("parent_required".to_string(), a.clone()),
+        ("parent_required".to_string(), b.clone()),
+    ];
+    want.sort();
+    assert_eq!(found, want, "{out}");
+    for (_, settle) in setting(&out, "parent_required") {
+        assert!(settle.contains("`parent"), "{settle}");
+    }
+
+    text = decide(&text, &a, "carry", "parent = \"none\"\n");
+    text = decide(&text, &b, "carry", &format!("parent = \"{s}\"\n"));
+    let out = explain_text(&env, &forge, &text);
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(out["recovery"], "fresh");
+    let row_b = carried_row(&out, &b);
+    assert_eq!(row_b["parent"], s.as_str(), "{out}");
+    assert!(
+        row_b.get("id").is_none(),
+        "a fresh verdict assigns no ids: {out}"
+    );
+    assert_eq!(carried_row(&out, &a)["parent"], serde_json::Value::Null);
+    let rewrites_a = rewrites_of(&out, &a);
+    assert!(
+        rewrites_a.contains(&format!("parent {g} not carried; set to none")),
+        "{rewrites_a:?}"
+    );
+    assert!(
+        rewrites_a.contains(&format!("dependency {b} carried as new:{b}")),
+        "{rewrites_a:?}"
+    );
+    assert!(
+        rewrites_of(&out, &b).contains(&format!("parent {g} not carried; set to {s}")),
+        "{out}"
+    );
+}
+
+#[test]
+fn carried_subtree_keeps_its_shape() {
+    // Spec §5 case 2: validation runs after the rewrites, so A and B are valid under G'.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let g = id_of(env.json(&forge, &["add", "Goal G", "-p", "1"]));
+    let a = id_of(env.json(&forge, &["add", "A", "--parent", &g]));
+    let b = id_of(env.json(&forge, &["add", "B", "--parent", &g]));
+    let (mut text, _) = draft_home(&env, &forge);
+    for id in [&g, &a, &b] {
+        text = decide(&text, id, "carry", "");
+    }
+    let out = explain_text(&env, &forge, &text);
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(out["recovery"], "fresh");
+    assert_eq!(carried_row(&out, &g)["parent"], serde_json::Value::Null);
+    for child in [&a, &b] {
+        assert_eq!(
+            carried_row(&out, child)["parent"],
+            format!("new:{g}"),
+            "{out}"
+        );
+        assert!(
+            rewrites_of(&out, child).contains(&format!("parent {g} carried as new:{g}")),
+            "{out}"
+        );
+    }
+}
+
+#[test]
+fn carried_parent_override_must_name_carried_or_open_successor_work() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let shut = id_of(env.json(&forge2, &["add", "Closed successor"]));
+    env.json(&forge2, &["done", &shut]);
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &d, "drop", "reason = \"gone\"\n");
+    for parent in [d.as_str(), shut.as_str(), "ops-abc123", "forge2-abcdef"] {
+        let out = explain_text(
+            &env,
+            &forge,
+            &decide(&text, &a, "carry", &format!("parent = \"{parent}\"\n")),
+        );
+        assert_eq!(
+            rules(&out),
+            vec![("parent_invalid".to_string(), a.clone())],
+            "{parent}: {out}"
+        );
+    }
+}
+
+#[test]
+fn dependency_on_dropped_work_needs_rm_depends() {
+    // Spec §5 case 3.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let k = id_of(env.json(&forge, &["add", "K"]));
+    env.json(&forge, &["done", &k]);
+    let a = id_of(env.json(&forge, &["add", "A", "--depends", &d, "--depends", &k]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &d, "drop", "reason = \"gone\"\n");
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", ""));
+    assert_eq!(
+        rules(&out),
+        vec![("depends_on_dropped".to_string(), a.clone())],
+        "{out}"
+    );
+    let settle = &setting(&out, "depends_on_dropped")[0].1;
+    assert!(
+        settle.contains("rm_depends") && settle.contains(&d),
+        "{settle}"
+    );
+
+    // rm_depends may name only a dependency this list drops.
+    let wrong = decide(
+        &text,
+        &a,
+        "carry",
+        &format!("rm_depends = [\"{d}\", \"{k}\"]\n"),
+    );
+    let out = explain_text(&env, &forge, &wrong);
+    assert_eq!(
+        rules(&out),
+        vec![("bad_key".to_string(), a.clone())],
+        "{out}"
+    );
+
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &a, "carry", &format!("rm_depends = [\"{d}\"]\n")),
+    );
+    assert_eq!(rules(&out), vec![], "{out}");
+    let rewrites = rewrites_of(&out, &a);
+    assert_eq!(
+        rewrites,
+        [format!("removed dependency {d} (dropped)")],
+        "{out}"
+    );
+}
+
+#[test]
+fn unresolved_plan_link_needs_links_drop() {
+    // Spec §5 case 6: valid only because validation runs on the rewritten record.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    std::fs::create_dir_all(forge.join("docs/plans")).unwrap();
+    std::fs::write(forge.join("docs/plans/x.md"), "# Plan\n\n### Task 1: one\n").unwrap();
+    let a = id_of(env.json(
+        &forge,
+        &[
+            "add",
+            "A",
+            "--plan",
+            "docs/plans/x.md",
+            "--step",
+            "Task 1: one",
+        ],
+    ));
+    let (text, _) = draft_home(&env, &forge);
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", ""));
+    assert_eq!(
+        rules(&out),
+        vec![("links_unresolved".to_string(), a.clone())],
+        "{out}"
+    );
+    let settle = &setting(&out, "links_unresolved")[0].1;
+    assert!(
+        settle.contains("links = \"drop\"") && settle.contains("docs/plans/x.md"),
+        "{settle}"
+    );
+
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &a, "carry", "links = \"drop\"\n"),
+    );
+    assert_eq!(rules(&out), vec![], "{out}");
+    let rewrites = rewrites_of(&out, &a);
+    assert!(
+        rewrites.contains(&"plan link docs/plans/x.md dropped (not in forge2)".to_string()),
+        "{rewrites:?}"
+    );
+    assert!(
+        rewrites.contains(&"step \"Task 1: one\" dropped with its plan".to_string()),
+        "{rewrites:?}"
+    );
+
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &a, "carry", "links = \"keep\"\n"),
+    );
+    assert!(
+        rules(&out).contains(&("bad_key".to_string(), a.clone())),
+        "{out}"
+    );
+}
+
+#[test]
+fn cited_reference_needs_a_replacement_body() {
+    // Spec §5 case 7.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    std::fs::create_dir_all(forge.join("docs/notes")).unwrap();
+    std::fs::write(forge.join("docs/notes/b.md"), "brief\n").unwrap();
+    let a = id_of(env.json(
+        &forge,
+        &[
+            "add",
+            "A",
+            "--body",
+            "Intro.\nSee [ref:brief] for the question.\nOutro.",
+            "--ref",
+            "brief (input): docs/notes/b.md",
+        ],
+    ));
+    let (text, _) = draft_home(&env, &forge);
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &a, "carry", "links = \"drop\"\n"),
+    );
+    assert_eq!(
+        rules(&out),
+        vec![("citation_dangling".to_string(), a.clone())],
+        "{out}"
+    );
+    let settle = &setting(&out, "citation_dangling")[0].1;
+    assert!(
+        settle.contains("[ref:brief]") && settle.contains("`body`"),
+        "{settle}"
+    );
+
+    // A replacement that still cites the dropped handle refuses too.
+    let still = "links = \"drop\"\nbody = \"\"\"\nSee [ref:brief] again.\n\"\"\"\n";
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", still));
+    assert_eq!(
+        rules(&out),
+        vec![("citation_dangling".to_string(), a.clone())],
+        "{out}"
+    );
+
+    let good = "links = \"drop\"\nbody = \"\"\"\nIntro.\nThe question is settled in forge2.\nOutro.\n\"\"\"\n";
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", good));
+    assert_eq!(rules(&out), vec![], "{out}");
+    let rewrites = rewrites_of(&out, &a);
+    assert!(
+        rewrites.contains(&"ref brief docs/notes/b.md dropped (not in forge2)".to_string()),
+        "{rewrites:?}"
+    );
+    assert!(
+        rewrites
+            .iter()
+            .any(|r| r.starts_with("body replaced") && r.contains("brief")),
+        "{rewrites:?}"
+    );
+    let changes = out["body_changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 1, "{out}");
+    assert_eq!(changes[0]["id"], a.as_str());
+    let diff = changes[0]["diff"].as_str().unwrap();
+    assert_eq!(
+        diff,
+        " Intro.\n-See [ref:brief] for the question.\n+The question is settled in forge2.\n Outro.\n"
+    );
+}
+
+#[test]
+fn replacement_body_round_trips_exactly() {
+    // Plan Review Focus 4: the projected body is the list's body after the record
+    // format's normalisation (trailing whitespace trimmed), non-ASCII intact.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A", "--body", "Old body."]));
+    let (text, _) = draft_home(&env, &forge);
+    let body = "body = \"\"\"\nLine é\n\n- item\n\"\"\"\n";
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", body));
+    assert_eq!(rules(&out), vec![], "{out}");
+    let diff = out["body_changes"][0]["diff"].as_str().unwrap();
+    assert_eq!(diff, "-Old body.\n+Line é\n+\n+- item\n");
+    assert!(
+        rewrites_of(&out, &a).contains(&"body replaced".to_string()),
+        "{out}"
+    );
+
+    // A body with a reserved delimiter is refused rather than mangled.
+    let bad = "body = \"\"\"\nx\n## Notes\ny\n\"\"\"\n";
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", bad));
+    assert_eq!(
+        rules(&out),
+        vec![("bad_key".to_string(), a.clone())],
+        "{out}"
+    );
+}
+
+#[test]
+fn parent_override_cycle_refuses() {
+    // Spec §5 case 14.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let b = id_of(env.json(&forge, &["add", "B"]));
+    let (text, _) = draft_home(&env, &forge);
+    let mut cyclic = decide(&text, &a, "carry", &format!("parent = \"{b}\"\n"));
+    cyclic = decide(&cyclic, &b, "carry", &format!("parent = \"{a}\"\n"));
+    let out = explain_text(&env, &forge, &cyclic);
+    let found = rules(&out);
+    assert_eq!(found.len(), 1, "{out}");
+    assert_eq!(found[0].0, "parent_cycle", "{out}");
+    let settle = &setting(&out, "parent_cycle")[0].1;
+    assert!(settle.contains(&a) && settle.contains(&b), "{settle}");
+
+    // A dependency cycle through the successor: S depends on A, written by hand, and A
+    // depends on S; after the run A's tombstone points at A'.
+    let s = id_of(env.json(&forge2, &["add", "S"]));
+    let c = id_of(env.json(&forge, &["add", "C", "--depends", &s]));
+    let path = forge2.join(format!("tasks/{s}.md"));
+    let record = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        record.replacen("depends: []", &format!("depends: [{c}]"), 1),
+    )
+    .unwrap();
+    let (text, _) = {
+        std::fs::remove_file(env.home.path().join("list.toml")).unwrap();
+        draft_home(&env, &forge)
+    };
+    let mut list = decide(&text, &a, "carry", "");
+    list = decide(&list, &b, "carry", "");
+    list = decide(&list, &c, "carry", "");
+    let out = explain_text(&env, &forge, &list);
+    assert_eq!(
+        rules(&out),
+        vec![("dependency_cycle".to_string(), c.clone())],
+        "{out}"
+    );
+    assert!(setting(&out, "dependency_cycle")[0].1.contains(&s), "{out}");
+}
+
+#[test]
+fn done_recurrence_carries_with_its_anchor() {
+    // Spec §5 case 9, recurrence half: a recurrence whose occurrence is done carries
+    // (move's open-status rule does not apply to it).
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let r = id_of(env.json(&forge, &["add", "R", "--every", "7d"]));
+    env.json(&forge, &["done", &r]);
+    let (text, _) = draft_home(&env, &forge);
+    let out = explain_text(&env, &forge, &decide(&text, &r, "carry", ""));
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(out["recovery"], "fresh");
+    let row = carried_row(&out, &r);
+    assert_eq!(row["rewrites"], serde_json::json!([]), "{out}");
+    assert_eq!(row["park"], false);
+}
+
+#[test]
+fn carried_need_must_be_declared_in_the_successor() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let config = forge.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[needs.gpu]\nmeaning = \"a GPU host\"\n");
+    std::fs::write(&config, text).unwrap();
+    let a = id_of(env.json(&forge, &["add", "A", "--need", "gpu"]));
+    let (text, _) = draft_home(&env, &forge);
+    let out = explain_text(&env, &forge, &decide(&text, &a, "carry", ""));
+    assert_eq!(
+        rules(&out),
+        vec![("destination_invalid".to_string(), a.clone())],
+        "{out}"
+    );
+    assert!(
+        setting(&out, "destination_invalid")[0].1.contains("gpu"),
+        "{out}"
+    );
+}
+
+#[test]
+fn carried_lane_under_a_successor_lane_refuses_and_a_carried_lane_tree_is_valid() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let l = id_of(env.json(&forge, &["add", "Lane L", "--lane", "--origin", "user"]));
+    let a = id_of(env.json(&forge, &["add", "A", "--parent", &l]));
+    let outer = id_of(env.json(&forge2, &["add", "Outer", "--lane", "--origin", "user"]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &a, "carry", "");
+    // Carried with its lane: valid, the child under the projected lane.
+    let out = explain_text(&env, &forge, &decide(&text, &l, "carry", ""));
+    assert_eq!(rules(&out), vec![], "{out}");
+    // The lane re-parented under a successor lane: nested.
+    let nested = decide(&text, &l, "carry", &format!("parent = \"{outer}\"\n"));
+    let out = explain_text(&env, &forge, &nested);
+    assert_eq!(
+        rules(&out),
+        vec![("destination_invalid".to_string(), l.clone())],
+        "{out}"
+    );
+    assert!(
+        setting(&out, "destination_invalid")[0].1.contains("lane"),
+        "{out}"
+    );
+}
