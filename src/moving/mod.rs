@@ -50,11 +50,7 @@ pub fn attachment_path(project: &Project, id: &TaskId, name: &str) -> Result<Pat
     Ok(attachments::task_dir(project, id).join(name))
 }
 
-pub(crate) fn attachment_bytes(
-    project: &Project,
-    id: &TaskId,
-    name: &str,
-) -> Result<Option<Vec<u8>>> {
+fn attachment_bytes(project: &Project, id: &TaskId, name: &str) -> Result<Option<Vec<u8>>> {
     let path = attachment_path(project, id, name)?;
     match attachments::entry_state(&path)? {
         EntryState::Absent => Ok(None),
@@ -212,37 +208,13 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     if stop_after("journal") {
         return Ok(out);
     }
-    for attachment in &journal.attachments {
-        let want = FileState::Digest(attachment.sha256.clone());
-        if attachment_state(&ctx.target, &target, &attachment.name)? != want {
-            let path = attachment_path(&ctx.target, &target, &attachment.name)?;
-            match attachments::entry_state(&path)? {
-                EntryState::File(_) => {
-                    return Err(Error::MovePending(format!(
-                        "attachment {} in {target} differs from its journal digest",
-                        attachment.name
-                    )));
-                }
-                EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
-                EntryState::Absent => {}
-            }
-            let bytes = attachment_bytes(&ctx.source.project, &source, &attachment.name)?
-                .ok_or_else(|| {
-                    Error::MovePending(format!("attachment {} is missing", attachment.name))
-                })?;
-            if digest(&bytes) != attachment.sha256 {
-                return Err(Error::MovePending(format!(
-                    "attachment {} differs from its journal digest",
-                    attachment.name
-                )));
-            }
-            attachments::ensure_task_dir(&ctx.target, &target)?;
-            let path = attachment_path(&ctx.target, &target, &attachment.name)?;
-            attachments::write_new(&path, &bytes)?;
-            crate::written::record(&ctx.target.records, &path);
-        }
-        verify_attachment(&ctx.target, &target, attachment)?;
-    }
+    copy_attachments(
+        &ctx.source.project,
+        &source,
+        &ctx.target,
+        &target,
+        &journal.attachments,
+    )?;
     if stop_after("attachments") {
         return Ok(out);
     }
@@ -287,47 +259,138 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     if stop_after("tombstone") {
         return Ok(out);
     }
-    for attachment in &journal.attachments {
-        verify_attachment(&ctx.target, &target, attachment)?;
-        if attachment.retain_source {
-            verify_attachment(&ctx.source.project, &source, attachment)?;
-            continue;
-        }
-        let path = attachment_path(&ctx.source.project, &source, &attachment.name)?;
-        match attachments::entry_state(&path)? {
-            EntryState::File(_) => {
-                verify_attachment(&ctx.source.project, &source, attachment)?;
-                std::fs::remove_file(&path)?;
-                crate::written::record(&ctx.source.project.records, &path);
-            }
-            EntryState::Absent => {}
-            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
-        }
-    }
-    if attachments::check_storage(&ctx.source.project, &source)? {
-        let dir = attachments::task_dir(&ctx.source.project, &source);
-        if std::fs::read_dir(&dir)?.next().is_none() {
-            std::fs::remove_dir(dir)?;
-        }
-    }
+    remove_source_attachments(
+        &ctx.source.project,
+        &source,
+        &ctx.target,
+        &target,
+        &journal.attachments,
+    )?;
     let mut store = ClaimStore::load(&ctx.source.project.prefix)?;
-    if (store.park(&source).is_some() && store.park(&source) != journal.source_park.as_ref())
-        || (store.escalation(&source).is_some()
-            && store.escalation(&source) != journal.source_escalation.as_ref())
-    {
-        return Err(Error::MovePending(format!(
-            "{source}'s store entries differ from the journal"
-        )));
-    }
-    let park_removed = store.remove_park(&source).is_some();
-    let escalation_removed = store.remove_escalation(&source).is_some();
-    if park_removed || escalation_removed {
+    if remove_source_entries(
+        &mut store,
+        &source,
+        journal.source_park.as_ref(),
+        journal.source_escalation.as_ref(),
+    )? {
         store.save()?;
     }
     if stop_after("cleanup") {
         return Ok(out);
     }
-    for (project, id) in [(&ctx.source.project, &source), (&ctx.target, &target)] {
+    audit_pair(&ctx.source.project, &source, &ctx.target, &target)?;
+    journal.remove()?;
+    Ok(out)
+}
+
+/// Copies every attachment of `attachments` from `source_id` in `source` to `target_id` in
+/// `target`, verified by digest; a present copy with the journal digest is skipped (move's
+/// M3, migrate's G3).
+pub(crate) fn copy_attachments(
+    source: &Project,
+    source_id: &TaskId,
+    target: &Project,
+    target_id: &TaskId,
+    attachments: &[journal::JournalAttachment],
+) -> Result<()> {
+    for attachment in attachments {
+        let want = FileState::Digest(attachment.sha256.clone());
+        if attachment_state(target, target_id, &attachment.name)? != want {
+            let path = attachment_path(target, target_id, &attachment.name)?;
+            match attachments::entry_state(&path)? {
+                EntryState::File(_) => {
+                    return Err(Error::MovePending(format!(
+                        "attachment {} in {target_id} differs from its journal digest",
+                        attachment.name
+                    )));
+                }
+                EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
+                EntryState::Absent => {}
+            }
+            let bytes =
+                attachment_bytes(source, source_id, &attachment.name)?.ok_or_else(|| {
+                    Error::MovePending(format!("attachment {} is missing", attachment.name))
+                })?;
+            if digest(&bytes) != attachment.sha256 {
+                return Err(Error::MovePending(format!(
+                    "attachment {} differs from its journal digest",
+                    attachment.name
+                )));
+            }
+            attachments::ensure_task_dir(target, target_id)?;
+            let path = attachment_path(target, target_id, &attachment.name)?;
+            attachments::write_new(&path, &bytes)?;
+            crate::written::record(&target.records, &path);
+        }
+        verify_attachment(target, target_id, attachment)?;
+    }
+    Ok(())
+}
+
+/// Removes the source bytes of every attachment but retained note archives, each verified
+/// first in both places, then the source attachment directory once it is empty (move's
+/// M6, migrate's G8). Absence is success.
+pub(crate) fn remove_source_attachments(
+    source: &Project,
+    source_id: &TaskId,
+    target: &Project,
+    target_id: &TaskId,
+    attachments: &[journal::JournalAttachment],
+) -> Result<()> {
+    for attachment in attachments {
+        verify_attachment(target, target_id, attachment)?;
+        if attachment.retain_source {
+            verify_attachment(source, source_id, attachment)?;
+            continue;
+        }
+        let path = attachment_path(source, source_id, &attachment.name)?;
+        match attachments::entry_state(&path)? {
+            EntryState::File(_) => {
+                verify_attachment(source, source_id, attachment)?;
+                std::fs::remove_file(&path)?;
+                crate::written::record(&source.records, &path);
+            }
+            EntryState::Absent => {}
+            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
+        }
+    }
+    if attachments::check_storage(source, source_id)? {
+        let dir = attachments::task_dir(source, source_id);
+        if std::fs::read_dir(&dir)?.next().is_none() {
+            std::fs::remove_dir(dir)?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes `id`'s park and escalation from `store` when they are the journal's (or absent);
+/// any other entry refuses. Returns whether the store changed; the caller saves it.
+pub(crate) fn remove_source_entries(
+    store: &mut ClaimStore,
+    id: &TaskId,
+    park: Option<&crate::claims::Park>,
+    escalation: Option<&crate::claims::Escalation>,
+) -> Result<bool> {
+    if (store.park(id).is_some() && store.park(id) != park)
+        || (store.escalation(id).is_some() && store.escalation(id) != escalation)
+    {
+        return Err(Error::MovePending(format!(
+            "{id}'s store entries differ from the journal"
+        )));
+    }
+    let park_removed = store.remove_park(id).is_some();
+    let escalation_removed = store.remove_escalation(id).is_some();
+    Ok(park_removed || escalation_removed)
+}
+
+/// Each record of a carried pair passes its attachment-ledger audit without an error.
+pub(crate) fn audit_pair(
+    source: &Project,
+    source_id: &TaskId,
+    target: &Project,
+    target_id: &TaskId,
+) -> Result<()> {
+    for (project, id) in [(source, source_id), (target, target_id)] {
         let record = project.read_task(id)?;
         let (_, problems) = attachments::audit_task(project, &record)?;
         if let Some(problem) = problems
@@ -337,11 +400,10 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
             return Err(Error::MovePending(format!("{id}: {}", problem.detail)));
         }
     }
-    journal.remove()?;
-    Ok(out)
+    Ok(())
 }
 
-pub(crate) fn verify_attachment(
+fn verify_attachment(
     project: &Project,
     id: &TaskId,
     attachment: &journal::JournalAttachment,

@@ -124,6 +124,10 @@ fn explain_pending(
         if reason.is_some() { "refuse" } else { "resume" },
     )?;
     if let Some(reason) = reason {
+        // Spec §4.7: new ids are shown only for a `resume` verdict.
+        for row in &mut out.carried {
+            row.id = None;
+        }
         out.refusals.push(RefusalOut {
             id: journal.source.clone(),
             rule: "pending_operation".into(),

@@ -5,14 +5,14 @@
 
 use super::MigrateCtx;
 use super::classify::{CarriedState, ClosedState, Phase, Snapshot};
-use super::journal::{CarriedEntry, MigrationJournal};
+use super::journal::MigrationJournal;
 use super::list::Decision;
-use crate::attachments::{self, EntryState};
+use crate::attachments;
 use crate::claims::ClaimStore;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::moving::classify::FileState;
-use crate::moving::{attachment_bytes, attachment_path, attachment_state, record_state};
+use crate::moving::{attachment_state, record_state};
 use crate::output::{CarriedOut, ClosedOut, DroppedOut, InboundOut, MigrateOut, WokenOut};
 use crate::rename::inventory::digest;
 use crate::repo::{Project, atomic_write};
@@ -276,39 +276,13 @@ pub fn run(ctx: &mut MigrateCtx, journal: MigrationJournal, from: Phase) -> Resu
 /// G3: every carried attachment copied to its new id, verified by digest.
 fn copy_attachments(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<()> {
     for entry in &journal.carried {
-        let (source, target) = (id(&entry.source), id(&entry.target));
-        for attachment in &entry.attachments {
-            let wanted = FileState::Digest(attachment.sha256.clone());
-            if attachment_state(&ctx.target, &target, &attachment.name)? != wanted {
-                let path = attachment_path(&ctx.target, &target, &attachment.name)?;
-                match attachments::entry_state(&path)? {
-                    EntryState::File(_) => {
-                        return Err(Error::MovePending(format!(
-                            "attachment {} in {target} differs from its journal digest",
-                            attachment.name
-                        )));
-                    }
-                    EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
-                    EntryState::Absent => {}
-                }
-                let bytes = attachment_bytes(&ctx.source.project, &source, &attachment.name)?
-                    .ok_or_else(|| {
-                        Error::MovePending(format!(
-                            "attachment {} of {source} is missing",
-                            attachment.name
-                        ))
-                    })?;
-                if digest(&bytes) != attachment.sha256 {
-                    return Err(Error::MovePending(format!(
-                        "attachment {} of {source} differs from its journal digest",
-                        attachment.name
-                    )));
-                }
-                attachments::ensure_task_dir(&ctx.target, &target)?;
-                attachments::write_new(&path, &bytes)?;
-            }
-            crate::moving::verify_attachment(&ctx.target, &target, attachment)?;
-        }
+        crate::moving::copy_attachments(
+            &ctx.source.project,
+            &id(&entry.source),
+            &ctx.target,
+            &id(&entry.target),
+            &entry.attachments,
+        )?;
     }
     Ok(())
 }
@@ -427,7 +401,13 @@ fn replace(project: &Project, listed: &str, source_digest: &str, text: &str) -> 
 fn cleanup(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<()> {
     let source = &ctx.source.project;
     for entry in &journal.carried {
-        remove_source_attachments(ctx, entry)?;
+        crate::moving::remove_source_attachments(
+            source,
+            &id(&entry.source),
+            &ctx.target,
+            &id(&entry.target),
+            &entry.attachments,
+        )?;
     }
     let mut store = ClaimStore::load(&source.prefix)?;
     let mut changed = false;
@@ -442,48 +422,15 @@ fn cleanup(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<()> {
                 .map(|e| (&e.id, &e.source_park, &e.source_escalation)),
         );
     for (listed, park, escalation) in entries {
-        let listed = id(listed);
-        if (store.park(&listed).is_some() && store.park(&listed) != park.as_ref())
-            || (store.escalation(&listed).is_some()
-                && store.escalation(&listed) != escalation.as_ref())
-        {
-            return Err(Error::MovePending(format!(
-                "{listed}'s store entries differ from the journal"
-            )));
-        }
-        changed |= store.remove_park(&listed).is_some();
-        changed |= store.remove_escalation(&listed).is_some();
+        changed |= crate::moving::remove_source_entries(
+            &mut store,
+            &id(listed),
+            park.as_ref(),
+            escalation.as_ref(),
+        )?;
     }
     if changed {
         store.save()?;
-    }
-    Ok(())
-}
-
-fn remove_source_attachments(ctx: &MigrateCtx, entry: &CarriedEntry) -> Result<()> {
-    let source = &ctx.source.project;
-    let (from, to) = (id(&entry.source), id(&entry.target));
-    for attachment in &entry.attachments {
-        crate::moving::verify_attachment(&ctx.target, &to, attachment)?;
-        if attachment.retain_source {
-            crate::moving::verify_attachment(source, &from, attachment)?;
-            continue;
-        }
-        let path = attachment_path(source, &from, &attachment.name)?;
-        match attachments::entry_state(&path)? {
-            EntryState::File(_) => {
-                crate::moving::verify_attachment(source, &from, attachment)?;
-                std::fs::remove_file(&path)?;
-            }
-            EntryState::Absent => {}
-            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
-        }
-    }
-    if attachments::check_storage(source, &from)? {
-        let dir = attachments::task_dir(source, &from);
-        if std::fs::read_dir(&dir)?.next().is_none() {
-            std::fs::remove_dir(dir)?;
-        }
     }
     Ok(())
 }
@@ -524,19 +471,12 @@ fn commit(journal: &MigrationJournal, warnings: &mut Vec<String>) -> Result<()> 
 /// Before G10: each carried pair's attachment ledger agrees with its files.
 fn audit(ctx: &MigrateCtx, journal: &MigrationJournal) -> Result<()> {
     for entry in &journal.carried {
-        for (project, listed) in [
-            (&ctx.source.project, &entry.source),
-            (&ctx.target, &entry.target),
-        ] {
-            let record = project.read_task(&id(listed))?;
-            let (_, problems) = attachments::audit_task(project, &record)?;
-            if let Some(problem) = problems
-                .iter()
-                .find(|problem| problem.severity == attachments::Severity::Error)
-            {
-                return Err(Error::MovePending(format!("{listed}: {}", problem.detail)));
-            }
-        }
+        crate::moving::audit_pair(
+            &ctx.source.project,
+            &id(&entry.source),
+            &ctx.target,
+            &id(&entry.target),
+        )?;
     }
     Ok(())
 }

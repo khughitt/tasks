@@ -2162,3 +2162,24 @@ fn a_pending_move_refuses_the_apply() {
     assert_eq!(kind, "move_pending", "{detail}");
     assert!(!migration_journal(&env, "forge").exists());
 }
+
+#[test]
+fn explain_of_a_refused_pending_run_assigns_no_ids() {
+    // Spec §4.7: new ids are filled only when the verdict is `resume`.
+    let mut env = TestEnv::new();
+    let p = phased(&mut env);
+    let l = p.list.to_str().unwrap();
+    apply_until(&env, &p.forge, &p.list, "journal");
+    let resume = env.json(&p.forge, &["migrate", l, "--explain"]);
+    assert_eq!(resume["recovery"], "resume");
+    assert!(carried_row(&resume, &p.a)["id"].is_string(), "{resume}");
+    let original = std::fs::read(&p.list).unwrap();
+    std::fs::write(&p.list, [original.as_slice(), b"\n# edited\n"].concat()).unwrap();
+    let refused = env.json(&p.forge, &["migrate", l, "--explain"]);
+    assert_eq!(refused["recovery"], "refuse", "{refused}");
+    assert!(carried_row(&refused, &p.a).get("id").is_none(), "{refused}");
+    assert_eq!(setting(&refused, "pending_operation").len(), 1, "{refused}");
+    assert!(setting(&refused, "pending_operation")[0].1.contains("list"));
+    std::fs::write(&p.list, &original).unwrap();
+    assert_eq!(env.json(&p.forge, &["migrate", l])["recovery"], "resumed");
+}

@@ -271,7 +271,7 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
             pair.tombstone.completed = None;
             pair.tombstone.closed = None;
         }
-        let (_, source_text) = ctx.source.project.read_task_with_raw(id)?;
+        let source_text = rendered_bytes(ctx, &eligible[id])?;
         works.push(Work {
             entry,
             carried: Carried {
@@ -744,6 +744,19 @@ fn parse_parent(
     })
 }
 
+/// The bytes of `task`'s record, which must still parse to the record that was rendered:
+/// the journal holds these bytes and `from_projection` checks them against the list.
+fn rendered_bytes(ctx: &MigrateCtx, task: &Task) -> Result<String> {
+    let (read, text) = ctx.source.project.read_task_with_raw(&task.id)?;
+    if read != *task {
+        return Err(Error::Validation(format!(
+            "{} changed while the list was being projected; nothing was written; rerun",
+            task.id
+        )));
+    }
+    Ok(text)
+}
+
 /// A dropped or closed entry, rendered (spec §4.4 "Dropped and closed tasks").
 pub struct Closed {
     pub id: TaskId,
@@ -1120,7 +1133,7 @@ fn project_closed_in(
             )),
             Err(error) => return Err(error),
         }
-        let (_, source_text) = ctx.source.project.read_task_with_raw(&id)?;
+        let source_text = rendered_bytes(ctx, task)?;
         let closed_text =
             crate::format::serialize_physical(&ctx.source.project.physical_for_save(&record)?);
         closed.push(Closed {

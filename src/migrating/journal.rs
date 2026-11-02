@@ -287,12 +287,25 @@ impl MigrationJournal {
                 source_escalation: item.source_escalation.clone(),
             })
             .collect();
+        // The bytes journaled (and replaced at G6/G7) must be the bytes the list reviewed.
+        let reviewed: BTreeMap<String, String> = list
+            .list
+            .tasks
+            .iter()
+            .filter_map(|entry| {
+                let id = TaskId::parse(entry.id.trim()).ok()?;
+                Some((
+                    ctx.registry.canonical_id(&id).to_string(),
+                    entry.digest.clone(),
+                ))
+            })
+            .collect();
         let map = |m: &BTreeMap<TaskId, Vec<TaskId>>| {
             m.iter()
                 .map(|(id, deps)| (id.to_string(), ids(deps)))
                 .collect()
         };
-        Ok(Self {
+        let journal = Self {
             source: ctx.source.project.prefix.clone(),
             successor: ctx.target.prefix.clone(),
             source_root: ctx.source.project.root.clone(),
@@ -313,7 +326,33 @@ impl MigrationJournal {
             woken: map(&projection.woken),
             carried,
             closed,
-        })
+        };
+        journal.check_reviewed(&reviewed)?;
+        Ok(journal)
+    }
+
+    /// Every listed record's journaled bytes digest to its list entry's `digest`
+    /// (`reviewed`: canonical id to `sha256:<hex>`), so a run never replaces bytes the
+    /// review did not see.
+    pub(crate) fn check_reviewed(&self, reviewed: &BTreeMap<String, String>) -> Result<()> {
+        let listed = self
+            .carried
+            .iter()
+            .map(|e| (&e.source, &e.source_digest))
+            .chain(self.closed.iter().map(|e| (&e.id, &e.source_digest)));
+        for (id, sha) in listed {
+            let want = format!("sha256:{sha}");
+            match reviewed.get(id) {
+                Some(digest) if *digest == want => {}
+                found => {
+                    return Err(Error::Validation(format!(
+                        "{id} changed after the list was reviewed (list digest {}, record {want}); nothing was written; re-read it and set `digest`, or redraft",
+                        found.map_or("absent", String::as_str)
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// For each records directory, every record and attachment path the run owns (absolute):
@@ -670,6 +709,29 @@ mod tests {
             ]
             .map(PathBuf::from)
         );
+    }
+
+    #[test]
+    fn journaled_bytes_must_be_the_reviewed_ones() {
+        let j = sample();
+        let reviewed = |carried: &str, closed: &str| -> BTreeMap<String, String> {
+            [
+                ("forge-00000a".to_string(), format!("sha256:{carried}")),
+                ("forge-00000c".to_string(), format!("sha256:{closed}")),
+            ]
+            .into_iter()
+            .collect()
+        };
+        let (a, c) = (&j.carried[0].source_digest, &j.closed[0].source_digest);
+        j.check_reviewed(&reviewed(a, c)).unwrap();
+        for digests in [reviewed(&digest(b"x"), c), reviewed(a, &digest(b"x"))] {
+            let error = j.check_reviewed(&digests).unwrap_err();
+            assert_eq!(error.kind(), "validation", "{error}");
+            assert!(error.to_string().contains("digest"), "{error}");
+        }
+        let mut missing = reviewed(a, c);
+        missing.remove("forge-00000c");
+        assert_eq!(j.check_reviewed(&missing).unwrap_err().kind(), "validation");
     }
 
     #[test]
