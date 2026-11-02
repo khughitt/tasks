@@ -2068,3 +2068,56 @@ fn a_worktree_with_unreadable_git_metadata_stays_io() {
         let _ = std::fs::set_permissions(l.wt.join(".git"), std::fs::Permissions::from_mode(0o644));
     }
 }
+
+fn commit_warnings(out: &serde_json::Value) -> Vec<String> {
+    out["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_string())
+        .filter(|w| w.contains("tasks commit"))
+        .collect()
+}
+
+#[test]
+fn init_records_warns_when_it_leaves_a_commit_config_uncommitted() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    let config = l.project.join("tasks/.config.toml");
+    let args = init_records("det", &l.records);
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+
+    // E1: a fresh config warns, naming the path and the remedy.
+    let out = env.json(&l.code, &args);
+    let warned = commit_warnings(&out);
+    assert_eq!(warned.len(), 1, "{out}");
+    assert!(warned[0].contains(&config.display().to_string()), "{out}");
+    assert!(warned[0].contains("tasks commit --project det"), "{out}");
+
+    // A2: second host pairing over committed, unchanged bytes does not warn.
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "records"]);
+    std::fs::remove_file(&registry).unwrap();
+    let out = env.json(&l.code, &args);
+    assert!(commit_warnings(&out).is_empty(), "{out}");
+
+    // E2: a committed config that init must modify warns.
+    std::fs::write(&config, "prefix = \"det\"\n").unwrap();
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "bare"]);
+    std::fs::remove_file(&registry).unwrap();
+    let out = env.json(&l.code, &args);
+    assert_eq!(commit_warnings(&out).len(), 1, "{out}");
+
+    // An unrelated staged file stays staged and nothing is committed.
+    std::fs::write(l.records.join("other"), "x\n").unwrap();
+    l.git(&l.records, &["add", "other"]);
+    let head = l.git(&l.records, &["rev-parse", "HEAD"]);
+    std::fs::remove_file(&registry).unwrap();
+    env.json(&l.code, &args);
+    assert_eq!(l.git(&l.records, &["rev-parse", "HEAD"]), head);
+    assert!(
+        l.git(&l.records, &["status", "--porcelain"])
+            .contains("A  other")
+    );
+}
