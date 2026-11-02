@@ -17,7 +17,8 @@ pub mod group;
 pub mod init;
 pub mod lanes;
 pub mod list;
-mod move_;
+mod migrate;
+pub(crate) mod move_;
 pub mod park;
 pub mod parked;
 pub mod projects;
@@ -2068,6 +2069,12 @@ fn dispatch(cli: Cli) -> Result<Output> {
             adopt,
         } => rename::run(dir, old, new, explain, adopt),
         Command::Move { id, to, explain } => move_::run(dir, &id, &to, explain),
+        Command::Migrate {
+            list,
+            to,
+            draft,
+            explain,
+        } => migrate::run(dir, list, to, draft, explain),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Retire { successor, reason } => {
             let project = open_ctx(dir)?.project;

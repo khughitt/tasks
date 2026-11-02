@@ -62,6 +62,13 @@ pub struct MoveOut {
 }
 
 #[derive(Serialize)]
+pub struct DraftOut {
+    pub path: String,
+    pub tasks: usize,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct RenameOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
@@ -1410,6 +1417,7 @@ pub enum Output {
     Init(InitOut),
     Rename(RenameOut),
     Move(MoveOut),
+    MigrateDraft(DraftOut),
     Id(IdOut),
     Commit(CommitOut),
     Add(AddOut),
@@ -1532,6 +1540,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
             text
         }
+        Output::MigrateDraft(o) => format!("{}: {} tasks to decide", o.path, o.tasks),
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Commit(o) => {
@@ -2696,6 +2705,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Retire(o) => o.warnings.clone(),
         Output::Rename(o) => o.warnings.clone(),
         Output::Move(o) => o.warnings.clone(),
+        Output::MigrateDraft(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Commit(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),

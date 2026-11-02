@@ -19,9 +19,39 @@ fn open(dir: Option<&Path>, spelling: &str, to: &str) -> Result<MoveCtx> {
 }
 
 fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
+    let (target, registry) = open_destination(
+        &source,
+        &source_id.prefix,
+        to,
+        |registered, target| {
+            format!(
+                "{source_id} is moved from {}'s registered checkout, which foreign readers and check read; run `tasks -C {} move {source_id} --to {target}`",
+                source_id.prefix,
+                crate::stale::quote(&registered.display().to_string())
+            )
+        },
+    )?;
+    Ok(MoveCtx {
+        source,
+        target,
+        registry,
+        source_id,
+    })
+}
+
+/// The checks `move` and `migrate` share before they touch a destination: it is
+/// registered, reachable and not the source, and the source was opened from its registered
+/// checkout. `from_elsewhere` words the refusal naming the registered checkout and the
+/// destination's live prefix.
+pub(crate) fn open_destination(
+    source: &Ctx,
+    source_prefix: &str,
+    to: &str,
+    from_elsewhere: impl FnOnce(&Path, &str) -> String,
+) -> Result<(crate::repo::Project, Registry)> {
     let registry = Registry::load()?;
     let target_prefix = registry.canonical_prefix(to);
-    if target_prefix == source_id.prefix {
+    if target_prefix == source_prefix {
         return Err(Error::Config(format!(
             "source and destination are both {target_prefix}; choose another project"
         )));
@@ -46,22 +76,16 @@ fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
     }
     // The registered copy is decided by records location: two records worktrees of a
     // detached project share one code root.
-    let registered = scope::config_dir(&registry, &source_id.prefix)
-        .ok_or_else(|| Error::Config(format!("no project registered as {:?}", source_id.prefix)))?;
+    let registered = scope::config_dir(&registry, source_prefix)
+        .ok_or_else(|| Error::Config(format!("no project registered as {source_prefix:?}")))?;
     if root_identity(&source.project.records)? != root_identity(&registered)? {
-        return Err(Error::Validation(format!(
-            "{source_id} is moved from {}'s registered checkout, which foreign readers and check read; run `tasks -C {} move {source_id} --to {target_prefix}`",
-            source_id.prefix,
-            crate::stale::quote(&registered.display().to_string())
+        return Err(Error::Validation(from_elsewhere(
+            &registered,
+            target_prefix,
         )));
     }
     let target = scope::open_registered(&registry, target_prefix, Origin::Prefix)?;
-    Ok(MoveCtx {
-        source,
-        target,
-        registry,
-        source_id,
-    })
+    Ok((target, registry))
 }
 
 fn identity(ctx: &MoveCtx) -> Result<(crate::model::TaskId, String, PathBuf, PathBuf)> {

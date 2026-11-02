@@ -286,6 +286,16 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["migrate"]
+summary = "Carry, drop or close every open task of a project into its successor from a reviewed decision list"
+args = [{ name = "list", value = "path", required = false }]
+options = [
+  { names = ["--to"], value = "string" },
+  { names = ["--draft"], value = "path" },
+  { names = ["--explain"], value = "none" },
+]
+
+[[cli.tasks.commands]]
 path = ["rename"]
 summary = "Rename a registered project's prefix and retain its retired names as aliases"
 args = [{ name = "old", value = "ref", required = true }, { name = "new", value = "ref", required = true }]
@@ -2721,7 +2731,7 @@ args = [{ name = "path", value = "path", required = false }]
 
 [[cli.familiar.commands]]
 path = ["projects"]
-summary = "Show every project's familiar, pinned or hashed"
+summary = "Show every project's familiar: family, theme and member"
 args = [{ name = "dir", value = "path", required = false, variadic = true }]
 options = [
   { names = ["--rows"], value = "int" },
@@ -2730,7 +2740,7 @@ options = [
 
 [[cli.familiar.commands]]
 path = ["theme"]
-summary = "Themes: list, add, validate, show, preview, sheet"
+summary = "Themes: list, add, remove, validate, show, preview, sheet"
 
 [[cli.familiar.commands]]
 path = ["theme", "list"]
@@ -2742,6 +2752,14 @@ path = ["theme", "add"]
 verb = "add"
 summary = "Install a theme from an HTTPS URL or local directory"
 args = [{ name = "source", value = "string", required = true }]
+options = [
+  { names = ["--replace"], value = "none" },
+]
+
+[[cli.familiar.commands]]
+path = ["theme", "remove"]
+summary = "Remove an installed theme and its receipt"
+args = [{ name = "id", value = "string", required = true }]
 
 [[cli.familiar.commands]]
 path = ["theme", "validate"]
@@ -2751,7 +2769,7 @@ args = [{ name = "dir", value = "path", required = true }]
 [[cli.familiar.commands]]
 path = ["theme", "show"]
 verb = "show"
-summary = "Show a theme's twelve members"
+summary = "Show a theme's members"
 args = [{ name = "id", value = "string", required = false }]
 options = [
   { names = ["--rows"], value = "int" },
@@ -2794,7 +2812,7 @@ summary = "Install the active theme into a harness"
 
 [[cli.familiar.commands]]
 path = ["install", "pets"]
-summary = "Install the active theme as Codex pets"
+summary = "Install every configured theme as Codex pets"
 options = [
   { names = ["--out"], value = "path" },
   { names = ["--sync-projects"], value = "none" },

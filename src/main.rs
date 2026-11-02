@@ -26,6 +26,7 @@ mod inventory;
 mod lanes;
 mod link;
 mod locations;
+mod migrating;
 mod model;
 mod moving;
 mod native;
