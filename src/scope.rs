@@ -39,8 +39,51 @@ pub fn config_dir(registry: &Registry, prefix: &str) -> Option<PathBuf> {
 
 /// Opens the project registered as `prefix`, applying the checks every cross-project
 /// path shares: registered, config present (in its `config_dir`), prefix agrees, and for
-/// a paired prefix a detached config whose checkout is the registered root.
+/// a paired prefix a detached config whose checkout is the registered root. A pairing
+/// mismatch is a `config` error naming the `init --records --force` that repairs it
+/// (relocation design §4.4).
 pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project> {
+    match open_registered_declared(registry, prefix, origin)? {
+        Registered::Paired(project) => Ok(project),
+        Registered::Mismatched(project) => Err(Error::Config(pairing_mismatch(
+            registry.canonical_prefix(prefix),
+            &project,
+        ))),
+    }
+}
+
+/// What `open_registered_declared` found for a registered prefix.
+pub(crate) enum Registered {
+    /// The config agrees with the registry.
+    Paired(Project),
+    /// A paired prefix whose detached config parses and declares another checkout than
+    /// the registry's root: the state every host is in between the sync of a relocated
+    /// checkout and its own re-point (relocation design §4.3). The project is the config's,
+    /// so its `root` and `checkout` are the declared checkout.
+    Mismatched(Project),
+}
+
+/// The repair a pairing mismatch names: the records root is the records directory's
+/// parent, and the command runs in the checkout the config declares.
+fn pairing_mismatch(prefix: &str, project: &Project) -> String {
+    let records_root = project.records.parent().unwrap_or(&project.records);
+    format!(
+        "registry pairs {prefix} with {}, whose config declares checkout {}; re-point it with \
+         `tasks init --prefix {prefix} --records {} --force` run in {}",
+        project.records.display(),
+        project.root.display(),
+        records_root.display(),
+        project.root.display()
+    )
+}
+
+/// `open_registered`, with a pairing mismatch returned as `Registered::Mismatched`
+/// instead of an error; every other failure is the same.
+pub(crate) fn open_registered_declared(
+    registry: &Registry,
+    prefix: &str,
+    origin: Origin,
+) -> Result<Registered> {
     let fail = |detail: String| match origin {
         Origin::Id(id) => Error::UnresolvableId(format!("{id}: {detail}")),
         Origin::Prefix => Error::Config(detail),
@@ -95,17 +138,20 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
             project.prefix
         )));
     }
-    if registry.records_dir(live).is_some()
-        && (project.kind != Kind::Detached || crate::rename::root_identity(root)? != project.root)
-    {
-        return Err(Error::Config(format!(
-            "registry pairs {live} with {}, whose config declares checkout {}; fix the \
-             registry or the config",
-            dir.display(),
-            project.root.display()
-        )));
+    if registry.records_dir(live).is_some() {
+        if project.kind != Kind::Detached {
+            return Err(Error::Config(format!(
+                "registry pairs {live} with {}, whose config declares checkout {}; fix the \
+                 registry or the config",
+                dir.display(),
+                project.root.display()
+            )));
+        }
+        if crate::rename::root_identity(root)? != project.root {
+            return Ok(Registered::Mismatched(project));
+        }
     }
-    Ok(project)
+    Ok(Registered::Paired(project))
 }
 
 /// The first two outcomes of spec §3.2: `prefix`'s `config_dir` exists and holds a

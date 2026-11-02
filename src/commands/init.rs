@@ -448,7 +448,7 @@ fn validate_records(
             root.display()
         )));
     }
-    let mut taken: Vec<_> = crate::locations::scan_checkouts(registry)
+    let mut taken: Vec<_> = crate::locations::scan_declared_checkouts(registry, prefix)
         .strict()?
         .into_iter()
         .filter(|linked| linked.prefix != prefix && linked.checkout == root)
