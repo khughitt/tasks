@@ -403,6 +403,8 @@ Each case runs in temporary repositories with scratch `XDG_CONFIG_HOME` and
 
 - Moving a goal, a subtree, or several tasks as one operation (a shell loop over
   single-task moves serves the five-task case in tasks-7ba557).
+  Subtree and batch moves are now `tasks migrate`'s; see the successor-migration design
+  spec (2026-11-02, in the tasks project's records directory under docs/specs).
 - Moving closed tasks.
 - Rewriting references in other projects, in prose, or in documents.
 - Moving or copying spec and plan documents.

@@ -3084,3 +3084,178 @@ fn a_reopen_that_would_reactivate_another_listed_edge_is_not_named() {
     );
     refuses(&env, &ops, &["edit", &x, "--status", "todo"]);
 }
+
+/// The review the user reads: `migrate <list> --explain --pretty --color never`.
+fn pretty_review(env: &TestEnv, dir: &std::path::Path, list: &std::path::Path) -> String {
+    let out = env
+        .cmd(dir)
+        .args([
+            "--pretty",
+            "--color",
+            "never",
+            "migrate",
+            list.to_str().unwrap(),
+            "--explain",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn pretty_review_shows_sections_in_order() {
+    // Spec §4.8: refusals, the successor tree, drops, closes, removed edges and dropped
+    // links, then body diffs.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let ops = env.init("ops");
+    let g = id_of(env.json(&forge, &["add", "Goal G", "-p", "1"]));
+    let a = id_of(env.json(&forge, &["add", "A", "--parent", &g]));
+    let k = id_of(env.json(&forge, &["add", "K"]));
+    let x = id_of(env.json(&forge, &["add", "X", "--depends", &k]));
+    let c = id_of(env.json(&forge, &["add", "C"]));
+    let u = id_of(env.json(&forge, &["add", "U needs rm_depends", "--depends", &k]));
+    let o = id_of(env.json(&ops, &["add", "O", "--depends", &k]));
+    let s = id_of(env.json(&forge2, &["add", "Goal S", "-p", "1"]));
+    let (text, _) = draft_home(&env, &forge);
+    let mut text = decide(&text, &g, "carry", "");
+    text = decide(&text, &a, "carry", "");
+    text = decide(
+        &text,
+        &k,
+        "drop",
+        &format!("reason = \"gone\"\nrelease = [\"{o}\"]\n"),
+    );
+    text = decide(
+        &text,
+        &x,
+        "carry",
+        &format!("parent = \"{s}\"\nrm_depends = [\"{k}\"]\nbody = \"\"\"\nNew words.\n\"\"\"\n"),
+    );
+    text = decide(&text, &c, "close", "reason = \"done in forge\"\n");
+    text = decide(&text, &u, "carry", "");
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let shown = pretty_review(&env, &forge, &list);
+    let at = |needle: &str| {
+        shown
+            .find(needle)
+            .unwrap_or_else(|| panic!("no {needle:?} in:\n{shown}"))
+    };
+    let refusals = at("refusals:");
+    let tree = at("carried:");
+    let dropped = at("dropped:");
+    let closed = at("closed:");
+    let removed = at("removed:");
+    let body = at("body:");
+    assert!(
+        refusals < tree && tree < dropped && dropped < closed && closed < removed && removed < body,
+        "{shown}"
+    );
+    // The tree nests A under G' and marks X's new parent; drops list released dependents.
+    assert!(shown.contains(&format!("\n  {g}\n    {a}\n")), "{shown}");
+    assert!(shown[tree..dropped].contains(&a), "{shown}");
+    assert!(
+        shown[tree..dropped].contains(&format!("under {s}")),
+        "{shown}"
+    );
+    assert!(shown[dropped..closed].contains("gone"), "{shown}");
+    assert!(
+        shown[dropped..closed].contains(&format!("released: {o}")),
+        "{shown}"
+    );
+    assert!(shown[closed..removed].contains("done in forge"), "{shown}");
+    assert!(
+        shown[removed..body].contains(&format!("removed dependency {k} (dropped)")),
+        "{shown}"
+    );
+    let diff: Vec<&str> = shown[body..]
+        .lines()
+        .filter(|l| l.starts_with('+'))
+        .collect();
+    assert_eq!(diff, ["+New words."], "{shown}");
+    // No refusals: the section is absent.
+    let text = std::fs::read_to_string(&list).unwrap();
+    let at_u = text.find(&format!("id = \"{u}\"")).unwrap();
+    let line = at_u + text[at_u..].find("decision = \"carry\"\n").unwrap();
+    let end = line + "decision = \"carry\"\n".len();
+    let clean = format!(
+        "{}decision = \"carry\"\nrm_depends = [\"{k}\"]\n{}",
+        &text[..line],
+        &text[end..]
+    );
+    std::fs::write(&list, clean).unwrap();
+    let shown = pretty_review(&env, &forge, &list);
+    assert!(!shown.contains("refusals:"), "{shown}");
+}
+
+#[test]
+fn forge_shaped_fixture_migrates_in_one_list() {
+    // Spec §5 case 16: a three-level tree, dependencies to a forge2 task, fleet-rollout
+    // dependents in ops, a mix of carry, drop and close.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let ops = env.init("ops");
+    let t = id_of(env.json(&forge2, &["add", "Successor task"]));
+    let s = id_of(env.json(&forge2, &["add", "Goal S", "-p", "1"]));
+    let g = id_of(env.json(&forge, &["add", "Goal G", "-p", "1"]));
+    let m = id_of(env.json(&forge, &["add", "Milestone M", "--parent", &g]));
+    let l1 = id_of(env.json(&forge, &["add", "Leaf 1", "--parent", &m]));
+    let l2 = id_of(env.json(&forge, &["add", "Leaf 2", "--parent", &m, "--depends", &t]));
+    let p = id_of(env.json(&forge, &["add", "Rollout prep"]));
+    let q = id_of(env.json(&forge, &["add", "Finished elsewhere", "--parent", &g]));
+    let h = id_of(env.json(&forge, &["add", "Harness", "--depends", &p]));
+    let fleet: Vec<String> = ["fleet a", "fleet b"]
+        .iter()
+        .map(|title| id_of(env.json(&ops, &["add", title, "--depends", &p])))
+        .collect();
+    let (text, _) = draft_home(&env, &forge);
+    let mut text = decide(&text, &g, "drop", "reason = \"replaced by forge2 goal\"\n");
+    text = decide(&text, &m, "carry", &format!("parent = \"{s}\"\n"));
+    text = decide(&text, &l1, "carry", "");
+    text = decide(&text, &l2, "carry", "");
+    text = decide(&text, &q, "close", "reason = \"done in forge\"\n");
+    text = decide(
+        &text,
+        &p,
+        "drop",
+        &format!(
+            "reason = \"rollout moved to forge2\"\nrelease = [\"{}\", \"{}\"]\n",
+            fleet[0], fleet[1]
+        ),
+    );
+    text = decide(
+        &text,
+        &h,
+        "carry",
+        &format!("parent = \"none\"\nrm_depends = [\"{p}\"]\n"),
+    );
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let out = explain(&env, &forge, &list);
+    assert!(out.get("refusals").is_none(), "{out}");
+    let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "fresh", "{out}");
+    let l2_new = new_id(&out, &l2);
+    let m_new = new_id(&out, &m);
+    assert_eq!(shown(&env, &forge2, &l2_new)["parent"], m_new.as_str());
+    assert_eq!(
+        shown(&env, &forge2, &l2_new)["depends"],
+        serde_json::json!([t])
+    );
+    assert_eq!(shown(&env, &forge2, &m_new)["parent"], s.as_str());
+    for id in &fleet {
+        // A dropped dependency no longer blocks; the edge itself is left alone.
+        assert_eq!(shown(&env, &ops, id)["depends"], serde_json::json!([p]));
+    }
+    env.json(
+        &forge,
+        &["retire", "--successor", "forge2", "--reason", "migrated"],
+    );
+    for dir in [&forge, &forge2, &ops] {
+        assert_clean(&env, dir);
+    }
+}

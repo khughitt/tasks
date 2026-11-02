@@ -1565,6 +1565,148 @@ fn halt_line(halts: &[HaltRow]) -> String {
     format!("halt: {named}; allowed: halt work, linked work, or equally urgent priority{missing}\n")
 }
 
+/// The migration review the user reads (spec §4.8): refusals, the successor tree for the
+/// carried tasks, drops with the dependents they release, closes, removed edges and dropped
+/// links, then body diffs.
+fn migrate_review(o: &MigrateOut) -> String {
+    let mut text = format!("{} → {} ({})", o.source, o.successor, o.recovery);
+    if !o.refusals.is_empty() {
+        text.push_str("\n\nrefusals:");
+        for r in &o.refusals {
+            text.push_str(&format!("\n  {} [{}]: {}", r.id, r.rule, r.settle));
+        }
+    }
+    if !o.carried.is_empty() {
+        text.push_str("\n\ncarried:");
+        let label = |row: &CarriedOut| {
+            let mut label = row
+                .id
+                .as_ref()
+                .map_or_else(|| row.from.clone(), |id| format!("{} -> {id}", row.from));
+            if row.park {
+                label.push_str(" [parked]");
+            }
+            if !row.attachments.is_empty() {
+                label.push_str(&format!(" [{} attachments]", row.attachments.len()));
+            }
+            if row.rewrites.iter().any(|r| {
+                r.starts_with("parent set to")
+                    || r.contains("overridden; set to")
+                    || r.contains("not carried; set to")
+            }) {
+                label.push_str(" (new parent)");
+            }
+            label
+        };
+        let carried_parent = |row: &CarriedOut| {
+            row.parent
+                .as_deref()
+                .and_then(|p| p.strip_prefix("new:"))
+                .map(str::to_string)
+        };
+        // Roots first: the successor's top level, then each successor parent.
+        let mut places: Vec<Option<&str>> = Vec::new();
+        for row in &o.carried {
+            if carried_parent(row).is_none() && !places.contains(&row.parent.as_deref()) {
+                places.push(row.parent.as_deref());
+            }
+        }
+        places.sort();
+        fn walk(
+            text: &mut String,
+            o: &MigrateOut,
+            from: &str,
+            depth: usize,
+            label: &dyn Fn(&CarriedOut) -> String,
+            carried_parent: &dyn Fn(&CarriedOut) -> Option<String>,
+        ) {
+            for row in o
+                .carried
+                .iter()
+                .filter(|row| carried_parent(row).as_deref() == Some(from))
+            {
+                text.push_str(&format!("\n{}{}", "  ".repeat(depth), label(row)));
+                walk(text, o, &row.from, depth + 1, label, carried_parent);
+            }
+        }
+        for place in places {
+            let depth = match place {
+                None => 1,
+                Some(parent) => {
+                    text.push_str(&format!("\n  under {parent}:"));
+                    2
+                }
+            };
+            for row in o
+                .carried
+                .iter()
+                .filter(|row| carried_parent(row).is_none() && row.parent.as_deref() == place)
+            {
+                text.push_str(&format!("\n{}{}", "  ".repeat(depth), label(row)));
+                walk(&mut text, o, &row.from, depth + 1, &label, &carried_parent);
+            }
+        }
+    }
+    if !o.dropped.is_empty() {
+        text.push_str("\n\ndropped:");
+        let mut reasons: std::collections::BTreeMap<&str, Vec<&DroppedOut>> = Default::default();
+        for d in &o.dropped {
+            reasons.entry(d.reason.as_str()).or_default().push(d);
+        }
+        for (reason, rows) in reasons {
+            text.push_str(&format!("\n  {reason}:"));
+            for d in rows {
+                text.push_str(&format!("\n    {}", d.id));
+                if !d.released.is_empty() {
+                    text.push_str(&format!(" (released: {})", d.released.join(", ")));
+                }
+            }
+        }
+    }
+    if !o.closed.is_empty() {
+        text.push_str("\n\nclosed:");
+        for c in &o.closed {
+            text.push_str(&format!("\n  {}: {}", c.id, c.reason));
+            if !c.released.is_empty() {
+                text.push_str(&format!(" (released: {})", c.released.join(", ")));
+            }
+            if !c.open_depends.is_empty() {
+                text.push_str(&format!(
+                    " (open dependencies: {})",
+                    c.open_depends.join(", ")
+                ));
+            }
+        }
+    }
+    let removed: Vec<(&str, &str)> = o
+        .carried
+        .iter()
+        .flat_map(|row| {
+            row.rewrites
+                .iter()
+                .filter(|r| r.starts_with("removed ") || r.contains(" dropped (not in "))
+                .map(move |r| (row.from.as_str(), r.as_str()))
+        })
+        .collect();
+    if !removed.is_empty() {
+        text.push_str("\n\nremoved:");
+        for (from, what) in removed {
+            text.push_str(&format!("\n  {from}: {what}"));
+        }
+    }
+    if !o.body_changes.is_empty() {
+        text.push_str("\n\nbody:");
+        for change in &o.body_changes {
+            text.push_str(&format!(
+                "\n{}:\n{}",
+                change.id,
+                change.diff.trim_end_matches('\n')
+            ));
+        }
+    }
+    text
+}
+
 fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> String {
     match out {
         Output::AttachmentEligibility(out) => out
@@ -1617,16 +1759,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             text
         }
         Output::MigrateDraft(o) => format!("{}: {} tasks to decide", o.path, o.tasks),
-        Output::Migrate(o) => {
-            let mut text = format!("{} → {} ({})", o.source, o.successor, o.recovery);
-            if !o.refusals.is_empty() {
-                text.push_str("\nrefusals:");
-                for r in &o.refusals {
-                    text.push_str(&format!("\n  {} [{}]: {}", r.id, r.rule, r.settle));
-                }
-            }
-            text
-        }
+        Output::Migrate(o) => migrate_review(o),
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Commit(o) => {
