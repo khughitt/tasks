@@ -2752,6 +2752,13 @@ struct Frozen {
 }
 
 fn frozen(env: &mut TestEnv) -> Frozen {
+    let f = frozen_list(env);
+    apply_until(env, &f.forge, &f.list, "journal");
+    f
+}
+
+/// `frozen`'s projects and list, before any run.
+fn frozen_list(env: &mut TestEnv) -> Frozen {
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
     let ops = env.init("ops");
@@ -2772,7 +2779,6 @@ fn frozen(env: &mut TestEnv) -> Frozen {
     let text = decide(&text, &b, "carry", &format!("parent = \"{s}\"\n"));
     let list = env.home.path().join("list.toml");
     std::fs::write(&list, text).unwrap();
-    apply_until(env, &forge, &list, "journal");
     Frozen {
         forge,
         forge2,
@@ -2919,6 +2925,59 @@ fn hand_edits_are_repaired_one_command_at_a_time() {
     );
     let b2 = new_id(&out, &f.b);
     assert_eq!(shown(&env, &f.forge2, &b2)["parent"], f.s.as_str());
+}
+
+#[test]
+fn a_write_between_preflight_and_the_journal_refuses_the_fresh_run() {
+    // Spec §4.5: a third project's write takes no lock the run holds, so an edge added
+    // after preflight's wide read, or another host's synced write to a parent target,
+    // is caught before any phase after the journal writes; the journal stays, so the
+    // named commands are admitted as restoring writes and the rerun resumes.
+    let mut env = TestEnv::new();
+    let f = frozen_list(&mut env);
+    let l = f.list.to_str().unwrap();
+    let marker = env.home.path().join("paused");
+    let child = env
+        .raw(&f.forge)
+        .env("TASKS_MIGRATE_PAUSE_BEFORE_JOURNAL", &marker)
+        .args(["migrate", l])
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !marker.exists() {
+        assert!(std::time::Instant::now() < deadline, "the run never paused");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!migration_journal(&env, "forge").exists());
+    env.json(&f.ops, &["dep", &f.y, "--on", &f.d]);
+    hand_edit(&f.forge2, &f.s, "\ndepends: ", "\nevery: 7d\ndepends: ");
+    std::fs::remove_file(&marker).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "move_pending", "{v}");
+    let detail = v["error"]["detail"].as_str().unwrap();
+    let rm_y = format!("`tasks dep {} --rm {}`", f.y, f.d);
+    let no_every = format!("`tasks edit {} --no-every`", f.s);
+    assert!(
+        detail.contains(&rm_y) && detail.contains(&no_every),
+        "{detail}"
+    );
+    assert!(migration_journal(&env, "forge").exists());
+    assert_eq!(shown(&env, &f.forge, &f.d)["status"], "todo");
+    assert_eq!(shown(&env, &f.forge, &f.b)["status"], "todo");
+    env.json(&f.ops, &["dep", &f.y, "--rm", &f.d]);
+    env.json(&f.forge2, &["edit", &f.s, "--no-every"]);
+    let out = env.json(&f.forge, &["migrate", l]);
+    assert_eq!(out["recovery"], "resumed", "{out}");
+    assert_eq!(
+        row(&out, "dropped", &f.d)["released"],
+        serde_json::json!([f.x])
+    );
+    assert_eq!(depends_of(&env, &f.ops, &f.y), Vec::<String>::new());
+    let b2 = new_id(&out, &f.b);
+    assert_eq!(shown(&env, &f.forge2, &b2)["parent"], f.s.as_str());
+    assert!(!migration_journal(&env, "forge").exists());
 }
 
 #[test]

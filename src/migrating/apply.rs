@@ -474,6 +474,29 @@ fn stop_after(phase: Phase) -> bool {
     stop
 }
 
+/// `TASKS_MIGRATE_PAUSE_BEFORE_JOURNAL=<path>` (tests): a fresh run creates `path` after
+/// preflight and waits, up to a minute, for it to be removed before writing the journal,
+/// so a test can write to a project the run does not lock in the window between
+/// preflight's reads and G2.
+fn pause_before_journal() -> Result<()> {
+    let Some(marker) = std::env::var_os("TASKS_MIGRATE_PAUSE_BEFORE_JOURNAL") else {
+        return Ok(());
+    };
+    let marker = PathBuf::from(marker);
+    std::fs::write(&marker, b"")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while marker.exists() {
+        if std::time::Instant::now() > deadline {
+            return Err(Error::Io(format!(
+                "{} was not removed within a minute",
+                marker.display()
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Ok(())
+}
+
 /// Executes G2-G10 from `from` (`Phase::Journal` for a fresh run).
 pub fn run(ctx: &mut MigrateCtx, journal: MigrationJournal, from: Phase) -> Result<MigrateOut> {
     let recovery = if from == Phase::Journal {
@@ -482,7 +505,7 @@ pub fn run(ctx: &mut MigrateCtx, journal: MigrationJournal, from: Phase) -> Resu
         // Spec §4.5: before any resumed phase, the inputs outside the journal.
         let refusals = super::freeze::revalidate(ctx, &journal, from)?;
         if !refusals.is_empty() {
-            return Err(super::freeze::refusal_error(&journal, &refusals));
+            return Err(super::freeze::refusal_error(&journal, &refusals, false));
         }
         "resumed"
     };
@@ -499,7 +522,18 @@ pub fn run(ctx: &mut MigrateCtx, journal: MigrationJournal, from: Phase) -> Resu
     ];
     for phase in phases.into_iter().filter(|phase| *phase >= from) {
         match phase {
-            Phase::Journal => journal.save()?,
+            Phase::Journal => {
+                pause_before_journal()?;
+                journal.save()?;
+                // A write in a project this run does not lock (or another host's synced
+                // write) may have landed between preflight's reads and the journal, which
+                // starts the freeze: judge the same inputs a resume judges. The journal
+                // stays, so the freeze admits the restoring commands the refusal names.
+                let refusals = super::freeze::revalidate(ctx, &journal, Phase::Journal)?;
+                if !refusals.is_empty() {
+                    return Err(super::freeze::refusal_error(&journal, &refusals, true));
+                }
+            }
             Phase::Attachments => copy_attachments(ctx, &journal)?,
             Phase::Destination => create_destinations(ctx, &journal)?,
             Phase::Store => write_destination_store(ctx, &journal)?,

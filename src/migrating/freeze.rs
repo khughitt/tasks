@@ -602,10 +602,16 @@ fn reopen_unreleased(
         .collect())
 }
 
-/// The resume's refusal over revalidation differences: `move_pending`, naming each.
-pub fn refusal_error(journal: &MigrationJournal, refusals: &[RefusalOut]) -> Error {
+/// The refusal over revalidation differences: `move_pending`, naming each. `fresh` is a
+/// run that has just written its journal and nothing else; otherwise a resume.
+pub fn refusal_error(journal: &MigrationJournal, refusals: &[RefusalOut], fresh: bool) -> Error {
+    let state = if fresh {
+        "cannot start: its preflight inputs changed while its journal was written; only the journal was written"
+    } else {
+        "cannot resume: its preflight inputs changed since the journal was written; nothing was written"
+    };
     Error::MovePending(format!(
-        "the pending migration of {} to {} cannot resume: its preflight inputs changed since the journal was written; nothing was written: {}; run each command, then `tasks migrate {}` again",
+        "the pending migration of {} to {} {state}: {}; run each command, then `tasks migrate {}` again",
         journal.source,
         journal.successor,
         refusals
