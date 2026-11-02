@@ -378,6 +378,33 @@ pub fn message(verb: &str, ids: &[String], title: Option<&str>) -> String {
     format!("{subject} {title}")
 }
 
+/// A migration's record commit message: a subject naming the two projects and how many
+/// tasks the list settles, however many that is, then the ids this working tree's commit
+/// touches, wrapped to the subject limit, in the body.
+pub fn migration_message(source: &str, successor: &str, tasks: usize, ids: &[String]) -> String {
+    let noun = if tasks == 1 { "task" } else { "tasks" };
+    let mut message = format!("chore(tasks): migrate {source} to {successor} ({tasks} {noun})");
+    let mut line = String::new();
+    let mut body = Vec::new();
+    for id in ids {
+        if !line.is_empty() && line.chars().count() + 1 + id.chars().count() > SUBJECT_MAX {
+            body.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(id);
+    }
+    if !line.is_empty() {
+        body.push(line);
+    }
+    if !body.is_empty() {
+        message.push_str("\n\n");
+        message.push_str(&body.join("\n"));
+    }
+    message
+}
+
 /// The task ids a root's written paths belong to: `tasks/<id>.md` and
 /// `tasks/files/<id>/…`, sorted and deduplicated. Paths are relative to the project root.
 fn ids_of(paths: &BTreeSet<PathBuf>) -> Vec<String> {
@@ -415,6 +442,43 @@ struct Tree {
 /// commit (spec §3.2, §3.7). Called by a write command's finishing point while its locks
 /// are still held. Returns the absolute paths it committed.
 pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
+    commit_drained(warnings, |verb, ids, projects| {
+        let title = match verb {
+            "add" | "feedback" => ids
+                .first()
+                .and_then(|id| crate::model::TaskId::parse(id).ok())
+                .and_then(|id| {
+                    let project = projects
+                        .iter()
+                        .find(|project| project.prefix == id.prefix)?;
+                    project.read_task(&id).ok()
+                })
+                .map(|task| task.title),
+            _ => None,
+        };
+        message(verb, ids, title.as_deref())
+    })
+}
+
+/// `commit_written` for `migrate`, whose commit names the two projects and the count of
+/// listed tasks rather than every id in its subject (`migration_message`).
+pub fn commit_migration(
+    warnings: &mut Vec<String>,
+    source: &str,
+    successor: &str,
+    tasks: usize,
+) -> BTreeSet<PathBuf> {
+    commit_drained(warnings, |_, ids, _| {
+        migration_message(source, successor, tasks, ids)
+    })
+}
+
+/// Drains the journal and commits each working tree's share with the message `compose`
+/// writes from the verb, the tree's ids and its projects.
+fn commit_drained(
+    warnings: &mut Vec<String>,
+    compose: impl Fn(&str, &[String], &[crate::repo::Project]) -> String,
+) -> BTreeSet<PathBuf> {
     let written = crate::written::take();
     let mut committed = BTreeSet::new();
     let Some(verb) = written.verb else {
@@ -452,20 +516,6 @@ pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
     }
     for (top, tree) in trees {
         let ids: Vec<String> = tree.ids.into_iter().collect();
-        let title = match verb {
-            "add" | "feedback" => ids
-                .first()
-                .and_then(|id| crate::model::TaskId::parse(id).ok())
-                .and_then(|id| {
-                    let project = tree
-                        .projects
-                        .iter()
-                        .find(|project| project.prefix == id.prefix)?;
-                    project.read_task(&id).ok()
-                })
-                .map(|task| task.title),
-            _ => None,
-        };
         let relative: Vec<PathBuf> = tree
             .absolute
             .iter()
@@ -475,7 +525,7 @@ pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
                     .to_path_buf()
             })
             .collect();
-        let refused = commit_paths(&top, &relative, &message(verb, &ids, title.as_deref()));
+        let refused = commit_paths(&top, &relative, &compose(verb, &ids, &tree.projects));
         if refused.is_empty() {
             committed.extend(tree.absolute);
         } else {
@@ -501,6 +551,25 @@ mod tests {
             message("add", &["tst-000001".into()], Some("Short")),
             "chore(tasks): add tst-000001 Short"
         );
+    }
+
+    #[test]
+    fn a_migration_message_keeps_its_subject_short_and_wraps_ids_in_the_body() {
+        assert_eq!(
+            migration_message("forge", "forge2", 1, &["forge-000001".into()]),
+            "chore(tasks): migrate forge to forge2 (1 task)\n\nforge-000001"
+        );
+        let ids: Vec<String> = (0..64).map(|n| format!("forge-{n:06x}")).collect();
+        let message = migration_message("forge", "forge2", 64, &ids);
+        let mut lines = message.lines();
+        assert_eq!(
+            lines.next(),
+            Some("chore(tasks): migrate forge to forge2 (64 tasks)")
+        );
+        assert_eq!(lines.next(), Some(""));
+        let body: Vec<&str> = lines.collect();
+        assert!(body.iter().all(|line| line.chars().count() <= SUBJECT_MAX));
+        assert_eq!(body.join(" ").split(' ').collect::<Vec<_>>(), ids);
     }
 
     #[test]

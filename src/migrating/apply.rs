@@ -747,7 +747,12 @@ fn commit(journal: &MigrationJournal, warnings: &mut Vec<String>) -> Result<()> 
         }
     }
     let mut commit_warnings = Vec::new();
-    crate::record_commit::commit_written(&mut commit_warnings);
+    crate::record_commit::commit_migration(
+        &mut commit_warnings,
+        &journal.source,
+        &journal.successor,
+        journal.carried.len() + journal.closed.len(),
+    );
     let left = super::commit::uncommitted(&owned)?;
     if !left.is_empty() {
         let mut detail = format!(

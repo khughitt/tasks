@@ -2014,6 +2014,20 @@ fn porcelain(dir: &std::path::Path) -> String {
     git_out(dir, &["status", "--porcelain"])
 }
 
+/// HEAD's subject, and the ids its body names.
+fn head_message(dir: &std::path::Path) -> (String, Vec<String>) {
+    let message = git_out(dir, &["log", "-1", "--format=%B"]);
+    let (subject, body) = message
+        .split_once("\n\n")
+        .unwrap_or((message.trim_end(), ""));
+    (
+        subject.to_string(),
+        body.split_whitespace().map(String::from).collect(),
+    )
+}
+
+const MIGRATE_SUBJECT: &str = "chore(tasks): migrate forge to forge2 (3 tasks)";
+
 #[test]
 fn commit_phase_resumes_from_the_journal_paths() {
     let mut env = TestEnv::new();
@@ -2052,6 +2066,14 @@ fn commit_phase_resumes_from_the_journal_paths() {
     assert_eq!(porcelain(&forge), "");
     assert_eq!(porcelain(&forge2), "");
     assert!(!migration_journal(&env, "forge").exists());
+    // One subject per working tree, the ids of that tree in the body.
+    let mut ids = vec![p.a.clone(), p.c.clone(), p.d.clone()];
+    ids.sort();
+    assert_eq!(head_message(&forge), (MIGRATE_SUBJECT.to_string(), ids));
+    assert_eq!(
+        head_message(&forge2),
+        (MIGRATE_SUBJECT.to_string(), vec![a2])
+    );
 }
 
 #[test]
@@ -2075,6 +2097,11 @@ fn a_failing_pre_commit_hook_keeps_the_journal() {
     let out = env.json(&forge, &["migrate", p.list.to_str().unwrap()]);
     assert_eq!(out["recovery"], "resumed", "{out}");
     assert_eq!(commits(&forge), before + 1);
+    let (subject, ids) = head_message(&forge);
+    assert_eq!(subject, MIGRATE_SUBJECT);
+    for id in [&p.a, &p.c, &p.d] {
+        assert!(ids.contains(id), "{id} not in {ids:?}");
+    }
     assert_eq!(porcelain(&forge), "");
     assert_eq!(porcelain(&forge2), "");
     assert!(!migration_journal(&env, "forge").exists());
@@ -2137,6 +2164,10 @@ fn shared_records_repository_gets_one_commit() {
     ] {
         assert!(files.contains(&path), "{path} not in {files:?}");
     }
+    // The subject stays short however many tasks move; the ids are in the body.
+    let mut ids = vec![p.a.clone(), p.c.clone(), p.d.clone(), a2.clone()];
+    ids.sort();
+    assert_eq!(head_message(&records), (MIGRATE_SUBJECT.to_string(), ids));
     assert_eq!(porcelain(&records), "");
     assert!(!migration_journal(&env, "forge").exists());
 }
