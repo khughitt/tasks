@@ -1012,12 +1012,15 @@ to the old id. See [recovery limits and manual undo](docs/specs/2026-10-08-task-
 task of the project in tree order, each with an empty `decision`. Fill every entry:
 `carry`, or `drop` / `close` with a `reason`. Carry keys settle what a refusal asks:
 `parent` (a carried id, a successor task, or `none`), `rm_depends`, `links = "drop"`,
-and a replacement `body`; drop and close take `release` for the other-project
-dependents they free. `tasks migrate <file> --explain` reports every refusal at once
-without locks or writes; `--pretty` prints the review in this order: refusals, the
-successor tree of carried tasks (new parents marked), drops grouped by reason with
-released dependents, closes with reasons, removed edges and dropped links, then body
-diffs. Show that review to the user, commit the list in the source records
+and a replacement `body`. A drop or close lists in `release` every open dependent it
+frees, in every reachable project, the successor included; tasks the list also drops or
+closes are not dependents. A close also lists carried dependents, by their source ids,
+since their edge now resolves to a done record; a drop does not, and each carried
+dependent instead names the dropped task in its `rm_depends`. `tasks migrate <file>
+--explain` reports every refusal at once without locks or writes; `--pretty` prints the
+review in this order: refusals, the successor tree of carried tasks (new parents marked),
+drops grouped by reason with released dependents, closes with reasons, woken shelves,
+outside dependents of carried tasks, removed edges and dropped links, then body diffs. Show that review to the user, commit the list in the source records
 (recommended `docs/notes/<date>-<prefix>-succession.toml`), run `tasks migrate <file>`,
 then `tasks retire --successor <successor>`.
 
