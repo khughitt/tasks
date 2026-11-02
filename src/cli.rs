@@ -15,7 +15,7 @@ pub fn takes_ref(arg: &clap::Arg) -> bool {
 #[derive(Parser, Debug)]
 #[command(
     name = "tasks",
-    version,
+    version = env!("TASKS_VERSION"),
     about = "File-based task tracker for projects and agents"
 )]
 pub struct Cli {
