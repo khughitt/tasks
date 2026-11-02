@@ -1,13 +1,17 @@
-//! Projecting carried tasks (spec §4.3 "Carried tasks", §4.4 "Carried task"): each carried
-//! entry is rendered as `move` renders it, then rewritten (parent, dependencies within the
-//! carried set, `wake_on`, dropped links, a replacement body), and only then validated in
-//! the destination, over the whole projected set at once.
+//! Projecting a decision list (spec §4.3, §4.4). Carried entries are rendered as `move`
+//! renders them, then rewritten (parent, dependencies within the carried set, `wake_on`,
+//! dropped links, a replacement body), and only then validated in the destination, over the
+//! whole projected set at once. Dropped and closed entries are rendered through the
+//! tracker's own status effects and must release exactly their open dependents. `preflight`
+//! joins both with the list checks.
 
 use super::MigrateCtx;
-use super::list::{Decision, Entry, LoadedList};
+use super::list::{Decision, DecisionList, Entry, LoadedList};
+use super::release::{self, Wide};
+use crate::claims::{ClaimStore, Escalation, Park};
 use crate::commands;
 use crate::error::{Error, Result};
-use crate::model::{Relation, Task, TaskId};
+use crate::model::{Relation, Status, Task, TaskId};
 use crate::moving::preflight::{
     RenderedPair, build_pair, collision, finish_pair, validate_destination_docs,
     validate_record_among,
@@ -197,7 +201,8 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         .map(|t| (t.id.clone(), t))
         .collect();
 
-    // The decisions, keyed by canonical id. check_list has refused anything else.
+    // The decisions, keyed by canonical id. `preflight` passes only the entries whose id and
+    // decision check_list accepted; anything else here is a caller error.
     let mut decided: BTreeMap<TaskId, Decision> = BTreeMap::new();
     let mut carry: Vec<(TaskId, &Entry)> = Vec::new();
     for entry in &list.list.tasks {
@@ -221,6 +226,14 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         }
     }
 
+    // Eligible tasks with no usable entry: check_list has refused each, so a carried task
+    // under one is not refused a second time for its parent.
+    let unsettled: BTreeSet<TaskId> = eligible
+        .keys()
+        .filter(|id| !decided.contains_key(*id))
+        .cloned()
+        .collect();
+
     // Every new id first: fresh in the destination and among themselves.
     let mut map: BTreeMap<TaskId, TaskId> = BTreeMap::new();
     let mut taken = BTreeSet::new();
@@ -238,12 +251,6 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         })?;
         map.insert(id.clone(), fresh);
     }
-    // New ids are not final until the run: refusals name them by their v1 id.
-    let shown = |id: &TaskId| match map.iter().find(|(_, new)| *new == id) {
-        Some((from, _)) => format!("new:{from}"),
-        None => id.to_string(),
-    };
-
     let owner = commands::owner_name(&ctx.source.project)?;
     let mut refusals = Vec::new();
     let mut works = Vec::new();
@@ -280,18 +287,20 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         let settle_parent = format!(
             "set `parent` to \"none\", a carried {source_prefix} id, or an open {succ} task id"
         );
-        let new_parent: std::result::Result<Option<TaskId>, (&str, String)> =
+        // `Err(None)`: the parent's own entry is refused, so this one is not refused again.
+        let new_parent: std::result::Result<Option<TaskId>, Option<(&str, String)>> =
             match (&entry.parent, &v1_parent) {
                 (None, None) => Ok(None),
                 (None, Some(p)) => match map.get(p) {
                     Some(new) => Ok(Some(new.clone())),
-                    None => Err((
+                    None if unsettled.contains(p) => Err(None),
+                    None => Err(Some((
                         "parent_required",
                         format!("its parent {p} is not carried; {settle_parent}"),
-                    )),
+                    ))),
                 },
                 (Some(value), _) => parse_parent(ctx, &map, value)?
-                    .map_err(|why| ("parent_invalid", format!("{why}; {settle_parent}"))),
+                    .map_err(|why| Some(("parent_invalid", format!("{why}; {settle_parent}")))),
             };
         match new_parent {
             Ok(parent) => {
@@ -315,8 +324,10 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
                     rewrite(&mut ctx.source, &owner, &suffix, &mut work.carried, text)?;
                 }
             }
-            Err((rule, settle)) => {
-                refusals.push(refuse(&id, rule, settle));
+            Err(refused) => {
+                if let Some((rule, settle)) = refused {
+                    refusals.push(refuse(&id, rule, settle));
+                }
                 work.carried.pair.target.parent = None;
                 work.parent_cut = true;
             }
@@ -658,7 +669,11 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
                         "dependency_cycle",
                         format!(
                             "once carried, the dependencies form a cycle ({}); remove one edge with `tasks dep <id> --rm <dependency>`",
-                            cycle.iter().map(shown).collect::<Vec<_>>().join(" -> ")
+                            cycle
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join(" -> ")
                         ),
                     ));
                 }
@@ -717,4 +732,648 @@ fn parse_parent(
         )),
         Err(error) => return Err(error),
     })
+}
+
+/// A dropped or closed entry, rendered (spec §4.4 "Dropped and closed tasks").
+// The texts, parks and run inputs are read by the apply of the plan's Task 5.
+#[allow(dead_code)]
+pub struct Closed {
+    pub id: TaskId,
+    pub decision: Decision,
+    /// The record's bytes as read.
+    pub source_text: String,
+    /// The record as the run writes it.
+    pub closed_text: String,
+    /// The open dependents this entry lets proceed (carried ones by their v1 ids).
+    pub released: Vec<TaskId>,
+    /// For a close: the dependencies still open once the run is complete.
+    pub open_depends: Vec<TaskId>,
+    pub source_park: Option<Park>,
+    pub source_escalation: Option<Escalation>,
+}
+
+/// Everything a valid list's run writes and reports, rendered at one time.
+// The texts, parks and run inputs are read by the apply of the plan's Task 5.
+#[allow(dead_code)]
+pub struct Projection {
+    /// Lowercase hex sha256 of the list, without `sha256:`.
+    pub list_sha: String,
+    pub now: String,
+    pub carried: Vec<Carried>,
+    pub closed: Vec<Closed>,
+    /// Each carried v1 id to its new id.
+    pub id_map: BTreeMap<TaskId, TaskId>,
+    /// Each carried v1 id to the records outside the carried set that depend on it.
+    pub inbound: BTreeMap<TaskId, Vec<TaskId>>,
+    /// Each dropped or closed id to the shelves whose `wake_on` names it.
+    pub woken: BTreeMap<TaskId, Vec<TaskId>>,
+    /// Registered projects that could not be read for dependents.
+    pub unread_projects: Vec<String>,
+    /// The open successor tasks carried records are placed under.
+    pub parent_targets: Vec<TaskId>,
+}
+
+/// `text` with every new id of `map` written `new:<v1 id>`: ids not assigned yet (a fresh
+/// verdict, or a refused list) are named by the task they stand for. Only whole ids are
+/// replaced, never a part of a longer word.
+pub fn shown(map: &BTreeMap<TaskId, TaskId>, text: &str) -> String {
+    let mut text = text.to_string();
+    for (from, new) in map {
+        let new = new.to_string();
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find(&new) {
+            let before = rest[..at].chars().next_back();
+            let after = rest[at + new.len()..].chars().next();
+            let joined = |c: Option<char>| {
+                c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            };
+            out.push_str(&rest[..at]);
+            if joined(before) || joined(after) {
+                out.push_str(&new);
+            } else {
+                out.push_str(&format!("new:{from}"));
+            }
+            rest = &rest[at + new.len()..];
+        }
+        out.push_str(rest);
+        text = out;
+    }
+    text
+}
+
+/// The text a `reason` stands for: a `[reasons]` key's text, else the literal.
+pub fn reason_text<'a>(list: &'a DecisionList, reason: &'a str) -> &'a str {
+    list.reasons.get(reason).map_or(reason, String::as_str)
+}
+
+/// The record `drop` (`Decision::Drop`) or `done` (`Decision::Close`) would write for
+/// `task` at `now`, with `note` as its one stamped note. Applies the status effects only;
+/// the caller checks. A carry is a caller error.
+pub(crate) fn render_closing(
+    task: &Task,
+    decision: Decision,
+    now: &str,
+    model: Option<String>,
+    owner: &str,
+    note: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Task> {
+    let to = match decision {
+        Decision::Drop => Status::Dropped,
+        Decision::Close => Status::Done,
+        Decision::Carry => {
+            return Err(Error::Validation(format!(
+                "{} is carried, not dropped or closed",
+                task.id
+            )));
+        }
+    };
+    let mut closed = task.clone();
+    commands::apply_status_effects(&mut closed, to, now, model)?;
+    closed.updated = now.to_string();
+    commands::append_stamped_note_to(warnings, &mut closed, owner, note)?;
+    Ok(closed)
+}
+
+/// The checks `save` and `write_task` make on a record `drop` or `done` writes in `project`.
+fn validate_closing(
+    project: &crate::repo::Project,
+    registry: &crate::registry::Registry,
+    task: &Task,
+) -> Result<()> {
+    crate::format::validate_task(task)?;
+    crate::review::validate(task)?;
+    crate::defer::validate(task)?;
+    project.validate_docs(task)?;
+    crate::hierarchy::validate_parent(project, registry, task)?;
+    crate::hierarchy::validate_lanes(project, registry, task)?;
+    crate::hierarchy::validate_periodic(project, registry, task)?;
+    crate::hierarchy::validate_defer(project, registry, task)
+}
+
+fn list_ids(ids: &[TaskId]) -> String {
+    if ids.is_empty() {
+        "none".to_string()
+    } else {
+        ids.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Renders every dropped and closed entry of a list that passed `check_list`, with the
+/// refusals spec §4.3 names: `release_mismatch`, `close_status`, `close_outputs`, and
+/// `closed_invalid` for a record `drop`/`done` would not write. `done`'s refusals over open
+/// descendants and open dependencies are not applied (spec §4.4). Writes nothing.
+// The joined `explain` reads the dependents once for both projections; this is the
+// standalone entry point.
+#[allow(dead_code)]
+pub fn project_closed(
+    ctx: &mut MigrateCtx,
+    list: &LoadedList,
+    carried_ids: &BTreeMap<TaskId, TaskId>,
+    now: &str,
+) -> Result<(Vec<Closed>, Vec<RefusalOut>)> {
+    let wide = release::read(&ctx.registry, &ctx.source.project.root)?;
+    ctx.source.warnings.extend(wide.warnings.iter().cloned());
+    project_closed_in(ctx, list, carried_ids, now, &wide)
+}
+
+fn project_closed_in(
+    ctx: &mut MigrateCtx,
+    list: &LoadedList,
+    carried_ids: &BTreeMap<TaskId, TaskId>,
+    now: &str,
+    wide: &Wide,
+) -> Result<(Vec<Closed>, Vec<RefusalOut>)> {
+    let suffix = format!(" list: sha256:{}", list.sha256);
+    let succ = ctx.target.prefix.clone();
+    let eligible: BTreeMap<TaskId, Task> = super::draft::eligible(ctx)?
+        .into_iter()
+        .map(|t| (t.id.clone(), t))
+        .collect();
+    let mut decided: BTreeMap<TaskId, (Decision, &Entry)> = BTreeMap::new();
+    for entry in &list.list.tasks {
+        let named = TaskId::parse(entry.id.trim())
+            .map(|id| ctx.registry.canonical_id(&id))
+            .ok()
+            .filter(|id| eligible.contains_key(id));
+        let (Some(id), Some(decision)) = (named, Decision::parse(&entry.decision)) else {
+            return Err(Error::Validation(format!(
+                "entry {:?} did not pass the list checks; run `tasks migrate <list> --explain`",
+                entry.id
+            )));
+        };
+        if decided.insert(id.clone(), (decision, entry)).is_some() {
+            return Err(Error::Validation(format!(
+                "{id} is listed twice; run `tasks migrate <list> --explain`"
+            )));
+        }
+    }
+    let closing: BTreeSet<TaskId> = decided
+        .iter()
+        .filter(|(_, (d, _))| *d != Decision::Carry)
+        .map(|(id, _)| id.clone())
+        .collect();
+    // Dependents the list settles itself, or whose own entry is refused, are not released.
+    let unsettled: BTreeSet<TaskId> = eligible
+        .keys()
+        .filter(|id| !decided.contains_key(*id))
+        .cloned()
+        .collect();
+    let dependents = release::open_dependents(&wide.tasks, &ctx.registry, &closing);
+
+    let owner = commands::owner_name(&ctx.source.project)?;
+    let store = ClaimStore::load(&ctx.source.project.prefix)?;
+    let resolver = Resolver::new(&ctx.source.project, &ctx.registry);
+    let mut closed = Vec::new();
+    let mut refusals = Vec::new();
+    for entry in &list.list.tasks {
+        let id = ctx
+            .registry
+            .canonical_id(&TaskId::parse(entry.id.trim()).expect("checked above"));
+        let (decision, _) = decided[&id];
+        if decision == Decision::Carry {
+            continue;
+        }
+        let task = &eligible[&id];
+        // A close on a recurrence is check_list's `close_recurring`; nothing more is said.
+        if decision == Decision::Close && task.every.is_some() {
+            continue;
+        }
+        let verb = if decision == Decision::Drop {
+            "drop"
+        } else {
+            "close"
+        };
+
+        // Status: `done`'s rule for a close; a drop of a recurrence whose occurrence is done
+        // is the spec's one exception (§4.3 coverage), which ends the cadence.
+        let to = if decision == Decision::Drop {
+            Status::Dropped
+        } else {
+            Status::Done
+        };
+        let done_recurrence = task.status == Status::Done && task.every.is_some();
+        if !Status::can_transition(task.status, to)
+            && !(decision == Decision::Drop && done_recurrence)
+        {
+            refusals.push(refuse(
+                &id,
+                &format!("{verb}_status"),
+                format!(
+                    "{id} is {}, which `tasks {}` refuses; carry it instead",
+                    task.status.as_str(),
+                    if decision == Decision::Drop {
+                        "drop"
+                    } else {
+                        "done"
+                    }
+                ),
+            ));
+            continue;
+        }
+        if decision == Decision::Close {
+            match crate::refs::require_outputs(&resolver, &ctx.source.project, task) {
+                Ok(()) => {}
+                Err(
+                    error @ (Error::RefOutputMissing(_)
+                    | Error::AttachmentUnsafe(_)
+                    | Error::SpecialFile(_)),
+                ) => refusals.push(refuse(
+                    &id,
+                    "close_outputs",
+                    format!("{error}; or drop {id} instead"),
+                )),
+                Err(error) => return Err(error),
+            }
+        }
+
+        // Release: exactly the open dependents, carried ones included only for a close.
+        let released: Vec<TaskId> = dependents
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .filter(|dep| !closing.contains(*dep) && !unsettled.contains(*dep))
+            .filter(|dep| decision == Decision::Close || !carried_ids.contains_key(*dep))
+            .cloned()
+            .collect();
+        let mut named = Vec::new();
+        let mut unknown = Vec::new();
+        for raw in &entry.release {
+            match TaskId::parse(raw.trim()) {
+                Ok(dep) => named.push(ctx.registry.canonical_id(&dep)),
+                Err(_) => unknown.push(format!("{raw:?}")),
+            }
+        }
+        let named_set: BTreeSet<&TaskId> = named.iter().collect();
+        let missing: Vec<String> = released
+            .iter()
+            .filter(|dep| !named_set.contains(dep))
+            .map(ToString::to_string)
+            .collect();
+        let extra: Vec<String> = named_set
+            .iter()
+            .filter(|dep| !released.contains(dep))
+            .map(ToString::to_string)
+            .chain(unknown)
+            .collect();
+        let repeated = named_set.len() != named.len();
+        if !missing.is_empty() || !extra.is_empty() || repeated {
+            let mut why = Vec::new();
+            if !missing.is_empty() {
+                why.push(format!("not listed: {}", missing.join(", ")));
+            }
+            if !extra.is_empty() {
+                why.push(format!("not open dependents of {id}: {}", extra.join(", ")));
+            }
+            if repeated {
+                why.push("an id is listed twice".to_string());
+            }
+            let exact = released
+                .iter()
+                .map(|dep| format!("\"{dep}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            refusals.push(refuse(
+                &id,
+                "release_mismatch",
+                format!(
+                    "this {verb} lets {} proceed ({}); set `release = [{exact}]` to say so, or carry {id}",
+                    list_ids(&released),
+                    why.join("; ")
+                ),
+            ));
+        }
+
+        // A close's dependencies still open once the run is complete: those the list does
+        // not close, carried ones (open in the successor) included.
+        let mut open_depends = Vec::new();
+        if decision == Decision::Close {
+            for dep in &task.depends {
+                let dep = ctx.registry.canonical_id(dep);
+                if closing.contains(&dep) || open_depends.contains(&dep) {
+                    continue;
+                }
+                let open = carried_ids.contains_key(&dep) || {
+                    let found = crate::dependency::resolve(&ctx.registry, &dep, |id| {
+                        resolver.resolve_task(id)
+                    })?;
+                    crate::dependency::verdict(found.as_ref())
+                        != crate::dependency::Verdict::Satisfied
+                };
+                if open {
+                    open_depends.push(dep);
+                }
+            }
+        }
+
+        let reason = reason_text(&list.list, entry.reason.as_deref().unwrap_or("").trim());
+        let mut note = format!(
+            "{} in migration to {succ}: {reason}",
+            if decision == Decision::Drop {
+                "dropped"
+            } else {
+                "closed"
+            }
+        );
+        if !released.is_empty() {
+            note.push_str(&format!("; released: {}", list_ids(&released)));
+        }
+        if !open_depends.is_empty() {
+            note.push_str(&format!("; still open: {}", list_ids(&open_depends)));
+        }
+        note.push_str(&suffix);
+        let model = if decision == Decision::Close {
+            commands::completion_model()?
+        } else {
+            None
+        };
+        let record = render_closing(
+            task,
+            decision,
+            now,
+            model,
+            &owner,
+            &note,
+            &mut ctx.source.warnings,
+        )?;
+        match validate_closing(&ctx.source.project, &ctx.registry, &record) {
+            Ok(()) => {}
+            Err(error) if refusable(&error) => refusals.push(refuse(
+                &id,
+                "closed_invalid",
+                format!("`tasks {verb}` would not write {id}: {error}"),
+            )),
+            Err(error) => return Err(error),
+        }
+        let (_, source_text) = ctx.source.project.read_task_with_raw(&id)?;
+        let closed_text =
+            crate::format::serialize_physical(&ctx.source.project.physical_for_save(&record)?);
+        closed.push(Closed {
+            id: id.clone(),
+            decision,
+            source_text,
+            closed_text,
+            released,
+            open_depends,
+            source_park: store.park(&id).cloned(),
+            source_escalation: store.escalation(&id).cloned(),
+        });
+    }
+    Ok((closed, refusals))
+}
+
+/// The entries the projections can read: those naming an eligible task once, with a
+/// decision. check_list has refused every other entry, and their tasks are left unsettled.
+fn projectable(ctx: &MigrateCtx, list: &LoadedList) -> Result<LoadedList> {
+    let eligible: BTreeSet<TaskId> = super::draft::eligible(ctx)?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let named = |entry: &Entry| {
+        TaskId::parse(entry.id.trim())
+            .map(|id| ctx.registry.canonical_id(&id))
+            .ok()
+            .filter(|id| eligible.contains(id))
+    };
+    let mut count: BTreeMap<TaskId, usize> = BTreeMap::new();
+    for id in list.list.tasks.iter().filter_map(named) {
+        *count.entry(id).or_default() += 1;
+    }
+    let mut kept = list.list.clone();
+    kept.tasks.retain(|entry| {
+        named(entry).is_some_and(|id| count[&id] == 1) && Decision::parse(&entry.decision).is_some()
+    });
+    Ok(LoadedList {
+        list: kept,
+        bytes: list.bytes.clone(),
+        sha256: list.sha256.clone(),
+    })
+}
+
+/// The list checks and both projections, every refusal together (spec §4.3: `--explain`
+/// reports all failures). A header mismatch says the list is for another run, so nothing
+/// is projected. The projection is `None` only then; refusal `settle` texts name unassigned
+/// ids as `new:<v1 id>`.
+pub fn explain(
+    ctx: &mut MigrateCtx,
+    list: &LoadedList,
+) -> Result<(Option<Projection>, Vec<RefusalOut>)> {
+    let mut refusals = super::preflight::check_list(ctx, list)?;
+    if refusals.iter().any(|r| r.rule == "header_mismatch") {
+        return Ok((None, refusals));
+    }
+    let list = projectable(ctx, list)?;
+    let now = render_time(ctx)?;
+    let (carried, id_map, more) = project_carried(ctx, &list, &now)?;
+    refusals.extend(more);
+    let wide = release::read(&ctx.registry, &ctx.source.project.root)?;
+    ctx.source.warnings.extend(wide.warnings.iter().cloned());
+    let (closed, more) = project_closed_in(ctx, &list, &id_map, &now, &wide)?;
+    refusals.extend(more);
+    for refusal in &mut refusals {
+        refusal.settle = shown(&id_map, &refusal.settle);
+    }
+
+    let carried_set: BTreeSet<TaskId> = id_map.keys().cloned().collect();
+    let inbound = release::dependents(&wide.tasks, &ctx.registry, &carried_set)
+        .into_iter()
+        .filter_map(|(id, deps)| {
+            let outside: Vec<TaskId> = deps
+                .into_iter()
+                .filter(|dep| !carried_set.contains(dep))
+                .collect();
+            (!outside.is_empty()).then_some((id, outside))
+        })
+        .collect();
+    // Every task the list drops or closes, whether or not its own entry was refused.
+    let closing: BTreeSet<TaskId> = list
+        .list
+        .tasks
+        .iter()
+        .filter(|entry| Decision::parse(&entry.decision) != Some(Decision::Carry))
+        .filter_map(|entry| TaskId::parse(entry.id.trim()).ok())
+        .map(|id| ctx.registry.canonical_id(&id))
+        .collect();
+    let woken = release::woken_shelves(&wide.tasks, &ctx.registry, &closing)
+        .into_iter()
+        .filter_map(|(id, shelves)| {
+            let open: Vec<TaskId> = shelves
+                .into_iter()
+                .filter(|shelf| !closing.contains(shelf))
+                .collect();
+            (!open.is_empty()).then_some((id, open))
+        })
+        .collect();
+    let new_ids: BTreeSet<&TaskId> = id_map.values().collect();
+    let parent_targets: Vec<TaskId> = carried
+        .iter()
+        .filter_map(|c| c.pair.target.parent.clone())
+        .filter(|parent| !new_ids.contains(parent))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    Ok((
+        Some(Projection {
+            list_sha: list.sha256.clone(),
+            now,
+            carried,
+            closed,
+            id_map,
+            inbound,
+            woken,
+            unread_projects: wide.unread_projects,
+            parent_targets,
+        }),
+        refusals,
+    ))
+}
+
+/// `explain` for a run: the projection of a list with no refusal, or every refusal.
+// Read by the apply of the plan's Task 5.
+#[allow(dead_code)]
+pub fn preflight(
+    ctx: &mut MigrateCtx,
+    list: &LoadedList,
+) -> Result<std::result::Result<Projection, Vec<RefusalOut>>> {
+    Ok(match explain(ctx, list)? {
+        (Some(projection), refusals) if refusals.is_empty() => Ok(projection),
+        (_, refusals) => Err(refusals),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: &str = "2026-11-02T12:00:00Z";
+
+    fn record(extra: &str) -> Task {
+        crate::history::fixture(
+            &format!(
+                "---\nid: forge-000001\ntitle: T\n{extra}priority: 2\n\
+                 created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+                 depends: []\ntags: []\n---\n"
+            ),
+            "tasks/forge-000001.md",
+        )
+        .unwrap()
+    }
+
+    /// Renders, then reads the written text back and runs the record-level write checks.
+    fn render(task: &Task, decision: Decision) -> (Task, String) {
+        let mut warnings = Vec::new();
+        let rendered = render_closing(
+            task,
+            decision,
+            NOW,
+            Some("m-1".into()),
+            "owner",
+            "dropped in migration to forge2: gone list: sha256:00",
+            &mut warnings,
+        )
+        .unwrap();
+        let text = crate::history::fixture_text(&rendered);
+        let read = crate::history::fixture(&text, "tasks/forge-000001.md").unwrap();
+        crate::format::validate_task(&read).unwrap();
+        crate::review::validate(&read).unwrap();
+        crate::defer::validate(&read).unwrap();
+        (read, text)
+    }
+
+    #[test]
+    fn a_dropped_reviewed_idea_loses_its_review() {
+        let idea = record(
+            "status: idea\nreviewed: true\nreviewed_at: 2026-10-17T09:00:00Z\nawaiting_user: true\n",
+        );
+        assert!(idea.reviewed);
+        let (read, text) = render(&idea, Decision::Drop);
+        assert_eq!(read.status, Status::Dropped);
+        assert!(!read.reviewed && read.reviewed_at.is_none() && !read.awaiting_user);
+        assert!(
+            !text.contains("reviewed") && !text.contains("awaiting_user"),
+            "{text}"
+        );
+        assert_eq!(read.closed.as_deref(), Some(NOW));
+        assert_eq!(read.updated, NOW);
+        assert_eq!(read.completed, None);
+        assert_eq!(read.model, None, "a drop records no completion model");
+        let note = read.notes.last().unwrap();
+        assert_eq!(note.by, "owner");
+        assert_eq!(
+            note.text,
+            "dropped in migration to forge2: gone list: sha256:00"
+        );
+    }
+
+    #[test]
+    fn a_dropped_shelf_spends_its_deferral_and_wake_on() {
+        let shelf = record("status: shelved\ndefer: 2099-01-01\nwake_on: [ops-000002]\n");
+        assert!(shelf.defer.is_some() && !shelf.wake_on.is_empty());
+        let (read, text) = render(&shelf, Decision::Drop);
+        assert_eq!(read.status, Status::Dropped);
+        assert!(read.defer.is_none() && read.wake_on.is_empty());
+        assert!(
+            !text.contains("defer") && !text.contains("wake_on"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_dropped_done_recurrence_keeps_its_cadence_as_history() {
+        let recurrence = record(
+            "status: done\nevery: 7d\ncompleted: 2026-10-30T00:00:00Z\nclosed: 2026-10-30T00:00:00Z\nlast_done: 2026-10-30T00:00:00Z\n",
+        );
+        let (read, text) = render(&recurrence, Decision::Drop);
+        assert_eq!(read.status, Status::Dropped);
+        assert_eq!(read.every.map(|e| e.to_string()).as_deref(), Some("7d"));
+        assert_eq!(read.last_done.as_deref(), Some("2026-10-30T00:00:00Z"));
+        assert_eq!(read.closed.as_deref(), Some(NOW));
+        assert!(text.contains("every: 7d"), "{text}");
+    }
+
+    #[test]
+    fn a_close_completes_as_done_does() {
+        let (read, _) = render(&record("status: doing\n"), Decision::Close);
+        assert_eq!(read.status, Status::Done);
+        assert_eq!(read.completed.as_deref(), Some(NOW));
+        assert_eq!(read.closed.as_deref(), Some(NOW));
+        assert_eq!(read.model.as_deref(), Some("m-1"));
+    }
+
+    #[test]
+    fn a_carry_is_not_rendered_as_closed() {
+        let error = render_closing(
+            &record("status: todo\n"),
+            Decision::Carry,
+            NOW,
+            None,
+            "owner",
+            "x",
+            &mut Vec::new(),
+        )
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("carried"), "{error}");
+    }
+
+    #[test]
+    fn shown_replaces_whole_new_ids_only() {
+        let map: BTreeMap<TaskId, TaskId> = [(
+            TaskId::parse("forge-000001").unwrap(),
+            TaskId::parse("fx-12ab34").unwrap(),
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            shown(
+                &map,
+                "fx-12ab34 under afx-12ab34, fx-12ab345 and (fx-12ab34)"
+            ),
+            "new:forge-000001 under afx-12ab34, fx-12ab345 and (new:forge-000001)"
+        );
+    }
 }

@@ -1257,3 +1257,326 @@ fn carried_lane_under_a_successor_lane_refuses_and_a_carried_lane_tree_is_valid(
         "{out}"
     );
 }
+
+fn row<'a>(out: &'a serde_json::Value, key: &str, id: &str) -> &'a serde_json::Value {
+    out[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("no {key} in {out}"))
+        .iter()
+        .find(|row| row["id"] == id)
+        .unwrap_or_else(|| panic!("{id} not in {key} of {out}"))
+}
+
+#[test]
+fn drop_with_an_outside_dependent_needs_release() {
+    // Spec §5 case 4: an open dependent in another project must be released by name.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let x = id_of(env.json(&ops, &["add", "X", "--depends", &d]));
+    let z = id_of(env.json(&ops, &["add", "Z"]));
+    // A closed dependent, and a dependent this list also drops, need no release.
+    let gone = id_of(env.json(&ops, &["add", "Gone", "--depends", &d]));
+    env.json(&ops, &["drop", &gone]);
+    let e = id_of(env.json(&forge, &["add", "E", "--depends", &d]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &e, "drop", "reason = \"gone\"\n");
+
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &d, "drop", "reason = \"superseded\"\n"),
+    );
+    assert_eq!(
+        rules(&out),
+        vec![("release_mismatch".to_string(), d.clone())],
+        "{out}"
+    );
+    let settle = &setting(&out, "release_mismatch")[0].1;
+    assert!(
+        settle.contains(&x) && settle.contains("`release"),
+        "{settle}"
+    );
+    assert!(!settle.contains(&e) && !settle.contains(&gone), "{settle}");
+
+    let extra = format!("reason = \"superseded\"\nrelease = [\"{x}\", \"{z}\"]\n");
+    let out = explain_text(&env, &forge, &decide(&text, &d, "drop", &extra));
+    assert_eq!(
+        rules(&out),
+        vec![("release_mismatch".to_string(), d.clone())],
+        "{out}"
+    );
+    assert!(setting(&out, "release_mismatch")[0].1.contains(&z), "{out}");
+
+    let before = snapshot(&ops);
+    let exact = format!("reason = \"superseded\"\nrelease = [\"{x}\"]\n");
+    let out = explain_text(&env, &forge, &decide(&text, &d, "drop", &exact));
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(out["recovery"], "fresh");
+    let dropped = row(&out, "dropped", &d);
+    assert_eq!(dropped["reason"], "superseded");
+    assert_eq!(dropped["released"], serde_json::json!([x]));
+    assert_eq!(row(&out, "dropped", &e)["released"], serde_json::json!([]));
+    assert_eq!(snapshot(&ops), before);
+}
+
+#[test]
+fn close_releases_carried_dependents_by_v1_id() {
+    // Spec §4.3: a closed task's carried dependents keep the edge, now satisfied, and are
+    // released by their v1 ids; its open dependencies do not block the close.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let y = id_of(env.json(&ops, &["add", "Y"]));
+    let c = id_of(env.json(&forge, &["add", "C", "--depends", &y]));
+    let a = id_of(env.json(&forge, &["add", "A", "--depends", &c]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &a, "carry", "");
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &c, "close", "reason = \"done in forge2\"\n"),
+    );
+    assert_eq!(
+        rules(&out),
+        vec![("release_mismatch".to_string(), c.clone())],
+        "{out}"
+    );
+    assert!(setting(&out, "release_mismatch")[0].1.contains(&a), "{out}");
+
+    let exact = format!("reason = \"done in forge2\"\nrelease = [\"{a}\"]\n");
+    let out = explain_text(&env, &forge, &decide(&text, &c, "close", &exact));
+    assert_eq!(rules(&out), vec![], "{out}");
+    let closed = row(&out, "closed", &c);
+    assert_eq!(closed["reason"], "done in forge2");
+    assert_eq!(closed["released"], serde_json::json!([a]));
+    assert_eq!(closed["open_depends"], serde_json::json!([y]));
+}
+
+#[test]
+fn dropped_reviewed_idea_and_shelf_are_clean() {
+    // Spec §5 case 8, projection half: each record renders as `drop` would write it and
+    // passes the write validation (the rendered text is pinned by the unit tests).
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let w = id_of(env.json(&ops, &["add", "W"]));
+    let idea = id_of(env.json(&forge, &["add", "I", "--status", "idea"]));
+    env.json(&forge, &["edit", &idea, "--reviewed"]);
+    let shelf = id_of(env.json(&forge, &["add", "S"]));
+    env.json(
+        &forge,
+        &[
+            "shelve",
+            &shelf,
+            "when W lands",
+            "--defer",
+            "2099-01-01",
+            "--wake-on",
+            &w,
+        ],
+    );
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&text, &idea, "drop", "reason = \"gone\"\n");
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &shelf, "drop", "reason = \"gone\"\n"),
+    );
+    assert_eq!(rules(&out), vec![], "{out}");
+    for id in [&idea, &shelf] {
+        assert_eq!(row(&out, "dropped", id)["reason"], "gone");
+    }
+    assert_eq!(out["woken"], serde_json::json!([]), "{out}");
+}
+
+#[test]
+fn close_with_a_missing_declared_output_refuses() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let c = id_of(env.json(
+        &forge,
+        &[
+            "add",
+            "C",
+            "--ref",
+            "report (output, kind=report): docs/notes/r.md",
+        ],
+    ));
+    let (text, _) = draft_home(&env, &forge);
+    let close = decide(&text, &c, "close", "reason = \"done\"\n");
+    let out = explain_text(&env, &forge, &close);
+    assert_eq!(
+        rules(&out),
+        vec![("close_outputs".to_string(), c.clone())],
+        "{out}"
+    );
+    assert!(
+        setting(&out, "close_outputs")[0]
+            .1
+            .contains("docs/notes/r.md"),
+        "{out}"
+    );
+    // A drop declares nothing finished.
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &c, "drop", "reason = \"gone\"\n"),
+    );
+    assert_eq!(rules(&out), vec![], "{out}");
+
+    std::fs::create_dir_all(forge.join("docs/notes")).unwrap();
+    std::fs::write(forge.join("docs/notes/r.md"), "report\n").unwrap();
+    let out = explain_text(&env, &forge, &close);
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(
+        row(&out, "closed", &c)["open_depends"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn done_recurrence_drop_ends_the_cadence() {
+    // Spec §5 case 9, drop half (the record itself is pinned by the unit tests).
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let r = id_of(env.json(&forge, &["add", "R", "--every", "7d"]));
+    env.json(&forge, &["done", &r]);
+    let (text, _) = draft_home(&env, &forge);
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &r, "drop", "reason = \"cadence ends\"\n"),
+    );
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(row(&out, "dropped", &r)["reason"], "cadence ends");
+}
+
+#[test]
+fn woken_shelves_are_reported_not_required() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let lost = env.init("lost");
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    let y = id_of(env.json(&ops, &["add", "Y"]));
+    env.json(
+        &ops,
+        &[
+            "shelve",
+            &y,
+            "when D lands",
+            "--defer",
+            "2099-01-01",
+            "--wake-on",
+            &d,
+        ],
+    );
+    let (text, _) = draft_home(&env, &forge);
+    std::fs::remove_dir_all(&lost).unwrap();
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &d, "drop", "reason = \"gone\"\n"),
+    );
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(
+        out["woken"],
+        serde_json::json!([{"id": d, "shelves": [y]}]),
+        "{out}"
+    );
+    assert_eq!(out["unread_projects"], serde_json::json!(["lost"]), "{out}");
+    assert_eq!(row(&out, "dropped", &d)["released"], serde_json::json!([]));
+}
+
+#[test]
+fn inbound_lists_dependents_of_carried_tasks_outside_the_carried_set() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&forge, &["add", "A"]));
+    let b = id_of(env.json(&forge, &["add", "B", "--depends", &a]));
+    let x = id_of(env.json(&ops, &["add", "X", "--depends", &a]));
+    let (text, _) = draft_home(&env, &forge);
+    let text = decide(&decide(&text, &a, "carry", ""), &b, "carry", "");
+    let out = explain_text(&env, &forge, &text);
+    assert_eq!(rules(&out), vec![], "{out}");
+    assert_eq!(
+        out["inbound"],
+        serde_json::json!([{"id": a, "dependents": [x]}]),
+        "{out}"
+    );
+}
+
+#[test]
+fn explain_joins_list_and_projection_refusals() {
+    // Ruling R6: list checks and projections report together; a header mismatch skips the
+    // projection.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    env.init("forge2");
+    let ops = env.init("ops");
+    let g = id_of(env.json(&forge, &["add", "G"]));
+    let a = id_of(env.json(&forge, &["add", "A", "--parent", &g]));
+    let b = id_of(env.json(&forge, &["add", "B"]));
+    let d = id_of(env.json(&forge, &["add", "D"]));
+    env.json(&ops, &["add", "X", "--depends", &d]);
+    let (text, _) = draft_home(&env, &forge);
+    env.json(&forge, &["edit", &b, "--title", "B changed"]);
+    let mut text = decide(&text, &g, "drop", "reason = \"gone\"\n");
+    text = decide(&text, &a, "carry", "");
+    text = decide(&text, &b, "carry", "");
+    text = decide(&text, &d, "drop", "reason = \"gone\"\n");
+    let out = explain_text(&env, &forge, &text);
+    let mut found = rules(&out);
+    found.sort();
+    let mut want = vec![
+        ("parent_required".to_string(), a.clone()),
+        ("release_mismatch".to_string(), d.clone()),
+        ("stale_digest".to_string(), b.clone()),
+    ];
+    want.sort();
+    assert_eq!(found, want, "{out}");
+
+    let out = explain_text(
+        &env,
+        &forge,
+        &text.replace("source = \"forge\"", "source = \"elsewhere\""),
+    );
+    let found: Vec<String> = rules(&out).into_iter().map(|(rule, _)| rule).collect();
+    assert!(found.contains(&"header_mismatch".to_string()), "{out}");
+    assert!(
+        !found
+            .iter()
+            .any(|r| r == "parent_required" || r == "release_mismatch"),
+        "{out}"
+    );
+}
+
+#[test]
+fn refusals_name_unassigned_ids_by_their_v1_id() {
+    // Ruling R8: a fresh run assigns no ids, so no refusal names a random new id.
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let l = id_of(env.json(&forge, &["add", "Lane L", "--lane", "--origin", "user"]));
+    let outer = id_of(env.json(&forge2, &["add", "Outer", "--lane", "--origin", "user"]));
+    let (text, _) = draft_home(&env, &forge);
+    let out = explain_text(
+        &env,
+        &forge,
+        &decide(&text, &l, "carry", &format!("parent = \"{outer}\"\n")),
+    );
+    let settle = &setting(&out, "destination_invalid")[0].1;
+    assert!(settle.contains(&format!("new:{l}")), "{settle}");
+    let rest = settle.replace(&outer, "").replace(&format!("new:{l}"), "");
+    assert!(!rest.contains("forge2-"), "{settle}");
+}

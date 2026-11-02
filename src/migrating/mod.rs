@@ -5,6 +5,7 @@ pub mod draft;
 pub mod list;
 pub mod preflight;
 pub mod project;
+pub mod release;
 pub mod review;
 
 use crate::commands::Ctx;
