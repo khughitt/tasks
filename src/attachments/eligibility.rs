@@ -98,7 +98,7 @@ impl Snapshot {
 }
 
 pub(crate) fn local_query(dir: &Path, paths: &[String]) -> Result<AttachmentEligibilityOut> {
-    let records = dir.canonicalize()?;
+    let records = crate::repo::canonical_start(dir)?;
     let tasks = Snapshot::take(&records.join("tasks"))?;
     if !tasks.metadata.is_dir() {
         return Err(Error::AttachmentUnsafe(

@@ -1240,6 +1240,8 @@ fn a_start_path_that_does_not_exist_is_checkout_missing_and_names_it() {
             vec!["-C", c, "add", "x"],
             vec!["-C", c, "where"],
             vec!["-C", c, "list", "--all-projects"],
+            vec!["-C", c, "init", "--prefix", "qq"],
+            vec!["-C", c, "attachments", "tasks/files/zz-000000/a"],
             vec!["where", c],
         ] {
             let (kind, detail) = kind_and_detail(&env, &root, &args);
@@ -1270,23 +1272,37 @@ fn a_deleted_current_directory_is_checkout_missing_and_names_it() {
     let mut env = TestEnv::new();
     let root = env.init("zz");
     let doomed = root.join("doomed");
-    std::fs::create_dir(&doomed).unwrap();
-    let mut command = std::process::Command::new("sh");
-    command.env_clear();
-    for (key, value) in common::isolated_env(env.home.path()) {
-        command.env(key, value);
+    for args in [
+        vec!["list"],
+        vec!["list", "--project", "zz"],
+        vec!["init", "--prefix", "qq"],
+        vec!["attachments", "tasks/files/zz-000000/a"],
+        vec!["where"],
+        // A relative -C resolves against the deleted directory, which is what is missing.
+        vec!["-C", "sub", "list"],
+    ] {
+        std::fs::create_dir(&doomed).unwrap();
+        let mut command = std::process::Command::new("sh");
+        command.env_clear();
+        for (key, value) in common::isolated_env(env.home.path()) {
+            command.env(key, value);
+        }
+        let out = command
+            .args(["-c", r#"cd "$1" && rmdir "$1" && shift && exec "$@""#, "sh"])
+            .arg(&doomed)
+            .arg(assert_cmd::cargo::cargo_bin("tasks"))
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+        let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(v["error"]["kind"], "checkout_missing", "{args:?}: {v}");
+        let detail = v["error"]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains(doomed.to_str().unwrap()),
+            "{args:?}: {detail}"
+        );
     }
-    let out = command
-        .args(["-c", r#"cd "$1" && rmdir "$1" && exec "$2" list"#, "sh"])
-        .arg(&doomed)
-        .arg(assert_cmd::cargo::cargo_bin("tasks"))
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1), "{out:?}");
-    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    assert_eq!(v["error"]["kind"], "checkout_missing", "{v}");
-    let detail = v["error"]["detail"].as_str().unwrap();
-    assert!(detail.contains(doomed.to_str().unwrap()), "{detail}");
 }
 
 #[test]

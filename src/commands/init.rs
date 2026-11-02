@@ -13,11 +13,7 @@ pub fn run(
     records: Option<PathBuf>,
     force: bool,
 ) -> Result<Output> {
-    let root = match dir {
-        Some(dir) => dir.to_path_buf(),
-        None => std::env::current_dir()?,
-    }
-    .canonicalize()?;
+    let root = crate::repo::canonical_start(&super::start_dir(dir)?)?;
     let prefix = match prefix {
         Some(prefix) => prefix,
         None => default_prefix(&root)?,

@@ -1919,7 +1919,20 @@ fn a_worktree_whose_gitlink_target_is_missing_is_worktree_orphaned() {
     let admin = l.code.join(".git/worktrees/wt");
     assert!(admin.is_dir());
     std::fs::create_dir_all(l.wt.join("sub")).unwrap();
+    // A bare repository inside the worktree fails git for its own reason, which names
+    // no gitlink: that failure stays io even once the worktree is orphaned.
+    l.git(&l.wt, &["init", "-q", "--bare", "vendor.git"]);
     std::fs::remove_dir_all(&admin).unwrap();
+    assert_eq!(env.fail(&l.wt.join("vendor.git"), &["list"]), "io");
+    // Above a discovery ceiling git never reads the gitlink: no project, not orphaned.
+    let out = env
+        .cmd(&l.wt.join("sub"))
+        .env("GIT_CEILING_DIRECTORIES", &l.wt)
+        .arg("list")
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "no_project", "{v}");
     let assert_orphaned = |target: &Path| {
         for start in [l.wt.clone(), l.wt.join("sub")] {
             for args in [vec!["list"], vec!["show", "000000"], vec!["where"]] {
@@ -1950,7 +1963,13 @@ fn a_worktree_whose_gitlink_target_is_missing_is_worktree_orphaned() {
 fn a_worktree_with_unreadable_git_metadata_stays_io() {
     use std::os::unix::fs::PermissionsExt;
     type Break = (&'static str, fn(&Layout));
-    let breaks: [Break; 4] = [
+    let breaks: [Break; 5] = [
+        // Read from the marker's directory, `../plain` exists; read from the start
+        // (`wt/sub`) it would not, so a wrong base would report the worktree orphaned.
+        ("relative gitfile pointing at a plain directory", |l| {
+            std::fs::create_dir_all(l.wt.join("../plain")).unwrap();
+            std::fs::write(l.wt.join(".git"), "gitdir: ../plain\n").unwrap()
+        }),
         ("garbage gitfile", |l| {
             std::fs::write(l.wt.join(".git"), "garbage\n").unwrap()
         }),
@@ -1971,11 +1990,14 @@ fn a_worktree_with_unreadable_git_metadata_stays_io() {
         let mut env = TestEnv::new();
         let l = layout(&mut env, "det");
         register(&env, &l, "det");
+        std::fs::create_dir_all(l.wt.join("sub")).unwrap();
         break_it(&l);
         // Root reads through any mode; the unreadable case cannot be staged there.
         if std::fs::read(l.wt.join(".git")).is_err() || name != "unreadable gitfile" {
-            for args in [vec!["list"], vec!["where"]] {
-                assert_eq!(env.fail(&l.wt, &args), "io", "{name}: {args:?}");
+            for start in [l.wt.clone(), l.wt.join("sub")] {
+                for args in [vec!["list"], vec!["where"]] {
+                    assert_eq!(env.fail(&start, &args), "io", "{name}: {args:?}");
+                }
             }
         }
         let _ = std::fs::set_permissions(l.wt.join(".git"), std::fs::Permissions::from_mode(0o644));

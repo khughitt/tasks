@@ -45,7 +45,7 @@ impl GitTree {
             // A spawn `NotFound` is a missing git executable only while `dir` still
             // exists: git runs in it, so a directory that vanished fails the same way.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return match dir.symlink_metadata() {
+                return match dir.metadata() {
                     Ok(_) => Ok(None),
                     Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => {
                         Err(Error::Io(format!(
@@ -104,7 +104,7 @@ impl GitTree {
                     )));
                 }
             }
-            if let Some(orphan) = orphaned(dir) {
+            if let Some(orphan) = orphaned(dir, &stderr) {
                 return Err(orphan);
             }
             return Err(Error::Io(failed));
@@ -227,12 +227,17 @@ fn mount_point(stderr: &str) -> Option<PathBuf> {
 
 /// After git rejected `dir`: `worktree_orphaned` when the nearest `.git` at or above it
 /// is a gitfile (`gitdir: <path>`, relative to the marker's directory when relative)
-/// whose target does not exist. Every other outcome (no marker, a `.git` directory, an
+/// whose target does not exist, and git's message names that gitfile (git 2.56:
+/// `gitfile does not point to a valid repository: <marker>`) or its target (older git:
+/// `not a git repository: <target>`), so a failure git had for another reason (a bare
+/// repository below the worktree) is never renamed. Read through a `.git` symlink, or
+/// past an empty `.git` directory git skips, the probe finds no gitfile and git's `io`
+/// stands. Every other outcome (no marker, a `.git` directory, an
 /// unreadable or unparseable gitfile, a target that exists, a target `lstat` cannot
 /// read) is `None`, and git's own failure stands: corruption and permission failures are
 /// never read as absence. A missing target also follows a main checkout moved without
 /// `git worktree repair` or a deleted main repository, so the detail names both.
-fn orphaned(dir: &Path) -> Option<Error> {
+fn orphaned(dir: &Path, stderr: &str) -> Option<Error> {
     use std::os::unix::ffi::OsStrExt;
     let start = dir.canonicalize().ok()?;
     let mut nearest = None;
@@ -261,6 +266,12 @@ fn orphaned(dir: &Path) -> Option<Error> {
     match target.symlink_metadata() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         _ => return None,
+    }
+    let named = [marker.as_path(), target.as_path(), written]
+        .iter()
+        .any(|path| stderr.contains(&*path.to_string_lossy()));
+    if !named {
+        return None;
     }
     let shown = if written.is_absolute() {
         written.display().to_string()

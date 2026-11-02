@@ -468,8 +468,9 @@ repository was moved or deleted). The detail names the worktree and the missing 
 local tells that apart from a removed worktree. Every other failure to open a start path
 stays `io`: a path through a regular file, a symlink loop, a permission failure, an
 unreadable or unparseable `.git` file, and every other git rejection, corruption
-included. `--project` skips the local lookup and is unaffected; `--all-projects` and
-`--group` still look at the start path and fail the same way.
+included. `--project` skips the local lookup, so a missing `-C` does not affect it,
+but a deleted current directory still fails; `--all-projects` and `--group` still look
+at the start path and fail the same way.
 
 Task ids on the command line accept trailing sentence punctuation: a trailing run of
 ASCII periods and commas on any positional id or id-valued flag (`--parent`, `--depends`,

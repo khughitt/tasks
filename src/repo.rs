@@ -432,12 +432,17 @@ fn doc_roots(key: &str, configured: Option<Vec<String>>, defaults: &[&str]) -> R
     configured.iter().map(|raw| doc_root(key, raw)).collect()
 }
 
-/// The start path a command opens from (`-C`, or `where PATH`), canonical. A start that
+/// The start path a command opens from (`-C`, or `where PATH`), canonical. Shared by
+/// every command that resolves one (`locate`, `where`, `init`, `attachments`). A start that
 /// does not exist (`NotFound`: removed, under a removed ancestor, a dangling symlink) is
 /// `checkout_missing` naming it; ENOTDIR, ELOOP, EACCES and every other failure are not
 /// absence and stay `io`. Every local lookup resolves its start here, so the kind means
 /// the same wherever it comes from.
 pub fn canonical_start(start: &Path) -> Result<PathBuf> {
+    if start.is_relative() {
+        // Resolved against the current directory: when that is gone, it is what is missing.
+        current_start()?;
+    }
     start
         .canonicalize()
         .map_err(|error| missing_start(error, || format!("{} does not exist", start.display())))
