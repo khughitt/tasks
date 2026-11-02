@@ -229,8 +229,9 @@ fn mount_point(stderr: &str) -> Option<PathBuf> {
 /// is a gitfile (`gitdir: <path>`, relative to the marker's directory when relative)
 /// whose target does not exist, and git's message names that gitfile (git 2.56:
 /// `gitfile does not point to a valid repository: <marker>`) or its target (older git:
-/// `not a git repository: <target>`), so a failure git had for another reason (a bare
-/// repository below the worktree) is never renamed. Read through a `.git` symlink, or
+/// `not a git repository: <target>`), each as the tail of a line, so a failure git had
+/// for another reason (a bare repository below the worktree, whose quoted path may
+/// contain the gitdir text or the target) is never renamed. Read through a `.git` symlink, or
 /// past an empty `.git` directory git skips, the probe finds no gitfile and git's `io`
 /// stands. Every other outcome (no marker, a `.git` directory, an
 /// unreadable or unparseable gitfile, a target that exists, a target `lstat` cannot
@@ -267,9 +268,15 @@ fn orphaned(dir: &Path, stderr: &str) -> Option<Error> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         _ => return None,
     }
-    let named = [marker.as_path(), target.as_path(), written]
-        .iter()
-        .any(|path| stderr.contains(&*path.to_string_lossy()));
+    // Only a line that ends in `: <marker>` or `: <target>` names them: a path that merely
+    // contains one (a bare `vendor.git` beside `gitdir: vendor`) is another failure.
+    let named = stderr.lines().any(|line| {
+        [marker.as_path(), target.as_path()].iter().any(|path| {
+            line.trim_end()
+                .strip_suffix(&*path.to_string_lossy())
+                .is_some_and(|head| head.ends_with(": "))
+        })
+    });
     if !named {
         return None;
     }

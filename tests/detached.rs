@@ -1957,6 +1957,44 @@ fn a_worktree_whose_gitlink_target_is_missing_is_worktree_orphaned() {
     assert_orphaned(Path::new("../../../code/.git/worktrees/wt"));
 }
 
+/// The gate names git's failure only when a line ends in the marker or the target: a
+/// hand-written `gitdir: vendor` with a missing target sits beside a bare `vendor.git`,
+/// whose refusal under `safe.bareRepository=explicit` quotes a path that merely contains
+/// both the written text and the target. That refusal is git's own and stays `io`.
+#[test]
+fn a_bare_repository_refusal_that_contains_the_gitdir_text_is_not_worktree_orphaned() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    std::fs::create_dir_all(l.wt.join("sub")).unwrap();
+    l.git(&l.wt, &["init", "-q", "--bare", "vendor.git"]);
+    std::fs::write(l.wt.join(".git"), "gitdir: vendor\n").unwrap();
+    assert!(!l.wt.join("vendor").exists());
+    let kind = |dir: &Path, args: &[&str]| {
+        let out = env
+            .cmd(dir)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "safe.bareRepository")
+            .env("GIT_CONFIG_VALUE_0", "explicit")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{args:?}: {out:?}");
+        let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        (
+            v["error"]["kind"].as_str().unwrap().to_string(),
+            v["error"]["detail"].as_str().unwrap().to_string(),
+        )
+    };
+    let bare = l.wt.join("vendor.git");
+    let (k, detail) = kind(&l.code, &["-C", bare.to_str().unwrap(), "list"]);
+    assert_eq!(k, "io", "{detail}");
+    assert!(detail.contains("bare repository"), "{detail}");
+    // The same gitfile read from the worktree itself is still orphaned.
+    let (k, detail) = kind(&l.wt.join("sub"), &["list"]);
+    assert_eq!(k, "worktree_orphaned", "{detail}");
+}
+
 /// Metadata git rejects for any reason other than a missing gitlink target is corruption
 /// or a permission failure, never absence: it stays `io`.
 #[test]
