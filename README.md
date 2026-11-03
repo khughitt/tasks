@@ -973,6 +973,12 @@ An interrupted `attach` leaves a file that `check` reports as `attachment_unnote
 Rerun it with the same bytes and `--name <name>` to finish, or `detach` the file. An
 interrupted `detach` finishes when rerun.
 
+#### Multipart validators
+
+Validators must be self-contained commands: processes started outside their process
+tree through a service manager, D-Bus activation or another daemon are outside
+validator containment and cannot be detected or cleaned up by tasks.
+
 ### Moving tasks
 
 `tasks move <id> --to <prefix> [--explain]` moves an open, unparented,

@@ -26,3 +26,6 @@ pub struct ValidatorSpec {
     pub glob: String,
     pub command: Vec<String>,
 }
+
+#[allow(dead_code)] // Wired into admission, publication and export in later plan steps.
+pub mod validate;
