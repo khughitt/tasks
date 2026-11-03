@@ -4,6 +4,8 @@ pub mod content;
 #[allow(dead_code)] // Wired into attach and recovery by the following plan tasks.
 pub mod cut;
 pub mod declaration;
+#[allow(dead_code)] // Consumed by multipart publication and recovery in the following steps.
+pub mod git_objects;
 pub mod names;
 
 pub const RECOVERY_MAX_BYTES: u64 = 268_435_456;

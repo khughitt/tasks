@@ -9,6 +9,64 @@ use std::process::Output;
 
 const SHOWN: usize = 5;
 
+#[derive(Debug)]
+#[allow(dead_code)] // Used by multipart publication in the following plan tasks.
+pub struct Committed {
+    pub toplevel: PathBuf,
+    pub commit: String,
+    pub paths: BTreeSet<PathBuf>,
+}
+
+fn commit_identity(stdout: &[u8]) -> Option<String> {
+    std::str::from_utf8(stdout).ok()?.lines().find_map(|line| {
+        let rest = line.strip_prefix('[')?;
+        let (header, _) = rest.split_once("] ")?;
+        if header.contains(']') {
+            return None;
+        }
+        let sha = header.rsplit_once(' ')?.1;
+        ((sha.len() == 40 || sha.len() == 64)
+            && sha
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        .then(|| sha.to_string())
+    })
+}
+
+fn path_blobs(
+    repo: &Repo,
+    commit: Option<&str>,
+    paths: &[String],
+) -> Result<BTreeMap<String, String>, String> {
+    let mut args = match commit {
+        Some(commit) => vec!["ls-tree", "-z", commit, "--"],
+        None => vec!["ls-files", "--stage", "-z", "--"],
+    };
+    args.extend(paths.iter().map(String::as_str));
+    let output = (repo.git)(&repo.toplevel, &args).map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(cause_of(args[0], &output));
+    }
+    let mut blobs = BTreeMap::new();
+    for entry in output
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let entry = std::str::from_utf8(entry).map_err(|error| error.to_string())?;
+        let (metadata, path) = entry.split_once('\t').ok_or("missing Git path metadata")?;
+        let fields: Vec<_> = metadata.split_whitespace().collect();
+        if fields.len() != 3 {
+            return Err("invalid Git path metadata".into());
+        }
+        blobs.insert(
+            path.to_string(),
+            fields[if commit.is_some() { 2 } else { 1 }].to_string(),
+        );
+    }
+    Ok(blobs)
+}
+
 fn state_home() -> Result<PathBuf, String> {
     if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
         return Ok(PathBuf::from(state));
@@ -22,7 +80,7 @@ fn state_home() -> Result<PathBuf, String> {
 /// commit. An empty result means committed, or nothing differed from HEAD.
 pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
     match state_home() {
-        Ok(state) => commit_paths_in(dir, paths, message, &state, &mut || {}, git),
+        Ok(state) => commit_paths_in(dir, paths, message, &state, &mut || {}, &mut || {}, git),
         Err(error) => vec![failed(dir, paths, &error, None)],
     }
 }
@@ -256,101 +314,159 @@ pub(crate) fn commit_paths_in(
     message: &str,
     state: &Path,
     before_commit: &mut dyn FnMut(),
+    after_commit: &mut dyn FnMut(),
     git: Git,
 ) -> Vec<String> {
-    let repo = match discover(dir, git) {
-        Ok(Some(repo)) => repo,
-        Ok(None) => return vec![unavailable(dir, paths)],
-        Err(error) => return vec![failed(dir, paths, &error, None)],
-    };
-    let _lock = match lock_for(&repo.common, state) {
-        Ok(lock) => lock,
-        Err(error) => return vec![failed(dir, paths, &error, None)],
-    };
-    if let Some(what) = in_progress(&repo.git_dir) {
-        return vec![deferred(
-            dir,
-            paths,
-            &format!("{what} is in progress"),
-            None,
-        )];
-    }
-    if !git(&repo.toplevel, &["symbolic-ref", "-q", "HEAD"])
-        .is_ok_and(|output| output.status.success())
-    {
-        return vec![deferred(dir, paths, "HEAD is detached", None)];
-    }
-    match staged(&repo) {
-        Ok(already) if !already.is_empty() => {
+    commit_paths_report_in(dir, paths, message, state, before_commit, after_commit, git).0
+}
+
+fn commit_paths_report_in(
+    dir: &Path,
+    paths: &[PathBuf],
+    message: &str,
+    state: &Path,
+    before_commit: &mut dyn FnMut(),
+    after_commit: &mut dyn FnMut(),
+    git: Git,
+) -> (Vec<String>, Option<Committed>) {
+    let mut committed = None;
+    let warnings = (|| {
+        let repo = match discover(dir, git) {
+            Ok(Some(repo)) => repo,
+            Ok(None) => return vec![unavailable(dir, paths)],
+            Err(error) => return vec![failed(dir, paths, &error, None)],
+        };
+        let _lock = match lock_for(&repo.common, state) {
+            Ok(lock) => lock,
+            Err(error) => return vec![failed(dir, paths, &error, None)],
+        };
+        if let Some(what) = in_progress(&repo.git_dir) {
             return vec![deferred(
                 dir,
                 paths,
-                &format!("staged changes: {}", listed(&already)),
+                &format!("{what} is in progress"),
                 None,
             )];
         }
-        Ok(_) => {}
-        Err(error) => return vec![failed(dir, paths, &error, None)],
-    }
-    let prefix = match dir.canonicalize() {
-        Ok(dir) => match dir.strip_prefix(&repo.toplevel) {
-            Ok(prefix) => prefix.to_path_buf(),
-            Err(_) => {
-                return vec![failed(
-                    dir.as_path(),
+        if !git(&repo.toplevel, &["symbolic-ref", "-q", "HEAD"])
+            .is_ok_and(|output| output.status.success())
+        {
+            return vec![deferred(dir, paths, "HEAD is detached", None)];
+        }
+        match staged(&repo) {
+            Ok(already) if !already.is_empty() => {
+                return vec![deferred(
+                    dir,
                     paths,
-                    "not under the repository top level",
+                    &format!("staged changes: {}", listed(&already)),
                     None,
                 )];
             }
-        },
-        Err(error) => return vec![failed(dir, paths, &error.to_string(), None)],
-    };
-    let ours: Vec<String> = paths
-        .iter()
-        .map(|path| prefix.join(path).display().to_string())
-        .collect();
-    let (present, missing): (Vec<&String>, Vec<&String>) = ours
-        .iter()
-        .partition(|path| repo.toplevel.join(path).exists());
-    for (base, group) in [
-        (vec!["add", "-A", "--"], present),
-        (
-            vec!["rm", "--cached", "-q", "-r", "--ignore-unmatch", "--"],
-            missing,
-        ),
-    ] {
-        if group.is_empty() {
-            continue;
+            Ok(_) => {}
+            Err(error) => return vec![failed(dir, paths, &error, None)],
         }
-        let mut args = base;
-        args.extend(group.iter().map(|path| path.as_str()));
-        let cause = match git(&repo.toplevel, &args) {
-            Ok(output) if output.status.success() => continue,
-            Ok(output) => cause_of(args[0], &output),
-            Err(error) => error.to_string(),
+        let prefix = match dir.canonicalize() {
+            Ok(dir) => match dir.strip_prefix(&repo.toplevel) {
+                Ok(prefix) => prefix.to_path_buf(),
+                Err(_) => {
+                    return vec![failed(
+                        dir.as_path(),
+                        paths,
+                        "not under the repository top level",
+                        None,
+                    )];
+                }
+            },
+            Err(error) => return vec![failed(dir, paths, &error.to_string(), None)],
         };
-        return vec![failed(dir, paths, &cause, cleanup(&repo, &ours))];
-    }
-    before_commit();
-    let now = match staged(&repo) {
-        Ok(now) => now,
-        Err(error) => return vec![failed(dir, paths, &error, cleanup(&repo, &ours))],
-    };
-    if now.is_empty() {
-        return Vec::new(); // the files already match HEAD
-    }
-    let foreign: Vec<&String> = now.iter().filter(|path| !ours.contains(path)).collect();
-    if !foreign.is_empty() {
-        let cause = format!("staged changes appeared: {}", listed(&foreign));
-        return vec![deferred(dir, paths, &cause, cleanup(&repo, &ours))];
-    }
-    let cause = match git(&repo.toplevel, &["commit", "-q", "-m", message]) {
-        Ok(output) if output.status.success() => return Vec::new(),
-        Ok(output) => cause_of("commit", &output),
-        Err(error) => error.to_string(),
-    };
-    vec![failed(dir, paths, &cause, cleanup(&repo, &ours))]
+        let ours: Vec<String> = paths
+            .iter()
+            .map(|path| prefix.join(path).display().to_string())
+            .collect();
+        let (present, missing): (Vec<&String>, Vec<&String>) = ours
+            .iter()
+            .partition(|path| repo.toplevel.join(path).exists());
+        for (base, group) in [
+            (vec!["add", "-A", "--"], present),
+            (
+                vec!["rm", "--cached", "-q", "-r", "--ignore-unmatch", "--"],
+                missing,
+            ),
+        ] {
+            if group.is_empty() {
+                continue;
+            }
+            let mut args = base;
+            args.extend(group.iter().map(|path| path.as_str()));
+            let cause = match git(&repo.toplevel, &args) {
+                Ok(output) if output.status.success() => continue,
+                Ok(output) => cause_of(args[0], &output),
+                Err(error) => error.to_string(),
+            };
+            return vec![failed(dir, paths, &cause, cleanup(&repo, &ours))];
+        }
+        before_commit();
+        let now = match staged(&repo) {
+            Ok(now) => now,
+            Err(error) => return vec![failed(dir, paths, &error, cleanup(&repo, &ours))],
+        };
+        if now.is_empty() {
+            return Vec::new(); // the files already match HEAD
+        }
+        let foreign: Vec<&String> = now.iter().filter(|path| !ours.contains(path)).collect();
+        if !foreign.is_empty() {
+            let cause = format!("staged changes appeared: {}", listed(&foreign));
+            return vec![deferred(dir, paths, &cause, cleanup(&repo, &ours))];
+        }
+        let expected = match path_blobs(&repo, None, &ours) {
+            Ok(blobs) => blobs,
+            Err(error) => return vec![failed(dir, paths, &error, cleanup(&repo, &ours))],
+        };
+        let output = git(
+            &repo.toplevel,
+            &["-c", "core.abbrev=no", "commit", "-m", message],
+        );
+        after_commit();
+        let output = match output {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
+                return vec![failed(
+                    dir,
+                    paths,
+                    &cause_of("commit", &output),
+                    cleanup(&repo, &ours),
+                )];
+            }
+            Err(error) => {
+                return vec![failed(
+                    dir,
+                    paths,
+                    &error.to_string(),
+                    cleanup(&repo, &ours),
+                )];
+            }
+        };
+        let identified = commit_identity(&output.stdout).filter(|sha| {
+            git(&repo.toplevel, &["cat-file", "-t", sha])
+                .is_ok_and(|out| out.status.success() && out.stdout == b"commit\n")
+                && path_blobs(&repo, Some(sha), &ours).is_ok_and(|blobs| blobs == expected)
+        });
+        match identified {
+            Some(commit) => {
+                committed = Some(Committed {
+                    toplevel: repo.toplevel.clone(),
+                    commit,
+                    paths: ours.iter().map(|path| repo.toplevel.join(path)).collect(),
+                });
+                Vec::new()
+            }
+            None => vec![format!(
+                "commit_failed: {}: commit made but not identified; inspect the commit before retrying",
+                dir.display()
+            )],
+        }
+    })();
+    (warnings, committed)
 }
 
 /// The top level of the working tree `dir` lies in, canonical; `None` outside git or
@@ -442,6 +558,14 @@ struct Tree {
 /// commit (spec §3.2, §3.7). Called by a write command's finishing point while its locks
 /// are still held. Returns the absolute paths it committed.
 pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
+    commit_written_result(warnings).1
+}
+
+pub fn commit_written_report(warnings: &mut Vec<String>) -> Vec<Committed> {
+    commit_written_result(warnings).0
+}
+
+fn commit_written_result(warnings: &mut Vec<String>) -> (Vec<Committed>, BTreeSet<PathBuf>) {
     commit_drained(warnings, |verb, ids, projects| {
         let title = match verb {
             "add" | "feedback" => ids
@@ -471,6 +595,7 @@ pub fn commit_migration(
     commit_drained(warnings, |_, ids, _| {
         migration_message(source, successor, tasks, ids)
     })
+    .1
 }
 
 /// Drains the journal and commits each working tree's share with the message `compose`
@@ -478,11 +603,12 @@ pub fn commit_migration(
 fn commit_drained(
     warnings: &mut Vec<String>,
     compose: impl Fn(&str, &[String], &[crate::repo::Project]) -> String,
-) -> BTreeSet<PathBuf> {
+) -> (Vec<Committed>, BTreeSet<PathBuf>) {
     let written = crate::written::take();
-    let mut committed = BTreeSet::new();
+    let mut committed = Vec::new();
+    let mut paths = BTreeSet::new();
     let Some(verb) = written.verb else {
-        return committed;
+        return (committed, paths);
     };
     let mut trees: BTreeMap<PathBuf, Tree> = BTreeMap::new();
     for (records, paths) in written.roots {
@@ -525,14 +651,27 @@ fn commit_drained(
                     .to_path_buf()
             })
             .collect();
-        let refused = commit_paths(&top, &relative, &compose(verb, &ids, &tree.projects));
-        if refused.is_empty() {
-            committed.extend(tree.absolute);
-        } else {
-            warnings.extend(refused);
+        match state_home() {
+            Ok(state) => {
+                let (refused, report) = commit_paths_report_in(
+                    &top,
+                    &relative,
+                    &compose(verb, &ids, &tree.projects),
+                    &state,
+                    &mut || {},
+                    &mut || {},
+                    git,
+                );
+                if refused.is_empty() {
+                    paths.extend(tree.absolute);
+                }
+                warnings.extend(refused);
+                committed.extend(report);
+            }
+            Err(error) => warnings.push(failed(&top, &relative, &error, None)),
         }
     }
-    committed
+    (committed, paths)
 }
 
 #[cfg(test)]
@@ -685,8 +824,187 @@ mod tests {
             "chore(tasks): note tst-000001",
             state,
             &mut || {},
+            &mut || {},
             isolated_git,
         )
+    }
+
+    fn report(
+        root: &Path,
+        paths: &[PathBuf],
+        after: &mut dyn FnMut(),
+    ) -> (Vec<String>, Option<Committed>) {
+        let state = state_home();
+        commit_paths_report_in(
+            root,
+            paths,
+            "chore(tasks): note tst-000001",
+            state.path(),
+            &mut || {},
+            after,
+            isolated_git,
+        )
+    }
+
+    #[test]
+    fn commit_report_does_not_substitute_head_for_missing_commit_output() {
+        fn without_identity(root: &Path, args: &[&str]) -> std::io::Result<Output> {
+            let mut output = isolated_git(root, args)?;
+            if args.contains(&"commit") && output.status.success() {
+                output.stdout.clear();
+            }
+            Ok(output)
+        }
+        let dir = repo(true);
+        let root = dir.path();
+        let path = write(root, "tasks/tst-000001.md", "record");
+        let state = state_home();
+        let (warnings, result) = commit_paths_report_in(
+            root,
+            &[path],
+            "m",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            without_identity,
+        );
+        assert!(result.is_none());
+        assert!(warnings[0].starts_with("commit_failed:"));
+        assert!(warnings[0].contains("commit made but not identified"));
+        assert_eq!(git(root, &["show", "HEAD:tasks/tst-000001.md"]), "record");
+    }
+
+    #[test]
+    fn commit_report_refuses_a_commit_with_changed_registered_bytes() {
+        let dir = repo(true);
+        let root = dir.path();
+        let path = write(root, "tasks/tst-000001.md", "record");
+        hook(
+            root,
+            "echo different > tasks/tst-000001.md; git add tasks/tst-000001.md",
+        );
+        let (warnings, result) = report(root, &[path], &mut || {});
+        assert!(result.is_none());
+        assert!(warnings[0].contains("commit made but not identified"));
+    }
+
+    #[test]
+    fn commit_report_noop_keeps_existing_committed_path_status() {
+        if std::env::var_os("TASKS_COMMIT_NOOP_TEST").is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap())
+                .env("HOME", home.path())
+                .env("XDG_STATE_HOME", home.path().join("state"))
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("TASKS_COMMIT_NOOP_TEST", "1")
+                .args([
+                    "--exact",
+                    "record_commit::tests::commit_report_noop_keeps_existing_committed_path_status",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let dir = repo(true);
+        let root = dir.path().canonicalize().unwrap();
+        write(
+            &root,
+            "tasks/.config.toml",
+            "prefix = \"tst\"\n[git]\ncommit = true\n",
+        );
+        let rel = write(&root, "tasks/tst-000001.md", "already committed");
+        git(&root, &["add", "tasks"]);
+        git(&root, &["commit", "-q", "-m", "records"]);
+        let before = git(&root, &["rev-parse", "HEAD"]);
+        let path = root.join(rel);
+        crate::written::begin(Some("note"));
+        crate::written::record(&root, &path);
+        let mut warnings = Vec::new();
+        // Feedback uses this membership to tell the user whether the record is committed.
+        assert!(commit_written(&mut warnings).contains(&path));
+        crate::written::record(&root, &path);
+        assert!(commit_written_report(&mut warnings).is_empty());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(git(&root, &["rev-parse", "HEAD"]), before);
+    }
+
+    #[test]
+    fn commit_report_returns_the_commit_it_made() {
+        let dir = repo(true);
+        let root = dir.path();
+        let path = write(root, "tasks/tst-000001.md", "record");
+        let (warnings, result) = report(root, std::slice::from_ref(&path), &mut || {});
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let result = result.unwrap();
+        assert_eq!(result.commit, git(root, &["rev-parse", "HEAD"]).trim());
+        assert_eq!(result.toplevel, root.canonicalize().unwrap());
+        assert_eq!(result.paths, [root.join(path)].into_iter().collect());
+    }
+
+    #[test]
+    fn commit_report_names_its_own_commit_when_head_moves_after_it() {
+        let dir = repo(true);
+        let root = dir.path();
+        let path = write(root, "tasks/tst-000001.md", "record");
+        let (warnings, result) = report(root, &[path], &mut || {
+            write(root, "other", "another writer");
+            git(root, &["add", "other"]);
+            git(root, &["commit", "-q", "-m", "other writer"]);
+        });
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let result = result.unwrap();
+        assert_eq!(result.commit, git(root, &["rev-parse", "HEAD^"]).trim());
+        assert_eq!(
+            git(
+                root,
+                &["show", &format!("{}:tasks/tst-000001.md", result.commit)]
+            ),
+            "record"
+        );
+    }
+
+    #[test]
+    fn commit_report_keeps_hook_behaviour() {
+        let dir = repo(true);
+        let root = dir.path();
+        let path = write(root, "tasks/tst-000001.md", "record");
+        hook(root, "echo generated > generated; git add generated");
+        let (warnings, result) = report(root, std::slice::from_ref(&path), &mut || {});
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(
+            git(
+                root,
+                &["show", "--name-only", "--format=", &result.unwrap().commit]
+            )
+            .contains("generated")
+        );
+        write(root, "tasks/tst-000001.md", "changed");
+        hook(root, "echo hook-refused >&2; exit 1");
+        let (warnings, result) = report(root, &[path], &mut || {});
+        assert!(result.is_none());
+        assert!(warnings[0].contains("hook-refused"), "{warnings:?}");
+    }
+
+    #[test]
+    fn commit_report_identifies_a_root_commit() {
+        let dir = repo(false);
+        let path = write(dir.path(), "tasks/tst-000001.md", "record");
+        let (warnings, result) = report(dir.path(), &[path], &mut || {});
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            result.unwrap().commit,
+            git(dir.path(), &["rev-parse", "HEAD"]).trim()
+        );
     }
 
     #[test]
@@ -772,6 +1090,7 @@ mod tests {
                     write(root, "tasks/ab.txt", "foreign");
                     git(root, &["add", "tasks/ab.txt"]);
                 },
+                &mut || {},
                 isolated_git,
             );
             assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
@@ -948,6 +1267,7 @@ mod tests {
                 std::fs::write(root.join("other.txt"), "x").unwrap();
                 git(root, &["add", "other.txt"]);
             },
+            &mut || {},
             isolated_git,
         );
         assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
@@ -1083,6 +1403,7 @@ mod tests {
                             &message,
                             &state,
                             &mut || {},
+                            &mut || {},
                             isolated_git,
                         );
                         assert_eq!(warnings, Vec::<String>::new());
@@ -1119,6 +1440,7 @@ mod tests {
             &mut || {
                 std::fs::write(&lock, "").unwrap();
             },
+            &mut || {},
             isolated_git,
         );
         std::fs::remove_file(&lock).unwrap();
