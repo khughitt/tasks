@@ -691,16 +691,22 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   sanitize required history. Preserve exact body bytes before shortening a large
   body. Archival reduces active rewrite cost, not total evidence or full-read cost;
   existing cap/layout limits remain in force.
-- A screenshot or file for a task: `tasks attach <id> <path>` (or `-` with `--name`, or
-  `--clipboard`), with `--caption "<what it shows>"`. `tasks show <id>` prints each
+- Screenshots or files for a task: `tasks attach <id> <path> <path>...`, with
+  `--caption "<what they show>"` applied to each file. The batch validates all names,
+  per-file caps, collisions and storage safety before writing, then records one
+  `attached:` note per file in one save/commit. A write/save failure removes all
+  files that call wrote. `--name`, `-` (stdin) and `--clipboard` require one source.
+  JSON returns `files: [{name, path, bytes}, ...]` even for one source, replacing
+  the old `file` object. `tasks show <id>` prints each
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
   After interrupted attachment publication, retry the same name and bytes through
   `tasks attach`, then verify both the live ledger and the payload at the intended
-  Git basis. Same-bytes adoption can repair the audit while leaving the file
-  untracked (tasks-b2bb36). Inspect the pending `tasks/` sweep, resolve unrelated
-  writes, run `tasks commit` when publication is missing, then verify exact bytes
+  Git basis. The retry publishes adopted payloads with the ledger record. With
+  older builds that leave an adopted file untracked, inspect the pending `tasks/`
+  sweep, resolve unrelated writes and run `tasks commit` when publication is
+  missing, then verify exact bytes
   with `git show <basis>:<attachment-path>` in the records repository. A successful
   audit or exit 0 alone does not establish committed evidence.
 - A checker needing an exact local attachment verdict uses

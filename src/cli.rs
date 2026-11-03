@@ -763,13 +763,13 @@ pub enum Command {
     Attach {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        /// The file to copy, or `-` for stdin (which needs --name).
+        /// The files to copy, or a single `-` for stdin (which needs --name).
         #[arg(required_unless_present = "clipboard", conflicts_with = "clipboard")]
-        source: Option<String>,
+        source: Vec<String>,
         /// Read an image from the Wayland clipboard through wl-paste.
         #[arg(long)]
         clipboard: bool,
-        /// The stored name: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
+        /// Single source only: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
         #[arg(long)]
         name: Option<String>,
         /// One line saying what the file shows, kept in the ledger note.

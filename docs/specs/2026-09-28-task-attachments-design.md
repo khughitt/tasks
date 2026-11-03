@@ -90,12 +90,18 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
 
 ### attach
 
+    tasks attach <id> <path>... [--caption <text>]
     tasks attach <id> <path | -> [--name <name>] [--caption <text>]
     tasks attach <id> --clipboard [--name <name>] [--caption <text>]
 
 - **Routing and locking:** routes by the id's prefix and holds the mutation lock
   (`open_id_write_ctx`), like `note`. Any status is accepted, including closed tasks:
   evidence often arrives after the fact.
+- **Batch:** one or more paths, stored separately in source order, with one ledger
+  note per file and a single save/commit. `--caption` applies to every file.
+  `--name`, stdin (`-`) and `--clipboard` refuse multiple sources. Duplicate
+  basenames fail `attachment_exists`. All names, sizes, collisions and storage
+  safety pass before any file is written.
 - **Name:** from a path, the basename unless `--name` is given. From stdin,
   `--name` is required, or the command fails `invalid_attachment_name`. From the
   clipboard, the default is `clipboard-<UTC yyyymmddThhmmssZ>.<ext>`, with the
@@ -112,9 +118,9 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
     stderr;
   - no image type on offer fails `clipboard_no_image`, listing the offered types;
   - an empty image (`wl-paste` exits 0 with zero bytes) fails `clipboard_no_image`.
-- **Write order:** the file is written before the ledger, so a failure never leaves a
-  ledger entry with no file.
-  1. Check storage safety and read the source into memory, up to the cap.
+- **Write order:** all files are written before the ledger is saved, so a failure
+  never leaves a ledger entry with no file.
+  1. Check storage safety and read every source into memory, each up to the cap.
   2. If `<name>` exists and is live in the ledger, fail `attachment_exists`. Otherwise,
      if it exists:
      - Inspect it with `symlink_metadata` before opening it. Anything but a regular
@@ -124,13 +130,15 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
        `attachment_exists`; the detail names the unrecorded file.
      - A regular file with identical bytes skips to step 4: an earlier attach was
        interrupted, and this run finishes it.
-  3. Write the file atomically: a `create_new` temp file `.<name>.tmp-<pid>` in the
-     same directory, fsync, then rename.
-  4. Append the `attached:` ledger note and `save`.
+  3. After every source passes steps 1–2, write each new file atomically: a
+     `create_new` temp file `.<name>.tmp-<pid>` in the same directory, fsync, then
+     rename.
+  4. Save all `attached:` ledger notes together, once.
 
-- **Failures:** if the save fails, the file this run wrote is removed and the error
-  returned; a file written by an earlier run stays, since this run cannot tell it
-  apart. A crash between steps 3 and 4 leaves a file with no ledger entry.
+- **Failures:** if a write or the save fails, every file this call wrote is
+  removed and the error returned; a file written by an earlier run stays. Cleanup
+  errors are appended to the original error. A crash between steps 3 and 4 leaves
+  files with no ledger entries.
   `check` reports it as `attachment_unnoted`, naming the file. Rerunning with the same
   bytes under the same name finishes it. For a path or stdin with `--name`, that is
   the same command. An automatically named clipboard attach picks a new timestamped
@@ -138,8 +146,9 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
   `tasks attach <id> --clipboard --name <name from check>` while the clipboard still
   holds the image, or with `<path> --name <name>` from the original file. Otherwise,
   `detach` the unrecorded file.
-- **Output:** `{"id", "file": {"name", "path", "bytes"}, "warnings"}`, where `path` is
-  absolute. `--pretty` prints the path.
+- **Output:** `{"id", "files": [{"name", "path", "bytes"}, ...], "warnings"}`,
+  including a one-element array for a single source, replacing the former `file`
+  object. Each `path` is absolute. `--pretty` prints one path per line in source order.
 
 ### detach
 

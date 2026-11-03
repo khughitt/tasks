@@ -63,15 +63,177 @@ fn attach_copies_a_file_and_records_a_ledger_note() {
         ],
     );
     assert_eq!(out["id"], id);
-    assert_eq!(out["file"]["name"], "before.png");
-    assert_eq!(out["file"]["bytes"], 9);
+    assert_eq!(out["files"].as_array().unwrap().len(), 1);
+    assert!(out.get("file").is_none());
+    assert_eq!(out["files"][0]["name"], "before.png");
+    assert_eq!(out["files"][0]["bytes"], 9);
     let path = stored(&dir, &id, "before.png");
-    assert_eq!(out["file"]["path"], path.display().to_string());
+    assert_eq!(out["files"][0]["path"], path.display().to_string());
     assert_eq!(std::fs::read(&path).unwrap(), b"png bytes");
     assert_eq!(
         notes(&env, &dir, &id),
         ["attached: before.png (9 bytes): the stale row"]
     );
+}
+
+#[test]
+fn attach_batch_copies_each_file_with_its_own_ledger_note() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    let a = write(&dir.join("scratch/a.png"), b"one");
+    let b = write(&dir.join("scratch/b.txt"), b"second");
+    let out = env.json(
+        &dir,
+        &[
+            "attach",
+            &id,
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+            "--caption",
+            "chosen evidence",
+        ],
+    );
+    assert_eq!(
+        out["files"],
+        serde_json::json!([
+            {"name": "a.png", "path": stored(&dir, &id, "a.png"), "bytes": 3},
+            {"name": "b.txt", "path": stored(&dir, &id, "b.txt"), "bytes": 6}
+        ])
+    );
+    assert_eq!(std::fs::read(stored(&dir, &id, "a.png")).unwrap(), b"one");
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, "b.txt")).unwrap(),
+        b"second"
+    );
+    assert_eq!(
+        notes(&env, &dir, &id),
+        [
+            "attached: a.png (3 bytes): chosen evidence",
+            "attached: b.txt (6 bytes): chosen evidence"
+        ]
+    );
+}
+
+#[test]
+fn attach_batch_preflights_every_source_before_writing() {
+    for (case, expected) in [
+        ("duplicate", "attachment_exists"),
+        ("oversize", "attachment_too_large"),
+        ("invalid-name", "invalid_attachment_name"),
+        ("missing", "io"),
+        ("collision", "attachment_exists"),
+        ("live", "attachment_exists"),
+    ] {
+        let mut env = TestEnv::new();
+        let dir = env.init("dot");
+        set_cap(&dir, 4);
+        let id = id_of(env.json(&dir, &["add", "T"]));
+        let a = write(&dir.join("scratch/a.txt"), b"one");
+        let b = match case {
+            "duplicate" => write(&dir.join("other/a.txt"), b"two"),
+            "oversize" => write(&dir.join("scratch/b.txt"), b"large"),
+            "invalid-name" => write(&dir.join("scratch/bad name"), b"two"),
+            "missing" => dir.join("scratch/missing.txt"),
+            "collision" | "live" => {
+                write(&stored(&dir, &id, "b.txt"), b"old");
+                write(&dir.join("scratch/b.txt"), b"new")
+            }
+            _ => unreachable!(),
+        };
+        if case == "live" {
+            env.json(
+                &dir,
+                &["attach", &id, stored(&dir, &id, "b.txt").to_str().unwrap()],
+            );
+        }
+        let record = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&record).unwrap();
+        assert_eq!(
+            env.fail(
+                &dir,
+                &["attach", &id, a.to_str().unwrap(), b.to_str().unwrap()]
+            ),
+            expected,
+            "{case}"
+        );
+        assert!(!stored(&dir, &id, "a.txt").exists(), "{case}");
+        assert_eq!(std::fs::read(&record).unwrap(), before, "{case}");
+        if case == "collision" || case == "live" {
+            assert_eq!(std::fs::read(stored(&dir, &id, "b.txt")).unwrap(), b"old");
+        } else {
+            assert!(!dir.join("tasks/files").exists(), "{case}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn attach_batch_refuses_an_unsafe_later_target_without_writing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    let a = write(&dir.join("scratch/a.txt"), b"one");
+    let b = write(&dir.join("scratch/b.txt"), b"two");
+    let target = stored(&dir, &id, "b.txt");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&b, &target).unwrap();
+    assert_eq!(
+        env.fail(
+            &dir,
+            &["attach", &id, a.to_str().unwrap(), b.to_str().unwrap()]
+        ),
+        "attachment_unsafe"
+    );
+    assert!(!stored(&dir, &id, "a.txt").exists());
+    assert!(target.is_symlink());
+    assert_eq!(std::fs::read(b).unwrap(), b"two");
+    assert!(notes(&env, &dir, &id).is_empty());
+}
+
+#[test]
+fn attach_batch_pretty_prints_one_path_per_source_in_order() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    let a = write(&dir.join("scratch/z.txt"), b"one");
+    let b = write(&dir.join("scratch/a.txt"), b"two");
+    let out = env.pretty(
+        &dir,
+        &["attach", &id, a.to_str().unwrap(), b.to_str().unwrap()],
+    );
+    assert_eq!(
+        out,
+        format!(
+            "{}\n{}\n",
+            stored(&dir, &id, "z.txt").display(),
+            stored(&dir, &id, "a.txt").display()
+        )
+    );
+}
+
+#[test]
+fn attach_batch_refuses_single_source_options_before_reading() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    // Missing paths ensure restrictions are checked before opening a source.
+    assert_eq!(
+        env.fail(&dir, &["attach", &id, "a", "b", "--name", "chosen.txt"]),
+        "validation"
+    );
+    for paths in [["-", "a"], ["a", "-"], ["-", "-"]] {
+        assert_eq!(
+            env.fail(
+                &dir,
+                &["attach", &id, paths[0], paths[1], "--name", "stdin.txt"]
+            ),
+            "validation"
+        );
+    }
+    env.usage(&dir, &["attach", &id, "a", "b", "--clipboard"]);
+    assert!(!dir.join("tasks/files").exists());
+    assert!(notes(&env, &dir, &id).is_empty());
 }
 
 #[test]
@@ -312,13 +474,27 @@ fn attach_removes_its_file_when_the_save_fails_and_keeps_an_earlier_one() {
     let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
     let earlier = write(&stored(&dir, &id, "earlier.png"), b"earlier");
     let source = write(&dir.join("scratch/new.png"), b"new");
+    let second = write(&dir.join("scratch/second.png"), b"second");
     let tasks = dir.join("tasks");
     std::fs::set_permissions(&tasks, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let kind = env.fail(&dir, &["attach", &id, source.to_str().unwrap()]);
+    let kind = env.fail(
+        &dir,
+        &[
+            "attach",
+            &id,
+            earlier.to_str().unwrap(),
+            source.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ],
+    );
+    let adopted_kind = env.fail(&dir, &["attach", &id, earlier.to_str().unwrap()]);
     std::fs::set_permissions(&tasks, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(kind, "io");
+    assert_eq!(adopted_kind, "io");
     assert!(!stored(&dir, &id, "new.png").exists());
-    assert!(earlier.is_file());
+    assert!(!stored(&dir, &id, "second.png").exists());
+    assert_eq!(std::fs::read(earlier).unwrap(), b"earlier");
+    assert!(notes(&env, &dir, &id).is_empty());
 }
 
 #[cfg(unix)]
@@ -538,7 +714,7 @@ fn clipboard_attach_reads_the_preferred_image_type() {
     );
     assert!(out.status.success(), "{out:?}");
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let name = v["file"]["name"].as_str().unwrap().to_string();
+    let name = v["files"][0]["name"].as_str().unwrap().to_string();
     assert!(
         name.starts_with("clipboard-") && name.ends_with("Z.png"),
         "{name}"

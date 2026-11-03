@@ -419,6 +419,7 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt or held-need override
     tasks note sci-4f2a9c "spec §4 no longer holds"
     tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
+    tasks attach sci-4f2a9c before.png after.png --caption "comparison"  # one save, separate files
     tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name
     tasks detach sci-4f2a9c before.png "wrong screenshot"  # recorded; uncommitted bytes are gone
     tasks done sci-91be03 "rows emitted"
@@ -1089,6 +1090,16 @@ Over-cap transport remains tasks-b81063. A body-dominant record can stay above
 its warning threshold after archival; preserve its exact body before editing it.
 
 ### Attachments
+
+`tasks attach <id> <path> <path>...` stores each file separately, with one
+`attached:` ledger note per file and one record save/commit for the batch.
+`--caption` applies to every file. All names, per-file sizes, collisions (including
+duplicate basenames) and storage safety are checked before any file is written.
+A write or save failure removes every file written by that call; pre-existing
+files remain. `--name`, `-` (stdin) and `--clipboard` require a single source.
+JSON always returns `files: [{name, path, bytes}, ...]`, including one element for
+a single source; this replaces the former `file` object. `--pretty` prints one
+absolute path per line, in source order.
 
 Attachments live in `tasks/files/<id>/`, one directory per task, committed with the
 record. Each file is capped at 2 MiB unless tasks/.config.toml sets
