@@ -35,6 +35,7 @@ pub struct ValidatorRun {
 struct Sweep {
     cleaned: Vec<u32>,
     survivors: Vec<u32>,
+    incomplete: Option<String>,
 }
 #[cfg(test)]
 static SUBREAPER_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -87,9 +88,9 @@ pub fn run_declared(
                 run.outcome = "unavailable";
                 append_error(&mut run, &error.to_string());
             }
-            let survivors = !run.survivors.is_empty();
+            let unavailable = run.outcome == "unavailable";
             runs.push(run);
-            if survivors {
+            if unavailable {
                 break;
             }
         }
@@ -168,7 +169,7 @@ fn subreaper() -> io::Result<()> {
     }
 }
 
-fn existing_stat(result: io::Result<String>) -> io::Result<Option<String>> {
+fn existing_stat(result: io::Result<Vec<u8>>) -> io::Result<Option<Vec<u8>>> {
     match result {
         Ok(stat) => Ok(Some(stat)),
         // procfs returns ESRCH when the process exits between open and read.
@@ -180,6 +181,21 @@ fn existing_stat(result: io::Result<String>) -> io::Result<Option<String>> {
         }
         Err(error) => Err(error),
     }
+}
+
+fn parent_pid(stat: &[u8]) -> io::Result<u32> {
+    let name_end = stat
+        .iter()
+        .rposition(|byte| *byte == b')')
+        .ok_or_else(|| io::Error::other("invalid /proc stat"))?;
+    // Linux comm is arbitrary bytes; only the fields after its final ')' are text.
+    let fields = std::str::from_utf8(&stat[name_end + 1..])
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    fields
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u32>().ok())
+        .ok_or_else(|| io::Error::other("invalid /proc parent pid"))
 }
 
 fn children() -> io::Result<Vec<u32>> {
@@ -194,18 +210,10 @@ fn children() -> io::Result<Vec<u32>> {
         else {
             continue;
         };
-        let Some(stat) = existing_stat(fs::read_to_string(entry.path().join("stat")))? else {
+        let Some(stat) = existing_stat(fs::read(entry.path().join("stat")))? else {
             continue;
         };
-        let fields = stat
-            .rsplit_once(')')
-            .ok_or_else(|| io::Error::other("invalid /proc stat"))?
-            .1;
-        let ppid = fields
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse::<u32>().ok())
-            .ok_or_else(|| io::Error::other("invalid /proc parent pid"))?;
+        let ppid = parent_pid(&stat)?;
         if ppid == parent {
             children.push(pid);
         }
@@ -215,19 +223,28 @@ fn children() -> io::Result<Vec<u32>> {
 }
 
 fn sweep(
-    mut list_children: impl FnMut() -> Vec<u32>,
+    mut list_children: impl FnMut() -> io::Result<Vec<u32>>,
     mut kill: impl FnMut(u32),
     mut try_reap: impl FnMut(u32) -> bool,
+    mut known: Vec<u32>,
     deadline: Duration,
 ) -> Sweep {
     let start = Instant::now();
     let mut cleaned = std::collections::BTreeSet::new();
     loop {
-        let current = list_children();
-        if current.is_empty() {
+        let incomplete = match list_children() {
+            Ok(pids) => {
+                known = pids;
+                None
+            }
+            Err(error) => Some(error.to_string()),
+        };
+        let current = known.clone();
+        if current.is_empty() && incomplete.is_none() {
             return Sweep {
                 cleaned: cleaned.into_iter().collect(),
                 survivors: Vec::new(),
+                incomplete: None,
             };
         }
         if start.elapsed() >= deadline {
@@ -237,12 +254,14 @@ fn sweep(
                     .filter(|pid| !current.contains(pid))
                     .collect(),
                 survivors: current,
+                incomplete,
             };
         }
         for pid in current {
             kill(pid);
             if try_reap(pid) {
                 cleaned.insert(pid);
+                known.retain(|child| *child != pid);
             }
         }
         thread::sleep(POLL.min(deadline.saturating_sub(start.elapsed())));
@@ -259,6 +278,15 @@ fn append_error(run: &mut ValidatorRun, message: &str) {
 fn report_survivors(run: &mut ValidatorRun, result: Sweep) {
     run.cleaned = result.cleaned;
     run.survivors = result.survivors;
+    if let Some(error) = result.incomplete {
+        run.outcome = "unavailable";
+        append_error(
+            run,
+            &format!(
+                "cleanup incomplete: child discovery failed: {error}; additional surviving PIDs are unknown"
+            ),
+        );
+    }
     if !run.survivors.is_empty() {
         run.outcome = "unavailable";
         let pids = run
@@ -393,19 +421,8 @@ fn execute(
     unsafe {
         libc::killpg(leader as i32, libc::SIGKILL);
     }
-    let mut scan_error = None;
-    let unreaped = std::cell::RefCell::new(vec![leader]);
     let result = sweep(
-        || match children() {
-            Ok(pids) => {
-                *unreaped.borrow_mut() = pids.clone();
-                pids
-            }
-            Err(error) => {
-                scan_error = Some(error);
-                unreaped.borrow().clone()
-            }
-        },
+        children,
         |pid| unsafe {
             libc::kill(pid as i32, libc::SIGKILL);
         },
@@ -413,7 +430,6 @@ fn execute(
             let mut status = 0;
             let result = unsafe { libc::waitpid(pid as i32, &mut status, libc::WNOHANG) };
             if result == pid as i32 {
-                unreaped.borrow_mut().retain(|child| *child != pid);
                 if pid == leader && libc::WIFEXITED(status) {
                     run.exit = Some(libc::WEXITSTATUS(status));
                 }
@@ -422,18 +438,36 @@ fn execute(
                 false
             }
         },
+        vec![leader],
         Duration::from_secs(5),
     );
+    let complete = result.incomplete.is_none() && result.survivors.is_empty();
     report_survivors(run, result);
     run.cleaned.retain(|pid| *pid != leader);
+    if let Err(error) = finish_io(run, threads, complete, Duration::from_secs(5)) {
+        failure = Some(error);
+    }
+    fs::remove_dir_all(&home.0)?;
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn finish_io(
+    run: &mut ValidatorRun,
+    threads: Vec<IoThread>,
+    complete: bool,
+    deadline: Duration,
+) -> io::Result<()> {
+    let mut failure = None;
     let join_start = Instant::now();
-    while threads.iter().any(|(_, handle)| !handle.is_finished())
-        && join_start.elapsed() < Duration::from_secs(5)
+    while threads.iter().any(|(_, handle)| !handle.is_finished()) && join_start.elapsed() < deadline
     {
         thread::sleep(POLL);
     }
     for (name, handle) in threads {
-        if !handle.is_finished() && !run.survivors.is_empty() {
+        if !handle.is_finished() && !complete {
             run.outcome = "unavailable";
             append_error(
                 run,
@@ -462,11 +496,10 @@ fn execute(
             }
         }
     }
-    fs::remove_dir_all(&home.0)?;
-    if let Some(error) = failure.or(scan_error) {
-        return Err(error);
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -492,9 +525,129 @@ mod tests {
     }
 
     #[test]
+    fn process_parent_does_not_require_a_utf8_name() {
+        assert_eq!(parent_pid(b"123 (validator-\xff) S 42 1 2 3").unwrap(), 42);
+        assert_eq!(parent_pid(b"123 (val) \xff) S 42 1 2 3").unwrap(), 42);
+        assert!(parent_pid(b"123 (name) S nope").is_err());
+    }
+
+    #[test]
+    fn failed_scans_after_reaping_the_known_leader_are_not_empty_cleanup() {
+        let mut scans = 0;
+        let mut signalled = Vec::new();
+        let start = Instant::now();
+        let result = sweep(
+            || {
+                scans += 1;
+                Err(io::Error::other("injected scan failure"))
+            },
+            |pid| signalled.push(pid),
+            |_| true,
+            vec![4242],
+            Duration::from_millis(35),
+        );
+        assert!(start.elapsed() >= Duration::from_millis(35));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(scans >= 3);
+        assert_eq!(signalled, [4242]);
+        assert_eq!(result.cleaned, [4242]);
+        assert!(result.survivors.is_empty());
+        assert!(result.incomplete.unwrap().contains("injected scan failure"));
+    }
+
+    #[test]
+    fn a_complete_scan_can_establish_cleanup_after_discovery_recovers() {
+        let mut scans = 0;
+        let cleanup = sweep(
+            || {
+                scans += 1;
+                if scans < 3 {
+                    Err(io::Error::other("temporary scan failure"))
+                } else {
+                    Ok(vec![])
+                }
+            },
+            |_| {},
+            |_| true,
+            vec![4242],
+            Duration::from_secs(1),
+        );
+        assert_eq!(scans, 3);
+        assert!(cleanup.incomplete.is_none());
+        assert!(cleanup.survivors.is_empty());
+        assert_eq!(cleanup.cleaned, [4242]);
+    }
+
+    #[test]
+    fn incomplete_cleanup_reports_and_detaches_an_unfinished_pipe_reader() {
+        let (reader, writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let result = drain(reader);
+            finished_tx.send(()).unwrap();
+            result
+        });
+        // The fallback release bounds the RED test even if production joins blindly.
+        let (release_tx, release_rx) = mpsc::channel();
+        let holder = thread::spawn(move || {
+            let _ = release_rx.recv_timeout(Duration::from_millis(300));
+            drop(writer);
+        });
+        let mut run = report(&spec("true"), "a.txt", Path::new("/"));
+        run.outcome = "passed";
+        let start = Instant::now();
+        let mut scans = 0;
+        let mut signalled = Vec::new();
+        let cleanup = sweep(
+            || {
+                scans += 1;
+                Err(io::Error::other("injected scan failure"))
+            },
+            |pid| signalled.push(pid),
+            |_| true,
+            vec![4242],
+            Duration::from_millis(35),
+        );
+        let complete = cleanup.incomplete.is_none() && cleanup.survivors.is_empty();
+        report_survivors(&mut run, cleanup);
+        let result = finish_io(
+            &mut run,
+            vec![("stdout", reader)],
+            complete,
+            Duration::from_millis(20),
+        );
+        let elapsed = start.elapsed();
+        let _ = release_tx.send(());
+        holder.join().unwrap();
+        finished_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        result.unwrap();
+        assert!(scans >= 3);
+        assert_eq!(signalled, [4242]);
+        assert!(!complete);
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "blocked for {elapsed:?}"
+        );
+        assert_eq!(run.outcome, "unavailable");
+        assert!(run.stderr.contains("cleanup incomplete"), "{}", run.stderr);
+        assert!(run.stderr.contains("unknown"), "{}", run.stderr);
+        assert!(
+            run.stderr.contains("detached validator-stdout"),
+            "{}",
+            run.stderr
+        );
+    }
+
+    #[test]
     fn sweep_reports_unkillable_survivors() {
         let start = Instant::now();
-        let result = sweep(|| vec![4242], |_| {}, |_| false, Duration::from_millis(30));
+        let result = sweep(
+            || Ok(vec![4242]),
+            |_| {},
+            |_| false,
+            vec![],
+            Duration::from_millis(30),
+        );
         assert_eq!(result.survivors, [4242]);
         assert!(result.cleaned.is_empty());
         let mut run = report(&spec("true"), "a.txt", Path::new("/"));
@@ -509,12 +662,13 @@ mod tests {
         let mut polls = 0;
         let start = Instant::now();
         sweep(
-            || vec![4242],
+            || Ok(vec![4242]),
             |_| {},
             |_| {
                 polls += 1;
                 false
             },
+            vec![],
             Duration::from_millis(35),
         );
         assert!(polls >= 3);
@@ -647,6 +801,7 @@ mod tests {
         validator_descendants_holding_pipes_are_killed,
         validator_setsid_and_double_fork_descendants_are_cleaned,
         subreaper_is_set_once,
+        non_utf8_validator_and_setsid_descendant_are_cleaned,
         validation_refuses_when_foreign_children_exist,
     );
 
@@ -759,10 +914,13 @@ mod tests {
                 assert_eq!(value.validators[0].outcome, "timeout");
                 assert!(start.elapsed() < Duration::from_secs(3));
                 let value = run_declared(
-                    &[ValidatorSpec {
-                        glob: "*".into(),
-                        command: vec!["/definitely/missing".into()],
-                    }],
+                    &[
+                        ValidatorSpec {
+                            glob: "*".into(),
+                            command: vec!["/definitely/missing".into()],
+                        },
+                        spec("touch should-not-run"),
+                    ],
                     b"",
                     dir.path(),
                     "a.txt",
@@ -770,6 +928,8 @@ mod tests {
                     normal,
                 );
                 assert_eq!(value.validators[0].outcome, "unavailable");
+                assert_eq!(value.validators.len(), 1);
+                assert!(!dir.path().join("should-not-run").exists());
             }
             "validator_output_is_capped_and_unread_stdin_does_not_hang" => {
                 let start = Instant::now();
@@ -816,6 +976,17 @@ mod tests {
                     assert_descendants_gone(&dir, &value);
                     fs::remove_file(dir.path().join("pids")).unwrap();
                 }
+            }
+            "non_utf8_validator_and_setsid_descendant_are_cleaned" => {
+                let code = r#"import ctypes; assert ctypes.CDLL(None).prctl(15, b'validator-\xff', 0, 0, 0) == 0; assert b'\xff' in open('/proc/self/stat','rb').read()"#;
+                let value = run(&dir, &format!("exec python3 -c \"{code}\""), b"", normal);
+                assert!(value.passed, "{}", serde_json::to_string(&value).unwrap());
+                let code = r#"import ctypes,os,time; p=os.fork(); p and os._exit(0); os.setsid(); assert ctypes.CDLL(None).prctl(15, b'validator-\xff', 0, 0, 0) == 0; assert b'\xff' in open('/proc/self/stat','rb').read(); open('pids','w').write(str(os.getpid())); time.sleep(2)"#;
+                let script =
+                    format!("python3 -c \"{code}\"; while test ! -s pids; do sleep 0.01; done");
+                let value = run(&dir, &script, b"", normal);
+                assert_descendants_gone(&dir, &value);
+                assert!(value.passed, "{}", serde_json::to_string(&value).unwrap());
             }
             "subreaper_is_set_once" => {
                 assert!(run(&dir, "true", b"", normal).passed);
