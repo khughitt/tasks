@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "retained-operation.schema.json#/$defs/CheckpointRequest"
+    },
+    {
+      "$ref": "retained-operation.schema.json#/$defs/TransferRequest"
+    },
+    {
+      "$ref": "retained-operation.schema.json#/$defs/ReconcileRequest"
+    }
+  ]
+}
