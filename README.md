@@ -975,9 +975,36 @@ operation-metadata reads. These counters exclude Git's private I/O; hash and
 history channels may overlap. Count CLI invocations and actual UTF-8 stdout
 separately when comparing caller context.
 
-The `transfer` and `reconcile` interfaces still refuse publication in this
-intermediate build. Do not install it before full delivery and envelope-consumer
-acceptance.
+### Retained transfers
+
+`tasks retained transfer <from> <to> --request <path>` transfers custody of selected
+identities while leaving their bytes in place. Both tasks must be open and claimed
+by the acting session. Its request has `version: 1`, `operation_id`, the current
+`host`, two exact `inputs` in sender/receiver order, nonempty `items` containing
+sender `{host, kind, path}` identities, and receiving `purpose` and `cleanup_trigger`.
+Use another operation for items needing different terms. A receiver identity already
+present is a conflict, including equal hashes. Selecting a container leaves its
+independent child identities and their owners unchanged.
+
+The command publishes both intents, fully verifies current and referenced prior
+bytes, commits receiver kept records, revalidates both histories and attachment
+bytes, and rechecks payloads before a separate sender release commit. Same-repository
+transfers retain that ordering. Cross-project worktrees use their verified absolute
+host path on the receiver; other identity spellings stay unchanged. Sender release
+purpose is exactly `Transferred to <receiver-task-id>; custody transferred and bytes remain in place`.
+The release note timestamp is strictly after every committed receiving kept note
+and the previous sender update, including future-dated receiver notes.
+
+A failure before release keeps sender custody and durable pending evidence. Retry
+the original request; a committed release needs only its missing final receipts,
+including when bytes later become unavailable. Completed replay returns historical
+publication references and participant counts from the original completed bases.
+Transfer counts describe recorded local identities on both participants; only the
+selected identities receive fresh byte inspection. They are not a host checkpoint.
+No copying, deletion, automatic closure or assignment of independent children occurs.
+
+The `reconcile` interface still refuses publication in this intermediate build.
+Do not install it before full delivery and envelope-consumer acceptance.
 
 ### Note archives
 

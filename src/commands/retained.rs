@@ -59,10 +59,23 @@ pub fn checkpoint(dir: Option<&Path>, id: String, request: PathBuf) -> Result<Ou
 }
 pub fn transfer(dir: Option<&Path>, from: String, to: String, request: PathBuf) -> Result<Output> {
     let ctx = open_id_ctx(dir, &from)?;
-    let _target = open_id_ctx(dir, &to)?;
-    let r: TransferRequest = decode_request(&request_bytes(&ctx, &request)?)?;
+    let from = parse_id(&ctx.registry, &ctx.shorthand, &from)?.to_string();
+    let target = open_id_ctx(dir, &to)?;
+    let to = parse_id(&target.registry, &target.shorthand, &to)?.to_string();
+    let bytes = request_bytes(&ctx, &request)?;
+    let r: TransferRequest = decode_request(&bytes)?;
     r.validate()?;
-    unavailable()
+    if r.inputs[0].task != from || r.inputs[1].task != to {
+        return Err(invalid("transfer arguments differ from request inputs"));
+    }
+    let key = OperationKey {
+        coordinator: from.clone(),
+        operation_id: r.operation_id.clone(),
+    };
+    let operation = crate::retained::publish::open(dir, &[from, to], &key)?;
+    Ok(Output::RetainedMutation(crate::retained::transfer::run(
+        operation, r, &bytes,
+    )?))
 }
 pub fn reconcile(dir: Option<&Path>, coordinator: String, request: PathBuf) -> Result<Output> {
     let ctx = open_id_ctx(dir, &coordinator)?;

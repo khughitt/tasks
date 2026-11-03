@@ -733,3 +733,666 @@ fn retained_checkpoint_rechecks_preserved_directory_versions() {
         "accounted_unknown"
     );
 }
+
+fn transfer_fixture() -> (RetainedEnv, String, std::path::PathBuf) {
+    let f = checkpoint_fixture();
+    let random = f.json(&["add", "Receiver"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let to = "sci-000002".to_string();
+    let path = f.records.join(format!("tasks/{random}.md"));
+    let bytes = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace(&random, &to);
+    std::fs::remove_file(path).unwrap();
+    std::fs::write(f.records.join(format!("tasks/{to}.md")), bytes).unwrap();
+    common::git(&f.records, &["add", "tasks"]);
+    common::git(&f.records, &["commit", "-qm", "fixed receiver identity"]);
+    f.json(&["start", &to]);
+    let file = f.dir.join("payload");
+    std::fs::write(&file, "payload").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 1, json!([declaration(&file, "evidence")])),
+    );
+    (f, to, file)
+}
+fn transfer_request(f: &RetainedEnv, to: &str) -> serde_json::Value {
+    json!({"version":1,"operation_id":"a".repeat(32),"host":host(),"inputs":[{"task":f.id,"basis":f.state()["basis"]},{"task":to,"basis":f.json(&["retained","state",to])["basis"]}],"items":[f.state()["items"][0]["identity"]],"purpose":"Continue review","cleanup_trigger":"Review and disposition complete"})
+}
+fn transfer(f: &RetainedEnv, to: &str, request: &serde_json::Value) -> serde_json::Value {
+    let path = f.request("transfer.json", request);
+    f.json(&[
+        "retained",
+        "transfer",
+        &f.id,
+        to,
+        "--request",
+        path.to_str().unwrap(),
+    ])
+}
+#[test]
+fn retained_transfer_time_and_purpose() {
+    for future in [false, true] {
+        let (f, to, _file) = transfer_fixture();
+        if future {
+            let p = f.records.join(format!("tasks/{to}.md"));
+            let mut bytes = std::fs::read_to_string(&p).unwrap();
+            let start = bytes.find("updated: ").unwrap() + "updated: ".len();
+            let end = start + bytes[start..].find('\n').unwrap();
+            bytes.replace_range(start..end, "2100-01-01T00:00:00Z");
+            std::fs::write(&p, bytes).unwrap();
+            common::git(&f.records, &["add", "tasks"]);
+            common::git(&f.records, &["commit", "-qm", "future receiver floor"]);
+        }
+        let old = f.json(&["show", &f.id])["task"]["updated"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let result = transfer(&f, &to, &transfer_request(&f, &to));
+        assert_eq!(result["outcome"], "transferred");
+        let sender = f.json(&["show", &f.id]);
+        let receiver = f.json(&["show", &to]);
+        let note = |task: &serde_json::Value, state: &str| {
+            task["task"]["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|n| {
+                    n["text"].as_str().is_some_and(|t| {
+                        t.starts_with("retained: ")
+                            && serde_json::from_str::<serde_json::Value>(&t[10..]).unwrap()["state"]
+                                == state
+                    })
+                })
+                .unwrap()
+                .clone()
+        };
+        let released = note(&sender, "released");
+        let kept = note(&receiver, "kept");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&released["text"].as_str().unwrap()[10..]).unwrap();
+        assert_eq!(
+            parsed["purpose"],
+            "Transferred to sci-000002; custody transferred and bytes remain in place"
+        );
+        assert!(released["at"].as_str().unwrap() > kept["at"].as_str().unwrap());
+        assert!(released["at"].as_str().unwrap() > old.as_str());
+        assert!(sender["task"]["updated"].as_str().unwrap() >= released["at"].as_str().unwrap());
+        assert_eq!(parsed["next_owner"], "none");
+        assert!(parsed.get("sha256").is_none());
+    }
+}
+#[test]
+fn retained_transfer_same_repo() {
+    let (f, to, file) = transfer_fixture();
+    f.check_hook();
+    let request = transfer_request(&f, &to);
+    let result = transfer(&f, &to, &request);
+    let publications = result["publications"].as_array().unwrap();
+    let receiver = publications
+        .iter()
+        .find(|p| p["task"] == to && p["phase"] == "receiver_published")
+        .unwrap();
+    let sender = publications
+        .iter()
+        .find(|p| p["task"] == f.id && p["phase"] == "sender_released")
+        .unwrap();
+    assert_ne!(receiver["basis"]["commit"], sender["basis"]["commit"]);
+    let out = common::git_fixture::command(f.env.home.path(), &f.records)
+        .args([
+            "merge-base",
+            "--is-ancestor",
+            receiver["basis"]["commit"].as_str().unwrap(),
+            sender["basis"]["commit"].as_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(std::fs::read(&file).unwrap(), b"payload");
+    assert_eq!(f.state()["items"][0]["record"]["state"], "released");
+    assert_eq!(
+        f.json(&["retained", "state", &to])["items"][0]["record"]["next_owner"],
+        format!("task:{to}")
+    );
+    let before = f.basis();
+    std::fs::remove_file(file).unwrap();
+    let replay = transfer(&f, &to, &request);
+    assert_eq!(replay["publications"], result["publications"]);
+    assert!(!replay["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(f.basis(), before);
+}
+#[test]
+fn retained_transfer_conflict() {
+    let (mut f, to, _) = transfer_fixture();
+    let record = f.state()["items"][0]["record"].clone();
+    let sender = f.id.clone();
+    f.id = to.clone();
+    f.note(record);
+    f.id = sender;
+    let request = transfer_request(&f, &to);
+    let before = f.basis();
+    let path = f.request("transfer.json", &request);
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            &to,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(
+        f.basis(),
+        before,
+        "conflicts are refused before durable intent"
+    );
+}
+#[test]
+fn retained_transfer_retry() {
+    for boundary in [
+        "intent",
+        "save:intent",
+        "commit:intent",
+        "receiver_intent",
+        "save:receiver_published",
+        "commit:receiver_published",
+        "receiver_published",
+        "save:sender_released",
+        "sender_released",
+        "commit:sender_released",
+        "commit:completed",
+        "completed",
+    ] {
+        let (f, to, _) = transfer_fixture();
+        f.check_hook();
+        let request = transfer_request(&f, &to);
+        let path = f.request("transfer.json", &request);
+        let out = f
+            .cmd()
+            .env("TASKS_RETAINED_STOP_AFTER", boundary)
+            .args([
+                "retained",
+                "transfer",
+                &f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{boundary}");
+        let result = transfer(&f, &to, &request);
+        assert_eq!(result["outcome"], "transferred", "{boundary}");
+        for (id, state) in [(&f.id, "released"), (&to, "kept")] {
+            let task = f.json(&["show", id]);
+            let count = task["task"]["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|n| {
+                    n["text"].as_str().is_some_and(|t| {
+                        t.starts_with("retained: ")
+                            && serde_json::from_str::<serde_json::Value>(&t[10..]).unwrap()["state"]
+                                == state
+                    })
+                })
+                .count();
+            assert_eq!(count, 1, "{boundary} {id}");
+        }
+    }
+}
+#[test]
+fn retained_transfer_changed_before_release() {
+    let (f, to, file) = transfer_fixture();
+    let request = transfer_request(&f, &to);
+    let path = f.request("transfer.json", &request);
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "receiver_published")
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            &to,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    std::fs::write(file, "tampered").unwrap();
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            &to,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(f.state()["items"][0]["record"]["state"], "kept");
+    assert_eq!(
+        f.json(&["retained", "state", &to])["items"][0]["record"]["state"],
+        "kept"
+    );
+}
+
+fn cross_receiver(f: &RetainedEnv, shared: bool) -> (std::path::PathBuf, String) {
+    let root = f.dir.parent().unwrap().join("other");
+    std::fs::create_dir(&root).unwrap();
+    common::git(&root, &["init", "-qb", "main"]);
+    common::git_fixture::assert_repo(f.env.home.path(), &root);
+    let mut args = vec!["-C", root.to_str().unwrap(), "init", "--prefix", "fam"];
+    if shared {
+        args.extend(["--records", f.records.to_str().unwrap()]);
+    }
+    f.json(&args);
+    let records = if shared {
+        f.records.join("fam")
+    } else {
+        root.clone()
+    };
+    let path = records.join("tasks/.config.toml");
+    let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    config.as_table_mut().unwrap().insert(
+        "git".into(),
+        toml::Value::Table(toml::map::Map::from_iter([(
+            "commit".into(),
+            toml::Value::Boolean(true),
+        )])),
+    );
+    std::fs::write(path, toml::to_string(&config).unwrap()).unwrap();
+    common::git(&records, &["add", "."]);
+    common::git(&records, &["commit", "-qm", "receiver configuration"]);
+    let to = f.json(&["add", "Foreign receiver", "--project", "fam"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &to]);
+    (root, to)
+}
+#[test]
+fn retained_transfer_cross_repo() {
+    for shared in [false, true] {
+        let (f, _, file) = transfer_fixture();
+        let (_root, to) = cross_receiver(&f, shared);
+        let result = transfer(&f, &to, &transfer_request(&f, &to));
+        assert_eq!(result["outcome"], "transferred");
+        assert_eq!(
+            f.json(&["retained", "state", &to])["items"][0]["record"]["path"],
+            file.to_str().unwrap()
+        );
+        assert_eq!(std::fs::read(file).unwrap(), b"payload");
+    }
+}
+#[test]
+fn retained_transfer_foreign_worktree() {
+    let (f, _, _) = transfer_fixture();
+    let (_root, to) = cross_receiver(&f, false);
+    std::fs::write(f.dir.join(".gitignore"), ".worktrees/\n").unwrap();
+    common::git(&f.dir, &["add", ".gitignore"]);
+    common::git(&f.dir, &["commit", "-qm", "worktree fixture"]);
+    let tree = f.dir.join(".worktrees/source");
+    common::git(
+        &f.dir,
+        &["worktree", "add", "-qb", "source", tree.to_str().unwrap()],
+    );
+    common::git_fixture::assert_worktree(f.env.home.path(), &f.dir, &tree);
+    let mut request = checkpoint_request(
+        &f,
+        2,
+        json!([{"kind":"worktree","path":".worktrees/source","purpose":"Review branch","cleanup_trigger":"Branch integrated"}]),
+    );
+    checkpoint(&f, &request);
+    request = transfer_request(&f, &to);
+    let source = f.state()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["kind"] == "worktree")
+        .unwrap()
+        .clone();
+    request["items"] = json!([source["identity"]]);
+    assert_eq!(transfer(&f, &to, &request)["outcome"], "transferred");
+    let state = f.json(&["retained", "state", &to]);
+    assert_eq!(
+        state["items"][0]["record"]["path"],
+        tree.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert!(state["items"][0]["record"].get("sha256").is_none());
+}
+#[test]
+fn retained_transfer_exception() {
+    let (f, to, _) = transfer_fixture();
+    let tree = f.dir.join("tree");
+    std::fs::create_dir(&tree).unwrap();
+    let child = tree.join("report");
+    std::fs::write(&child, "independent").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(
+            &f,
+            2,
+            json!([
+                declaration(&tree, "scratch"),
+                declaration(&child, "evidence")
+            ]),
+        ),
+    );
+    let third = f.json(&["add", "Independent owner"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut independent = f.state()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["path"] == child.to_str().unwrap())
+        .unwrap()["record"]
+        .clone();
+    independent["next_owner"] = json!(format!("task:{third}"));
+    f.note(independent.clone());
+    let mut request = transfer_request(&f, &to);
+    request["items"] = json!([f.state()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["kind"] == "scratch")
+        .unwrap()["identity"]]);
+    assert_eq!(transfer(&f, &to, &request)["outcome"], "transferred");
+    let state = f.state();
+    let actual = &state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["path"] == child.to_str().unwrap())
+        .unwrap()["record"];
+    assert_eq!(*actual, independent);
+    assert_eq!(
+        f.json(&["retained", "state", &to])["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn retained_transfer_historical_counts() {
+    let (mut f, to, _) = transfer_fixture();
+    let request = transfer_request(&f, &to);
+    let result = transfer(&f, &to, &request);
+    let mut released = f.state()["items"][0]["record"].clone();
+    released["purpose"] =
+        json!("Transferred to sci-000003; custody transferred and bytes remain in place");
+    let from = f.id.clone();
+    f.id = to.clone();
+    f.note(released);
+    f.id = from;
+    let replay = transfer(&f, &to, &request);
+    assert_eq!(
+        replay["counts"], result["counts"],
+        "historical replay cannot use today's changed receiver custody"
+    );
+}
+#[test]
+fn retained_transfer_after_release_finishes_with_new_receiver_work() {
+    let (f, to, file) = transfer_fixture();
+    let request = transfer_request(&f, &to);
+    let path = f.request("transfer.json", &request);
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "commit:completed")
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            &to,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(f.state()["items"][0]["record"]["state"], "released");
+    let next = json!({"version":1,"operation_id":"b".repeat(32),"host":host(),"inputs":[{"task":to,"basis":f.json(&["retained","state",&to])["basis"]}]});
+    let next_path = f.request("receiver-checkpoint.json", &next);
+    f.json(&[
+        "retained",
+        "checkpoint",
+        &to,
+        "--request",
+        next_path.to_str().unwrap(),
+    ]);
+    std::fs::remove_file(file).unwrap();
+    assert_eq!(
+        transfer(&f, &to, &request)["outcome"],
+        "transferred",
+        "committed release needs only original final receipts"
+    );
+}
+
+#[test]
+fn retained_transfer_consumer_fixture() {
+    use sha2::{Digest, Sha256};
+    let (f, to, _) = transfer_fixture();
+    f.check_hook();
+    let request = transfer_request(&f, &to);
+    let result = transfer(&f, &to, &request);
+    let fixture = json!({"format":"tasks-retained-generated-fixture-1","producer_transfer_sha256":format!("{:x}",Sha256::digest(include_bytes!("../src/retained/transfer.rs"))),"request":request,"result":result,"sender":f.json(&["show",&f.id])["task"],"receiver":f.json(&["show",&to])["task"],"sender_state":f.state(),"receiver_state":f.json(&["retained","state",&to]),"expected":{"outcome":"transferred","release_kind":"transfer","target":to,"forbidden_findings":["release_disposition_unknown","identity_release_unestablished"],"bytes_inspected_by_consumer":false}});
+    assert_eq!(fixture["sender_state"]["complete"], true);
+    assert_eq!(fixture["receiver_state"]["complete"], true);
+    if let Some(dir) = std::env::var_os("TASKS_RETAINED_FIXTURE_OUT") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir(&dir).expect("fixture exports need a new explicit directory");
+        std::fs::write(
+            dir.join("transfer-generated.json"),
+            serde_json::to_vec_pretty(&fixture).unwrap(),
+        )
+        .unwrap();
+        let out = common::git_fixture::command(f.env.home.path(), &f.records)
+            .args([
+                "bundle",
+                "create",
+                dir.join("transfer-records.bundle").to_str().unwrap(),
+                "refs/heads/main",
+            ])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+}
+
+#[test]
+fn retained_checkpoint_retry_rejects_unbound_retention_note() {
+    let f = checkpoint_fixture();
+    let file = f.dir.join("payload");
+    std::fs::write(&file, "payload").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 1, json!([declaration(&file, "evidence")])),
+    );
+    let request = checkpoint_request(&f, 2, json!([]));
+    let path = f.request("request.json", &request);
+    assert!(
+        !f.cmd()
+            .env("TASKS_RETAINED_STOP_AFTER", "intent")
+            .args([
+                "retained",
+                "checkpoint",
+                &f.id,
+                "--request",
+                path.to_str().unwrap()
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let mut foreign = f.state()["items"][0]["record"].clone();
+    foreign["purpose"] = json!("Uncoordinated external change");
+    f.note(foreign);
+    let before = f.basis();
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "an unrelated reserved note cannot be adopted into the original intent"
+    );
+    assert_eq!(f.basis(), before);
+}
+#[test]
+fn retained_transfer_reverifies_unknown_source() {
+    let (f, to, _) = transfer_fixture();
+    let mut unknown = f.state()["items"][0]["record"].clone();
+    unknown["verification"] = json!("unknown");
+    unknown["sha256"] = serde_json::Value::Null;
+    unknown["verification_action"] = json!("Reinspect after temporary access failure");
+    f.note(unknown);
+    assert_eq!(
+        transfer(&f, &to, &transfer_request(&f, &to))["outcome"],
+        "transferred",
+        "fresh full inspection can establish an unknown source's unchanged required version"
+    );
+}
+
+#[test]
+fn retained_transfer_inherits_prior_versions() {
+    let (f, to, _) = transfer_fixture();
+    let tree = f.dir.join("tree");
+    let prior = f.dir.join("prior");
+    for dir in [&tree, &prior] {
+        std::fs::create_dir(dir).unwrap();
+        std::fs::write(dir.join("report"), "old").unwrap();
+    }
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 2, json!([declaration(&tree, "scratch")])),
+    );
+    let old = f.state();
+    let item = old["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["kind"] == "scratch")
+        .unwrap();
+    let name = std::path::Path::new(item["record"]["manifest"].as_str().unwrap())
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let mut req = checkpoint_request(&f, 3, json!([]));
+    req["preserved_previous"] = json!([{"identity":item["identity"],"artifact":{"type":"directory","host":host(),"path":prior.to_str().unwrap(),"manifest":{"type":"attachment","task":f.id,"basis":old["basis"],"name":name,"sha256":item["record"]["sha256"]}}}]);
+    std::fs::write(tree.join("report"), "new").unwrap();
+    assert_eq!(checkpoint(&f, &req)["outcome"], "verified");
+    let mut req = transfer_request(&f, &to);
+    req["items"] = json!([item["identity"]]);
+    assert_eq!(transfer(&f, &to, &req)["outcome"], "transferred");
+    std::fs::remove_file(prior.join("report")).unwrap();
+    let req = json!({"version":1,"operation_id":"b".repeat(32),"host":host(),"inputs":[{"task":to,"basis":f.json(&["retained","state",&to])["basis"]}]});
+    let path = f.request("receiver-checkpoint.json", &req);
+    assert_eq!(
+        f.json(&[
+            "retained",
+            "checkpoint",
+            &to,
+            "--request",
+            path.to_str().unwrap()
+        ])["outcome"],
+        "accounted_unknown",
+        "transfer cannot sever the exact prior-payload obligations"
+    );
+}
+#[test]
+fn retained_transfer_dirty_receiver_evidence() {
+    let (f, to, _) = transfer_fixture();
+    let mut record = f.record();
+    record["host"] = json!(host());
+    record["kind"] = json!("worktree");
+    record["path"] = json!(f.dir.to_str().unwrap());
+    record.as_object_mut().unwrap().remove("sha256");
+    f.note(record);
+    let mut req = transfer_request(&f, &to);
+    req["items"] = json!([f.state()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["kind"] == "worktree")
+        .unwrap()["identity"]]);
+    let path = f.request("transfer.json", &req);
+    assert!(
+        !f.cmd()
+            .env("TASKS_RETAINED_STOP_AFTER", "receiver_published")
+            .args([
+                "retained",
+                "transfer",
+                &f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap()
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let state = f.json(&["retained", "state", &to]);
+    let receipt = state["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["note"]["phase"] == "receiver_published")
+        .unwrap();
+    let name = receipt["note"]["outputs"]["artifacts"][0]["name"]
+        .as_str()
+        .unwrap();
+    let artifact = f.records.join(format!("tasks/files/{to}/{name}"));
+    let mut bytes = std::fs::read(&artifact).unwrap();
+    bytes[0] = b'!';
+    std::fs::write(artifact, bytes).unwrap();
+    assert!(
+        !f.cmd()
+            .args([
+                "retained",
+                "transfer",
+                &f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap()
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let sender = f.state();
+    assert_eq!(
+        sender["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["identity"]["kind"] == "worktree")
+            .unwrap()["record"]["state"],
+        "kept"
+    );
+}

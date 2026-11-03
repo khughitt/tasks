@@ -543,9 +543,18 @@ payloads through explicit immutable locators. `accounted_unknown` is successful
 accounting, not verification. A completed retry returns historical publication
 references and explicitly leaves current bytes unchecked. Errors keep the durable
 reservation; they do not park or close the task. See README's retained checkpoint
-request and resolution contract. Transfer/reconcile still refuse publication in
-this intermediate build; retain the installed manual procedure until full delivery
-and consumer acceptance.
+request and resolution contract.
+
+`tasks retained transfer <from> <to> --request <path>` moves selected custody after
+both owned starts and exact current input bases. Its strict request lists the
+sender identities and common receiving purpose/trigger. It leaves physical bytes
+and unselected independent identities in place. Receiver kept records commit
+before sender release, with full verification again at the release boundary.
+Receiver collisions refuse even with equal hashes. Retry the original immutable
+request after interruption; committed release needs only missing final receipts.
+A completed retry returns dated historical results, not current verification.
+Reconcile still refuses publication in this intermediate build; retain the installed
+manual procedure until full delivery and consumer acceptance.
 
 Pending retained operations reserve task/evidence mutation while permitting reads,
 unrelated appended notes, start/claim refresh and park. Complete or reconcile them

@@ -425,6 +425,59 @@ pub fn stop(boundary: &str) {
         std::process::exit(86)
     }
 }
+fn preimage(
+    project: &Project,
+    id: &crate::model::TaskId,
+    input: &Basis,
+    metrics: &mut super::verify::Metrics,
+) -> Result<()> {
+    let original = super::basis::read_exact(project, id, input)?;
+    metrics.history_bytes_read += original.history_bytes_read;
+    let current = super::basis::read(project, id, Some("HEAD"))?;
+    metrics.history_bytes_read += current.history_bytes_read;
+    if current.task != original.task || current.basis.retained_ref != input.retained_ref {
+        return Err(Error::RetainedStaleBasis(
+            "Committed task or publishing branch changed between phases".into(),
+        ));
+    }
+    for (name, state) in crate::attachments::ledger(&original.task) {
+        if state == crate::attachments::Ledger::Attached {
+            let path = format!("{}/tasks/files/{id}/{name}", input.records_subdir);
+            let bytes = super::basis::blob(
+                project,
+                &input.commit,
+                path.trim_start_matches("./"),
+                Some(project.attachments_max_bytes),
+                &mut metrics.history_bytes_read,
+            )?;
+            if super::verify::read_local(
+                &crate::attachments::task_dir(project, id).join(&name),
+                project.attachments_max_bytes,
+            )? != bytes
+            {
+                return Err(Error::RetainedStaleBasis(format!(
+                    "Required attachment {name} differs from its committed preimage"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+impl OperationCtx {
+    pub fn revalidate(&mut self) -> Result<()> {
+        self.heartbeat()?;
+        for id in self.tasks.keys().cloned().collect::<Vec<_>>() {
+            let project = self.project(&id).clone();
+            preimage(&project, &id, &self.tasks[&id].basis, &mut self.metrics)?;
+            if project.read_task(&id)? != self.tasks[&id].task {
+                return Err(Error::RetainedStaleBasis(
+                    "Participant changed between retained phases".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
 pub fn batch(
     ctx: &mut OperationCtx,
     id: &crate::model::TaskId,
@@ -443,36 +496,7 @@ pub fn batch(
     crate::commands::retained_owner(context, id)?;
     crate::attachments::check_storage(&context.project, id)?;
     let input = &ctx.tasks.get(id).expect("participant").basis;
-    let original = super::basis::read_exact(&context.project, id, input)?;
-    ctx.metrics.history_bytes_read += original.history_bytes_read;
-    let current = super::basis::read(&context.project, id, Some("HEAD"))?;
-    ctx.metrics.history_bytes_read += current.history_bytes_read;
-    if current.task != original.task || current.basis.retained_ref != input.retained_ref {
-        return Err(Error::RetainedStaleBasis(
-            "Committed task or publishing branch changed between phases".into(),
-        ));
-    }
-    for (name, state) in crate::attachments::ledger(&original.task) {
-        if state == crate::attachments::Ledger::Attached {
-            let path = format!("{}/tasks/files/{id}/{name}", input.records_subdir);
-            let bytes = super::basis::blob(
-                &context.project,
-                &input.commit,
-                path.trim_start_matches("./"),
-                Some(context.project.attachments_max_bytes),
-                &mut ctx.metrics.history_bytes_read,
-            )?;
-            if super::verify::read_local(
-                &crate::attachments::task_dir(&context.project, id).join(&name),
-                context.project.attachments_max_bytes,
-            )? != bytes
-            {
-                return Err(Error::RetainedStaleBasis(format!(
-                    "Required attachment {name} differs from its committed preimage"
-                )));
-            }
-        }
-    }
+    preimage(&context.project, id, input, &mut ctx.metrics)?;
     let mut task = context.project.read_task(id)?;
     if task != *expected {
         return Err(Error::RetainedStaleBasis(
@@ -913,6 +937,9 @@ pub fn validate_inputs(ctx: &mut OperationCtx, inputs: &[Input]) -> Result<()> {
                         .into(),
                 ));
             }
+            let mut items = std::collections::BTreeSet::new();
+            let mut attachments = std::collections::BTreeSet::new();
+            let mut checkpoints = std::collections::BTreeSet::new();
             for note in &current.notes[old.task.notes.len()..] {
                 if let Some(raw) = note.text.strip_prefix("retention operation: ") {
                     let n = decode_operation(raw)?;
@@ -921,6 +948,47 @@ pub fn validate_inputs(ctx: &mut OperationCtx, inputs: &[Input]) -> Result<()> {
                             "foreign phase or changed intent after the original input",
                         ));
                     }
+                    match &n.outputs {
+                        PhaseOutputs::Items(o) => items.extend(o.items.iter().copied()),
+                        PhaseOutputs::Receiver(o) => items.extend(o.items.iter().copied()),
+                        PhaseOutputs::Sender(o) => items.extend(o.items.iter().copied()),
+                        PhaseOutputs::Ready(o) => items.extend(o.items.iter().copied()),
+                        PhaseOutputs::Completed(o) => checkpoints.extend(o.checkpoint),
+                        PhaseOutputs::Incomplete(o) => checkpoints.extend(o.checkpoint),
+                        _ => {}
+                    }
+                    for artifact in phase_artifacts(&n)? {
+                        if let ArtifactLocator::Attachment { task, name, .. } = artifact
+                            && task == id.to_string()
+                        {
+                            attachments.insert(name);
+                        }
+                    }
+                }
+            }
+            for (index, note) in current.notes.iter().enumerate().skip(old.task.notes.len()) {
+                let ordinal = index as u64 + 1;
+                let valid = if note.text.starts_with("retained:") {
+                    items.contains(&ordinal)
+                } else if note.text.starts_with("retention checkpoint:") {
+                    checkpoints.contains(&ordinal)
+                        && note
+                            .text
+                            .strip_prefix("retention checkpoint: ")
+                            .and_then(|raw| decode_checkpoint(raw).ok())
+                            .is_some_and(|n| n.operation == ctx.key)
+                } else if note.text.starts_with("attached:") || note.text.starts_with("detached:") {
+                    crate::attachments::parse_ledger_note(&note.text).is_some_and(
+                        |(state, name)| {
+                            state == crate::attachments::Ledger::Attached
+                                && attachments.contains(name)
+                        },
+                    )
+                } else {
+                    true
+                };
+                if !valid {
+                    return Err(Error::RetainedStaleBasis("Intervening retention/evidence note is not bound to this operation's receipts; recover its exact reserved input".into()));
                 }
             }
         }
