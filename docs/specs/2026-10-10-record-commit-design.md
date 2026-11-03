@@ -72,7 +72,8 @@ A write command collects the paths it wrote, grouped by project root:
 
 - task records it created or rewrote, which can be more than one: `start --force
   --reason` past a halt also writes the reason onto the halt's record;
-- attachment files it added or removed under `tasks/files/<id>/` (`attach`, `detach`);
+- attachment files it added, adopted after an interrupted attach, or removed under
+  `tasks/files/<id>/` (`attach`, `detach`);
 - both records of a `move` (destination record, source tombstone), each in its own
   project root.
 

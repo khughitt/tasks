@@ -136,7 +136,6 @@ pub fn attach(
     let created_dir = if write {
         let created = attachments::ensure_task_dir(&ctx.project, &task.id)?;
         attachments::write_new(&target, &bytes)?;
-        crate::written::record(&ctx.project.records, &target);
         created
     } else {
         false
@@ -158,6 +157,7 @@ pub fn attach(
             )),
         });
     }
+    crate::written::record(&ctx.project.records, &target);
     super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachment landed");
     super::finish(&mut ctx);
     Ok(Output::Attach(AttachOut {
