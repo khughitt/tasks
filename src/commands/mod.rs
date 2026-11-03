@@ -2319,18 +2319,26 @@ fn dispatch(cli: Cli) -> Result<Output> {
         Command::Note {
             id,
             text,
+            stdin,
             stamp,
             reviewed,
             no_reviewed,
             awaiting_user,
-        } => status::note(
-            open_id_write_ctx(dir, &id)?,
-            id,
-            text,
-            stamp,
-            crate::review::Review::from_flags(reviewed, no_reviewed),
-            crate::review::Awaiting::from_flags(awaiting_user, false),
-        ),
+        } => {
+            let texts = if stdin {
+                status::read_notes(std::io::stdin().lock())?
+            } else {
+                vec![text.expect("clap requires text unless --stdin")]
+            };
+            status::note(
+                open_id_write_ctx(dir, &id)?,
+                id,
+                texts,
+                stamp,
+                crate::review::Review::from_flags(reviewed, no_reviewed),
+                crate::review::Awaiting::from_flags(awaiting_user, false),
+            )
+        }
         Command::Attach {
             id,
             source,

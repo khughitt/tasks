@@ -972,6 +972,169 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
 }
 
 #[test]
+fn note_stdin_appends_in_order_with_one_record_commit() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let config = dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
+    git(&dir, &["add", "tasks"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    let id = id_of(env.json(&dir, &["add", "Batch"]));
+    let read_git = |args: &[&str]| {
+        let out = common::git_fixture::command(env.home.path(), &dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let before: u64 = read_git(&["rev-list", "--count", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["note", &id, "--stdin"])
+        .write_stdin("first: café \t\r\nsecond\nfirst: café")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result.as_object().unwrap().len(), 2);
+    assert_eq!(result["id"], id);
+    assert_eq!(result["warnings"].as_array().unwrap().len(), 1);
+    assert!(
+        result["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("duplicate prior logical note 2")
+    );
+    let shown = env.json(&dir, &["show", &id]);
+    let notes = &shown["task"]["notes"].as_array().unwrap()[1..];
+    assert_eq!(
+        notes
+            .iter()
+            .map(|n| n["text"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["first: café", "second", "first: café"]
+    );
+    assert!(
+        notes
+            .iter()
+            .all(|n| n["at"] == notes[0]["at"] && n.get("harness_session").is_none())
+    );
+    let after: u64 = read_git(&["rev-list", "--count", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(after, before + 1);
+    assert_eq!(read_git(&["status", "--porcelain"]), "");
+    assert_eq!(
+        read_git(&["show", &format!("HEAD:tasks/{id}.md")]),
+        std::fs::read_to_string(dir.join(format!("tasks/{id}.md"))).unwrap()
+    );
+}
+
+#[test]
+fn note_stdin_invalid_input_leaves_the_record_unchanged() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Atomic", "--status", "idea"]));
+    let path = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&path).unwrap();
+    for (input, detail) in [
+        (b"".as_slice(), "empty"),
+        (b"\n", "line 1"),
+        (b"first\n\nlast\n", "line 2"),
+        (b"first\n \t\nlast\n", "line 2"),
+        (b"first\nbad\rnote\n", "line 2"),
+        (b"first\n\xff\n", "line 2"),
+    ] {
+        let out = env
+            .cmd(&dir)
+            .args([
+                "note",
+                &id,
+                "--stdin",
+                "--reviewed",
+                "--awaiting-user",
+                "--stamp",
+            ])
+            .write_stdin(input)
+            .assert()
+            .code(1)
+            .get_output()
+            .clone();
+        assert_eq!(err_kind(&out), "validation");
+        assert!(err_detail(&out).contains(detail), "{out:?}");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+}
+
+#[test]
+fn note_stdin_conflicts_with_text_and_text_is_otherwise_required() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Arguments"]));
+    for args in [vec!["note", &id, "text", "--stdin"], vec!["note", &id]] {
+        env.cmd(&dir)
+            .args(args)
+            .write_stdin("stdin note\n")
+            .assert()
+            .code(2);
+    }
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn note_stdin_stamps_every_note_and_applies_review_flags() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Review", "--status", "idea"]));
+    env.cmd(&dir)
+        .env("CODEX_THREAD_ID", "batch-session")
+        .args([
+            "note",
+            &id,
+            "--stdin",
+            "--stamp",
+            "--reviewed",
+            "--awaiting-user",
+        ])
+        .write_stdin("one\ntwo\n")
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &id]);
+    assert_eq!(shown["task"]["reviewed"], true);
+    assert_eq!(shown["task"]["awaiting_user"], true);
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 3);
+    for n in &notes[1..] {
+        assert_eq!(n["harness_session"], "codex:batch-session");
+        assert_eq!(n["harness_session_source"], "CODEX_THREAD_ID");
+        assert_eq!(n["at"], notes[1]["at"]);
+    }
+    env.cmd(&dir)
+        .args(["note", &id, "--stdin", "--no-reviewed"])
+        .write_stdin("readmit\nfinding\n")
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &id]);
+    assert_eq!(shown["task"]["reviewed"], false);
+    assert_eq!(shown["task"]["awaiting_user"], false);
+    assert_eq!(shown["task"]["notes"].as_array().unwrap().len(), 5);
+}
+
+#[test]
 fn note_stamp_conflicts_warn_without_values_and_still_land() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

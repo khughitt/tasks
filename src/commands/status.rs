@@ -189,22 +189,56 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
     }
 }
 
+pub fn read_notes(reader: impl std::io::BufRead) -> Result<Vec<String>> {
+    let mut texts = Vec::new();
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.map_err(|error| {
+            Error::Validation(format!(
+                "stdin line {}: cannot read note: {error}",
+                index + 1
+            ))
+        })?;
+        let text = crate::format::normalize_note_text(&line)
+            .map_err(|error| Error::Validation(format!("stdin line {}: {error}", index + 1)))?;
+        texts.push(text.to_string());
+    }
+    if texts.is_empty() {
+        return Err(Error::Validation(
+            "stdin is empty; expected at least one note".into(),
+        ));
+    }
+    Ok(texts)
+}
+
 pub fn note(
     mut ctx: Ctx,
     id: String,
-    text: String,
+    texts: Vec<String>,
     stamp: bool,
     review: crate::review::Review,
     awaiting: crate::review::Awaiting,
 ) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     crate::review::apply(&mut task, review, awaiting, &mut ctx.warnings)?;
-    let duplicate = crate::growth::first_duplicate(&task.notes, &text);
     let owner = owner_name(&ctx.project)?;
-    if stamp {
-        append_stamped_note(&mut ctx, &mut task, &owner, &text)?;
-    } else {
-        append_note(&mut task, &owner, &text)?;
+    let at = crate::time::now();
+    let mut duplicates = Vec::new();
+    for text in texts {
+        let duplicate = crate::growth::first_duplicate(&task.notes, &text);
+        if stamp {
+            append_stamped_note(&mut ctx, &mut task, &owner, &text)?;
+        } else {
+            append_note(&mut task, &owner, &text)?;
+        }
+        let note = task.notes.last_mut().expect("note appended");
+        note.at.clone_from(&at);
+        if let Some(index) = duplicate {
+            let bytes = note.text.len();
+            duplicates.push(format!(
+                "the note landed; its {bytes} bytes duplicate prior logical note {}; link bulky detail in an attachment or records document, or use the approved checkpoint procedure",
+                index + 1,
+            ));
+        }
     }
     // Identity and the store are resolved *before* the file write. Doing it afterwards
     // means a corrupt store returns an error after the note has already landed, and the
@@ -217,13 +251,7 @@ pub fn note(
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
     save(&mut ctx, &mut task)?;
-    if let Some(index) = duplicate {
-        let bytes = task.notes.last().expect("note appended").text.len();
-        ctx.warnings.push(format!(
-            "the note landed; its {bytes} bytes duplicate prior logical note {}; link bulky detail in an attachment or records document, or use the approved checkpoint procedure",
-            index + 1,
-        ));
-    }
+    ctx.warnings.extend(duplicates);
 
     // Use the pruned store so a note cannot revive a stale claim.
     let existing = ctx.claims_mut()?.get(&task.id).cloned();

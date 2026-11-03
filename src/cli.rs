@@ -733,7 +733,11 @@ pub enum Command {
     Note {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        text: String,
+        #[arg(required_unless_present = "stdin", conflicts_with = "stdin")]
+        text: Option<String>,
+        /// Read one note per line; validate all lines before saving once.
+        #[arg(long)]
+        stdin: bool,
         /// Stamp the note with this session's harness provenance, as lifecycle notes are.
         #[arg(long)]
         stamp: bool,

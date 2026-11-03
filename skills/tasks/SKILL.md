@@ -144,6 +144,12 @@ mean those documents were verified.
    unnecessary explicit overrides bypass native root association.
    For relay identity setup and recovery, see [Relay identity](../../README.md#relay-identity-opt-in).
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
+   For several notes on one task, `tasks note <id> --stdin < notes.txt` appends one
+   per line in order with one save (and one record commit when enabled). It conflicts
+   with TEXT. Empty input or any invalid line, including a blank or whitespace-only
+   line, refuses the whole batch before writing; errors name the line number.
+   Notes share one whole-second `at` timestamp, which is not a unique note identifier.
+   `--stamp` stamps each note; review and awaiting-user flags apply once to the write.
    Use [Artifact placement and retention](#artifact-placement-and-retention) for
    bulky evidence and retention checkpoints; keep required audit and review notes.
 5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a

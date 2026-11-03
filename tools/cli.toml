@@ -606,8 +606,9 @@ options = [
 [[cli.tasks.commands]]
 path = ["note"]
 summary = "Append a timestamped note"
-args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = true }]
+args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = false }]
 options = [
+  { names = ["--stdin"], value = "none" },
   { names = ["--stamp"], value = "none" },
   { names = ["--reviewed"], value = "none" },
   { names = ["--no-reviewed"], value = "none" },

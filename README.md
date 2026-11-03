@@ -595,6 +595,13 @@ There is no serialized marker kind: arbitrary user text can equal a generated te
 (for example, a close message of `resumed`). Text matching alone cannot disambiguate
 that collision; consumers must retain that uncertainty.
 Plain `tasks note`, shelf notes and takeover commentary remain unstamped.
+`tasks note <id> --stdin < notes.txt` appends one note per line in input order,
+with one save and one record commit when enabled. It conflicts with positional
+text. Empty input, blank or whitespace-only lines, invalid UTF-8 and invalid note
+text are refused before any write; line errors name their line number.
+All notes in the batch share one whole-second `at` timestamp; timestamps are not
+unique note identifiers. `--stamp` stamps every note; `--reviewed`, `--no-reviewed`
+and `--awaiting-user` apply once to the write. JSON remains `{ "id", "warnings" }`.
 `tasks note <id> "<text>" --stamp` opts one note in: it carries the same pair under the
 same rules (a missing source leaves it off; a conflict warns without values and the note
 still lands), and changes nothing else about `note`. Its text is not interpreted, so a
