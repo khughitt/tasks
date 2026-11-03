@@ -1,12 +1,9 @@
-#[allow(dead_code)] // Wired into attach and recovery by the following plan tasks.
+pub mod audit;
 pub mod catalog;
-#[allow(dead_code)] // Wired into attach and recovery by the following plan tasks.
 pub mod content;
 #[allow(dead_code)] // Wired into attach and recovery by the following plan tasks.
 pub mod cut;
-#[allow(dead_code)] // Wired into attach and recovery by the following plan tasks.
 pub mod declaration;
-#[allow(dead_code)] // Wired into attach and recovery by the following plan tasks.
 pub mod names;
 
 pub const RECOVERY_MAX_BYTES: u64 = 268_435_456;

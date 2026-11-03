@@ -28,6 +28,7 @@ struct Document {
 }
 
 impl Catalog {
+    #[allow(dead_code)] // Multipart attach writes this format in the following steps.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut text = format!(
             "{{\n  \"version\": 1,\n  \"name\": {},\n  \"bytes\": {},\n  \"sha256\": {},\n  \"parts\": [\n",

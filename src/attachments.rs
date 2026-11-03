@@ -370,7 +370,7 @@ fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Ve
                         Severity::Error,
                         "attachment_unnoted",
                         shown,
-                        format!("{name} is not attached in {}'s notes; attach it again with the same bytes, or detach it", task.id),
+                        format!("{name} is not attached in {}'s notes; rerun tasks attach {} <source> --name {name} with the same bytes, or detach it", task.id, task.id),
                     ));
                 }
                 files.push(Attachment {
@@ -391,6 +391,7 @@ fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Ve
             ));
         }
     }
+    problems.extend(crate::multipart::audit::audit(project, task)?);
     Ok((files, problems))
 }
 
