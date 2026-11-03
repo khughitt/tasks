@@ -8,6 +8,29 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 thread_local! {static METADATA_BYTES:std::cell::Cell<u64>=const{std::cell::Cell::new(0)};}
+thread_local! {static HASH_WORK:std::cell::Cell<(u64,u64)>=const{std::cell::Cell::new((0,0))};}
+pub fn begin_metrics() {
+    METADATA_BYTES.with(|v| v.set(0));
+    HASH_WORK.with(|v| v.set((0, 0)));
+}
+pub fn hash_work() -> (u64, u64) {
+    HASH_WORK.with(std::cell::Cell::get)
+}
+pub fn record_hash(bytes: u64, ns: u64) {
+    HASH_WORK.with(|v| {
+        let (b, t) = v.get();
+        v.set((b.saturating_add(bytes), t.saturating_add(ns)));
+    });
+}
+pub fn sha256(bytes: &[u8]) -> String {
+    let start = std::time::Instant::now();
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    record_hash(
+        bytes.len() as u64,
+        start.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+    );
+    digest
+}
 pub fn metadata_bytes_read() -> u64 {
     METADATA_BYTES.with(std::cell::Cell::get)
 }
@@ -95,7 +118,7 @@ fn prefix(
     for archive in archives {
         let name = archive.file_name();
         let bytes = resolve(archive).map_err(|error| archive_error(&name, error))?;
-        if format!("{:x}", Sha256::digest(&bytes)) != archive.sha256 {
+        if sha256(&bytes) != archive.sha256 {
             return Err(archive_error(&name, "SHA-256 mismatch"));
         }
         let text = std::str::from_utf8(&bytes).map_err(|error| archive_error(&name, error))?;
@@ -373,5 +396,9 @@ mod historical_tests {
         assert_eq!(project.read_raw(&id).unwrap(), bytes);
         assert_eq!(project.read_raw(&id).unwrap(), bytes);
         assert_eq!(metadata_bytes_read() - before, bytes.len() as u64 * 2);
+        std::fs::write(project.task_path(&id), [0xff, 0x00]).unwrap();
+        let before = metadata_bytes_read();
+        assert!(project.read_raw(&id).is_err());
+        assert_eq!(metadata_bytes_read() - before, 2);
     }
 }

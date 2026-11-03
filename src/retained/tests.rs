@@ -249,6 +249,83 @@ fn retained_operation_nested_contract() {
         );
     }
 }
+
+#[test]
+fn retained_operation_mapping_and_actions_contract() {
+    let identity = json!({"host":"h","kind":"evidence","path":"/data/a"});
+    for side in ["sender", "receiver"] {
+        for field in ["host", "kind", "path"] {
+            let mut mapping = json!({"sender":identity,"receiver":identity});
+            mapping[side][field] = json!("");
+            let n = operation(
+                "receiver_published",
+                json!({"items":[1],"artifacts":[],"mapping":[mapping]}),
+            );
+            assert!(decode_operation(&n.to_string()).is_err(), "{side}.{field}");
+        }
+    }
+    let locator =
+        json!({"type":"git","basis":basis(),"path":"request.json","sha256":"a".repeat(64)});
+    for (phase, outputs) in [
+        (
+            "reconcile_ready",
+            json!({"directive":locator,"reconciliation_id":"1".repeat(32),"items":[],"unresolved":[""]}),
+        ),
+        (
+            "reconciled",
+            json!({"directive":locator,"reconciliation_id":"1".repeat(32),"ready_bases":[],"unresolved":[""]}),
+        ),
+    ] {
+        assert!(
+            decode_operation(&operation(phase, outputs).to_string()).is_err(),
+            "{phase}"
+        );
+    }
+}
+
+#[test]
+fn retained_known_other_host_does_not_block_local_scope() {
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t, "t", r#"retained: {"host":"other","version":2}"#).unwrap();
+    assert!(!state::replay(&t, &basis(), None).unwrap().complete);
+    let local = state::replay(&t, &basis(), Some("h")).unwrap();
+    assert!(local.complete);
+    assert!(local.items[0].record.is_some());
+}
+
+#[test]
+fn retained_operation_item_role_and_mapping_binding() {
+    for (phase, outputs) in [
+        (
+            "sender_released",
+            json!({"items":[2],"receiver_basis":basis(),"mapping":[]}),
+        ),
+        (
+            "receiver_published",
+            json!({"items":[2],"artifacts":[],"mapping":[]}),
+        ),
+    ] {
+        let mut t = task();
+        crate::commands::append_note(
+            &mut t,
+            "t",
+            &format!("retention operation: {}", operation("intent", json!({}))),
+        )
+        .unwrap();
+        crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+        crate::commands::append_note(
+            &mut t,
+            "t",
+            &format!("retention operation: {}", operation(phase, outputs)),
+        )
+        .unwrap();
+        assert!(
+            !state::replay(&t, &basis(), None).unwrap().complete,
+            "{phase}"
+        );
+    }
+}
 #[test]
 fn retained_operation_nullable_contract() {
     let mut n = operation("intent", json!({}));

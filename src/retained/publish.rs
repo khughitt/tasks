@@ -422,6 +422,11 @@ fn stop_phase(boundary: &str, phase: &str) {
 }
 pub fn stop(boundary: &str) {
     if std::env::var("TASKS_RETAINED_STOP_AFTER").as_deref() == Ok(boundary) {
+        eprintln!(
+            "retained test interruption metrics: {}",
+            serde_json::to_string(&super::verify::Metrics::default().finish())
+                .expect("metrics serialize")
+        );
         std::process::exit(86)
     }
 }
@@ -1096,11 +1101,7 @@ pub fn result(
         publications,
         counts,
         actions,
-        metrics: {
-            let mut metrics = ctx.metrics.finish();
-            metrics.history_bytes_read += crate::history::metadata_bytes_read();
-            metrics
-        },
+        metrics: ctx.metrics.finish(),
         warnings: if replay {
             vec!["Completed operation replay; current filesystem bytes were not inspected".into()]
         } else {

@@ -971,7 +971,8 @@ verified; `accounted_unknown` is complete accounting with unresolved observation
 `no_local_items` creates no empty checkpoint. Failed publication returns nonzero
 and preserves the reservation. The command does not park or close the task.
 `wall_ns` measures the held-lock operation, `hash_ns`/`bytes_hashed` accumulate the
-verifier's hash work, and `history_bytes_read` includes repeated task/archive and
+command thread's SHA-256 work (including recovery, archive validation and repeated
+verification), and `history_bytes_read` includes repeated task/archive and
 operation-metadata reads. These counters exclude Git's private I/O; hash and
 history channels may overlap. Count CLI invocations and actual UTF-8 stdout
 separately when comparing caller context.

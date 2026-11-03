@@ -11,7 +11,11 @@ pub fn now() -> String {
 /// same second as the loaded write would give two checkouts' different copies one stamp
 /// (record-home spec §3.1); strictly increasing stamps keep the written copy the newest.
 pub fn after(loaded: &str) -> Result<String> {
-    let floor = parse(loaded)? + time::Duration::SECOND;
+    let floor = parse(loaded)?
+        .checked_add(time::Duration::SECOND)
+        .ok_or_else(|| {
+            Error::Validation("timestamp cannot advance beyond the supported range".into())
+        })?;
     Ok(format(OffsetDateTime::now_utc().max(floor)))
 }
 
@@ -76,5 +80,13 @@ mod tests {
     #[test]
     fn day_is_the_date_part() {
         assert_eq!(day("2026-08-29T14:02:11Z"), "2026-08-29");
+    }
+
+    #[test]
+    fn after_refuses_timestamp_overflow() {
+        assert!(matches!(
+            after("9999-12-31T23:59:59Z"),
+            Err(Error::Validation(_))
+        ));
     }
 }

@@ -84,6 +84,22 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
         } else if let Some(raw) = note.text.strip_prefix("retention operation: ") {
             let decoded = decode_operation(raw).and_then(|n| {
                 n.request.pinned(&task.id.to_string(), basis)?;
+                let local = task.id.to_string();
+                if n.input_bases
+                    .first()
+                    .is_none_or(|b| b.task != n.key.coordinator)
+                    || !n.input_bases.iter().any(|b| b.task == local)
+                    || (matches!(
+                        n.phase.as_str(),
+                        "items_published" | "sender_released" | "reconciled"
+                    ) && local != n.key.coordinator)
+                    || (n.phase == "receiver_published"
+                        && (n.input_bases.len() != 2 || n.input_bases[1].task != local))
+                {
+                    return Err(invalid(
+                        "operation participant role conflicts with its source task",
+                    ));
+                }
                 let key = (n.key.coordinator.clone(), n.key.operation_id.clone());
                 let previous = phases.get(&key);
                 validate_transition(previous, &n)?;
@@ -111,6 +127,29 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
                         return Err(invalid(
                             "operation item source conflicts with its observation",
                         ));
+                    }
+                    let mapped = match &n.outputs {
+                        PhaseOutputs::Receiver(o) => Some((&o.mapping, false)),
+                        PhaseOutputs::Sender(o) => Some((&o.mapping, true)),
+                        _ => None,
+                    };
+                    if let Some((mapping, sender)) = mapped {
+                        let matches = mapping
+                            .iter()
+                            .filter(|m| {
+                                (if sender { &m.sender } else { &m.receiver }) == &record.identity()
+                            })
+                            .count();
+                        if mapping.len() != ordinals.len()
+                            || matches != 1
+                            || (sender && record.state != "released")
+                            || (!sender
+                                && (record.state != "kept" || record.verification != "verified"))
+                        {
+                            return Err(invalid(
+                                "operation mapping conflicts with retained source",
+                            ));
+                        }
                     }
                 }
                 phases.insert(key, n.clone());

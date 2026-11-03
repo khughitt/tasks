@@ -6,6 +6,33 @@ use common::retained::{
 use serde_json::json;
 
 #[test]
+fn retained_metrics_diagnostic_counts_readonly_calls() {
+    let f = RetainedEnv::new("in-tree");
+    f.note(f.record());
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_TEST_METRICS", "1")
+        .args(["retained", "state", &f.id])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    let raw = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("retained test command metrics: "))
+        .expect("explicit test-only command metric diagnostic");
+    let metrics: serde_json::Value = serde_json::from_str(raw).unwrap();
+    assert!(metrics["history_bytes_read"].as_u64().unwrap() > 0);
+    assert!(metrics["wall_ns"].as_u64().unwrap() > 0);
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&out.stdout)
+            .unwrap()
+            .get("metrics")
+            .is_none()
+    );
+}
+
+#[test]
 fn retained_state_exact_basis() {
     let f = RetainedEnv::new("in-tree");
     f.note(f.record());
@@ -757,6 +784,16 @@ fn retained_transfer_time_and_purpose() {
         assert!(sender["task"]["updated"].as_str().unwrap() >= released["at"].as_str().unwrap());
         assert_eq!(parsed["next_owner"], "none");
         assert!(parsed.get("sha256").is_none());
+        if future && let Some(dir) = std::env::var_os("TASKS_RETAINED_FUTURE_FIXTURE_OUT") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir(&dir).expect("new explicit fixture directory");
+            let fixture = json!({"format":"tasks-retained-generated-future-fixture-1","sender":sender["task"],"receiver":receiver["task"],"result":result});
+            std::fs::write(
+                dir.join("transfer-future-generated.json"),
+                serde_json::to_vec_pretty(&fixture).unwrap(),
+            )
+            .unwrap();
+        }
     }
 }
 #[test]

@@ -99,12 +99,8 @@ fn discover(dir: &Path, git: Git) -> Result<Option<Repo>, String> {
 }
 
 fn lock_for(common: &Path, state: &Path) -> Result<MutationLock, String> {
-    use sha2::Digest;
-    let digest = sha2::Sha256::digest(common.as_os_str().as_encoded_bytes());
-    let hex: String = digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let digest = crate::history::sha256(common.as_os_str().as_encoded_bytes());
+    let hex = &digest[..16];
     let path = state.join(format!("tasks/claims/.commit-{hex}.lock"));
     MutationLock::acquire_at(&path).map_err(|error| error.to_string())
 }

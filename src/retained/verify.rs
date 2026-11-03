@@ -30,11 +30,12 @@ impl Metrics {
         self.pulse_at = Some(Instant::now());
     }
     pub fn finish(&self) -> Self {
+        let (bytes_hashed, hash_ns) = crate::history::hash_work();
         Self {
             wall_ns: self.wall_ns,
-            hash_ns: self.hash_ns,
-            bytes_hashed: self.bytes_hashed,
-            history_bytes_read: self.history_bytes_read,
+            hash_ns,
+            bytes_hashed,
+            history_bytes_read: crate::history::metadata_bytes_read(),
             ..Self::default()
         }
     }
@@ -80,7 +81,7 @@ pub struct Observation {
     pub preservations: Vec<ArtifactLocator>,
 }
 pub fn sha(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::history::sha256(bytes)
 }
 pub fn hash_bytes(bytes: &[u8], metrics: &mut Metrics) -> String {
     let start = Instant::now();
@@ -124,19 +125,25 @@ fn stable(path: &Path, file: &File, before: &Metadata) -> Result<()> {
 }
 fn hash_stream(reader: &mut impl Read, metrics: &mut Metrics) -> Result<String> {
     let start = Instant::now();
-    let mut hash = Sha256::new();
-    let mut buf = [0u8; 65536];
-    loop {
-        metrics.pulse()?;
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
+    let before = metrics.bytes_hashed;
+    let result = (|| {
+        let mut hash = Sha256::new();
+        let mut buf = [0u8; 65536];
+        loop {
+            metrics.pulse()?;
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buf[..n]);
+            metrics.bytes_hashed += n as u64;
         }
-        hash.update(&buf[..n]);
-        metrics.bytes_hashed += n as u64;
-    }
-    metrics.hash_ns += start.elapsed().as_nanos().min(u64::MAX as u128) as u64;
-    Ok(format!("{:x}", hash.finalize()))
+        Ok(format!("{:x}", hash.finalize()))
+    })();
+    let ns = start.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+    metrics.hash_ns += ns;
+    crate::history::record_hash(metrics.bytes_hashed - before, ns);
+    result
 }
 fn hash_file(path: &Path, metrics: &mut Metrics) -> Result<String> {
     let mut f = open(path, false)?;
@@ -402,7 +409,9 @@ fn payload_digest(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
+    let before = metrics.bytes_hashed;
     let result = hash_stream(&mut child.stdout.take().expect("piped stdout"), metrics);
+    crate::history::record_metadata_read((metrics.bytes_hashed - before) as usize);
     if result.is_err() {
         let _ = child.kill();
     }
@@ -1197,6 +1206,29 @@ mod tests {
         manifest(t.path(), &mut m).unwrap();
         assert_eq!(m.bytes_hashed, once * 2);
         assert!(once >= 7);
+    }
+    #[test]
+    fn retained_verify_command_hash_totals_include_direct_and_partial_work() {
+        let before = Metrics::default().finish();
+        sha(b"abc");
+        let mut local = Metrics::default();
+        hash_bytes(b"def", &mut local);
+        struct Interrupted(bool);
+        impl Read for Interrupted {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::other("interrupted fixture"));
+                }
+                self.0 = true;
+                buf[..3].copy_from_slice(b"ghi");
+                Ok(3)
+            }
+        }
+        assert!(hash_stream(&mut Interrupted(false), &mut local).is_err());
+        let after = Metrics::default().finish();
+        assert_eq!(after.bytes_hashed - before.bytes_hashed, 9);
+        assert_eq!(local.bytes_hashed, 6);
+        assert!(after.hash_ns > before.hash_ns);
     }
     #[test]
     fn retained_verify_unknown() {

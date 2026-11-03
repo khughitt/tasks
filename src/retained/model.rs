@@ -713,6 +713,16 @@ pub fn decode_operation(raw: &str) -> Result<OperationNote> {
         }
         Ok(())
     }
+    fn mappings(items: &[Mapping]) -> Result<()> {
+        for m in items {
+            for i in [&m.sender, &m.receiver] {
+                if !text(&i.host) || !text(&i.kind) || !text(&i.path) {
+                    return Err(invalid("mapping identity"));
+                }
+            }
+        }
+        Ok(())
+    }
     match &n.outputs {
         PhaseOutputs::Intent(_) => {}
         PhaseOutputs::Items(o) => {
@@ -730,12 +740,14 @@ pub fn decode_operation(raw: &str) -> Result<OperationNote> {
         }
         PhaseOutputs::Receiver(o) => {
             ordinals(&o.items)?;
+            mappings(&o.mapping)?;
             for a in &o.artifacts {
                 a.validate()?;
             }
         }
         PhaseOutputs::Sender(o) => {
             ordinals(&o.items)?;
+            mappings(&o.mapping)?;
             o.receiver_basis.validate()?;
         }
         PhaseOutputs::Completed(o) => {
@@ -771,6 +783,9 @@ pub fn decode_operation(raw: &str) -> Result<OperationNote> {
             .validate()?;
         }
         PhaseOutputs::Ready(o) => {
+            if o.unresolved.iter().any(|a| !text(a)) {
+                return Err(invalid("empty unresolved action"));
+            }
             o.directive.validate()?;
             OperationKey {
                 coordinator: n.key.coordinator.clone(),
@@ -780,6 +795,9 @@ pub fn decode_operation(raw: &str) -> Result<OperationNote> {
             ordinals(&o.items)?;
         }
         PhaseOutputs::Reconciled(o) => {
+            if o.unresolved.iter().any(|a| !text(a)) {
+                return Err(invalid("empty unresolved action"));
+            }
             o.directive.validate()?;
             OperationKey {
                 coordinator: n.key.coordinator.clone(),

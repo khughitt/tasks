@@ -15,6 +15,9 @@ pub fn git(project: &Project, args: &[&str]) -> Result<Vec<u8>> {
         .arg("--literal-pathspecs")
         .args(args)
         .output()?;
+    if args.starts_with(&["cat-file", "blob"]) {
+        crate::history::record_metadata_read(out.stdout.len());
+    }
     if !out.status.success() {
         return Err(Error::RetainedHistoryBlocked(format!(
             "Git {} failed: {}; recover the exact records basis before relying on retained state",

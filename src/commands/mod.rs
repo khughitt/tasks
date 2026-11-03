@@ -2506,6 +2506,8 @@ fn dispatch(cli: Cli) -> Result<Output> {
 }
 
 pub fn run(cli: Cli) -> Result<Output> {
+    crate::history::begin_metrics();
+    let started = std::time::Instant::now();
     crate::written::begin(cli.command.commit_verb());
     let result = dispatch(cli);
     // A command that failed after writing leaves its files uncommitted; `prime` lists
@@ -2517,6 +2519,14 @@ pub fn run(cli: Cli) -> Result<Output> {
             left.roots.is_empty(),
             "written but never committed: {:?}",
             left.roots
+        );
+    }
+    if std::env::var("TASKS_RETAINED_TEST_METRICS").as_deref() == Ok("1") {
+        let mut metrics = crate::retained::verify::Metrics::default().finish();
+        metrics.wall_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+        eprintln!(
+            "retained test command metrics: {}",
+            serde_json::to_string(&metrics).expect("metrics serialize")
         );
     }
     result
