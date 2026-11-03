@@ -3,3 +3,6 @@ pub mod model;
 pub mod state;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub mod verify;
