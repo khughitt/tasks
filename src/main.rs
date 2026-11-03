@@ -29,6 +29,7 @@ mod locations;
 mod migrating;
 mod model;
 mod moving;
+mod multipart;
 mod native;
 mod needs;
 mod output;

@@ -221,6 +221,11 @@ mod tests {
             feedback: None,
             needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
+            multipart: crate::multipart::MultipartConfig {
+                max_bytes: 16_777_216,
+                max_parts: 16,
+                validators: None,
+            },
             growth_warn_bytes: None,
             retired: None,
             checkout: PathBuf::new(),
@@ -252,6 +257,11 @@ mod tests {
             feedback: None,
             needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
+            multipart: crate::multipart::MultipartConfig {
+                max_bytes: 16_777_216,
+                max_parts: 16,
+                validators: None,
+            },
             growth_warn_bytes: None,
             retired: None,
             checkout: PathBuf::new(),
