@@ -15,7 +15,8 @@ use time::OffsetDateTime;
 
 /// A `doing` record untouched this long is stalled (§5.4). Fixed: no option changes it.
 pub const STALL_AFTER: time::Duration = time::Duration::days(3);
-/// A done goal stays listed, in the closed section, this long after it closed (§5.1).
+/// Under `--closed`, a done goal is listed in the closed section this long after it
+/// closed (§5.1); without the flag no done goal is listed.
 pub const CLOSED_WINDOW: time::Duration = time::Duration::days(14);
 
 fn is_zero(n: &usize) -> bool {
@@ -317,12 +318,14 @@ pub fn attention(
 
 /// The selected rows, open ones first by subtree activity, then total, then id; closed
 /// ones after, newest close first, then id. Open dependencies change neither order nor
-/// flags (§5.2a). `lookup` reads one record by canonical id for [`dependencies`].
+/// flags (§5.2a). Closed rows appear only when `include_closed` is set. `lookup` reads
+/// one record by canonical id for [`dependencies`].
 pub fn goal_rows(
     all: &[Task],
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
+    include_closed: bool,
     mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
 ) -> Result<Vec<GoalRow>> {
     let mut open: Vec<(OffsetDateTime, GoalRow)> = Vec::new();
@@ -363,6 +366,7 @@ pub fn goal_rows(
                 )?;
                 open.push((crate::time::parse(&row.last_activity)?, row));
             }
+            Status::Done if !include_closed => {}
             Status::Done => {
                 let stamp = closed_at(task);
                 let at = crate::time::parse(stamp)?;

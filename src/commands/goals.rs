@@ -5,11 +5,12 @@ use super::ReadCtx;
 use crate::error::Result;
 use crate::output::{GoalsOut, Output, ParkEvidence};
 
-pub fn run(mut ctx: ReadCtx) -> Result<Output> {
+/// `closed` adds the goals closed inside [`crate::goals::CLOSED_WINDOW`].
+pub fn run(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;
-    let goals = crate::goals::goal_rows(&all, &claims, &ctx.registry, now, |id| {
+    let goals = crate::goals::goal_rows(&all, &claims, &ctx.registry, now, closed, |id| {
         super::list::scan_lookup(&ctx, &all, id)
     })?;
     let colors = ctx.project_colors();

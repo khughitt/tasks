@@ -284,7 +284,7 @@ fn closed_goal_reports_open_dependencies_too() {
     env.json(&aa, &["dep", &g, "--on", &x]);
     env.json(&aa, &["done", &piece]);
     env.json(&aa, &["done", &g, "--force"]);
-    let out = goals(&env, &aa, &[]);
+    let out = goals(&env, &aa, &["--closed"]);
     assert_eq!(
         row(&out, &g)["dependencies"],
         serde_json::json!({"open": 1, "total": 1})
@@ -374,11 +374,23 @@ fn closed_window_includes_recent_done_goals_after_open_ones() {
     set_field(&aa, &old, "closed", Some(&ago(15)));
     // The open goal is older than the closed one's stamps: closed rows still come last.
     backdate(&aa, &[&open], &ago(30));
-    let out = goals(&env, &aa, &[]);
+    let out = goals(&env, &aa, &["--closed"]);
     assert_eq!(ids(&out), [open, recent.clone()]);
     let closed = row(&out, &recent);
     assert!(closed.get("closed").is_some(), "{closed}");
     assert!(closed.get("attention").is_none(), "{closed}");
+}
+
+#[test]
+fn closed_goals_are_hidden_without_the_flag() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (open, _) = goal_with_child(&env, &aa, "Open");
+    let (recent, piece) = goal_with_child(&env, &aa, "Recent");
+    env.json(&aa, &["done", &piece]);
+    env.json(&aa, &["done", &recent]);
+    assert_eq!(ids(&goals(&env, &aa, &[])), std::slice::from_ref(&open));
+    assert_eq!(ids(&goals(&env, &aa, &["--closed"])), [open, recent]);
 }
 
 #[test]
@@ -391,7 +403,7 @@ fn closed_window_falls_back_to_updated() {
     set_field(&aa, &g, "closed", None);
     set_field(&aa, &g, "completed", None);
     set_field(&aa, &g, "updated", Some(&ago(2)));
-    assert_eq!(ids(&goals(&env, &aa, &[])), [g]);
+    assert_eq!(ids(&goals(&env, &aa, &["--closed"])), [g]);
 }
 
 #[test]
@@ -432,8 +444,8 @@ fn retired_project_needs_explicit_scope() {
     env.json(&bb, &["done", &piece]);
     env.json(&bb, &["done", &g]);
     env.json(&bb, &["retire", "--reason", "fixture"]);
-    assert!(ids(&goals(&env, &aa, &[])).is_empty());
-    let out = goals(&env, &aa, &["--project", "bb"]);
+    assert!(ids(&goals(&env, &aa, &["--closed"])).is_empty());
+    let out = goals(&env, &aa, &["--project", "bb", "--closed"]);
     assert_eq!(ids(&out), [g]);
     let warnings = out["warnings"].to_string();
     assert!(warnings.contains("retired"), "{warnings}");
@@ -695,7 +707,7 @@ fn closed_goal_has_no_attention() {
     let (g, leaf) = goal_with_child(&env, &aa, "G");
     env.json(&aa, &["block", &leaf, "why"]);
     env.json(&aa, &["done", &g, "closed anyway", "--force"]);
-    let out = goals(&env, &aa, &[]);
+    let out = goals(&env, &aa, &["--closed"]);
     assert!(row(&out, &g).get("closed").is_some());
     assert_eq!(attention(&out, &g), Value::Null);
 }
@@ -713,6 +725,10 @@ fn dependency_wait_is_not_flagged() {
 
 fn pretty(env: &TestEnv, dir: &Path) -> String {
     env.pretty(dir, &["goals", "--color", "never"])
+}
+
+fn pretty_closed(env: &TestEnv, dir: &Path) -> String {
+    env.pretty(dir, &["goals", "--closed", "--color", "never"])
 }
 
 fn line_of<'a>(text: &'a str, id: &str) -> &'a str {
@@ -796,7 +812,10 @@ fn pretty_closed_section_follows_open_rows() {
     let (closed, piece) = goal_with_child(&env, &aa, "Closed");
     env.json(&aa, &["done", &piece]);
     env.json(&aa, &["done", &closed]);
-    let text = pretty(&env, &aa);
+    let hidden = pretty(&env, &aa);
+    assert!(!hidden.contains(&closed), "{hidden}");
+    assert!(!hidden.contains("── closed"), "{hidden}");
+    let text = pretty_closed(&env, &aa);
     let at = |needle: &str| {
         text.find(needle)
             .unwrap_or_else(|| panic!("no {needle}: {text}"))

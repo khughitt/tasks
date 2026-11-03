@@ -2452,13 +2452,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             project,
             all_projects: _,
             group,
+            closed,
         } => {
             let scope = ScopeArgs {
                 all_projects: project.is_none() && group.is_none(),
                 project,
                 group,
             };
-            goals::run(open_read_ctx(dir, &scope)?)
+            goals::run(open_read_ctx(dir, &scope)?, closed)
         }
         Command::Feedback {
             project,

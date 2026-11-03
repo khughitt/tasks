@@ -1113,6 +1113,9 @@ pub enum Command {
             add = ArgValueCandidates::new(crate::complete::groups)
         )]
         group: Option<String>,
+        /// Also list the goals closed in the last 14 days, after the open ones.
+        #[arg(long)]
+        closed: bool,
     },
     /// Every claim in the registry's claim stores, with liveness; opens no checkout.
     Claims {

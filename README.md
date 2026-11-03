@@ -211,7 +211,9 @@ goals with a `user` or `mixed` origin, most recently active first, with progress
 over each goal's descendants only (a dependency is never a piece) and flags for stalled,
 blocked and waiting-on-you work inside it. A goal's dependencies outside its subtree are
 counted apart, as `dependencies` in JSON and `8/8 · 26/33 deps open` in the pretty row,
-so a goal whose remaining work sits in prerequisites never reads as finished.
+so a goal whose remaining work sits in prerequisites never reads as finished. Done goals
+are left out unless `--closed` is given, which lists those closed in the last 14 days
+after the open ones, newest close first.
 
 A need (`--need <name>`, declared under `[needs]` in tasks/.config.toml) names a shared
 resource a step uses. An exclusive need serves one session at a time; see [Claims](#claims).
@@ -387,6 +389,7 @@ every project. Needs are declared per project in `[needs]` (see the design's §6
     tasks park <id> "rerun the preflight" --reason quiet --waiting-on user --minutes 50  # needs an idle host
     tasks quiet                      # what could run tonight, across every project; -n 1 for the top
     tasks goals                      # the goals you asked for, across projects: progress, activity, attention
+    tasks goals --closed             # ...plus the goals closed in the last 14 days
     tasks list --parked --waiting-on user --all-projects  # everything waiting on you, with its next step
     tasks --pretty --headers list     # label each column of a pretty table
     tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads

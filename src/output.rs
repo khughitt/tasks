@@ -2748,8 +2748,8 @@ pub fn parked_table(
     crate::table::render(&parked_columns(), &built, layout, widths, painter)
 }
 
-/// The pretty goals view (goals-view spec §5.5): open rows, then a separator and the
-/// recently closed rows, dimmed. Fixed columns line up across both sections.
+/// The pretty goals view (goals-view spec §5.5): open rows, then, under `--closed`, a
+/// separator and the recently closed rows, dimmed. Fixed columns line up across both sections.
 pub fn goals_table(
     rows: &[crate::goals::GoalRow],
     painter: &Painter,

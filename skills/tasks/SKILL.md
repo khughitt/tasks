@@ -87,7 +87,8 @@ mean those documents were verified.
    `mixed` origin across every registered project, most recently active first, with
    progress over each goal's descendants only, its open dependencies outside the subtree
    counted apart (`8/8 · 26/33 deps open`), and stalled, blocked and waiting-on-you
-   flags. When filing a goal the user described, set `--origin user` (or `mixed`) so it
+   flags. Done goals are left out unless `--closed` adds those closed in the last 14
+   days. When filing a goal the user described, set `--origin user` (or `mixed`) so it
    appears there.
    `tasks blockers` ranks open prerequisites by the open work that depends on them,
    directly and transitively (`-n` defaults to 20; `--project`, `--group` or
