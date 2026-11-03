@@ -261,3 +261,83 @@ fn retained_operation_nullable_contract() {
     n["request"] = json!({"type":"attachment","task":"sci-000001","name":"request.json","basis":null,"sha256":"a".repeat(64)});
     assert!(decode_operation(&n.to_string()).is_err());
 }
+#[test]
+fn retained_unknown_empty_host() {
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t, "t", r#"retained: {"host":""}"#).unwrap();
+    assert!(!state::replay(&t, &basis(), Some("h")).unwrap().complete);
+}
+#[test]
+fn retained_complete_host_resolution() {
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t, "t", r#"retained: {"host":"h","path":42}"#).unwrap();
+    crate::commands::append_note(
+        &mut t,
+        "t",
+        &format!("retention operation: {}", operation("intent", json!({}))),
+    )
+    .unwrap();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    let output = json!({"items":[4],"artifacts":[],"resolutions":[{"bad":{"basis":basis(),"ordinal":2},"successors":[4],"reason":"Complete declared host inventory"}]});
+    crate::commands::append_note(
+        &mut t,
+        "t",
+        &format!(
+            "retention operation: {}",
+            operation("items_published", output)
+        ),
+    )
+    .unwrap();
+    assert!(state::replay(&t, &basis(), Some("h")).unwrap().complete);
+}
+#[test]
+fn retained_task_resolution_cannot_hide_other_hosts() {
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    let mut remote = record();
+    remote["host"] = json!("other");
+    remote["path"] = json!("/data/remote");
+    crate::commands::append_note(&mut t, "t", &format!("retained: {remote}")).unwrap();
+    crate::commands::append_note(&mut t, "t", r#"retained: {"version":2}"#).unwrap();
+    crate::commands::append_note(
+        &mut t,
+        "t",
+        &format!("retention operation: {}", operation("intent", json!({}))),
+    )
+    .unwrap();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    let output = json!({"items":[5],"artifacts":[],"resolutions":[{"bad":{"basis":basis(),"ordinal":3},"successors":[5],"reason":"Incomplete current-host declaration"}]});
+    crate::commands::append_note(
+        &mut t,
+        "t",
+        &format!(
+            "retention operation: {}",
+            operation("items_published", output)
+        ),
+    )
+    .unwrap();
+    assert!(!state::replay(&t, &basis(), Some("h")).unwrap().complete);
+}
+
+#[test]
+fn retained_replay_rejects_missing_phase_items() {
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    for note in [
+        operation("intent", json!({})),
+        operation(
+            "items_published",
+            json!({"items":[999],"artifacts":[],"resolutions":[]}),
+        ),
+    ] {
+        crate::commands::append_note(&mut t, "t", &format!("retention operation: {note}")).unwrap();
+    }
+    let state = state::replay(&t, &basis(), None).unwrap();
+    assert!(
+        !state.complete,
+        "a phase cannot bind a missing retained source ordinal"
+    );
+    assert!(state.items[0].record.is_none());
+}

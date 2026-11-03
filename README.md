@@ -904,11 +904,80 @@ containing committed note only when both name the same task. Foreign locators an
 request preservation inputs require an explicit basis. This avoids a commit hash
 self-reference when request bytes, attachment ledger and intent publish together.
 
-`tasks retained checkpoint <id> --request <path>`, `transfer <from> <to>
---request <path>` and `reconcile <coordinator> --request <path>` reserve the
-versioned lifecycle interface. This intermediate build validates requests and
-refuses publication; use the manual retained-item procedure until delivery and
-consumer acceptance. Do not install this intermediate writer.
+### Retained checkpoints
+
+`tasks retained checkpoint <id> --request <path>` performs one whole-host accounting
+operation. Start the task first, use Git records with `[git] commit = true`, and copy
+the exact current `basis` object from `tasks retained state <id>` into the request.
+Keep the mutable request outside the inventoried directory. For example, replace
+the task, host, commit and paths below with the actual state and declaration:
+
+```json
+{
+  "version": 1,
+  "operation_id": "0123456789abcdef0123456789abcdef",
+  "host": "host1",
+  "inputs": [{
+    "task": "sci-a00001",
+    "basis": {
+      "project": "sci", "layout": "in-tree", "records_subdir": ".",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "task_path": "tasks/sci-a00001.md", "retained_ref": "refs/heads/main"
+    }
+  }],
+  "declarations": [{
+    "kind": "scratch", "path": "$WORK_ROOT/sci/sci-a00001/evidence",
+    "purpose": "Review evidence", "cleanup_trigger": "Review completes"
+  }]
+}
+```
+
+Reuse an operation id only to retry that same parsed request. Whitespace changes
+are harmless; changed terms or bases require a new operation. A fresh operation
+rejects stale inputs. A retry verifies its durable intent and prior phases, and
+adopts byte-identical interrupted attachments before commit hooks run. An
+unpublished completion is preserved as immutable recovery evidence before a fresh
+inspection. Completed retries return the original publication references, with a
+warning that current filesystem bytes were not inspected.
+
+Every known kept identity on the executing host is inspected, including those
+omitted from `declarations`. Unchanged v1 items still receive full hashing; their
+item notes and exact manifests are reused. Historical objects receive explicit v1
+successors. Worktrees receive Git and ignored-file observations, never a content
+hash. The tool does not discover unrecorded host items or inspect other hosts.
+
+Changed evidence needs `preserved_previous` entries of `{identity, artifact}`;
+request schemas describe exact Git/attachment locators and preserved directory
+roots. Missing prior payloads, unreadable files and unexpected changes remain
+kept/unknown, with null current hashes and concrete actions. Directory inventories
+include hidden members, empty directories and literal symlink targets. Unsupported
+historical manifests and a manifest destination inside its own container refuse.
+An unknown result retains the prior-version requirement in history; another
+checkpoint cannot accept an unexplained replacement. Referenced prior payloads are
+rechecked on later observations. A directory proof needs its old manifest and
+every old member; later immutable members may coexist in that preserved root.
+Supply an explicit, fully verified replacement locator to repair an unavailable
+prior location.
+
+`resolutions` pairs an exact bad `{basis, ordinal}` with complete `declarations`
+and a `reason`. A correction must cover its blocked identity or all known
+identities in its blocked host/task scope; it never selects an older valid note as
+a fallback. A scope spanning other hosts requires explicit history recovery.
+
+Successful JSON has `version`, `operation`, `outcome`, `publications`, `counts`,
+`actions`, `metrics`, and `warnings`. `verified` means the observed local kept set
+verified; `accounted_unknown` is complete accounting with unresolved observations;
+`no_local_items` creates no empty checkpoint. Failed publication returns nonzero
+and preserves the reservation. The command does not park or close the task.
+`wall_ns` measures the held-lock operation, `hash_ns`/`bytes_hashed` accumulate the
+verifier's hash work, and `history_bytes_read` includes repeated task/archive and
+operation-metadata reads. These counters exclude Git's private I/O; hash and
+history channels may overlap. Count CLI invocations and actual UTF-8 stdout
+separately when comparing caller context.
+
+The `transfer` and `reconcile` interfaces still refuse publication in this
+intermediate build. Do not install it before full delivery and envelope-consumer
+acceptance.
 
 ### Note archives
 

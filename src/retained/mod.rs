@@ -4,7 +4,8 @@ pub mod state;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
 pub mod verify;
 
 pub mod publish;
+
+pub mod checkpoint;

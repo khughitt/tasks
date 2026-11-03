@@ -10,6 +10,8 @@ pub enum Error {
     RetainedHistoryBlocked(String),
     #[error("{0}")]
     RetainedStaleBasis(String),
+    #[error("{0}")]
+    RetainedOwnership(String),
 
     #[error("prime --summary requires JSON; use tasks --json prime --summary")]
     SummaryRequiresJson,
@@ -151,6 +153,7 @@ impl Error {
                 detail: detail + suffix,
             },
             Error::Validation(detail) => Error::Validation(detail + suffix),
+            Error::RetainedOwnership(detail) => Error::RetainedOwnership(detail + suffix),
             Error::RetainedInput(detail) => Error::RetainedInput(detail + suffix),
             Error::RetainedPublicationUnsupported(detail) => {
                 Error::RetainedPublicationUnsupported(detail + suffix)
@@ -221,6 +224,7 @@ impl Error {
             Error::InvalidId(..) => "invalid_id",
             Error::Parse { .. } => "parse",
             Error::Validation(_) => "validation",
+            Error::RetainedOwnership(_) => "retained_ownership",
             Error::RetainedInput(_) => "retained_input",
             Error::RetainedPublicationUnsupported(_) => "retained_publication_unsupported",
             Error::RetainedHistoryBlocked(_) => "retained_history_blocked",

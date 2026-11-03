@@ -7,6 +7,14 @@ use std::collections::BTreeSet;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
+thread_local! {static METADATA_BYTES:std::cell::Cell<u64>=const{std::cell::Cell::new(0)};}
+pub fn metadata_bytes_read() -> u64 {
+    METADATA_BYTES.with(std::cell::Cell::get)
+}
+pub fn record_metadata_read(bytes: usize) {
+    METADATA_BYTES.with(|total| total.set(total.get() + bytes as u64));
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveDescriptor {
     pub sha256: String,
@@ -186,7 +194,9 @@ pub fn read_archive_at(
         }
         attachments::read_capped(file, max_bytes, &path.display().to_string())
     };
-    read().map_err(|error| archive_error(&path.display().to_string(), error))
+    let bytes = read().map_err(|error| archive_error(&path.display().to_string(), error))?;
+    record_metadata_read(bytes.len());
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -349,5 +359,19 @@ mod historical_tests {
             assert_eq!(&logical.notes[..original.len()], original);
             assert_eq!(logical.notes.len(), count);
         }
+    }
+    #[test]
+    fn metadata_read_counter_tracks_repeated_record_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("tasks")).unwrap();
+        std::fs::write(temp.path().join("tasks/.config.toml"), "prefix = \"sci\"\n").unwrap();
+        let project = crate::repo::Project::open(temp.path()).unwrap();
+        let id = TaskId::parse("sci-a00001").unwrap();
+        let bytes = "A record read counter fixture\n";
+        std::fs::write(project.task_path(&id), bytes).unwrap();
+        let before = metadata_bytes_read();
+        assert_eq!(project.read_raw(&id).unwrap(), bytes);
+        assert_eq!(project.read_raw(&id).unwrap(), bytes);
+        assert_eq!(metadata_bytes_read() - before, bytes.len() as u64 * 2);
     }
 }

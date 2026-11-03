@@ -534,9 +534,18 @@ diagnostics. `complete: false` or a null item record means unresolved uncertaint
 never substitute its predecessor. Default reads refuse dirty required records;
 explicit historical reads use only pinned task/archive blobs. Missing or
 conflicting evidence fails explicitly. This query does not inspect current bytes.
-The checkpoint/transfer/reconcile interfaces in this intermediate build validate
-requests but refuse publication; keep the installed manual procedure until full
-delivery and consumer acceptance.
+`tasks retained checkpoint <id> --request <path>` performs fresh whole-host
+accounting after an owned start, with Git-backed auto-commit records and the exact
+current input basis. It includes every known local kept identity even when omitted
+from declarations. Keep request/manifest metadata outside the inventoried container.
+Retry the same operation id with the same parsed request; preserve prior changed
+payloads through explicit immutable locators. `accounted_unknown` is successful
+accounting, not verification. A completed retry returns historical publication
+references and explicitly leaves current bytes unchecked. Errors keep the durable
+reservation; they do not park or close the task. See README's retained checkpoint
+request and resolution contract. Transfer/reconcile still refuse publication in
+this intermediate build; retain the installed manual procedure until full delivery
+and consumer acceptance.
 
 Pending retained operations reserve task/evidence mutation while permitting reads,
 unrelated appended notes, start/claim refresh and park. Complete or reconcile them

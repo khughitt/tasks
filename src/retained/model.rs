@@ -283,20 +283,17 @@ pub fn decode_record(raw: &str) -> Result<RetentionRecord> {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg(test)]
 pub struct Manifest {
     pub version: u8,
     pub entries: Vec<ManifestEntry>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-#[cfg(test)]
 pub enum ManifestEntry {
     File { path: String, sha256: String },
     Directory { path: String },
     Symlink { path: String, target: String },
 }
-#[cfg(test)]
 impl ManifestEntry {
     pub fn path(&self) -> &str {
         match self {
@@ -304,7 +301,6 @@ impl ManifestEntry {
         }
     }
 }
-#[cfg(test)]
 pub fn decode_manifest(raw: &str) -> Result<Manifest> {
     let m: Manifest = decode_request(raw.as_bytes())?;
     if m.version != 1
@@ -1071,4 +1067,16 @@ impl ArtifactLocator {
             _ => Ok(()),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MutationResult {
+    pub version: u8,
+    pub operation: OperationKey,
+    pub outcome: String,
+    pub publications: Vec<Publication>,
+    pub counts: Counts,
+    pub actions: Vec<String>,
+    pub metrics: super::verify::Metrics,
+    pub warnings: Vec<String>,
 }

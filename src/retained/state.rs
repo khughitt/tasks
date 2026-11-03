@@ -65,20 +65,18 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
         let parsed = if let Some(raw) = note.text.strip_prefix("retained: ") {
             match decode_record(raw) {
                 Ok(r) => {
-                    if host.is_none_or(|h| h == r.host) {
-                        let identity = r.identity();
-                        items.insert(
-                            identity.clone(),
-                            RetainedItem {
-                                identity,
-                                record: Some(r),
-                                source: Some(source.clone()),
-                                observed_at: note.at.clone(),
-                                checkpoint: None,
-                                coverage: "recorded".into(),
-                            },
-                        );
-                    }
+                    let identity = r.identity();
+                    items.insert(
+                        identity.clone(),
+                        RetainedItem {
+                            identity,
+                            record: Some(r),
+                            source: Some(source.clone()),
+                            observed_at: note.at.clone(),
+                            checkpoint: None,
+                            coverage: "recorded".into(),
+                        },
+                    );
                     Ok(())
                 }
                 Err(e) => Err((raw, e.to_string())),
@@ -89,6 +87,32 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
                 let key = (n.key.coordinator.clone(), n.key.operation_id.clone());
                 let previous = phases.get(&key);
                 validate_transition(previous, &n)?;
+                let ordinals: &[u64] = match &n.outputs {
+                    PhaseOutputs::Items(o) => &o.items,
+                    PhaseOutputs::Receiver(o) => &o.items,
+                    PhaseOutputs::Sender(o) => &o.items,
+                    PhaseOutputs::Ready(o) => &o.items,
+                    _ => &[],
+                };
+                let mut seen = std::collections::BTreeSet::new();
+                for ordinal in ordinals {
+                    let record = ordinal
+                        .checked_sub(1)
+                        .and_then(|v| usize::try_from(v).ok())
+                        .filter(|v| *v < i)
+                        .and_then(|v| task.notes.get(v))
+                        .and_then(|note| note.text.strip_prefix("retained: "))
+                        .and_then(|raw| decode_record(raw).ok())
+                        .ok_or_else(|| {
+                            invalid("operation item lacks a preceding retained source")
+                        })?;
+                    if !seen.insert(*ordinal) || record.version != Some(1) || record.host != n.host
+                    {
+                        return Err(invalid(
+                            "operation item source conflicts with its observation",
+                        ));
+                    }
+                }
                 phases.insert(key, n.clone());
                 Ok(n)
             });
@@ -115,15 +139,32 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
                                     .as_ref()
                                     .is_some_and(|p| p.ordinal == relation.bad.ordinal)
                                 {
-                                    let covered = d.identity.as_ref().is_some_and(|id| {
-                                        relation.successors.iter().any(|o| {
+                                    let corrected = relation
+                                        .successors
+                                        .iter()
+                                        .filter_map(|o| {
                                             task.notes
                                                 .get(*o as usize - 1)
                                                 .and_then(|n| n.text.strip_prefix("retained: "))
                                                 .and_then(|r| decode_record(r).ok())
-                                                .is_some_and(|r| r.identity() == *id)
+                                                .filter(|r| r.version == Some(1))
+                                                .map(|r| r.identity())
                                         })
-                                    });
+                                        .collect::<Vec<_>>();
+                                    let covered = corrected.len() == relation.successors.len()
+                                        && !corrected.is_empty()
+                                        && if let Some(identity) = &d.identity {
+                                            corrected.contains(identity)
+                                        } else {
+                                            corrected.iter().all(|i| {
+                                                d.host.as_ref().is_none_or(|h| *h == i.host)
+                                            }) && items
+                                                .keys()
+                                                .filter(|i| {
+                                                    d.host.as_ref().is_none_or(|h| *h == i.host)
+                                                })
+                                                .all(|i| corrected.contains(i))
+                                        };
                                     if covered {
                                         d.resolved_by = Some(source.clone());
                                     }
@@ -190,14 +231,28 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
         if let Err((raw, detail)) = parsed {
             // Partial identity is diagnostic scope only, never a usable predecessor.
             let v = strict(raw.as_bytes()).unwrap_or(Value::Null);
-            let h = v.get("host").and_then(Value::as_str).map(str::to_string);
+            let h = v
+                .get("host")
+                .and_then(Value::as_str)
+                .filter(|h| text(h))
+                .map(str::to_string);
             if host.is_some_and(|filter| h.as_deref().is_some_and(|h| h != filter)) {
                 continue;
             }
             let identity = serde_json::from_value::<Identity>(
                 serde_json::json!({"host":v.get("host"),"kind":v.get("kind"),"path":v.get("path")}),
             )
-            .ok();
+            .ok()
+            .filter(|identity| {
+                Declaration {
+                    kind: identity.kind.clone(),
+                    path: identity.path.clone(),
+                    purpose: "Diagnostic scope".into(),
+                    cleanup_trigger: "Recover exact history".into(),
+                }
+                .record(&identity.host, &task.id.to_string())
+                .is_ok()
+            });
             s.diagnostics.push(Diagnostic {
                 code: if detail.contains("unsupported_version") {
                     "unsupported_version"
@@ -256,6 +311,34 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
         }
     }
     s.complete = s.diagnostics.iter().all(|d| d.resolved_by.is_some());
-    s.items = items.into_values().collect();
+    s.items = items
+        .into_values()
+        .filter(|i| host.is_none_or(|h| h == i.identity.host))
+        .collect();
     Ok(s)
+}
+
+pub fn verification_requirement(task: &Task, current: &RetentionRecord) -> RetentionRecord {
+    if current.verification != "unknown" || current.kind == "worktree" {
+        return current.clone();
+    }
+    for note in task.notes.iter().rev() {
+        if let Some(raw) = note.text.strip_prefix("retained: ")
+            && let Ok(record) = decode_record(raw)
+            && record.identity() == current.identity()
+        {
+            if record.state == "released" {
+                break;
+            }
+            if record.verification == "verified" {
+                let mut required = current.clone();
+                required.verification = "verified".into();
+                required.sha256 = record.sha256;
+                required.manifest = record.manifest;
+                required.verification_action = None;
+                return required;
+            }
+        }
+    }
+    current.clone()
 }

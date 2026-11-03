@@ -124,6 +124,39 @@ impl RetainedEnv {
     pub fn record(&self) -> Value {
         json!({"version":1,"host":"fixture-host","kind":"evidence","path":"/data/report","state":"kept","verification":"verified","purpose":"Review","next_owner":format!("task:{}",self.id),"cleanup_trigger":"After review","sha256":"a".repeat(64)})
     }
+    pub fn check_hook(&self) {
+        use std::os::unix::fs::PermissionsExt;
+        let output = git_fixture::command(self.env.home.path(), &self.records)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let dir = PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
+        assert!(
+            dir.canonicalize()
+                .unwrap()
+                .starts_with(self._root.path().canonicalize().unwrap())
+        );
+        let binary = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tasks");
+        let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+        let hook = dir.join("hooks/pre-commit");
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\nexec {} -C {} check >/dev/null\n",
+                quote(binary.to_str().unwrap()),
+                quote(self.records.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     pub fn request(&self, name: &str, v: &Value) -> PathBuf {
         let p = self.dir.join(name);
         std::fs::write(&p, serde_json::to_vec(v).unwrap()).unwrap();

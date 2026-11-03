@@ -19,6 +19,53 @@ pub struct Metrics {
     pub hash_ns: u64,
     pub bytes_hashed: u64,
     pub history_bytes_read: u64,
+    #[serde(skip)]
+    owners: Vec<(crate::model::TaskId, String)>,
+    #[serde(skip)]
+    pulse_at: Option<Instant>,
+}
+impl Metrics {
+    pub fn track(&mut self, owners: Vec<(crate::model::TaskId, String)>) {
+        self.owners = owners;
+        self.pulse_at = Some(Instant::now());
+    }
+    pub fn finish(&self) -> Self {
+        Self {
+            wall_ns: self.wall_ns,
+            hash_ns: self.hash_ns,
+            bytes_hashed: self.bytes_hashed,
+            history_bytes_read: self.history_bytes_read,
+            ..Self::default()
+        }
+    }
+    fn pulse(&mut self) -> Result<()> {
+        if self.owners.is_empty()
+            || self
+                .pulse_at
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(60))
+        {
+            return Ok(());
+        }
+        for (id, session) in &self.owners {
+            let update = (|| -> Result<()> {
+                let mut store = crate::claims::ClaimStore::load(&id.prefix)?;
+                let mut claim = store
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| invalid("claim disappeared during verification"))?;
+                if claim.session != *session || crate::claims::liveness(&claim).is_stale() {
+                    return Err(invalid("claim changed or expired during verification"));
+                }
+                claim.seen = crate::time::now();
+                store.insert(id, claim);
+                store.save()?;
+                Ok(())
+            })();
+            update.map_err(|e|crate::error::Error::RetainedOwnership(format!("Retained claim heartbeat on {id} failed: {e}; re-establish ownership before retry")))?;
+        }
+        self.pulse_at = Some(Instant::now());
+        Ok(())
+    }
 }
 #[derive(Debug, Clone)]
 pub struct ManifestBytes {
@@ -30,11 +77,12 @@ pub struct Observation {
     pub record: RetentionRecord,
     pub manifest: Option<ManifestBytes>,
     pub git: Option<String>,
+    pub preservations: Vec<ArtifactLocator>,
 }
 pub fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
-fn timed_hash(bytes: &[u8], metrics: &mut Metrics) -> String {
+pub fn hash_bytes(bytes: &[u8], metrics: &mut Metrics) -> String {
     let start = Instant::now();
     let digest = sha(bytes);
     metrics.bytes_hashed += bytes.len() as u64;
@@ -79,6 +127,7 @@ fn hash_stream(reader: &mut impl Read, metrics: &mut Metrics) -> Result<String> 
     let mut hash = Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
+        metrics.pulse()?;
         let n = reader.read(&mut buf)?;
         if n == 0 {
             break;
@@ -100,15 +149,19 @@ fn walk(
     dir: &Path,
     prefix: &str,
     entries: &mut Vec<ManifestEntry>,
+    snapshots: &mut std::collections::BTreeMap<String, Metadata>,
     metrics: &mut Metrics,
 ) -> Result<()> {
     let handle = open(dir, true)?;
     let before = handle.metadata()?;
+    snapshots.insert(prefix.to_string(), before.clone());
     // Held directory descriptors prevent a replaced ancestor from redirecting enumeration.
     let held = PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()));
-    let mut names = std::fs::read_dir(&held)?
-        .map(|e| e.map(|e| e.file_name()))
-        .collect::<std::io::Result<Vec<_>>>()?;
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(&held)? {
+        metrics.pulse()?;
+        names.push(entry?.file_name());
+    }
     names.sort();
     for name in names {
         let n = name
@@ -124,6 +177,7 @@ fn walk(
         }
         let physical = held.join(&name);
         let meta = std::fs::symlink_metadata(&physical)?;
+        snapshots.insert(path.clone(), meta.clone());
         if meta.is_symlink() {
             let target = std::fs::read_link(&physical)?
                 .into_os_string()
@@ -135,7 +189,7 @@ fn walk(
             entries.push(ManifestEntry::Symlink { path, target });
         } else if meta.is_dir() {
             entries.push(ManifestEntry::Directory { path: path.clone() });
-            walk(&physical, &path, entries, metrics)?;
+            walk(&physical, &path, entries, snapshots, metrics)?;
         } else if meta.is_file() {
             entries.push(ManifestEntry::File {
                 path,
@@ -152,16 +206,65 @@ fn walk(
     }
     Ok(())
 }
+// Recheck every member after the entire hash pass; parent mtimes do not cover file edits.
+fn recheck(
+    dir: &Path,
+    prefix: &str,
+    snapshots: &std::collections::BTreeMap<String, Metadata>,
+    metrics: &mut Metrics,
+) -> Result<()> {
+    let handle = open(dir, true)?;
+    let before = snapshots
+        .get(prefix)
+        .ok_or_else(|| invalid("directory inventory changed"))?;
+    stable(dir, &handle, before)?;
+    let held = PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()));
+    for entry in std::fs::read_dir(&held)? {
+        metrics.pulse()?;
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .ok_or_else(|| invalid("member name changed"))?;
+        let key = if prefix.is_empty() {
+            name.into()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let expected = snapshots
+            .get(&key)
+            .ok_or_else(|| invalid("new retained member during inspection"))?;
+        let path = held.join(name);
+        let actual = std::fs::symlink_metadata(&path)?;
+        if stamp(expected) != stamp(&actual) {
+            return Err(invalid("retained member changed during inventory"));
+        }
+        if actual.is_dir() {
+            recheck(&path, &key, snapshots, metrics)?;
+        }
+    }
+    stable(dir, &handle, before)
+}
 pub fn manifest(root: &Path, metrics: &mut Metrics) -> Result<ManifestBytes> {
+    manifest_observed(root, metrics, || {})
+}
+fn manifest_observed(
+    root: &Path,
+    metrics: &mut Metrics,
+    after: impl FnOnce(),
+) -> Result<ManifestBytes> {
     let mut entries = Vec::new();
-    walk(root, "", &mut entries, metrics)?;
+    let mut snapshots = std::collections::BTreeMap::new();
+    walk(root, "", &mut entries, &mut snapshots, metrics)?;
+    after();
+    recheck(root, "", &snapshots, metrics)?;
     entries.sort_by(|a, b| a.path().cmp(b.path()));
     let bytes = serde_json::to_vec(&Manifest {
         version: 1,
         entries,
     })
     .map_err(invalid)?;
-    let sha256 = timed_hash(&bytes, metrics);
+    let sha256 = hash_bytes(&bytes, metrics);
     Ok(ManifestBytes { bytes, sha256 })
 }
 pub fn current_path(project: &Project, path: &str) -> Result<PathBuf> {
@@ -170,18 +273,27 @@ pub fn current_path(project: &Project, path: &str) -> Result<PathBuf> {
             .ok_or_else(|| invalid("WORK_ROOT is unavailable on this host"))?;
         Ok(PathBuf::from(root).join(s))
     } else if path.starts_with(".worktrees/") {
-        Ok(project.checkout.join(path))
+        let main = if project.kind == crate::repo::Kind::InTree {
+            project
+                .main_checkout_root()?
+                .unwrap_or_else(|| project.checkout.clone())
+        } else {
+            project.checkout.clone()
+        };
+        Ok(main.join(path))
     } else {
         Ok(PathBuf::from(path))
     }
 }
-fn read_file(path: &Path, cap: u64) -> Result<Vec<u8>> {
+pub fn read_local(path: &Path, cap: u64) -> Result<Vec<u8>> {
     let mut file = open(path, false)?;
     let before = file.metadata()?;
     let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
+    let read = Read::by_ref(&mut file)
         .take(cap.saturating_add(1))
-        .read_to_end(&mut bytes)?;
+        .read_to_end(&mut bytes);
+    crate::history::record_metadata_read(bytes.len());
+    read?;
     if bytes.len() as u64 > cap {
         return Err(invalid("retained metadata exceeds attachment cap"));
     }
@@ -269,7 +381,7 @@ pub fn artifact(
         Some(p.attachments_max_bytes),
         &mut metrics.history_bytes_read,
     )?;
-    if timed_hash(&bytes, metrics) != expected {
+    if hash_bytes(&bytes, metrics) != expected {
         return Err(invalid("preserved artifact digest mismatch"));
     }
     Ok(bytes)
@@ -333,6 +445,12 @@ fn previous(
         .sha256
         .value()
         .ok_or_else(|| invalid("previous digest missing"))?;
+    let directory = r.kind == "scratch" || r.manifest.value().is_some();
+    if directory != matches!(locator, ArtifactLocator::Directory { .. }) {
+        return Err(invalid(
+            "prior directories require a complete member root; a manifest alone is not a payload version",
+        ));
+    }
     match locator {
         ArtifactLocator::Directory {
             host,
@@ -343,12 +461,18 @@ fn previous(
                 return Err(invalid("preserved member root is on another host"));
             }
             let old = artifact(project, loc, metrics)?;
-            if sha(&old) != expected {
+            if hash_bytes(&old, metrics) != expected {
                 return Err(invalid("preserved manifest differs from previous digest"));
             }
             let root = current_path(project, path)?;
             let observed = manifest(&root, metrics)?;
-            if parsed(&old)? != parsed(&observed.bytes)? {
+            let expected = parsed(&old)?;
+            let actual = parsed(&observed.bytes)?;
+            if expected
+                .entries
+                .iter()
+                .any(|wanted| !actual.entries.contains(wanted))
+            {
                 return Err(invalid("preserved tree lacks a prior member version"));
             }
             Ok(())
@@ -361,7 +485,7 @@ fn previous(
         }
     }
 }
-fn unknown(mut r: RetentionRecord, detail: impl std::fmt::Display) -> Observation {
+pub fn unknown(mut r: RetentionRecord, detail: impl std::fmt::Display) -> Observation {
     r.version = Some(1);
     r.state = "kept".into();
     r.verification = "unknown".into();
@@ -375,7 +499,20 @@ fn unknown(mut r: RetentionRecord, detail: impl std::fmt::Display) -> Observatio
         record: r,
         manifest: None,
         git: None,
+        preservations: Vec::new(),
     }
+}
+pub fn preflight(project: &Project, record: &RetentionRecord) -> Result<()> {
+    if let Some(name) = record.manifest.value()
+        && let Ok(bytes) = read_local(&current_path(project, name)?, project.attachments_max_bytes)
+        && let Ok(v) = strict(&bytes)
+        && v.get("version").and_then(|v| v.as_u64()) != Some(1)
+    {
+        return Err(invalid(
+            "unsupported historical manifest format; preserve and migrate it explicitly",
+        ));
+    }
+    Ok(())
 }
 pub fn inspect(
     project: &Project,
@@ -390,15 +527,7 @@ pub fn inspect(
     if record.state != "kept" {
         return Err(invalid("only kept identities can be inspected"));
     }
-    if let Some(name) = record.manifest.value()
-        && let Ok(bytes) = read_file(&current_path(project, name)?, project.attachments_max_bytes)
-        && let Ok(v) = strict(&bytes)
-        && v.get("version").and_then(|v| v.as_u64()) != Some(1)
-    {
-        return Err(invalid(
-            "unsupported historical manifest format; preserve and migrate it explicitly",
-        ));
-    }
+    preflight(project, record)?;
     let attempt = (|| -> Result<Observation> {
         let path = current_path(project, &record.path)?;
         let mut r = record.clone();
@@ -429,6 +558,7 @@ pub fn inspect(
                 record: r,
                 manifest: None,
                 git: Some(String::from_utf8(status.stdout).map_err(invalid)?),
+                preservations: Vec::new(),
             });
         }
         let meta = std::fs::symlink_metadata(&path)?;
@@ -440,17 +570,18 @@ pub fn inspect(
             let m = manifest(&path, metrics)?;
             let mut candidate = m;
             if let Some(oldpath) = record.manifest.value() {
-                let old = read_file(
+                let old = read_local(
                     &current_path(project, oldpath)?,
                     project.attachments_max_bytes,
                 )?;
                 let oldparsed = parsed(&old)?;
-                if record.sha256.value() != Some(timed_hash(&old, metrics).as_str()) {
+                let old_hash = hash_bytes(&old, metrics);
+                if record.sha256.value() != Some(old_hash.as_str()) {
                     return Err(invalid("previous manifest digest mismatch"));
                 }
                 if oldparsed == parsed(&candidate.bytes)? {
                     candidate = ManifestBytes {
-                        sha256: sha(&old),
+                        sha256: old_hash,
                         bytes: old,
                     };
                 }
@@ -461,7 +592,11 @@ pub fn inspect(
         } else {
             hash_file(&path, metrics)?
         };
-        if record.verification == "verified" && record.sha256.value() != Some(digest.as_str()) {
+        let previous_directory = record.kind == "scratch" || record.manifest.value().is_some();
+        if record.verification == "verified"
+            && (record.sha256.value() != Some(digest.as_str())
+                || meta.is_dir() != previous_directory)
+        {
             previous(
                 project,
                 record,
@@ -470,6 +605,9 @@ pub fn inspect(
                 metrics,
             )?;
         }
+        if !meta.is_dir() {
+            r.manifest = FieldString::Absent;
+        }
         r.verification = "verified".into();
         r.sha256 = FieldString::Text(digest);
         r.verification_action = None;
@@ -477,9 +615,259 @@ pub fn inspect(
             record: r,
             manifest: generated,
             git: None,
+            preservations: Vec::new(),
         })
     })();
-    Ok(attempt.unwrap_or_else(|e| unknown(record.clone(), e)))
+    match attempt {
+        Err(e @ crate::error::Error::RetainedOwnership(_)) => Err(e),
+        Err(e) => Ok(unknown(record.clone(), e)),
+        Ok(observation) => Ok(observation),
+    }
+}
+
+pub fn version_key(locator: &ArtifactLocator) -> Result<(bool, String)> {
+    match locator {
+        ArtifactLocator::Git { sha256, .. } | ArtifactLocator::Attachment { sha256, .. } => {
+            Ok((false, sha256.clone()))
+        }
+        ArtifactLocator::Directory { manifest, .. } => {
+            let (_, digest) = version_key(manifest)?;
+            Ok((true, digest))
+        }
+    }
+}
+pub fn preserved(
+    project: &Project,
+    locator: &ArtifactLocator,
+    metrics: &mut Metrics,
+) -> Result<()> {
+    match locator {
+        ArtifactLocator::Directory {
+            host,
+            path,
+            manifest: locator,
+        } => {
+            if *host != crate::claims::hostname() {
+                return Err(invalid("prior member root is on another host"));
+            }
+            let saved = artifact(project, locator, metrics)?;
+            let wanted = parsed(&saved)?;
+            let actual = manifest(&current_path(project, path)?, metrics)?;
+            let actual = parsed(&actual.bytes)?;
+            if wanted
+                .entries
+                .iter()
+                .any(|entry| !actual.entries.contains(entry))
+            {
+                return Err(invalid(
+                    "prior member root lacks a required immutable version",
+                ));
+            }
+            Ok(())
+        }
+        _ => payload_digest(project, locator, metrics).map(|_| ()),
+    }
+}
+fn references(
+    project: &Project,
+    pinned: &basis::PinnedTask,
+    identity: &Identity,
+    metrics: &mut Metrics,
+    active: &mut std::collections::BTreeSet<(String, String, Identity)>,
+) -> Result<std::collections::BTreeMap<(bool, String), ArtifactLocator>> {
+    let key = (
+        pinned.task.id.to_string(),
+        pinned.basis.commit.clone(),
+        identity.clone(),
+    );
+    if !active.insert(key.clone()) {
+        return Err(invalid("cycle in preserved ownership evidence"));
+    }
+    let result = (|| {
+        let mut versions = std::collections::BTreeMap::new();
+        let start = pinned
+            .task
+            .notes
+            .iter()
+            .rposition(|n| {
+                n.text
+                    .strip_prefix("retained: ")
+                    .and_then(|r| decode_record(r).ok())
+                    .is_some_and(|r| r.identity() == *identity && r.state == "released")
+            })
+            .map_or(0, |i| i + 1);
+        for note in &pinned.task.notes[start..] {
+            metrics.pulse()?;
+            let Some(raw) = note.text.strip_prefix("retention operation: ") else {
+                continue;
+            };
+            let operation = decode_operation(raw)?;
+            match operation.outputs {
+                PhaseOutputs::Receiver(output) => {
+                    for mapping in output.mapping.iter().filter(|m| m.receiver == *identity) {
+                        let source = operation
+                            .input_bases
+                            .iter()
+                            .find(|i| i.task == operation.key.coordinator)
+                            .ok_or_else(|| {
+                                invalid("receiver phase lacks its exact sender input")
+                            })?;
+                        let source_id = crate::model::TaskId::parse(&source.task)?;
+                        let source_project = if source.basis.project == project.prefix {
+                            project.clone()
+                        } else {
+                            crate::scope::open_registered(
+                                &crate::registry::Registry::load()?,
+                                &source.basis.project,
+                                crate::scope::Origin::Id(&source_id),
+                            )?
+                        };
+                        let source = basis::read_exact(&source_project, &source_id, &source.basis)?;
+                        metrics.history_bytes_read += source.history_bytes_read;
+                        versions.extend(references(
+                            &source_project,
+                            &source,
+                            &mapping.sender,
+                            metrics,
+                            active,
+                        )?);
+                    }
+                }
+                PhaseOutputs::Items(output) => {
+                    if output.artifacts.is_empty() {
+                        continue;
+                    }
+                    let loc = operation
+                        .request
+                        .pinned(&pinned.task.id.to_string(), &pinned.basis)?;
+                    let bytes = artifact(project, &loc, metrics)?;
+                    let request: CheckpointRequest = decode_request(&bytes)?;
+                    request.validate()?;
+                    for previous in request
+                        .preserved_previous
+                        .iter()
+                        .filter(|p| p.identity == *identity)
+                    {
+                        for candidate in &output.artifacts {
+                            let candidate_key = version_key(candidate)?;
+                            let derived = matches!((candidate,&previous.artifact),(ArtifactLocator::Directory{host,path,..},ArtifactLocator::Directory{host:expected_host,path:expected_path,..}) if host==expected_host&&path==expected_path)
+                                && versions.contains_key(&candidate_key);
+                            if *candidate == previous.artifact || derived {
+                                versions.insert(candidate_key, candidate.clone());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(versions)
+    })();
+    active.remove(&key);
+    result
+}
+pub fn inspect_history(
+    project: &Project,
+    pinned: &basis::PinnedTask,
+    record: &RetentionRecord,
+    provided: Option<&ArtifactLocator>,
+    metrics: &mut Metrics,
+) -> Result<Observation> {
+    let known = super::state::replay(&pinned.task, &pinned.basis, Some(&record.host))?
+        .items
+        .iter()
+        .any(|i| {
+            i.identity == record.identity() && i.record.as_ref().is_some_and(|r| r.state == "kept")
+        });
+    let required = if known {
+        super::state::verification_requirement(&pinned.task, record)
+    } else {
+        record.clone()
+    };
+    let mut versions = if known && record.kind != "worktree" {
+        references(
+            project,
+            pinned,
+            &record.identity(),
+            metrics,
+            &mut std::collections::BTreeSet::new(),
+        )?
+    } else {
+        std::collections::BTreeMap::new()
+    };
+    let mut observation = inspect(project, &required, provided, metrics)?;
+    let mut proved = std::collections::BTreeSet::new();
+    let mut used = Vec::new();
+    if let Some(locator) = provided {
+        let key = version_key(locator)?;
+        let current = required.sha256.value().map(|sha| {
+            (
+                required.kind == "scratch" || required.manifest.value().is_some(),
+                sha.to_string(),
+            )
+        });
+        if record.kind == "scratch" && !key.0 {
+            return Err(invalid(
+                "scratch preservation needs a complete directory member root",
+            ));
+        }
+        if known
+            && required.verification == "verified"
+            && current.as_ref() != Some(&key)
+            && !versions.contains_key(&key)
+        {
+            return Err(invalid(
+                "preservation does not match a current or referenced prior version",
+            ));
+        }
+        match preserved(project, locator, metrics) {
+            Ok(()) => {
+                versions.insert(key.clone(), locator.clone());
+                proved.insert(key);
+                used.push(locator.clone());
+            }
+            Err(e @ crate::error::Error::RetainedOwnership(_)) => return Err(e),
+            Err(e) => observation = unknown(record.clone(), e),
+        }
+    }
+    let current = if observation.record.verification == "verified" {
+        observation
+            .record
+            .sha256
+            .value()
+            .map(|sha| (observation.manifest.is_some(), sha.to_string()))
+    } else {
+        None
+    };
+    for (key, locator) in versions {
+        if current.as_ref() == Some(&key) || proved.contains(&key) {
+            continue;
+        }
+        let mut checked = preserved(project, &locator, metrics);
+        if checked.is_err()
+            && let (
+                ArtifactLocator::Directory { manifest, .. },
+                Some(ArtifactLocator::Directory { host, path, .. }),
+            ) = (&locator, provided)
+        {
+            let rebound = ArtifactLocator::Directory {
+                host: host.clone(),
+                path: path.clone(),
+                manifest: manifest.clone(),
+            };
+            checked = preserved(project, &rebound, metrics);
+            if checked.is_ok() {
+                used.push(rebound);
+            }
+        }
+        match checked {
+            Ok(()) => {}
+            Err(e @ crate::error::Error::RetainedOwnership(_)) => return Err(e),
+            Err(e) => observation = unknown(record.clone(), e),
+        }
+    }
+    observation.preservations = used;
+    Ok(observation)
 }
 
 #[cfg(test)]
@@ -758,6 +1146,19 @@ mod tests {
                 .verification,
             "unknown"
         );
+        let bare = match &loc {
+            ArtifactLocator::Directory { manifest, .. } => manifest.as_ref(),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            inspect(&p, &r, Some(bare), &mut Metrics::default())
+                .unwrap()
+                .record
+                .verification,
+            "unknown",
+            "manifest bytes alone do not preserve directory members"
+        );
+        std::fs::write(prior.join("additional-report"), "later version").unwrap();
         let o = inspect(&p, &r, Some(&loc), &mut Metrics::default()).unwrap();
         assert_eq!(o.record.verification, "verified");
         assert_ne!(o.manifest.unwrap().bytes, first.bytes);
@@ -839,6 +1240,159 @@ mod tests {
         assert!(
             decode_manifest(r#"{"version":1,"entries":[{"type":"directory","path":"../escape"}]}"#)
                 .is_err()
+        );
+    }
+    #[test]
+    fn retained_verify_claim_heartbeat() {
+        if isolated("retained::verify::tests::retained_verify_claim_heartbeat") {
+            return;
+        }
+        let _lock = crate::claims::MutationLock::acquire("sci").unwrap();
+        let id = crate::model::TaskId::parse("sci-a00001").unwrap();
+        let mut claim:crate::claims::Claim=serde_json::from_value(serde_json::json!({"owner":"tester","session":"owned","host":crate::claims::hostname(),"worktree":"/fixture","started":crate::time::now(),"seen":crate::time::now()})).unwrap();
+        let mut store = crate::claims::ClaimStore::load("sci").unwrap();
+        store.insert(&id, claim.clone());
+        store.save().unwrap();
+        let mut metrics = Metrics::default();
+        metrics.track(vec![(id.clone(), "owned".into())]);
+        metrics.pulse_at = None;
+        metrics.pulse().unwrap();
+        assert_eq!(
+            crate::claims::ClaimStore::load("sci")
+                .unwrap()
+                .get(&id)
+                .unwrap()
+                .session,
+            "owned"
+        );
+        claim.seen = "2020-01-01T00:00:00Z".into();
+        store.insert(&id, claim);
+        store.save().unwrap();
+        metrics.pulse_at = None;
+        assert!(matches!(
+            metrics.pulse(),
+            Err(crate::error::Error::RetainedOwnership(_))
+        ));
+        assert_eq!(
+            crate::claims::ClaimStore::load("sci")
+                .unwrap()
+                .get(&id)
+                .unwrap()
+                .seen,
+            "2020-01-01T00:00:00Z"
+        );
+        let serialized = serde_json::to_value(metrics.finish()).unwrap();
+        assert_eq!(serialized.as_object().unwrap().len(), 4);
+    }
+    #[test]
+    fn retained_verify_relative_main_checkout() {
+        if isolated("retained::verify::tests::retained_verify_relative_main_checkout") {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let p = project(root.path());
+        repo(root.path());
+        std::fs::write(root.path().join(".gitignore"), ".worktrees/\n").unwrap();
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "-qm", "project"]);
+        let tree = root.path().join(".worktrees/feature");
+        git(
+            root.path(),
+            &["worktree", "add", "-qb", "feature", tree.to_str().unwrap()],
+        );
+        crate::common::git_fixture::assert_worktree(root.path(), root.path(), &tree);
+        let branch = Project::open(&tree).unwrap();
+        let mut record = record(&tree, "worktree");
+        record.path = ".worktrees/feature".into();
+        let observation = inspect(&branch, &record, None, &mut Metrics::default()).unwrap();
+        assert_eq!(observation.record.verification, "verified");
+        assert_eq!(observation.record.path, ".worktrees/feature");
+        assert_eq!(
+            current_path(&branch, &record.path)
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            tree.canonicalize().unwrap()
+        );
+        assert_eq!(
+            current_path(&p, &record.path)
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            tree.canonicalize().unwrap()
+        );
+    }
+    #[test]
+    fn retained_verify_directory_to_file() {
+        if isolated("retained::verify::tests::retained_verify_directory_to_file") {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let p = project(root.path());
+        repo(root.path());
+        let tree = root.path().join("tree");
+        let prior = root.path().join("prior");
+        std::fs::create_dir(&tree).unwrap();
+        std::fs::create_dir(&prior).unwrap();
+        std::fs::write(tree.join("report"), "old").unwrap();
+        std::fs::write(prior.join("report"), "old").unwrap();
+        let m = manifest(&tree, &mut Metrics::default()).unwrap();
+        let path = root.path().join("manifest.json");
+        std::fs::write(&path, &m.bytes).unwrap();
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "-qm", "prior version"]);
+        let commit = String::from_utf8(git(root.path(), &["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+        let mut r = record(&tree, "evidence");
+        r.verification = "verified".into();
+        r.verification_action = None;
+        r.sha256 = FieldString::Text(m.sha256.clone());
+        r.manifest = FieldString::Text(path.to_str().unwrap().into());
+        let prior = ArtifactLocator::Directory {
+            host: crate::claims::hostname(),
+            path: prior.to_str().unwrap().into(),
+            manifest: Box::new(ArtifactLocator::Git {
+                basis: Basis {
+                    project: "sci".into(),
+                    layout: "in-tree".into(),
+                    records_subdir: ".".into(),
+                    commit,
+                    task_path: "tasks/sci-a00001.md".into(),
+                    retained_ref: "refs/heads/main".into(),
+                },
+                path: "manifest.json".into(),
+                sha256: m.sha256,
+            }),
+        };
+        std::fs::remove_dir_all(&tree).unwrap();
+        std::fs::write(&tree, &m.bytes).unwrap();
+        assert_eq!(
+            inspect(&p, &r, None, &mut Metrics::default())
+                .unwrap()
+                .record
+                .verification,
+            "unknown",
+            "equal file/manifest bytes do not establish the prior directory payload"
+        );
+        let observed = inspect(&p, &r, Some(&prior), &mut Metrics::default()).unwrap();
+        assert_eq!(observed.record.verification, "verified");
+        assert_eq!(observed.record.manifest, FieldString::Absent);
+        assert!(observed.manifest.is_none());
+    }
+    #[test]
+    fn retained_verify_directory_late_member_change() {
+        let root = tempfile::tempdir().unwrap();
+        let early = root.path().join("a");
+        std::fs::write(&early, "old").unwrap();
+        std::fs::write(root.path().join("z"), "last").unwrap();
+        assert!(
+            manifest_observed(root.path(), &mut Metrics::default(), || {
+                std::fs::write(&early, "new").unwrap();
+            })
+            .is_err(),
+            "a member changed after hashing but before the inventory was complete"
         );
     }
 }

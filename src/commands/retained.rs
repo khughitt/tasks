@@ -21,11 +21,7 @@ pub fn request_bytes(ctx: &Ctx, path: &Path) -> Result<Vec<u8>> {
         crate::attachments::EntryState::File(_) => {}
         _ => return Err(invalid("request must be a regular file")),
     }
-    crate::attachments::read_capped(
-        std::fs::File::open(path)?,
-        ctx.project.attachments_max_bytes,
-        "retained request",
-    )
+    crate::retained::verify::read_local(path, ctx.project.attachments_max_bytes)
 }
 fn unavailable() -> Result<Output> {
     Err(Error::RetainedPublicationUnsupported("Lifecycle writers are not available in this intermediate build; use the documented manual procedure until delivery and consumer acceptance".into()))
@@ -43,9 +39,23 @@ pub fn dispatch(dir: Option<&Path>, action: RetainedAction) -> Result<Output> {
 }
 pub fn checkpoint(dir: Option<&Path>, id: String, request: PathBuf) -> Result<Output> {
     let ctx = open_id_ctx(dir, &id)?;
-    let r: CheckpointRequest = decode_request(&request_bytes(&ctx, &request)?)?;
+    let id = parse_id(&ctx.registry, &ctx.shorthand, &id)?.to_string();
+    let bytes = request_bytes(&ctx, &request)?;
+    let r: CheckpointRequest = decode_request(&bytes)?;
     r.validate()?;
-    unavailable()
+    if r.inputs[0].task != id {
+        return Err(invalid(
+            "checkpoint argument differs from its request input",
+        ));
+    }
+    let key = OperationKey {
+        coordinator: id.clone(),
+        operation_id: r.operation_id.clone(),
+    };
+    let operation = crate::retained::publish::open(dir, &[id], &key)?;
+    Ok(Output::RetainedMutation(crate::retained::checkpoint::run(
+        operation, r, &bytes,
+    )?))
 }
 pub fn transfer(dir: Option<&Path>, from: String, to: String, request: PathBuf) -> Result<Output> {
     let ctx = open_id_ctx(dir, &from)?;

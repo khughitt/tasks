@@ -911,7 +911,9 @@ impl Project {
         if !path.is_file() {
             return Err(Error::TaskNotFound(id.to_string()));
         }
-        Ok(std::fs::read_to_string(path)?)
+        let raw = std::fs::read_to_string(path)?;
+        crate::history::record_metadata_read(raw.len());
+        Ok(raw)
     }
 
     pub fn read_archive(

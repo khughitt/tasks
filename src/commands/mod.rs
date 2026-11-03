@@ -2522,7 +2522,6 @@ pub fn run(cli: Cli) -> Result<Output> {
     result
 }
 
-#[cfg(test)]
 pub fn revalidate_retained_ctx(ctx: &mut Ctx) -> Result<()> {
     let registry = Registry::load()?;
     reject_pending_rename(&ctx.project)?;
@@ -2549,8 +2548,8 @@ pub fn revalidate_retained_ctx(ctx: &mut Ctx) -> Result<()> {
     ctx.registry = registry;
     Ok(())
 }
-#[cfg(test)]
 pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
+    ctx.claims = Some(ClaimStore::load(&ctx.project.prefix)?);
     let me = ctx.resolve_for_guard()?;
     let claim = ctx.claims_mut()?.get(id).cloned().ok_or_else(|| {
         Error::RetainedInput(format!(

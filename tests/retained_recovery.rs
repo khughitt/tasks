@@ -113,3 +113,129 @@ fn retained_terminal_archive() {
         after["operations"][0]["note"]
     );
 }
+#[test]
+fn retained_checkpoint_recovery() {
+    for boundary in [
+        "intent",
+        "artifact:items_published",
+        "save:items_published",
+        "items_published",
+        "save:completed",
+        "commit:completed",
+    ] {
+        let f = RetainedEnv::new("in-tree");
+        f.json(&["start", &f.id]);
+        f.check_hook();
+        let tree = f.dir.join("tree");
+        std::fs::create_dir(&tree).unwrap();
+        std::fs::write(tree.join("report"), "payload").unwrap();
+        let host = std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .unwrap()
+            .trim()
+            .to_string();
+        let request = json!({"version":1,"operation_id":"1".repeat(32),"host":host,"inputs":[{"task":f.id,"basis":f.state()["basis"]}],"declarations":[{"kind":"scratch","path":tree.to_str().unwrap(),"purpose":"Review","cleanup_trigger":"Review completes"}]});
+        let path = f.request("request.json", &request);
+        let args = [
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ];
+        let out = f
+            .cmd()
+            .env("TASKS_RETAINED_STOP_AFTER", boundary)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(86), "{boundary}: {out:?}");
+        let result = f.json(&args);
+        assert_eq!(result["outcome"], "verified", "{boundary}");
+        let state = f.state();
+        assert_eq!(
+            state["checkpoints"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|c| c["note"]["complete"] == true)
+                .count(),
+            1
+        );
+        let name = std::path::Path::new(state["items"][0]["record"]["manifest"].as_str().unwrap())
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let out = common::git_fixture::command(f.env.home.path(), &f.records)
+            .args([
+                "cat-file",
+                "-e",
+                &format!("HEAD:tasks/files/{}/{name}", f.id),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{boundary}: manifest was not committed: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn retained_checkpoint_saved_completion_rechecks() {
+    let f = RetainedEnv::new("in-tree");
+    f.json(&["start", &f.id]);
+    f.check_hook();
+    let file = f.dir.join("payload");
+    std::fs::write(&file, "payload").unwrap();
+    let request = json!({"version":1,"operation_id":"2".repeat(32),"host":std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap().trim(),"inputs":[{"task":f.id,"basis":f.state()["basis"]}],"declarations":[{"kind":"evidence","path":file.to_str().unwrap(),"purpose":"Review","cleanup_trigger":"Review completes"}]});
+    let path = f.request("request.json", &request);
+    let args = [
+        "retained",
+        "checkpoint",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ];
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "save:completed")
+        .args(args)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(86), "{out:?}");
+    std::fs::remove_file(file).unwrap();
+    let result = f.json(&args);
+    assert_eq!(result["outcome"], "accounted_unknown");
+    let state = f.state();
+    assert_eq!(state["items"][0]["record"]["verification"], "unknown");
+    assert_eq!(
+        state["checkpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["note"]["complete"] == true)
+            .count(),
+        1
+    );
+    let entries = std::fs::read_dir(f.records.join(format!("tasks/files/{}", f.id)))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("retained-checkpoint-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 1);
+    let backup: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&entries[0]).unwrap()).unwrap();
+    assert!(
+        backup["raw_task"]
+            .as_str()
+            .unwrap()
+            .contains("retention checkpoint:")
+    );
+}

@@ -135,9 +135,8 @@ pub fn check_write(
     new: &Task,
     permission: WritePermission,
 ) -> Result<()> {
-    #[cfg(test)]
     if let WritePermission::Retained(ref authority) = permission {
-        return authority.validate(old, new);
+        return authority.validate(project, old, new);
     }
     if old
         .notes
@@ -202,29 +201,54 @@ pub fn check_write(
     Ok(())
 }
 
-#[cfg(test)]
 pub struct Authority {
     key: OperationKey,
+    recovery: Option<Box<StagedRecovery>>,
 }
+#[derive(Clone)]
+struct StagedRecovery {
+    base: Task,
+    from_sha: String,
+    backup_name: String,
+    backup_sha: String,
+}
+const STAGED_ACTION: &str = "Reinspect the original request; unpublished task preserved as ";
 pub enum WritePermission {
     Ordinary,
     Claim,
     Park,
-    #[cfg(test)]
     Retained(Authority),
 }
-#[cfg(test)]
 impl Authority {
-    fn validate(&self, old: &Task, new: &Task) -> Result<()> {
-        if !new.notes.starts_with(&old.notes) {
-            return Err(invalid("publication cannot rewrite prior history"));
+    fn validate(&self, project: &Project, old: &Task, new: &Task) -> Result<()> {
+        let baseline = if let Some(recovery) = &self.recovery {
+            let raw = project.read_raw(&old.id)?.into_bytes();
+            let backup = super::verify::read_local(
+                &crate::attachments::task_dir(project, &old.id).join(&recovery.backup_name),
+                project.attachments_max_bytes,
+            )?;
+            if super::verify::sha(&raw) != recovery.from_sha
+                || super::verify::sha(&backup) != recovery.backup_sha
+                || crate::attachments::ledger(new).get(&recovery.backup_name)
+                    != Some(&crate::attachments::Ledger::Attached)
+            {
+                return Err(invalid(
+                    "staged recovery preimage or preserved backup changed",
+                ));
+            }
+            &recovery.base
+        } else {
+            old
+        };
+        if !new.notes.starts_with(&baseline.notes) {
+            return Err(invalid("publication cannot rewrite published history"));
         }
-        if let Some(p) = pending(old)?
+        if let Some(p) = pending(baseline)?
             && p.note.key != self.key
         {
             return Err(invalid("publication lacks the task reservation"));
         }
-        for n in &new.notes[old.notes.len()..] {
+        for n in &new.notes[baseline.notes.len()..] {
             if let Some(raw) = n.text.strip_prefix("retention operation: ")
                 && decode_operation(raw)?.key != self.key
             {
@@ -235,35 +259,33 @@ impl Authority {
     }
 }
 
-#[cfg(test)]
 pub struct OperationCtx {
     pub key: OperationKey,
+    started: std::time::Instant,
+    staged_recovery: Option<(crate::model::TaskId, StagedRecovery)>,
     pub tasks: BTreeMap<crate::model::TaskId, super::basis::PinnedTask>,
     pub metrics: super::verify::Metrics,
     contexts: BTreeMap<String, crate::commands::Ctx>,
     locks: BTreeMap<std::path::PathBuf, crate::record_commit::CommitLock>,
 }
-#[cfg(test)]
 pub struct NewArtifact {
     pub name: String,
     pub bytes: Vec<u8>,
 }
-#[cfg(test)]
 pub struct GeneratedNote {
     pub at: String,
     pub text: String,
 }
-#[cfg(test)]
 pub struct Published {
     pub publication: Publication,
     pub sources: Vec<Source>,
 }
-#[cfg(test)]
 pub fn open(
     dir: Option<&std::path::Path>,
     ids: &[String],
     key: &OperationKey,
 ) -> Result<OperationCtx> {
+    let started = std::time::Instant::now();
     key.validate()?;
     let mut contexts = BTreeMap::new();
     let mut resolved = std::collections::BTreeSet::new();
@@ -318,8 +340,17 @@ pub fn open(
         crate::commands::retained_owner(ctx, &id)?;
         let mut pinned = super::basis::read(&ctx.project, &id, Some("HEAD"))?;
         let working = crate::commands::load(ctx, &id.to_string())?;
+        let completed = working.notes.iter().any(|n| {
+            n.text
+                .strip_prefix("retention operation: ")
+                .and_then(|s| decode_operation(s).ok())
+                .is_some_and(|n| {
+                    n.key == *key && matches!(n.phase.as_str(), "completed" | "reconciled")
+                })
+        });
         if let Some(p) = pending(&working)?
             && p.note.key != *key
+            && !completed
         {
             return Err(invalid("task is reserved by another retained operation"));
         }
@@ -327,6 +358,8 @@ pub fn open(
             let mut expected = pinned.task.clone();
             expected.updated = working.updated.clone();
             expected.notes = working.notes.clone();
+            expected.owner = working.owner.clone();
+            expected.complexity = working.complexity;
             if expected != working
                 || !working.notes.starts_with(&pinned.task.notes)
                 || !working.notes[pinned.task.notes.len()..].iter().any(|n| {
@@ -349,19 +382,31 @@ pub fn open(
         }
         tasks.insert(id, pinned);
     }
-    let metrics = super::verify::Metrics {
-        history_bytes_read: tasks.values().map(|p| p.history_bytes_read).sum(),
-        ..Default::default()
-    };
+    let mut metrics = super::verify::Metrics::default();
+    metrics.history_bytes_read = tasks.values().map(|p| p.history_bytes_read).sum();
+    let mut owners = Vec::new();
+    for id in tasks.keys() {
+        let ctx = contexts.get_mut(&id.prefix).expect("participant prefix");
+        owners.push((
+            id.clone(),
+            ctx.claims_mut()?
+                .get(id)
+                .expect("owned claim")
+                .session
+                .clone(),
+        ));
+    }
+    metrics.track(owners);
     Ok(OperationCtx {
         key: key.clone(),
+        started,
+        staged_recovery: None,
         tasks,
         contexts,
         locks,
         metrics,
     })
 }
-#[cfg(test)]
 impl OperationCtx {
     pub fn project(&self, id: &crate::model::TaskId) -> &Project {
         &self
@@ -371,13 +416,15 @@ impl OperationCtx {
             .project
     }
 }
-#[cfg(test)]
-fn stop(boundary: &str) {
+fn stop_phase(boundary: &str, phase: &str) {
+    stop(boundary);
+    stop(&format!("{boundary}:{phase}"));
+}
+pub fn stop(boundary: &str) {
     if std::env::var("TASKS_RETAINED_STOP_AFTER").as_deref() == Ok(boundary) {
         std::process::exit(86)
     }
 }
-#[cfg(test)]
 pub fn batch(
     ctx: &mut OperationCtx,
     id: &crate::model::TaskId,
@@ -394,6 +441,7 @@ pub fn batch(
         .get_mut(&id.prefix)
         .expect("participant context");
     crate::commands::retained_owner(context, id)?;
+    crate::attachments::check_storage(&context.project, id)?;
     let input = &ctx.tasks.get(id).expect("participant").basis;
     let original = super::basis::read_exact(&context.project, id, input)?;
     ctx.metrics.history_bytes_read += original.history_bytes_read;
@@ -414,8 +462,10 @@ pub fn batch(
                 Some(context.project.attachments_max_bytes),
                 &mut ctx.metrics.history_bytes_read,
             )?;
-            if std::fs::read(crate::attachments::task_dir(&context.project, id).join(&name))?
-                != bytes
+            if super::verify::read_local(
+                &crate::attachments::task_dir(&context.project, id).join(&name),
+                context.project.attachments_max_bytes,
+            )? != bytes
             {
                 return Err(Error::RetainedStaleBasis(format!(
                     "Required attachment {name} differs from its committed preimage"
@@ -429,6 +479,15 @@ pub fn batch(
             "Task changed between retained phases; retry after recovering the exact preimage"
                 .into(),
         ));
+    }
+    let recovery = ctx.staged_recovery.take();
+    let recovery = match recovery {
+        Some((target, recovery)) if target == *id => Some(recovery),
+        Some(_) => return Err(invalid("staged recovery targets another participant")),
+        None => None,
+    };
+    if let Some(recovery) = &recovery {
+        task = recovery.base.clone();
     }
     let mut sources = Vec::new();
     if notes.is_empty() {
@@ -485,7 +544,9 @@ pub fn batch(
                 crate::attachments::write_new(&path, &artifact.bytes)?
             }
             crate::attachments::EntryState::File(_) => {
-                if std::fs::read(&path)? != artifact.bytes {
+                if super::verify::read_local(&path, context.project.attachments_max_bytes)?
+                    != artifact.bytes
+                {
                     return Err(invalid(
                         "immutable retained artifact name already holds different bytes",
                     ));
@@ -532,7 +593,7 @@ pub fn batch(
             }
         }
     }
-    stop("artifact");
+    stop_phase("artifact", &operation.phase);
     let start = reused.unwrap_or(task.notes.len());
     if reused.is_none() {
         for n in notes {
@@ -565,9 +626,10 @@ pub fn batch(
         || Ok(()),
         WritePermission::Retained(Authority {
             key: ctx.key.clone(),
+            recovery: recovery.map(Box::new),
         }),
     )?;
-    stop("save");
+    stop_phase("save", &operation.phase);
     let written = crate::written::take();
     if written
         .roots
@@ -603,7 +665,7 @@ pub fn batch(
             warnings.join("; ")
         )));
     }
-    stop("commit");
+    stop_phase("commit", &operation.phase);
     let pinned = super::basis::read(&context.project, id, None)?;
     ctx.metrics.history_bytes_read += pinned.history_bytes_read;
     if pinned.task != task {
@@ -644,6 +706,510 @@ pub fn batch(
         sources,
     })
 }
+
+pub struct Binding {
+    pub bytes: Vec<u8>,
+    pub request: ArtifactLocator,
+    pub name: String,
+    pub inputs: Vec<Input>,
+    pub host: String,
+}
+impl OperationCtx {
+    pub fn phase(&self, id: &crate::model::TaskId) -> Result<Option<(usize, OperationNote)>> {
+        let task = &self
+            .tasks
+            .get(id)
+            .ok_or_else(|| invalid("unknown participant"))?
+            .task;
+        for (i, n) in task.notes.iter().enumerate().rev() {
+            if let Some(raw) = n.text.strip_prefix("retention operation: ") {
+                let note = decode_operation(raw)?;
+                if note.key == self.key {
+                    return Ok(Some((i, note)));
+                }
+            }
+        }
+        Ok(None)
+    }
+    pub fn observer(&mut self, id: &crate::model::TaskId) -> Result<Option<String>> {
+        let ctx = self
+            .contexts
+            .get_mut(&id.prefix)
+            .ok_or_else(|| invalid("unknown participant"))?;
+        Ok(ctx
+            .resolve_for_guard()?
+            .identity()
+            .map(|i| i.tagged.clone()))
+    }
+    pub fn heartbeat(&mut self) -> Result<()> {
+        let ids = self.tasks.keys().cloned().collect::<Vec<_>>();
+        for id in ids {
+            let ctx = self.contexts.get_mut(&id.prefix).expect("participant");
+            crate::commands::retained_owner(ctx, &id)?;
+        }
+        Ok(())
+    }
+    pub fn phase_publications(&mut self, id: &crate::model::TaskId) -> Result<Vec<Publication>> {
+        let task = self
+            .tasks
+            .get(id)
+            .ok_or_else(|| invalid("unknown participant"))?
+            .task
+            .clone();
+        let project = self.project(id).clone();
+        let mut publications = Vec::new();
+        for (i, n) in task.notes.iter().enumerate() {
+            if let Some(raw) = n.text.strip_prefix("retention operation: ") {
+                let note = decode_operation(raw)?;
+                if note.key == self.key {
+                    let context = note
+                        .input_bases
+                        .iter()
+                        .find(|i| i.task == id.to_string())
+                        .ok_or_else(|| invalid("phase lacks its participant input"))?
+                        .basis
+                        .clone();
+                    let basis = super::basis::publication_basis(
+                        &project,
+                        id,
+                        &context,
+                        &task.notes[..=i],
+                        &mut self.metrics.history_bytes_read,
+                    )?;
+                    publications.push(Publication {
+                        task: id.to_string(),
+                        phase: note.phase,
+                        basis,
+                    });
+                }
+            }
+        }
+        Ok(publications)
+    }
+}
+pub fn binding<T: serde::de::DeserializeOwned + PartialEq>(
+    ctx: &mut OperationCtx,
+    request: &T,
+    provided: &[u8],
+    inputs: &[Input],
+    host: &str,
+    name: &str,
+) -> Result<Binding> {
+    let id = crate::model::TaskId::parse(&ctx.key.coordinator)?;
+    let project = ctx.project(&id).clone();
+    crate::attachments::validate_name(name)?;
+    crate::attachments::check_storage(&project, &id)?;
+    let existing = ctx.phase(&id)?;
+    let mut bytes = provided.to_vec();
+    let mut locator = None;
+    if let Some((index, note)) = existing {
+        if note.input_bases != inputs || note.host != host {
+            return Err(invalid(
+                "same operation key is bound to different input bases or host",
+            ));
+        }
+        let pinned = ctx.tasks.get(&id).expect("coordinator");
+        let committed = super::basis::read_exact(&project, &id, &pinned.basis)?;
+        ctx.metrics.history_bytes_read += committed.history_bytes_read;
+        if committed.task.notes.get(index) == pinned.task.notes.get(index) {
+            let loc = note.request.pinned(&id.to_string(), &pinned.basis)?;
+            bytes = super::verify::artifact(&project, &loc, &mut ctx.metrics)?;
+        } else {
+            let path = crate::attachments::task_dir(&project, &id).join(name);
+            if matches!(
+                crate::attachments::entry_state(&path)?,
+                crate::attachments::EntryState::File(_)
+            ) {
+                bytes = super::verify::read_local(&path, project.attachments_max_bytes)?;
+            }
+            let expected = match &note.request {
+                ArtifactLocator::Attachment { sha256, .. }
+                | ArtifactLocator::Git { sha256, .. } => sha256,
+                _ => return Err(invalid("operation request must be a file")),
+            };
+            if super::verify::hash_bytes(&bytes, &mut ctx.metrics) != *expected {
+                return Err(invalid(
+                    "unpublished request bytes are missing or differ from the original intent",
+                ));
+            }
+        }
+        locator = Some(note.request);
+    } else {
+        let path = crate::attachments::task_dir(&project, &id).join(name);
+        match crate::attachments::entry_state(&path)? {
+            crate::attachments::EntryState::Absent => {}
+            crate::attachments::EntryState::File(_) => {
+                bytes = super::verify::read_local(&path, project.attachments_max_bytes)?;
+            }
+            crate::attachments::EntryState::Unsafe(detail) => {
+                return Err(Error::AttachmentUnsafe(detail));
+            }
+        }
+    }
+    if decode_request::<T>(&bytes)? != *request {
+        return Err(invalid(
+            "same operation key has different parsed intent; restore its original request",
+        ));
+    }
+    let request = locator.unwrap_or_else(|| ArtifactLocator::Attachment {
+        task: id.to_string(),
+        name: name.into(),
+        basis: None,
+        sha256: super::verify::hash_bytes(&bytes, &mut ctx.metrics),
+    });
+    Ok(Binding {
+        bytes,
+        request,
+        name: name.into(),
+        inputs: inputs.to_vec(),
+        host: host.into(),
+    })
+}
+pub fn validate_bases(ctx: &OperationCtx, inputs: &[Input]) -> Result<()> {
+    if inputs.len() != ctx.tasks.len() {
+        return Err(invalid("request inputs differ from locked participants"));
+    }
+    for input in inputs {
+        let id = crate::model::TaskId::parse(&input.task)?;
+        if !ctx.tasks.contains_key(&id) {
+            return Err(invalid("unlocked input participant"));
+        }
+        super::basis::validate_locator(ctx.project(&id), &id, &input.basis)?;
+    }
+    Ok(())
+}
+pub fn validate_inputs(ctx: &mut OperationCtx, inputs: &[Input]) -> Result<()> {
+    let coordinator = crate::model::TaskId::parse(&ctx.key.coordinator)?;
+    let retry = ctx.phase(&coordinator)?.is_some();
+    for input in inputs {
+        let id = crate::model::TaskId::parse(&input.task)?;
+        let pinned = ctx
+            .tasks
+            .get(&id)
+            .ok_or_else(|| invalid("request inputs differ from locked participants"))?;
+        let project = ctx.project(&id).clone();
+        super::basis::validate_locator(&project, &id, &input.basis)?;
+        if input.basis.retained_ref != pinned.basis.retained_ref {
+            return Err(Error::RetainedStaleBasis(
+                "Publish from the input's named retained branch".into(),
+            ));
+        }
+        let old = super::basis::read_exact(&project, &id, &input.basis)?;
+        ctx.metrics.history_bytes_read += old.history_bytes_read;
+        if !retry {
+            if input.basis != pinned.basis || pinned.task != old.task {
+                return Err(Error::RetainedStaleBasis("A new operation requires exact current committed inputs; refresh its basis before retry".into()));
+            }
+        } else {
+            let current = &ctx.tasks.get(&id).expect("participant").task;
+            let mut expected = old.task.clone();
+            expected.notes = current.notes.clone();
+            expected.updated = current.updated.clone();
+            expected.owner = current.owner.clone();
+            expected.complexity = current.complexity;
+            if expected != *current || !current.notes.starts_with(&old.task.notes) {
+                return Err(Error::RetainedStaleBasis(
+                    "Operation input has non-append edits; recover its exact reserved preimage"
+                        .into(),
+                ));
+            }
+            for note in &current.notes[old.task.notes.len()..] {
+                if let Some(raw) = note.text.strip_prefix("retention operation: ") {
+                    let n = decode_operation(raw)?;
+                    if n.key != ctx.key || n.input_bases != inputs {
+                        return Err(invalid(
+                            "foreign phase or changed intent after the original input",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+pub fn receipt(
+    ctx: &mut OperationCtx,
+    binding: &Binding,
+    id: &crate::model::TaskId,
+    outputs: PhaseOutputs,
+    at: &str,
+) -> Result<GeneratedNote> {
+    let request = if let Some((_, previous)) = ctx.phase(id)? {
+        previous.request
+    } else if id.to_string() == ctx.key.coordinator {
+        binding.request.clone()
+    } else {
+        let coordinator = crate::model::TaskId::parse(&ctx.key.coordinator)?;
+        binding.request.pinned(
+            &coordinator.to_string(),
+            &ctx.tasks.get(&coordinator).expect("coordinator").basis,
+        )?
+    };
+    let note = OperationNote {
+        version: 1,
+        key: ctx.key.clone(),
+        phase: outputs.phase().into(),
+        request,
+        input_bases: binding.inputs.clone(),
+        host: binding.host.clone(),
+        at: at.into(),
+        observer: ctx.observer(id)?,
+        outputs,
+        diagnostics: Vec::new(),
+    };
+    let text = format!(
+        "retention operation: {}",
+        serde_json::to_string(&note).map_err(invalid)?
+    );
+    decode_operation(text.strip_prefix("retention operation: ").expect("prefix"))?;
+    Ok(GeneratedNote {
+        at: at.into(),
+        text,
+    })
+}
+pub fn intent(ctx: &mut OperationCtx, binding: &Binding, id: &crate::model::TaskId) -> Result<()> {
+    let note = if let Some((index, phase)) = ctx.phase(id)? {
+        if phase.phase != "intent" {
+            return Ok(());
+        }
+        let pinned = ctx.tasks.get(id).expect("participant");
+        let committed = super::basis::read_exact(ctx.project(id), id, &pinned.basis)?;
+        let committed_note = committed.task.notes.get(index) == pinned.task.notes.get(index);
+        ctx.metrics.history_bytes_read += committed.history_bytes_read;
+        if committed_note {
+            return Ok(());
+        }
+        let n = &ctx.tasks.get(id).expect("participant").task.notes[index];
+        GeneratedNote {
+            at: n.at.clone(),
+            text: n.text.clone(),
+        }
+    } else {
+        let at = crate::time::after(&ctx.tasks.get(id).expect("participant").task.updated)?;
+        receipt(ctx, binding, id, PhaseOutputs::Intent(Empty {}), &at)?
+    };
+    let artifacts = if id.to_string() == ctx.key.coordinator {
+        vec![NewArtifact {
+            name: binding.name.clone(),
+            bytes: binding.bytes.clone(),
+        }]
+    } else {
+        Vec::new()
+    };
+    batch(ctx, id, &artifacts, &[note])?;
+    stop("intent");
+    Ok(())
+}
+pub fn result(
+    ctx: &mut OperationCtx,
+    outcome: String,
+    counts: Counts,
+    actions: Vec<String>,
+    replay: bool,
+) -> Result<MutationResult> {
+    let mut publications = Vec::new();
+    let ids = ctx.tasks.keys().cloned().collect::<Vec<_>>();
+    for id in ids {
+        publications.extend(ctx.phase_publications(&id)?);
+    }
+    ctx.metrics.wall_ns = ctx.started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+    Ok(MutationResult {
+        version: 1,
+        operation: ctx.key.clone(),
+        outcome,
+        publications,
+        counts,
+        actions,
+        metrics: {
+            let mut metrics = ctx.metrics.finish();
+            metrics.history_bytes_read += crate::history::metadata_bytes_read();
+            metrics
+        },
+        warnings: if replay {
+            vec!["Completed operation replay; current filesystem bytes were not inspected".into()]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+fn phase_artifacts(note: &OperationNote) -> Result<Vec<ArtifactLocator>> {
+    let mut artifacts = vec![note.request.clone()];
+    match &note.outputs {
+        PhaseOutputs::Items(o) => artifacts.extend(o.artifacts.clone()),
+        PhaseOutputs::Receiver(o) => artifacts.extend(o.artifacts.clone()),
+        PhaseOutputs::ReconcileIntent(o) => artifacts.push(o.directive.clone()),
+        PhaseOutputs::Ready(o) => artifacts.push(o.directive.clone()),
+        PhaseOutputs::Reconciled(o) => artifacts.push(o.directive.clone()),
+        PhaseOutputs::Incomplete(o) => {
+            if let Some(raw) = o.action.strip_prefix(STAGED_ACTION) {
+                artifacts.push(decode_request(raw.as_bytes())?);
+            }
+        }
+        _ => {}
+    }
+    Ok(artifacts)
+}
+pub fn recover_saved(
+    ctx: &mut OperationCtx,
+    id: &crate::model::TaskId,
+    binding: &Binding,
+) -> Result<()> {
+    let project = ctx.project(id).clone();
+    let pinned = ctx
+        .tasks
+        .get(id)
+        .ok_or_else(|| invalid("unknown recovery participant"))?;
+    let original = super::basis::read_exact(&project, id, &pinned.basis)?;
+    ctx.metrics.history_bytes_read += original.history_bytes_read;
+    if original.task == pinned.task {
+        return Ok(());
+    }
+    let working = pinned.task.clone();
+    let Some((_, phase)) = ctx.phase(id)? else {
+        return Err(invalid(
+            "unpublished data lacks its original operation phase",
+        ));
+    };
+    if matches!(phase.phase.as_str(), "completed" | "sender_released") {
+        let prior = original
+            .task
+            .notes
+            .iter()
+            .rev()
+            .filter_map(|n| {
+                n.text
+                    .strip_prefix("retention operation: ")
+                    .and_then(|r| decode_operation(r).ok())
+            })
+            .find(|n| n.key == ctx.key)
+            .ok_or_else(|| invalid("unsafe staged phase lacks a committed intent"))?;
+        let raw = project.read_raw(id)?.into_bytes();
+        let from_sha = super::verify::hash_bytes(&raw, &mut ctx.metrics);
+        let bytes=serde_json::to_vec(&serde_json::json!({"version":1,"operation":ctx.key,"basis":original.basis,"raw_sha256":from_sha,"raw_task":String::from_utf8(raw).map_err(invalid)?,"action":"Reinspect before publishing an interrupted completion or sender release"})).map_err(invalid)?;
+        let backup_sha = super::verify::hash_bytes(&bytes, &mut ctx.metrics);
+        let name = format!("retained-checkpoint-{backup_sha}.json");
+        let mut base = original.task;
+        base.owner = working.owner.clone();
+        base.complexity = working.complexity;
+        base.updated = working.updated.clone();
+        let at = crate::time::after(&base.updated)?;
+        let locator = ArtifactLocator::Attachment {
+            task: id.to_string(),
+            name: name.clone(),
+            basis: None,
+            sha256: backup_sha.clone(),
+        };
+        let action = format!(
+            "{STAGED_ACTION}{}",
+            serde_json::to_string(&locator).map_err(invalid)?
+        );
+        let attempt = base
+            .notes
+            .iter()
+            .filter_map(|n| {
+                n.text
+                    .strip_prefix("retention operation: ")
+                    .and_then(|r| decode_operation(r).ok())
+            })
+            .filter(|n| n.key == ctx.key && n.phase == "incomplete")
+            .count() as u64
+            + 1;
+        let note = receipt(
+            ctx,
+            binding,
+            id,
+            PhaseOutputs::Incomplete(IncompleteOutput {
+                attempt,
+                previous_phase: prior.phase,
+                checkpoint: None,
+                action,
+            }),
+            &at,
+        )?;
+        ctx.staged_recovery = Some((
+            id.clone(),
+            StagedRecovery {
+                base,
+                from_sha,
+                backup_name: name.clone(),
+                backup_sha,
+            },
+        ));
+        batch(ctx, id, &[NewArtifact { name, bytes }], &[note])?;
+        return Ok(());
+    }
+    let suffix = &working.notes[original.task.notes.len()..];
+    let mut expected = BTreeMap::new();
+    let mut items = std::collections::BTreeSet::new();
+    for note in suffix {
+        if let Some(raw) = note.text.strip_prefix("retention operation: ") {
+            let operation = decode_operation(raw)?;
+            if operation.key != ctx.key || operation.input_bases != binding.inputs {
+                return Err(invalid("unpublished phase differs from its bound intent"));
+            }
+            for artifact in phase_artifacts(&operation)? {
+                if let ArtifactLocator::Attachment {
+                    task, name, sha256, ..
+                } = artifact
+                    && task == id.to_string()
+                    && expected
+                        .insert(name, sha256.clone())
+                        .is_some_and(|old| old != sha256)
+                {
+                    return Err(invalid("conflicting staged artifact digests"));
+                }
+            }
+            let ordinals = match operation.outputs {
+                PhaseOutputs::Items(o) => o.items,
+                PhaseOutputs::Receiver(o) => o.items,
+                PhaseOutputs::Sender(o) => o.items,
+                PhaseOutputs::Ready(o) => o.items,
+                _ => Vec::new(),
+            };
+            items.extend(ordinals);
+        }
+    }
+    for (index, note) in working
+        .notes
+        .iter()
+        .enumerate()
+        .skip(original.task.notes.len())
+    {
+        if note.text.starts_with("retained: ") && !items.contains(&(index as u64 + 1)) {
+            return Err(invalid(
+                "unpublished retained object lacks its exact batch receipt",
+            ));
+        }
+    }
+    let before = crate::attachments::ledger(&original.task);
+    let mut artifacts = Vec::new();
+    for (name, state) in crate::attachments::ledger(&working) {
+        if state == crate::attachments::Ledger::Attached && before.get(&name) != Some(&state) {
+            let bytes = super::verify::read_local(
+                &crate::attachments::task_dir(&project, id).join(&name),
+                project.attachments_max_bytes,
+            )?;
+            let hash = super::verify::hash_bytes(&bytes, &mut ctx.metrics);
+            if expected.get(&name) != Some(&hash) {
+                return Err(invalid(
+                    "unpublished attachment lacks its exact artifact digest in the phase receipt",
+                ));
+            }
+            artifacts.push(NewArtifact { name, bytes });
+        }
+    }
+    let notes = suffix
+        .iter()
+        .map(|n| GeneratedNote {
+            at: n.at.clone(),
+            text: n.text.clone(),
+        })
+        .collect::<Vec<_>>();
+    batch(ctx, id, &artifacts, &notes)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

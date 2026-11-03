@@ -329,3 +329,58 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
     }
     Ok(pinned)
 }
+
+pub fn publication_basis(
+    project: &Project,
+    id: &TaskId,
+    context: &Basis,
+    prefix: &[crate::model::Note],
+    bytes_read: &mut u64,
+) -> Result<Basis> {
+    if prefix.is_empty() {
+        return Err(invalid("publication source requires a logical note"));
+    }
+    validate_locator(project, id, context)?;
+    let commits = string(git(
+        project,
+        &[
+            "log",
+            "--first-parent",
+            "--reverse",
+            "--format=%H",
+            &context.retained_ref,
+            "--",
+            &context.task_path,
+        ],
+    )?)?;
+    let commits = commits.lines().collect::<Vec<_>>();
+    let mut low = 0;
+    let mut high = commits.len();
+    // Operation history is append-only; archival preserves this logical prefix.
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let mut candidate = context.clone();
+        candidate.commit = commits[mid].into();
+        let task = task_at(project, id, &candidate, bytes_read)?;
+        if task.notes.starts_with(prefix) {
+            high = mid
+        } else {
+            low = mid + 1
+        }
+    }
+    let commit = commits.get(low).ok_or_else(|| {
+        Error::RetainedHistoryBlocked(
+            "Original publication is unavailable on its retained branch; recover exact history"
+                .into(),
+        )
+    })?;
+    let mut result = context.clone();
+    result.commit = (*commit).into();
+    if !task_at(project, id, &result, bytes_read)?
+        .notes
+        .starts_with(prefix)
+    {
+        return Err(invalid("original publication prefix does not match"));
+    }
+    Ok(result)
+}

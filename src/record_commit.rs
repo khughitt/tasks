@@ -545,18 +545,15 @@ fn commit_drained(
     committed
 }
 
-#[cfg(test)]
 pub struct CommitLock {
     common: PathBuf,
     _guard: MutationLock,
 }
-#[cfg(test)]
 pub fn common_dir(dir: &Path) -> Result<PathBuf, String> {
     discover(dir, git)?
         .map(|r| r.common)
         .ok_or_else(|| "retained publication requires Git records".into())
 }
-#[cfg(test)]
 pub fn lock(dir: &Path) -> Result<CommitLock, String> {
     let common = common_dir(dir)?;
     let guard = lock_for(&common, &state_home()?)?;
@@ -565,7 +562,6 @@ pub fn lock(dir: &Path) -> Result<CommitLock, String> {
         _guard: guard,
     })
 }
-#[cfg(test)]
 impl CommitLock {
     pub fn commit_paths(&self, dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
         let repo = match discover(dir, git) {
