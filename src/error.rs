@@ -110,6 +110,12 @@ pub enum Error {
     #[error("{0}")]
     ClipboardUnavailable(String),
     #[error("{0}")]
+    MultipartUncuttable(String),
+    #[error("{0}")]
+    MultipartNotText(String),
+    #[error("{0}")]
+    MultipartInvalidContent(String),
+    #[error("{0}")]
     ClipboardNoImage(String),
     #[error("io: {0}")]
     Io(String),
@@ -183,6 +189,11 @@ impl Error {
             Error::AttachmentMissing(detail) => Error::AttachmentMissing(detail + suffix),
             Error::AttachmentUnsafe(detail) => Error::AttachmentUnsafe(detail + suffix),
             Error::AttachmentTooLarge(detail) => Error::AttachmentTooLarge(detail + suffix),
+            Error::MultipartUncuttable(detail) => Error::MultipartUncuttable(detail + suffix),
+            Error::MultipartNotText(detail) => Error::MultipartNotText(detail + suffix),
+            Error::MultipartInvalidContent(detail) => {
+                Error::MultipartInvalidContent(detail + suffix)
+            }
             Error::ClipboardUnavailable(detail) => Error::ClipboardUnavailable(detail + suffix),
             Error::ClipboardNoImage(detail) => Error::ClipboardNoImage(detail + suffix),
             Error::CheckoutMissing(detail) => Error::CheckoutMissing(detail + suffix),
@@ -243,6 +254,9 @@ impl Error {
             Error::AttachmentMissing(_) => "attachment_missing",
             Error::AttachmentUnsafe(_) => "attachment_unsafe",
             Error::AttachmentTooLarge(_) => "attachment_too_large",
+            Error::MultipartUncuttable(_) => "multipart_uncuttable",
+            Error::MultipartNotText(_) => "multipart_not_text",
+            Error::MultipartInvalidContent(_) => "multipart_invalid_content",
             Error::ClipboardUnavailable(_) => "clipboard_unavailable",
             Error::ClipboardNoImage(_) => "clipboard_no_image",
             Error::Io(_) => "io",
