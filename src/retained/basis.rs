@@ -128,7 +128,8 @@ pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result
         path_string(sub)?
     };
     let task_path = path_string(project.task_path(id).strip_prefix(&root).map_err(invalid)?)?;
-    if basis.project != project.prefix
+    if id.prefix != project.prefix
+        || basis.project != project.prefix
         || basis.layout != project.kind.as_str()
         || basis.records_subdir != sub
         || basis.task_path != task_path

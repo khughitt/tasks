@@ -569,6 +569,14 @@ pub fn run(
         &request.host,
         &name,
     )?;
+    if ctx
+        .phase(&id)?
+        .is_some_and(|(_, n)| n.phase == "reconciled")
+    {
+        return Err(invalid(
+            "This operation was reconciled without completion; repair observations with a fresh checkpoint request",
+        ));
+    }
     if let Some(result) = replay(&mut ctx, &id, &request)? {
         return Ok(result);
     }

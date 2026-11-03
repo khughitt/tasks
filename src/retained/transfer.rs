@@ -484,6 +484,14 @@ pub fn run(
         &request.host,
         &name,
     )?;
+    if ctx
+        .phase(&from)?
+        .is_some_and(|(_, n)| n.phase == "reconciled")
+    {
+        return Err(invalid(
+            "This transfer was reconciled without release; use a fresh operation for any new transfer",
+        ));
+    }
     if let Some((index, note)) = ctx.phase(&from)?
         && note.phase == "completed"
         && committed(&mut ctx, &from, index)?

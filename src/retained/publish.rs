@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 pub struct PendingOperation {
     pub note: OperationNote,
 }
-pub fn pending(task: &Task) -> Result<Option<PendingOperation>> {
+fn latest(task: &Task) -> Result<Vec<OperationNote>> {
     let mut phases = BTreeMap::<(String, String), OperationNote>::new();
     for note in &task.notes {
         if let Some(raw) = note.text.strip_prefix("retention operation: ") {
@@ -19,9 +19,9 @@ pub fn pending(task: &Task) -> Result<Option<PendingOperation>> {
             phases.insert(key, n);
         }
     }
-    let mut live = phases
-        .into_values()
-        .filter(|n| !matches!(n.phase.as_str(), "completed" | "reconciled"));
+    Ok(phases.into_values().collect())
+}
+fn one_pending(mut live: impl Iterator<Item = OperationNote>) -> Result<Option<PendingOperation>> {
     let first = live.next();
     if live.next().is_some() {
         return Err(Error::RetainedHistoryBlocked(
@@ -30,28 +30,28 @@ pub fn pending(task: &Task) -> Result<Option<PendingOperation>> {
     }
     Ok(first.map(|note| PendingOperation { note }))
 }
+#[cfg(test)]
+pub fn pending(task: &Task) -> Result<Option<PendingOperation>> {
+    one_pending(
+        latest(task)?
+            .into_iter()
+            .filter(|n| !matches!(n.phase.as_str(), "completed" | "reconciled")),
+    )
+}
 fn pending_here(project: &Project, task: &Task) -> Result<Option<PendingOperation>> {
-    let Some(p) = pending(task)? else {
-        return Ok(None);
-    };
-    if p.note.phase == "reconcile_ready" && p.note.key.coordinator != task.id.to_string() {
-        let ctx =
-            crate::commands::open_id_unlocked_ctx(Some(&project.records), &p.note.key.coordinator)?;
-        let id = crate::model::TaskId::parse(&p.note.key.coordinator)?;
-        let coordinator = super::basis::read(&ctx.project, &id, None)?;
-        for n in &coordinator.task.notes {
-            if let Some(raw) = n.text.strip_prefix("retention operation: ") {
-                let terminal = decode_operation(raw)?;
-                if terminal.key == p.note.key
-                    && terminal.request == p.note.request
-                    && terminal.phase == "reconciled"
-                {
-                    return Ok(None);
-                }
-            }
+    let mut live = Vec::new();
+    for note in latest(task)? {
+        if note.phase == "completed" {
+            continue;
         }
+        if matches!(note.phase.as_str(), "reconcile_ready" | "reconciled")
+            && super::reconcile::reservation_ended(project, task, &note)?
+        {
+            continue;
+        }
+        live.push(note);
     }
-    Ok(Some(p))
+    one_pending(live.into_iter())
 }
 fn reserved(text: &str) -> bool {
     [
@@ -243,7 +243,7 @@ impl Authority {
         if !new.notes.starts_with(&baseline.notes) {
             return Err(invalid("publication cannot rewrite published history"));
         }
-        if let Some(p) = pending(baseline)?
+        if let Some(p) = pending_here(project, baseline)?
             && p.note.key != self.key
         {
             return Err(invalid("publication lacks the task reservation"));
@@ -348,7 +348,7 @@ pub fn open(
                     n.key == *key && matches!(n.phase.as_str(), "completed" | "reconciled")
                 })
         });
-        if let Some(p) = pending(&working)?
+        if let Some(p) = pending_here(&ctx.project, &working)?
             && p.note.key != *key
             && !completed
         {
@@ -905,6 +905,14 @@ pub fn validate_bases(ctx: &OperationCtx, inputs: &[Input]) -> Result<()> {
 pub fn validate_inputs(ctx: &mut OperationCtx, inputs: &[Input]) -> Result<()> {
     let coordinator = crate::model::TaskId::parse(&ctx.key.coordinator)?;
     let retry = ctx.phase(&coordinator)?.is_some();
+    validate_since(ctx, inputs, inputs, retry)
+}
+pub fn validate_since(
+    ctx: &mut OperationCtx,
+    inputs: &[Input],
+    phase_inputs: &[Input],
+    retry: bool,
+) -> Result<()> {
     for input in inputs {
         let id = crate::model::TaskId::parse(&input.task)?;
         let pinned = ctx
@@ -943,7 +951,7 @@ pub fn validate_inputs(ctx: &mut OperationCtx, inputs: &[Input]) -> Result<()> {
             for note in &current.notes[old.task.notes.len()..] {
                 if let Some(raw) = note.text.strip_prefix("retention operation: ") {
                     let n = decode_operation(raw)?;
-                    if n.key != ctx.key || n.input_bases != inputs {
+                    if n.key != ctx.key || n.input_bases != phase_inputs {
                         return Err(invalid(
                             "foreign phase or changed intent after the original input",
                         ));
@@ -957,7 +965,7 @@ pub fn validate_inputs(ctx: &mut OperationCtx, inputs: &[Input]) -> Result<()> {
                         PhaseOutputs::Incomplete(o) => checkpoints.extend(o.checkpoint),
                         _ => {}
                     }
-                    for artifact in phase_artifacts(&n)? {
+                    for artifact in observation_artifacts(&project, current, &n)? {
                         if let ArtifactLocator::Attachment { task, name, .. } = artifact
                             && task == id.to_string()
                         {
@@ -1118,6 +1126,40 @@ fn phase_artifacts(note: &OperationNote) -> Result<Vec<ArtifactLocator>> {
     }
     Ok(artifacts)
 }
+fn observation_artifacts(
+    project: &Project,
+    task: &Task,
+    note: &OperationNote,
+) -> Result<Vec<ArtifactLocator>> {
+    let mut artifacts = phase_artifacts(note)?;
+    if let PhaseOutputs::Ready(out) = &note.outputs {
+        for ordinal in &out.items {
+            let raw = task
+                .notes
+                .get(*ordinal as usize - 1)
+                .and_then(|n| n.text.strip_prefix("retained: "))
+                .ok_or_else(|| invalid("ready observation source missing"))?;
+            let record = decode_record(raw)?;
+            if let (Some(path), Some(digest)) = (record.manifest.value(), record.sha256.value()) {
+                let path = std::path::Path::new(path);
+                if path.parent() == Some(crate::attachments::task_dir(project, &task.id).as_path())
+                {
+                    artifacts.push(ArtifactLocator::Attachment {
+                        task: task.id.to_string(),
+                        name: path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .ok_or_else(|| invalid("manifest filename"))?
+                            .into(),
+                        basis: None,
+                        sha256: digest.into(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(artifacts)
+}
 pub fn recover_saved(
     ctx: &mut OperationCtx,
     id: &crate::model::TaskId,
@@ -1216,7 +1258,7 @@ pub fn recover_saved(
             if operation.key != ctx.key || operation.input_bases != binding.inputs {
                 return Err(invalid("unpublished phase differs from its bound intent"));
             }
-            for artifact in phase_artifacts(&operation)? {
+            for artifact in observation_artifacts(&project, &working, &operation)? {
                 if let ArtifactLocator::Attachment {
                     task, name, sha256, ..
                 } = artifact

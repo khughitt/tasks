@@ -1,6 +1,6 @@
 use super::{Ctx, open_id_ctx, parse_id};
 use crate::cli::RetainedAction;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::output::Output;
 use crate::retained::{basis, model::*, state as history};
 use std::path::{Path, PathBuf};
@@ -11,6 +11,7 @@ pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> 
     }
     let id = parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let pinned = basis::read(&ctx.project, &id, at.as_deref())?;
+    crate::retained::reconcile::validate_terminal_history(&ctx.project, &pinned)?;
     let mut out = history::replay(&pinned.task, &pinned.basis, host.as_deref())?;
     out.warnings.extend(ctx.warnings);
     out.warnings.extend(pinned.warnings);
@@ -22,9 +23,6 @@ pub fn request_bytes(ctx: &Ctx, path: &Path) -> Result<Vec<u8>> {
         _ => return Err(invalid("request must be a regular file")),
     }
     crate::retained::verify::read_local(path, ctx.project.attachments_max_bytes)
-}
-fn unavailable() -> Result<Output> {
-    Err(Error::RetainedPublicationUnsupported("Lifecycle writers are not available in this intermediate build; use the documented manual procedure until delivery and consumer acceptance".into()))
 }
 pub fn dispatch(dir: Option<&Path>, action: RetainedAction) -> Result<Output> {
     match action {
@@ -79,7 +77,18 @@ pub fn transfer(dir: Option<&Path>, from: String, to: String, request: PathBuf) 
 }
 pub fn reconcile(dir: Option<&Path>, coordinator: String, request: PathBuf) -> Result<Output> {
     let ctx = open_id_ctx(dir, &coordinator)?;
-    let r: ReconcileRequest = decode_request(&request_bytes(&ctx, &request)?)?;
+    let coordinator = parse_id(&ctx.registry, &ctx.shorthand, &coordinator)?.to_string();
+    let bytes = request_bytes(&ctx, &request)?;
+    let r: ReconcileRequest = decode_request(&bytes)?;
     r.validate()?;
-    unavailable()
+    if r.operation.coordinator != coordinator {
+        return Err(invalid(
+            "coordinator argument differs from reconciliation request",
+        ));
+    }
+    let ids = r.inputs.iter().map(|i| i.task.clone()).collect::<Vec<_>>();
+    let operation = crate::retained::publish::open(dir, &ids, &r.operation)?;
+    Ok(Output::RetainedMutation(crate::retained::reconcile::run(
+        operation, r, &bytes,
+    )?))
 }

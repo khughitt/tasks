@@ -1,5 +1,8 @@
 mod common;
-use common::retained::RetainedEnv;
+use common::retained::{
+    RetainedEnv, checkpoint, checkpoint_fixture, checkpoint_request, cross_receiver, declaration,
+    host, transfer, transfer_fixture, transfer_request,
+};
 use serde_json::json;
 
 #[test]
@@ -199,37 +202,6 @@ fn retained_state_completion() {
     );
 }
 
-fn checkpoint_fixture() -> RetainedEnv {
-    let f = RetainedEnv::new("in-tree");
-    f.json(&["start", &f.id]);
-    f
-}
-fn host() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname")
-        .unwrap()
-        .trim()
-        .into()
-}
-fn checkpoint_request(
-    f: &RetainedEnv,
-    n: u64,
-    declarations: serde_json::Value,
-) -> serde_json::Value {
-    json!({"version":1,"operation_id":format!("{n:032x}"),"host":host(),"inputs":[{"task":f.id,"basis":f.state()["basis"]}],"declarations":declarations})
-}
-fn declaration(path: &std::path::Path, kind: &str) -> serde_json::Value {
-    json!({"kind":kind,"path":path.to_str().unwrap(),"purpose":"Review","cleanup_trigger":"Review completes"})
-}
-fn checkpoint(f: &RetainedEnv, request: &serde_json::Value) -> serde_json::Value {
-    let path = f.request("request.json", request);
-    f.json(&[
-        "retained",
-        "checkpoint",
-        &f.id,
-        "--request",
-        path.to_str().unwrap(),
-    ])
-}
 fn retained_notes(f: &RetainedEnv) -> usize {
     f.json(&["show", &f.id])["task"]["notes"]
         .as_array()
@@ -734,44 +706,6 @@ fn retained_checkpoint_rechecks_preserved_directory_versions() {
     );
 }
 
-fn transfer_fixture() -> (RetainedEnv, String, std::path::PathBuf) {
-    let f = checkpoint_fixture();
-    let random = f.json(&["add", "Receiver"])["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let to = "sci-000002".to_string();
-    let path = f.records.join(format!("tasks/{random}.md"));
-    let bytes = std::fs::read_to_string(&path)
-        .unwrap()
-        .replace(&random, &to);
-    std::fs::remove_file(path).unwrap();
-    std::fs::write(f.records.join(format!("tasks/{to}.md")), bytes).unwrap();
-    common::git(&f.records, &["add", "tasks"]);
-    common::git(&f.records, &["commit", "-qm", "fixed receiver identity"]);
-    f.json(&["start", &to]);
-    let file = f.dir.join("payload");
-    std::fs::write(&file, "payload").unwrap();
-    checkpoint(
-        &f,
-        &checkpoint_request(&f, 1, json!([declaration(&file, "evidence")])),
-    );
-    (f, to, file)
-}
-fn transfer_request(f: &RetainedEnv, to: &str) -> serde_json::Value {
-    json!({"version":1,"operation_id":"a".repeat(32),"host":host(),"inputs":[{"task":f.id,"basis":f.state()["basis"]},{"task":to,"basis":f.json(&["retained","state",to])["basis"]}],"items":[f.state()["items"][0]["identity"]],"purpose":"Continue review","cleanup_trigger":"Review and disposition complete"})
-}
-fn transfer(f: &RetainedEnv, to: &str, request: &serde_json::Value) -> serde_json::Value {
-    let path = f.request("transfer.json", request);
-    f.json(&[
-        "retained",
-        "transfer",
-        &f.id,
-        to,
-        "--request",
-        path.to_str().unwrap(),
-    ])
-}
 #[test]
 fn retained_transfer_time_and_purpose() {
     for future in [false, true] {
@@ -988,40 +922,6 @@ fn retained_transfer_changed_before_release() {
     );
 }
 
-fn cross_receiver(f: &RetainedEnv, shared: bool) -> (std::path::PathBuf, String) {
-    let root = f.dir.parent().unwrap().join("other");
-    std::fs::create_dir(&root).unwrap();
-    common::git(&root, &["init", "-qb", "main"]);
-    common::git_fixture::assert_repo(f.env.home.path(), &root);
-    let mut args = vec!["-C", root.to_str().unwrap(), "init", "--prefix", "fam"];
-    if shared {
-        args.extend(["--records", f.records.to_str().unwrap()]);
-    }
-    f.json(&args);
-    let records = if shared {
-        f.records.join("fam")
-    } else {
-        root.clone()
-    };
-    let path = records.join("tasks/.config.toml");
-    let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    config.as_table_mut().unwrap().insert(
-        "git".into(),
-        toml::Value::Table(toml::map::Map::from_iter([(
-            "commit".into(),
-            toml::Value::Boolean(true),
-        )])),
-    );
-    std::fs::write(path, toml::to_string(&config).unwrap()).unwrap();
-    common::git(&records, &["add", "."]);
-    common::git(&records, &["commit", "-qm", "receiver configuration"]);
-    let to = f.json(&["add", "Foreign receiver", "--project", "fam"])["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    f.json(&["start", &to]);
-    (root, to)
-}
 #[test]
 fn retained_transfer_cross_repo() {
     for shared in [false, true] {

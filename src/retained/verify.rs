@@ -1395,4 +1395,32 @@ mod tests {
             "a member changed after hashing but before the inventory was complete"
         );
     }
+    #[test]
+    fn retained_verify_locator_task_project() {
+        if isolated("retained::verify::tests::retained_verify_locator_task_project") {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let p = project(root.path());
+        repo(root.path());
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "-qm", "project"]);
+        let commit = String::from_utf8(git(root.path(), &["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+        let id = crate::model::TaskId::parse("fam-a00001").unwrap();
+        let basis = Basis {
+            project: "sci".into(),
+            layout: "in-tree".into(),
+            records_subdir: ".".into(),
+            task_path: "tasks/fam-a00001.md".into(),
+            commit,
+            retained_ref: "refs/heads/main".into(),
+        };
+        assert!(
+            basis::validate_locator(&p, &id, &basis).is_err(),
+            "a task locator must use its actual project prefix"
+        );
+    }
 }

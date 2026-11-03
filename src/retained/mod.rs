@@ -10,3 +10,5 @@ pub mod verify;
 pub mod publish;
 
 pub mod checkpoint;
+
+pub mod reconcile;

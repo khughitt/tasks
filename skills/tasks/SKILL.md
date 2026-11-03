@@ -553,8 +553,15 @@ before sender release, with full verification again at the release boundary.
 Receiver collisions refuse even with equal hashes. Retry the original immutable
 request after interruption; committed release needs only missing final receipts.
 A completed retry returns dated historical results, not current verification.
-Reconcile still refuses publication in this intermediate build; retain the installed
-manual procedure until full delivery and consumer acceptance.
+`tasks retained reconcile <coordinator> --request <path>` explicitly ends an
+irrecoverable pending operation using a stable directive and fresh participant
+bases. It keeps custody, records unknown observations, verifies all ready commits,
+and only then ends reservations through the coordinator terminal. It never releases
+bytes or completes the requested transfer/checkpoint; committed sender release
+requires finishing the original operation. Malformed history remains blocked and
+needs explicit repair. Keep original named retained refs available. Use fresh
+checkpoint inputs for later repair; retain the installed manual procedure until
+full delivery and consumer acceptance.
 
 Pending retained operations reserve task/evidence mutation while permitting reads,
 unrelated appended notes, start/claim refresh and park. Complete or reconcile them

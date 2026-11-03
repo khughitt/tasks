@@ -1003,8 +1003,35 @@ Transfer counts describe recorded local identities on both participants; only th
 selected identities receive fresh byte inspection. They are not a host checkpoint.
 No copying, deletion, automatic closure or assignment of independent children occurs.
 
-The `reconcile` interface still refuses publication in this intermediate build.
-Do not install it before full delivery and envelope-consumer acceptance.
+### Retained reconciliation
+
+`tasks retained reconcile <coordinator> --request <path>` ends an irrecoverable
+pending operation without completing its requested checkpoint or transfer. Its
+request has `version: 1`, the original `operation` key, a stable hexadecimal
+`reconciliation_id`, fresh `inputs` for every participant, and a concrete `reason`.
+Run from the original input's named retained branch and keep that ref available.
+Reuse the same parsed directive on retry; another directive refuses while it is
+bound. Original request bytes remain unchanged.
+
+Reconciliation preserves current custody, publishes observation changes and each
+participant's ready receipt, then publishes the coordinator terminal citing every
+exact ready basis. A ready note alone leaves the reservation in place. Missing or
+changed payloads become kept/unknown; malformed retained history stays blocked.
+It observes the effective history rather than applying an abandoned replacement
+or source correction. Use a fresh checkpoint to apply such a repair. A committed
+sender release always refuses reconciliation, including after an incomplete phase;
+finish the original transfer's missing receipts instead.
+
+`reconciled` never means transferred or a complete host checkpoint. Result counts
+cover interpretable recorded identities at the ready bases; `actions` preserves
+unknown or blocked scopes. Independent exceptions and existing owners stay intact.
+The command copies or deletes no payloads and releases no kept identity. Unknown
+observations still block reliance or disposal after the reservation ends. Terminal
+replay verifies its immutable directive and ready publications without inspecting
+current payloads. A later operation needs fresh input bases.
+
+Do not install this intermediate build before full delivery and envelope-consumer
+acceptance.
 
 ### Note archives
 
