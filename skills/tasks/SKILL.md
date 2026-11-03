@@ -525,6 +525,19 @@ contract is unavailable, resolve that missing input before asserting a checkpoin
 Follow its fresh inspection and immutable-basis procedure even when every item is
 unchanged. A recorded observation is not proof of current filesystem state.
 
+### Retained-state queries
+
+Use `tasks retained state <id> [--at <revision>] [--host <host>]` to inspect
+Git-pinned logical retention history. JSON reports the immutable basis, effective
+items and their source ordinals, checkpoint coverage, operation phases and scoped
+diagnostics. `complete: false` or a null item record means unresolved uncertainty;
+never substitute its predecessor. Default reads refuse dirty required records;
+explicit historical reads use only pinned task/archive blobs. Missing or
+conflicting evidence fails explicitly. This query does not inspect current bytes.
+The checkpoint/transfer/reconcile interfaces in this intermediate build validate
+requests but refuse publication; keep the installed manual procedure until full
+delivery and consumer acceptance.
+
 ### Record commits
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.

@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 pub fn invalid(detail: impl fmt::Display) -> Error {
-    Error::Validation(format!("retained_input: {detail}"))
+    Error::RetainedInput(detail.to_string())
 }
 
 // serde_json's ordinary map reader overwrites duplicate keys, including nested ones.
@@ -283,17 +283,20 @@ pub fn decode_record(raw: &str) -> Result<RetentionRecord> {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(test)]
 pub struct Manifest {
     pub version: u8,
     pub entries: Vec<ManifestEntry>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[cfg(test)]
 pub enum ManifestEntry {
     File { path: String, sha256: String },
     Directory { path: String },
     Symlink { path: String, target: String },
 }
+#[cfg(test)]
 impl ManifestEntry {
     pub fn path(&self) -> &str {
         match self {
@@ -301,6 +304,7 @@ impl ManifestEntry {
         }
     }
 }
+#[cfg(test)]
 pub fn decode_manifest(raw: &str) -> Result<Manifest> {
     let m: Manifest = decode_request(raw.as_bytes())?;
     if m.version != 1

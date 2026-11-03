@@ -870,6 +870,31 @@ or referenced document before shortening it with `tasks edit <id> --body`.
 Protected note history remains append-only; use `tasks archive-notes <id>` for a
 read-only preview of lossless note archival.
 
+### Retained state
+
+`tasks retained state <id> [--at <revision>] [--host <host>]` replays retained
+notes in logical ordinal order from one immutable Git commit. JSON includes
+`version: 1`, `contract: "retention-1"`, `task`, `basis`, `host_filter`,
+`complete`, `items`, `checkpoints`, `operations`, `diagnostics`, and `warnings`.
+Each item has its identity, effective record, exact source ordinal, observation
+time and checkpoint coverage. `--pretty` renders the same evidence for inspection.
+
+The default reads committed HEAD and refuses dirty required task or archive files.
+`--at` reads only that revision's bytes, including its note archives; dirty current
+files do not affect it. The basis names a reachable local branch, the full commit,
+records layout and task path. Missing archives, invalid locators and conflicting
+checkpoint or repair bases fail explicitly. Malformed retained notes quarantine
+their known identity, host or whole task: `complete: false` and a null effective
+record prevent an older valid note from silently becoming current. A host filter
+never hides task-wide uncertainty. Historical observations do not verify current
+filesystem bytes.
+
+`tasks retained checkpoint <id> --request <path>`, `transfer <from> <to>
+--request <path>` and `reconcile <coordinator> --request <path>` reserve the
+versioned lifecycle interface. This intermediate build validates requests and
+refuses publication; use the manual retained-item procedure until delivery and
+consumer acceptance. Do not install this intermediate writer.
+
 ### Note archives
 
 `tasks archive-notes <id>` reports `id`, `source_sha256`, `archive_name`,

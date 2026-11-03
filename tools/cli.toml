@@ -181,6 +181,37 @@ tier = "typed"
 default_output = "json"
 env = "TASKS"
 
+[[cli.tasks.commands]]
+path = ["retained"]
+summary = "Query retained state and execute verified lifecycle operations"
+
+[[cli.tasks.commands]]
+path = ["retained", "state"]
+summary = "Read retained intent and observations at an immutable records revision"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--at"], value = "string" },
+  { names = ["--host"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["retained", "checkpoint"]
+summary = "Verify and publish a resumable retained host checkpoint"
+args = [{ name = "id", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retained", "transfer"]
+summary = "Transfer retained custody after durable receiver publication"
+args = [{ name = "from", value = "ref", required = true }, { name = "to", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retained", "reconcile"]
+summary = "Reconcile pending lifecycle operations while preserving custody"
+args = [{ name = "coordinator", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
 [cli.mindful]
 project = "mind6"
 tier = "typed"

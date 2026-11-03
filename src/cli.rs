@@ -442,6 +442,11 @@ pub struct EditArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Query retained state and execute verified lifecycle operations.
+    Retained {
+        #[command(subcommand)]
+        action: RetainedAction,
+    },
     /// Initialize tasks/ in this repository and register it.
     Init {
         #[arg(long)]
@@ -1138,12 +1143,52 @@ pub enum GroupAction {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum RetainedAction {
+    /// Read retained intent and observations at an immutable records revision.
+    State {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        #[arg(long, value_name = "COMMIT")]
+        at: Option<String>,
+        #[arg(long)]
+        host: Option<String>,
+    },
+    /// Verify and publish a resumable retained host checkpoint.
+    Checkpoint {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        #[arg(long, value_name = "PATH")]
+        request: PathBuf,
+    },
+    /// Transfer retained custody after durable receiver publication.
+    Transfer {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        from: String,
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        to: String,
+        #[arg(long, value_name = "PATH")]
+        request: PathBuf,
+    },
+    /// Reconcile pending lifecycle operations while preserving custody.
+    Reconcile {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        coordinator: String,
+        #[arg(long, value_name = "PATH")]
+        request: PathBuf,
+    },
+}
+
 impl Command {
     /// The verb a record commit names for this command, or `None` for a command that never
     /// writes a record (record-commit spec §3.2). `init`, `rename`, `retire`, `unretire` and
     /// `unregister` keep their own procedures and commit nothing.
     pub fn commit_verb(&self) -> Option<&'static str> {
         Some(match self {
+            Command::Retained {
+                action: RetainedAction::State { .. },
+            } => return None,
+            Command::Retained { .. } => "retained",
             Command::Add { .. } => "add",
             Command::Edit { .. } => "edit",
             Command::Note { .. } => "note",

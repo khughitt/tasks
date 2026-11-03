@@ -26,6 +26,7 @@ pub mod quiet;
 pub mod release;
 pub mod rename;
 mod resolver;
+pub mod retained;
 pub mod retire;
 pub mod root;
 pub mod sample;
@@ -2123,6 +2124,7 @@ fn fetch(no_fetch: bool) -> crate::resolve::Fetch {
 fn dispatch(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
+        Command::Retained { action } => retained::dispatch(dir, action),
         Command::Attachments { paths } => attachments::run(dir, paths),
         Command::Init {
             prefix,

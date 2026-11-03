@@ -47,7 +47,6 @@ mod relay;
 mod rename;
 mod repo;
 mod resolve;
-#[cfg(test)]
 mod retained;
 mod review;
 mod scope;

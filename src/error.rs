@@ -2,6 +2,15 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    RetainedInput(String),
+    #[error("{0}")]
+    RetainedPublicationUnsupported(String),
+    #[error("{0}")]
+    RetainedHistoryBlocked(String),
+    #[error("{0}")]
+    RetainedStaleBasis(String),
+
     #[error("prime --summary requires JSON; use tasks --json prime --summary")]
     SummaryRequiresJson,
     #[error(
@@ -142,6 +151,13 @@ impl Error {
                 detail: detail + suffix,
             },
             Error::Validation(detail) => Error::Validation(detail + suffix),
+            Error::RetainedInput(detail) => Error::RetainedInput(detail + suffix),
+            Error::RetainedPublicationUnsupported(detail) => {
+                Error::RetainedPublicationUnsupported(detail + suffix)
+            }
+            Error::RetainedHistoryBlocked(detail) => Error::RetainedHistoryBlocked(detail + suffix),
+            Error::RetainedStaleBasis(detail) => Error::RetainedStaleBasis(detail + suffix),
+
             Error::OpenDependencies(id, detail) => Error::OpenDependencies(id, detail + suffix),
             Error::OpenDescendants(id, detail) => Error::OpenDescendants(id, detail + suffix),
             Error::InvalidTransition(from, to) => Error::InvalidTransition(from, to + suffix),
@@ -205,6 +221,11 @@ impl Error {
             Error::InvalidId(..) => "invalid_id",
             Error::Parse { .. } => "parse",
             Error::Validation(_) => "validation",
+            Error::RetainedInput(_) => "retained_input",
+            Error::RetainedPublicationUnsupported(_) => "retained_publication_unsupported",
+            Error::RetainedHistoryBlocked(_) => "retained_history_blocked",
+            Error::RetainedStaleBasis(_) => "retained_stale_basis",
+
             Error::OpenDependencies(..) => "open_dependencies",
             Error::OpenDescendants(..) => "open_descendants",
             Error::InvalidTransition(..) => "invalid_transition",

@@ -176,7 +176,28 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
             }
         } else if let Some(raw) = note.text.strip_prefix("retention checkpoint: ") {
             if raw.starts_with('{') {
-                match decode_checkpoint(raw) {
+                let checked = decode_checkpoint(raw).and_then(|n| {
+                    let key = (
+                        n.operation.coordinator.clone(),
+                        n.operation.operation_id.clone(),
+                    );
+                    if n.complete
+                        && (n.operation.coordinator != task.id.to_string()
+                            || !phases.get(&key).is_some_and(|p| {
+                                p.host == n.host
+                                    && matches!(
+                                        p.phase.as_str(),
+                                        "intent" | "items_published" | "incomplete"
+                                    )
+                            }))
+                    {
+                        return Err(invalid(
+                            "checkpoint requires its matching unfinished operation intent",
+                        ));
+                    }
+                    Ok(n)
+                });
+                match checked {
                     Ok(n) => {
                         if n.complete {
                             checkpoints.insert(n.host.clone(), source.clone());
