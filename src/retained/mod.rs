@@ -6,3 +6,5 @@ mod tests;
 
 #[cfg(test)]
 pub mod verify;
+
+pub mod publish;

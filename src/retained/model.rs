@@ -395,7 +395,12 @@ pub enum ArtifactLocator {
     Attachment {
         task: String,
         name: String,
-        basis: Basis,
+        #[serde(
+            default,
+            deserialize_with = "present_option",
+            skip_serializing_if = "Option::is_none"
+        )]
+        basis: Option<Basis>,
         sha256: String,
     },
     Directory {
@@ -484,15 +489,51 @@ pub struct ResolutionRelation {
 pub struct Diagnostic {
     pub code: String,
     pub scope: String,
+    #[serde(deserialize_with = "required_option")]
     pub host: Option<String>,
+    #[serde(deserialize_with = "required_option")]
     pub identity: Option<Identity>,
+    #[serde(deserialize_with = "required_option")]
     pub source: Option<Source>,
     pub detail: String,
     pub action: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub resolved_by: Option<Source>,
 }
 
+fn present_option<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> std::result::Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+fn source_valid(source: &Source) -> Result<()> {
+    source.basis.validate()?;
+    if source.ordinal == 0 {
+        return Err(invalid("source ordinal must be positive"));
+    }
+    Ok(())
+}
+fn diagnostic_valid(d: &Diagnostic) -> Result<()> {
+    if !text(&d.code)
+        || !["task", "host", "identity"].contains(&d.scope.as_str())
+        || !text(&d.detail)
+        || !text(&d.action)
+        || d.host.as_deref().is_some_and(|h| !text(h))
+        || d.identity
+            .as_ref()
+            .is_some_and(|i| !text(&i.host) || !text(&i.kind) || !text(&i.path))
+    {
+        return Err(invalid("diagnostic fields"));
+    }
+    for source in [&d.source, &d.resolved_by].into_iter().flatten() {
+        source_valid(source)?;
+    }
+    Ok(())
+}
 fn required_option<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
 ) -> std::result::Result<Option<T>, D::Error> {
@@ -645,10 +686,111 @@ pub fn decode_operation(raw: &str) -> Result<OperationNote> {
         return Err(invalid("operation shape/phase"));
     }
     crate::time::parse(&n.at)?;
+    n.request.validate()?;
+    if n.observer.as_deref().is_some_and(|o| !line(o)) {
+        return Err(invalid("operation observer"));
+    }
+    for diagnostic in &n.diagnostics {
+        diagnostic_valid(diagnostic)?;
+    }
+
     for i in &n.input_bases {
         i.basis.validate()?;
         if !task_id(&i.task) {
             return Err(invalid("input task"));
+        }
+    }
+    inputs_valid(&n.input_bases)?;
+    fn ordinals(items: &[u64]) -> Result<()> {
+        if items.contains(&0) || items.iter().collect::<BTreeSet<_>>().len() != items.len() {
+            Err(invalid("phase ordinals must be distinct and positive"))
+        } else {
+            Ok(())
+        }
+    }
+    fn publications(items: &[Publication]) -> Result<()> {
+        for p in items {
+            if !task_id(&p.task) || !line(&p.phase) {
+                return Err(invalid("publication locator"));
+            }
+            p.basis.validate()?;
+        }
+        Ok(())
+    }
+    match &n.outputs {
+        PhaseOutputs::Intent(_) => {}
+        PhaseOutputs::Items(o) => {
+            ordinals(&o.items)?;
+            for a in &o.artifacts {
+                a.validate()?;
+            }
+            for r in &o.resolutions {
+                r.bad.basis.validate()?;
+                ordinals(&r.successors)?;
+                if r.bad.ordinal == 0 || !line(&r.reason) {
+                    return Err(invalid("resolution relation"));
+                }
+            }
+        }
+        PhaseOutputs::Receiver(o) => {
+            ordinals(&o.items)?;
+            for a in &o.artifacts {
+                a.validate()?;
+            }
+        }
+        PhaseOutputs::Sender(o) => {
+            ordinals(&o.items)?;
+            o.receiver_basis.validate()?;
+        }
+        PhaseOutputs::Completed(o) => {
+            if ![
+                "verified",
+                "accounted_unknown",
+                "no_local_items",
+                "transferred",
+                "reconciled",
+            ]
+            .contains(&o.outcome.as_str())
+                || o.checkpoint == Some(0)
+            {
+                return Err(invalid("completion outcome"));
+            }
+            publications(&o.publications)?;
+        }
+        PhaseOutputs::Incomplete(o) => {
+            if o.attempt == 0
+                || !line(&o.previous_phase)
+                || !line(&o.action)
+                || o.checkpoint == Some(0)
+            {
+                return Err(invalid("incomplete attempt"));
+            }
+        }
+        PhaseOutputs::ReconcileIntent(o) => {
+            o.directive.validate()?;
+            OperationKey {
+                coordinator: n.key.coordinator.clone(),
+                operation_id: o.reconciliation_id.clone(),
+            }
+            .validate()?;
+        }
+        PhaseOutputs::Ready(o) => {
+            o.directive.validate()?;
+            OperationKey {
+                coordinator: n.key.coordinator.clone(),
+                operation_id: o.reconciliation_id.clone(),
+            }
+            .validate()?;
+            ordinals(&o.items)?;
+        }
+        PhaseOutputs::Reconciled(o) => {
+            o.directive.validate()?;
+            OperationKey {
+                coordinator: n.key.coordinator.clone(),
+                operation_id: o.reconciliation_id.clone(),
+            }
+            .validate()?;
+            publications(&o.ready_bases)?;
         }
     }
     Ok(n)
@@ -657,6 +799,13 @@ pub fn decode_checkpoint(raw: &str) -> Result<CheckpointNote> {
     let n: CheckpointNote = decode_request(raw.as_bytes())?;
     n.operation.validate()?;
     crate::time::parse(&n.observed_at)?;
+    if !line(&n.host)
+        || n.observer.as_deref().is_some_and(|o| !line(o))
+        || n.actions.iter().any(|a| !text(a))
+    {
+        return Err(invalid("checkpoint metadata"));
+    }
+
     if n.version != 1 {
         return Err(invalid("unsupported_version"));
     }
@@ -736,7 +885,9 @@ impl ArtifactLocator {
                 basis,
                 sha256,
             } => {
-                basis.validate()?;
+                if let Some(basis) = basis {
+                    basis.validate()?;
+                }
                 if !task_id(task) || !digest(sha256) {
                     return Err(invalid("attachment locator"));
                 }
@@ -776,7 +927,7 @@ impl CheckpointRequest {
         }
         unique_identities(&ids)?;
         for p in &self.preserved_previous {
-            p.artifact.validate()?;
+            p.artifact.external()?;
         }
         for r in &self.resolutions {
             r.bad.basis.validate()?;
@@ -842,5 +993,82 @@ impl ReconcileRequest {
             return Err(invalid("reconciliation request"));
         }
         Ok(())
+    }
+}
+
+pub fn validate_transition(previous: Option<&OperationNote>, n: &OperationNote) -> Result<()> {
+    let allowed = match n.phase.as_str() {
+        "intent" => previous.is_none(),
+        "items_published" => previous.is_some_and(|p| {
+            matches!(
+                p.phase.as_str(),
+                "intent" | "items_published" | "incomplete"
+            )
+        }),
+        "receiver_published" | "sender_released" => {
+            previous.is_some_and(|p| matches!(p.phase.as_str(), "intent" | "incomplete"))
+        }
+        "completed" => previous.is_some_and(|p| {
+            matches!(
+                p.phase.as_str(),
+                "intent"
+                    | "items_published"
+                    | "receiver_published"
+                    | "sender_released"
+                    | "incomplete"
+            )
+        }),
+        "incomplete" | "reconcile_intent" => previous.is_some_and(|p| {
+            !matches!(p.phase.as_str(), "completed" | "reconciled")
+                && (n.phase != "reconcile_intent" || p.phase != "sender_released")
+        }),
+        "reconcile_ready" => {
+            previous.is_some_and(|p| matches!(p.phase.as_str(), "reconcile_intent" | "incomplete"))
+        }
+        "reconciled" => previous.is_some_and(|p| p.phase == "reconcile_ready"),
+        _ => false,
+    };
+    if !allowed
+        || previous.is_some_and(|p| {
+            p.request != n.request || p.input_bases != n.input_bases || p.host != n.host
+        })
+    {
+        return Err(invalid("conflicting operation history"));
+    }
+    Ok(())
+}
+
+impl ArtifactLocator {
+    pub fn pinned(&self, task: &str, context: &Basis) -> Result<Self> {
+        match self {
+            Self::Attachment {
+                task: owner,
+                name,
+                basis: None,
+                sha256,
+            } if owner == task => Ok(Self::Attachment {
+                task: owner.clone(),
+                name: name.clone(),
+                basis: Some(context.clone()),
+                sha256: sha256.clone(),
+            }),
+            Self::Attachment { basis: None, .. } => Err(invalid(
+                "foreign attachment requires an explicit publication basis",
+            )),
+            _ => {
+                self.validate()?;
+                Ok(self.clone())
+            }
+        }
+    }
+    pub fn external(&self) -> Result<()> {
+        self.validate()?;
+        match self {
+            Self::Attachment { basis: None, .. } => Err(invalid(
+                "request artifacts require an explicit immutable basis",
+            )),
+            Self::Directory { manifest, .. } => manifest.external(),
+            _ => Ok(()),
+        }
     }
 }

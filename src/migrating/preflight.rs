@@ -96,6 +96,7 @@ fn name_entry(
 /// Every refusal the list earns against the source as it stands. Reads only.
 pub fn check_list(ctx: &MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>> {
     let source = &ctx.source.project;
+    crate::retained::publish::project_permission(source, true)?;
     let mut refusals = Vec::new();
 
     // Header.

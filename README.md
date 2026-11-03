@@ -889,6 +889,21 @@ record prevent an older valid note from silently becoming current. A host filter
 never hides task-wide uncertainty. Historical observations do not verify current
 filesystem bytes.
 
+Machine `retention operation:` and JSON `retention checkpoint:` envelopes require
+owned lifecycle publication; generic notes cannot forge them. A pending operation
+allows queries, unrelated appended notes, normal start/claim refresh and park;
+closure, archival and competing task/evidence changes must wait for completion or
+reconciliation. Terminal note archival preserves logical ordinals and attachment
+paths. Move, migrate and rename refuse retention operation history or protected
+`retained-op-*.request.json`, `retained-manifest-*.json`, and
+`retained-checkpoint-*.json` artifacts until locator migration is supported.
+Protected artifacts cannot be detached.
+
+In operation schemas, an attachment locator without `basis` resolves against its
+containing committed note only when both name the same task. Foreign locators and
+request preservation inputs require an explicit basis. This avoids a commit hash
+self-reference when request bytes, attachment ledger and intent publish together.
+
 `tasks retained checkpoint <id> --request <path>`, `transfer <from> <to>
 --request <path>` and `reconcile <coordinator> --request <path>` reserve the
 versioned lifecycle interface. This intermediate build validates requests and

@@ -96,8 +96,19 @@ impl RetainedEnv {
         );
         serde_json::from_slice(&out.stdout).unwrap()
     }
-    pub fn note(&self, value: Value) {
-        self.json(&["note", &self.id, &format!("retained: {value}")]);
+    pub fn seed_note(&self, text: &str) {
+        let path = self.records.join(format!("tasks/{}.md", self.id));
+        let mut raw = std::fs::read_to_string(&path).unwrap();
+        if !raw.contains("\n## Notes\n") {
+            raw.push_str("\n## Notes\n\n");
+        }
+        raw.push_str(&format!("- 2026-11-03T00:00:00Z (fixture): {text}\n"));
+        std::fs::write(&path, raw).unwrap();
+        git(&self.records, &["add", path.to_str().unwrap()]);
+        git(&self.records, &["commit", "-qm", "seed retained history"]);
+    }
+    pub fn note(&self, record: Value) {
+        self.seed_note(&format!("retained: {record}"));
     }
     pub fn state(&self) -> Value {
         self.json(&["retained", "state", &self.id])

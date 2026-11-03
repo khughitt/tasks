@@ -190,6 +190,11 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
     } else {
         ctx.project.read_task_with_raw(&id)?
     };
+    crate::retained::publish::permission(
+        &ctx.project,
+        &task,
+        crate::retained::publish::WriteAction::Archive,
+    )?;
     let Some(expected) = expect else {
         prior_receipt(&ctx, &task, "")?;
         return Ok(Output::ArchivePreview(

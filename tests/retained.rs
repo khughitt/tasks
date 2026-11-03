@@ -122,11 +122,7 @@ fn retained_state_checkpoint_requires_intent() {
     let f = RetainedEnv::new("in-tree");
     f.note(f.record());
     let basis = f.state()["basis"].clone();
-    f.json(&[
-        "note",
-        &f.id,
-        &format!("retention checkpoint: {}", cp(&f, basis)),
-    ]);
+    f.seed_note(&format!("retention checkpoint: {}", cp(&f, basis)));
     let s = f.state();
     assert_eq!(s["complete"], false);
     assert_eq!(s["items"][0]["record"], serde_json::Value::Null);
@@ -136,23 +132,15 @@ fn retained_state_checkpoint_intervening_change() {
     let f = RetainedEnv::new("in-tree");
     f.note(f.record());
     let basis = f.state()["basis"].clone();
-    f.json(&[
-        "note",
-        &f.id,
-        &format!(
-            "retention operation: {}",
-            op(&f, basis, "intent", json!({}))
-        ),
-    ]);
+    f.seed_note(&format!(
+        "retention operation: {}",
+        op(&f, basis, "intent", json!({}))
+    ));
     let basis = f.state()["basis"].clone();
     let mut r = f.record();
     r["purpose"] = json!("Changed after observation");
     f.note(r);
-    f.json(&[
-        "note",
-        &f.id,
-        &format!("retention checkpoint: {}", cp(&f, basis)),
-    ]);
+    f.seed_note(&format!("retention checkpoint: {}", cp(&f, basis)));
     let out = f.cmd().args(["retained", "state", &f.id]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty());
@@ -169,14 +157,10 @@ fn retained_state_repair_requires_exact_bad_source() {
         .as_array()
         .unwrap()
         .len();
-    f.json(&[
-        "note",
-        &f.id,
-        &format!(
-            "retention operation: {}",
-            op(&f, basis.clone(), "intent", json!({}))
-        ),
-    ]);
+    f.seed_note(&format!(
+        "retention operation: {}",
+        op(&f, basis.clone(), "intent", json!({}))
+    ));
     f.note(f.record());
     let successor = f.json(&["show", &f.id])["task"]["notes"]
         .as_array()
@@ -190,7 +174,7 @@ fn retained_state_repair_requires_exact_bad_source() {
         "items_published",
         json!({"items":[successor],"artifacts":[],"resolutions":[{"bad":{"basis":fake,"ordinal":ordinal},"successors":[successor],"reason":"Claimed repair"}]}),
     );
-    f.json(&["note", &f.id, &format!("retention operation: {receipt}")]);
+    f.seed_note(&format!("retention operation: {receipt}"));
     let out = f.cmd().args(["retained", "state", &f.id]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty());

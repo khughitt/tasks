@@ -194,9 +194,10 @@ fn artifact_location(
     metrics: &mut Metrics,
 ) -> Result<(Project, Basis, String, String)> {
     let declared = match locator {
-        ArtifactLocator::Git { basis, .. } | ArtifactLocator::Attachment { basis, .. } => {
-            &basis.project
-        }
+        ArtifactLocator::Git { basis, .. }
+        | ArtifactLocator::Attachment {
+            basis: Some(basis), ..
+        } => &basis.project,
         _ => return Err(invalid("directory locator has no file payload")),
     };
     let resolved = if declared == &project.prefix {
@@ -218,7 +219,7 @@ fn artifact_location(
         ArtifactLocator::Attachment {
             task,
             name,
-            basis,
+            basis: Some(basis),
             sha256,
         } => {
             let id = crate::model::TaskId::parse(task)?;
@@ -238,8 +239,8 @@ fn artifact_location(
                 sha256,
             )
         }
-        ArtifactLocator::Directory { .. } => {
-            return Err(invalid("directory locator has no file payload"));
+        ArtifactLocator::Directory { .. } | ArtifactLocator::Attachment { basis: None, .. } => {
+            return Err(invalid("artifact needs an explicit pinned file locator"));
         }
     };
     b.validate()?;

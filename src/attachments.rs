@@ -141,7 +141,7 @@ pub fn read_capped(reader: impl Read, max: u64, what: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Writes `bytes` to `path` through a `create_new` temp beside it, fsynced, then renamed.
+/// Publishes fsynced bytes through an exclusive hard link; an existing name is never replaced.
 pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let name = path
         .file_name()
@@ -154,7 +154,10 @@ pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .open(&temp)?;
     let written = file.write_all(bytes).and_then(|()| file.sync_all());
     drop(file);
-    if let Err(error) = written.and_then(|()| std::fs::rename(&temp, path)) {
+    if let Err(error) = written
+        .and_then(|()| std::fs::hard_link(&temp, path))
+        .and_then(|()| std::fs::remove_file(&temp))
+    {
         let _ = std::fs::remove_file(&temp);
         return Err(error.into());
     }

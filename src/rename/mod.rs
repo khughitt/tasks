@@ -173,6 +173,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         }
     }
     let inventory = if recovery == Recovery::Fresh {
+        crate::retained::publish::project_permission(&project, true)?;
         crate::commands::reject_pending_operations(Some(&project.root), &invocation.source)?;
         crate::commands::reject_pending_operations(None, &invocation.target)?;
         if registry.is_taken(&invocation.target) {

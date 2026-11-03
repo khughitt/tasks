@@ -216,3 +216,48 @@ fn retained_all_phase_outputs_are_closed() {
         assert!(decode_operation(&bad.to_string()).is_err(), "{phase}");
     }
 }
+
+#[test]
+fn retained_local_request_locator() {
+    let mut op = operation("intent", json!({}));
+    op["request"] = json!({"type":"attachment","task":"sci-000001","name":"retained-op-00000000000000000000000000000000.request.json","sha256":"a".repeat(64)});
+    assert!(decode_operation(&op.to_string()).is_ok());
+}
+#[test]
+fn retained_operation_nested_contract() {
+    for (phase, out) in [
+        (
+            "items_published",
+            json!({"items":[0],"artifacts":[],"resolutions":[]}),
+        ),
+        (
+            "completed",
+            json!({"outcome":"invented","publications":[],"checkpoint":null}),
+        ),
+        (
+            "incomplete",
+            json!({"attempt":0,"previous_phase":"intent","checkpoint":null,"action":"Retry"}),
+        ),
+        (
+            "sender_released",
+            json!({"items":[1],"receiver_basis":{ "project":"sci","layout":"in-tree","records_subdir":".","commit":"bad","task_path":"tasks/sci-000001.md","retained_ref":"refs/heads/main"},"mapping":[]}),
+        ),
+    ] {
+        assert!(
+            decode_operation(&operation(phase, out).to_string()).is_err(),
+            "{phase}"
+        );
+    }
+}
+#[test]
+fn retained_operation_nullable_contract() {
+    let mut n = operation("intent", json!({}));
+    n["observer"] = json!("");
+    assert!(decode_operation(&n.to_string()).is_err());
+    let mut n = operation("intent", json!({}));
+    n["diagnostics"] = json!([{"code":"gap","scope":"task","host":null,"identity":null,"detail":"Missing basis","action":"Restore"}]);
+    assert!(decode_operation(&n.to_string()).is_err());
+    let mut n = operation("intent", json!({}));
+    n["request"] = json!({"type":"attachment","task":"sci-000001","name":"request.json","basis":null,"sha256":"a".repeat(64)});
+    assert!(decode_operation(&n.to_string()).is_err());
+}

@@ -85,45 +85,10 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
             }
         } else if let Some(raw) = note.text.strip_prefix("retention operation: ") {
             let decoded = decode_operation(raw).and_then(|n| {
+                n.request.pinned(&task.id.to_string(), basis)?;
                 let key = (n.key.coordinator.clone(), n.key.operation_id.clone());
                 let previous = phases.get(&key);
-                let allowed = match n.phase.as_str() {
-                    "intent" => previous.is_none(),
-                    "items_published" => previous.is_some_and(|p| {
-                        matches!(
-                            p.phase.as_str(),
-                            "intent" | "items_published" | "incomplete"
-                        )
-                    }),
-                    "receiver_published" | "sender_released" => previous
-                        .is_some_and(|p| matches!(p.phase.as_str(), "intent" | "incomplete")),
-                    "completed" => previous.is_some_and(|p| {
-                        matches!(
-                            p.phase.as_str(),
-                            "intent"
-                                | "items_published"
-                                | "receiver_published"
-                                | "sender_released"
-                                | "incomplete"
-                        )
-                    }),
-                    "incomplete" | "reconcile_intent" => previous.is_some_and(|p| {
-                        !matches!(p.phase.as_str(), "completed" | "reconciled")
-                            && (n.phase != "reconcile_intent" || p.phase != "sender_released")
-                    }),
-                    "reconcile_ready" => previous.is_some_and(|p| {
-                        matches!(p.phase.as_str(), "reconcile_intent" | "incomplete")
-                    }),
-                    "reconciled" => previous.is_some_and(|p| p.phase == "reconcile_ready"),
-                    _ => false,
-                };
-                if !allowed
-                    || previous.is_some_and(|p| {
-                        p.request != n.request || p.input_bases != n.input_bases || p.host != n.host
-                    })
-                {
-                    return Err(invalid("conflicting operation history"));
-                }
+                validate_transition(previous, &n)?;
                 phases.insert(key, n.clone());
                 Ok(n)
             });

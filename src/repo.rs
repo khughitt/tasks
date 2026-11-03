@@ -1052,6 +1052,25 @@ impl Project {
         task: &Task,
         before_write: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
+        self.write_task_permitted(
+            registry,
+            task,
+            before_write,
+            crate::retained::publish::WritePermission::Ordinary,
+        )
+    }
+    pub(crate) fn write_task_permitted(
+        &self,
+        registry: &Registry,
+        task: &Task,
+        before_write: impl FnOnce() -> Result<()>,
+        permission: crate::retained::publish::WritePermission,
+    ) -> Result<()> {
+        if self.task_path(&task.id).exists() {
+            let old = self.read_task(&task.id)?;
+            crate::retained::publish::check_write(self, &old, task, permission)?;
+        }
+
         crate::review::validate(task)?;
         crate::defer::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;

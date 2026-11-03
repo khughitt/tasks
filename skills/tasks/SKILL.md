@@ -538,6 +538,13 @@ The checkpoint/transfer/reconcile interfaces in this intermediate build validate
 requests but refuse publication; keep the installed manual procedure until full
 delivery and consumer acceptance.
 
+Pending retained operations reserve task/evidence mutation while permitting reads,
+unrelated appended notes, start/claim refresh and park. Complete or reconcile them
+before closure or archival. Terminal archival keeps logical note ordinals; ID-changing
+move/migrate/rename refuse protected retention locators. Never detach protected
+retained request, manifest or checkpoint artifacts, or forge machine operation/checkpoint
+notes through `tasks note`.
+
 ### Record commits
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.

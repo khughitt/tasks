@@ -168,10 +168,10 @@
             "type",
             "task",
             "name",
-            "basis",
             "sha256"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "An omitted basis is resolved only from the same owning task note publication; foreign references require an explicit basis."
         },
         {
           "type": "object",

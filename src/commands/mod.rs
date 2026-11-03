@@ -691,6 +691,10 @@ fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     Ok(ctx)
 }
 
+pub fn open_id_unlocked_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    open_id_ctx(dir, id)
+}
+
 fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     let mut ctx = match open_ctx(dir) {
         Ok(ctx) => ctx,
@@ -1923,7 +1927,12 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // clearing it is reported; the command fails with the store error itself.
             store.save()?;
 
-            let error = match ctx.project.write_task(&ctx.registry, task) {
+            let error = match ctx.project.write_task_permitted(
+                &ctx.registry,
+                task,
+                || Ok(()),
+                crate::retained::publish::WritePermission::Claim,
+            ) {
                 Ok(()) => {
                     if let Some(escalation) = &previous_escalation {
                         ctx.warnings.push(format!(
@@ -2022,7 +2031,12 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
         Some((id, ClaimIntent::Park { park, escalation })) => {
             // Record first, then store: a note with no entry is a trail that says what was
             // intended, while an entry with no note would be state the record never saw.
-            ctx.project.write_task(&ctx.registry, task)?;
+            ctx.project.write_task_permitted(
+                &ctx.registry,
+                task,
+                || Ok(()),
+                crate::retained::publish::WritePermission::Park,
+            )?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.insert_park(&id, park);
@@ -2506,4 +2520,62 @@ pub fn run(cli: Cli) -> Result<Output> {
         );
     }
     result
+}
+
+#[cfg(test)]
+pub fn revalidate_retained_ctx(ctx: &mut Ctx) -> Result<()> {
+    let registry = Registry::load()?;
+    reject_pending_rename(&ctx.project)?;
+    let project = match &ctx.routing {
+        Routing::Local => Project {
+            worktree: ctx.project.worktree.clone(),
+            ..Project::open(&ctx.project.records)?
+        },
+        Routing::Registered(prefix) => crate::scope::open_registered(
+            &registry,
+            registry.canonical_prefix(prefix),
+            Origin::Prefix,
+        )?,
+    };
+    if project.prefix != ctx.project.prefix || project.records != ctx.project.records {
+        return Err(Error::RetainedStaleBasis(
+            "Project pairing changed while locking; retry from the exact current pairing".into(),
+        ));
+    }
+    reject_stale_local(&registry, &project)?;
+    reject_retired(&registry, &project)?;
+    reject_pending_operations(Some(&project.root), &project.prefix)?;
+    ctx.project = project;
+    ctx.registry = registry;
+    Ok(())
+}
+#[cfg(test)]
+pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
+    let me = ctx.resolve_for_guard()?;
+    let claim = ctx.claims_mut()?.get(id).cloned().ok_or_else(|| {
+        Error::RetainedInput(format!(
+            "Run tasks start {id} to establish ownership before retained publication"
+        ))
+    })?;
+    if crate::claims::liveness(&claim).is_stale() {
+        return Err(Error::RetainedInput(format!(
+            "Run tasks start {id} to re-establish the stale claim before retry"
+        )));
+    }
+    if ownership(&claim, &me)? == Ownership::Foreign {
+        return Err(Error::Claimed(
+            id.to_string(),
+            Ctx::describe_claim(&claim, &crate::claims::liveness(&claim)),
+        ));
+    }
+    follow_holder(ctx, id, Some(&me), "retained ownership was checked");
+    if ctx.claims_mut()?.get(id).is_none() {
+        return Err(Error::RetainedInput(format!(
+            "Claim on {id} expired before retained publication; run tasks start first"
+        )));
+    }
+    if !ctx.warnings.is_empty() {
+        return Err(Error::RetainedHistoryBlocked(ctx.warnings.join("; ")));
+    }
+    Ok(())
 }

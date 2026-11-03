@@ -14,6 +14,7 @@ pub fn retire(here: Project, successor: Option<String>, reason: String) -> Resul
     let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
+    crate::retained::publish::project_permission(&project, false)?;
     if let Some(existing) = &project.retired {
         return Err(Error::RetiredProject(format!(
             "{} is already retired (since {}: {}); run `tasks unretire` first to declare it again",

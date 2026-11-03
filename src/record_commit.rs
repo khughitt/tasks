@@ -267,6 +267,16 @@ pub(crate) fn commit_paths_in(
         Ok(lock) => lock,
         Err(error) => return vec![failed(dir, paths, &error, None)],
     };
+    commit_under_lock(&repo, dir, paths, message, before_commit)
+}
+fn commit_under_lock(
+    repo: &Repo,
+    dir: &Path,
+    paths: &[PathBuf],
+    message: &str,
+    before_commit: &mut dyn FnMut(),
+) -> Vec<String> {
+    let git = repo.git;
     if let Some(what) = in_progress(&repo.git_dir) {
         return vec![deferred(
             dir,
@@ -280,7 +290,7 @@ pub(crate) fn commit_paths_in(
     {
         return vec![deferred(dir, paths, "HEAD is detached", None)];
     }
-    match staged(&repo) {
+    match staged(repo) {
         Ok(already) if !already.is_empty() => {
             return vec![deferred(
                 dir,
@@ -330,12 +340,12 @@ pub(crate) fn commit_paths_in(
             Ok(output) => cause_of(args[0], &output),
             Err(error) => error.to_string(),
         };
-        return vec![failed(dir, paths, &cause, cleanup(&repo, &ours))];
+        return vec![failed(dir, paths, &cause, cleanup(repo, &ours))];
     }
     before_commit();
-    let now = match staged(&repo) {
+    let now = match staged(repo) {
         Ok(now) => now,
-        Err(error) => return vec![failed(dir, paths, &error, cleanup(&repo, &ours))],
+        Err(error) => return vec![failed(dir, paths, &error, cleanup(repo, &ours))],
     };
     if now.is_empty() {
         return Vec::new(); // the files already match HEAD
@@ -343,14 +353,14 @@ pub(crate) fn commit_paths_in(
     let foreign: Vec<&String> = now.iter().filter(|path| !ours.contains(path)).collect();
     if !foreign.is_empty() {
         let cause = format!("staged changes appeared: {}", listed(&foreign));
-        return vec![deferred(dir, paths, &cause, cleanup(&repo, &ours))];
+        return vec![deferred(dir, paths, &cause, cleanup(repo, &ours))];
     }
     let cause = match git(&repo.toplevel, &["commit", "-q", "-m", message]) {
         Ok(output) if output.status.success() => return Vec::new(),
         Ok(output) => cause_of("commit", &output),
         Err(error) => error.to_string(),
     };
-    vec![failed(dir, paths, &cause, cleanup(&repo, &ours))]
+    vec![failed(dir, paths, &cause, cleanup(repo, &ours))]
 }
 
 /// The top level of the working tree `dir` lies in, canonical; `None` outside git or
@@ -533,6 +543,44 @@ fn commit_drained(
         }
     }
     committed
+}
+
+#[cfg(test)]
+pub struct CommitLock {
+    common: PathBuf,
+    _guard: MutationLock,
+}
+#[cfg(test)]
+pub fn common_dir(dir: &Path) -> Result<PathBuf, String> {
+    discover(dir, git)?
+        .map(|r| r.common)
+        .ok_or_else(|| "retained publication requires Git records".into())
+}
+#[cfg(test)]
+pub fn lock(dir: &Path) -> Result<CommitLock, String> {
+    let common = common_dir(dir)?;
+    let guard = lock_for(&common, &state_home()?)?;
+    Ok(CommitLock {
+        common,
+        _guard: guard,
+    })
+}
+#[cfg(test)]
+impl CommitLock {
+    pub fn commit_paths(&self, dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
+        let repo = match discover(dir, git) {
+            Ok(Some(r)) if r.common == self.common => r,
+            _ => {
+                return vec![failed(
+                    dir,
+                    paths,
+                    "held commit lock no longer matches records repository",
+                    None,
+                )];
+            }
+        };
+        commit_under_lock(&repo, dir, paths, message, &mut || {})
+    }
 }
 
 #[cfg(test)]
