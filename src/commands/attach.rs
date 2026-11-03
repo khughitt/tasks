@@ -5,19 +5,21 @@ use crate::output::{AttachOut, DetachOut, FileInfo, Output};
 use std::path::{Path, PathBuf};
 
 pub enum Source {
-    Path(PathBuf),
+    Paths(Vec<PathBuf>),
     Stdin,
     Clipboard,
 }
 
 impl Source {
-    pub fn from_args(source: Option<String>, clipboard: bool) -> Result<Source> {
-        match (source, clipboard) {
-            (None, true) => Ok(Source::Clipboard),
-            (Some(source), false) if source == "-" => Ok(Source::Stdin),
-            (Some(source), false) => Ok(Source::Path(source.into())),
+    pub fn from_args(sources: Vec<String>, clipboard: bool) -> Result<Source> {
+        match (sources.as_slice(), clipboard) {
+            ([], true) => Ok(Source::Clipboard),
+            ([source], false) if source == "-" => Ok(Source::Stdin),
+            (paths, false) if !paths.is_empty() && paths.iter().all(|path| path != "-") => {
+                Ok(Source::Paths(paths.iter().map(PathBuf::from).collect()))
+            }
             _ => Err(Error::Validation(
-                "give exactly one of a path, `-`, or --clipboard".into(),
+                "give one or more paths, a single `-`, or --clipboard".into(),
             )),
         }
     }
@@ -68,32 +70,43 @@ pub fn attach(
     if let Some(caption) = &caption {
         validate_caption(caption)?;
     }
-    let (name, bytes) = match source {
-        Source::Path(path) => {
-            let name = match name {
-                Some(name) => name,
-                None => basename(&path)?,
-            };
-            attachments::validate_name(&name)?;
-            let file = std::fs::File::open(&path)
-                .map_err(|error| Error::Io(format!("{}: {error}", path.display())))?;
-            let bytes = attachments::read_capped(file, max, &path.display().to_string()).map_err(
-                |error| match error {
-                    Error::Io(detail) => Error::Io(format!("{}: {detail}", path.display())),
-                    other => other,
-                },
-            )?;
-            (name, bytes)
+    let sources = match source {
+        Source::Paths(paths) => {
+            if paths.len() > 1 && name.is_some() {
+                return Err(Error::Validation("--name needs a single source".into()));
+            }
+            let mut sources = Vec::new();
+            let mut names = std::collections::HashSet::new();
+            for path in paths {
+                let name = match &name {
+                    Some(name) => name.clone(),
+                    None => basename(&path)?,
+                };
+                attachments::validate_name(&name)?;
+                if !names.insert(name.clone()) {
+                    return Err(Error::AttachmentExists(format!(
+                        "more than one source would be stored as {name}"
+                    )));
+                }
+                let file = std::fs::File::open(&path)
+                    .map_err(|error| Error::Io(format!("{}: {error}", path.display())))?;
+                let bytes = attachments::read_capped(file, max, &path.display().to_string())
+                    .map_err(|error| match error {
+                        Error::Io(detail) => Error::Io(format!("{}: {detail}", path.display())),
+                        other => other,
+                    })?;
+                sources.push((name, bytes));
+            }
+            sources
         }
         Source::Stdin => {
             let name = name.ok_or_else(|| {
                 Error::InvalidAttachmentName("an attachment from stdin needs --name".into())
             })?;
-            attachments::validate_name(&name)?;
-            (
+            vec![(
                 name,
                 attachments::read_capped(std::io::stdin().lock(), max, "stdin")?,
-            )
+            )]
         }
         Source::Clipboard => {
             let image = crate::clipboard::read(max)?;
@@ -101,72 +114,89 @@ pub fn attach(
                 crate::clipboard::default_name(&crate::time::now(), image.extension)
             });
             attachments::validate_name(&name)?;
-            (name, image.bytes)
+            vec![(name, image.bytes)]
         }
     };
-    let note = attachments::attached_note(&name, bytes.len() as u64, caption.as_deref());
-    crate::format::validate_note_text(&note)?;
-
-    let target = attachments::task_dir(&ctx.project, &task.id).join(&name);
-    let live = attachments::ledger(&task).get(&name) == Some(&Ledger::Attached);
-    let state = attachments::entry_state(&target)?;
-    if live && state != EntryState::Absent {
-        return Err(Error::AttachmentExists(format!(
-            "{} already has {name}",
-            task.id
-        )));
-    }
-    let write = match state {
-        EntryState::Absent => true,
-        EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
-        EntryState::File(size) => {
-            if size != bytes.len() as u64 || std::fs::read(&target)? != bytes {
-                return Err(Error::AttachmentExists(format!(
-                    "{} holds an unrecorded {name} with different bytes; detach it or choose another --name",
-                    task.id
-                )));
+    let ledger = attachments::ledger(&task);
+    let mut pending = Vec::new();
+    let mut files = Vec::new();
+    for (name, bytes) in sources {
+        let note = attachments::attached_note(&name, bytes.len() as u64, caption.as_deref());
+        crate::format::validate_note_text(&note)?;
+        let target = attachments::task_dir(&ctx.project, &task.id).join(&name);
+        let live = ledger.get(&name) == Some(&Ledger::Attached);
+        let state = attachments::entry_state(&target)?;
+        if live && state != EntryState::Absent {
+            return Err(Error::AttachmentExists(format!(
+                "{} already has {name}",
+                task.id
+            )));
+        }
+        let write = match state {
+            EntryState::Absent => true,
+            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
+            EntryState::File(size) => {
+                if size != bytes.len() as u64 || std::fs::read(&target)? != bytes {
+                    return Err(Error::AttachmentExists(format!(
+                        "{} holds an unrecorded {name} with different bytes; detach it or choose another --name",
+                        task.id
+                    )));
+                }
+                false // an interrupted attach left these bytes; add only the note
             }
-            false // an interrupted attach left these bytes; this run adds only the note
-        }
-    };
+        };
+        files.push(FileInfo {
+            name,
+            path: target.display().to_string(),
+            bytes: bytes.len() as u64,
+        });
+        pending.push((target, bytes, write));
+        append_note(&mut task, &owner, &note)?;
+    }
 
     // Identity and the claim store resolve before any write, as for `note`.
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
-    let created_dir = if write {
-        let created = attachments::ensure_task_dir(&ctx.project, &task.id)?;
-        attachments::write_new(&target, &bytes)?;
-        crate::written::record(&ctx.project.records, &target);
-        created
-    } else {
-        false
-    };
-    append_note(&mut task, &owner, &note)?;
-    if let Err(error) = save(&mut ctx, &mut task) {
-        if !write {
-            return Err(error);
+    let mut written = Vec::new();
+    let mut created_dir = false;
+    let result = (|| {
+        for (target, bytes, write) in &pending {
+            if *write {
+                if written.is_empty() {
+                    created_dir = attachments::ensure_task_dir(&ctx.project, &task.id)?;
+                }
+                attachments::write_new(target, bytes)?;
+                written.push(target);
+                crate::written::record(&ctx.project.records, target);
+            }
         }
-        let mut cleanup = std::fs::remove_file(&target);
-        if cleanup.is_ok() && created_dir {
-            cleanup = std::fs::remove_dir(target.parent().expect("attachment has a directory"));
+        save(&mut ctx, &mut task)
+    })();
+    if let Err(mut error) = result {
+        for target in written.iter().rev() {
+            if let Err(cleanup) = std::fs::remove_file(target) {
+                error = error.with_suffix(&format!(
+                    "; also could not remove {}: {cleanup}",
+                    target.display()
+                ));
+            }
         }
-        return Err(match cleanup {
-            Ok(()) => error,
-            Err(cleanup) => error.with_suffix(&format!(
-                "; also could not remove {}: {cleanup}",
-                target.display()
-            )),
-        });
+        if created_dir {
+            let dir = attachments::task_dir(&ctx.project, &task.id);
+            if let Err(cleanup) = std::fs::remove_dir(&dir) {
+                error = error.with_suffix(&format!(
+                    "; also could not remove {}: {cleanup}",
+                    dir.display()
+                ));
+            }
+        }
+        return Err(error);
     }
-    super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachment landed");
+    super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachments landed");
     super::finish(&mut ctx);
     Ok(Output::Attach(AttachOut {
         id: task.id.to_string(),
-        file: FileInfo {
-            name,
-            path: target.display().to_string(),
-            bytes: bytes.len() as u64,
-        },
+        files,
         warnings: ctx.warnings,
     }))
 }

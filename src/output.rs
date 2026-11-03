@@ -822,7 +822,7 @@ pub struct FileInfo {
 #[derive(Serialize)]
 pub struct AttachOut {
     pub id: String,
-    pub file: FileInfo,
+    pub files: Vec<FileInfo>,
     pub warnings: Vec<String>,
 }
 
@@ -2251,7 +2251,12 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
         ),
         Output::ArchiveApply(o) => format!("{}: {} ({})", o.id, o.action, o.archive_name),
-        Output::Attach(o) => o.file.path.clone(),
+        Output::Attach(o) => o
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::Detach(o) if o.removed => format!(
             "removed {}; git history keeps committed bytes, uncommitted ones are gone",
             o.path

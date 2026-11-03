@@ -646,8 +646,13 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   sanitize required history. Preserve exact body bytes before shortening a large
   body. Archival reduces active rewrite cost, not total evidence or full-read cost;
   existing cap/layout limits remain in force.
-- A screenshot or file for a task: `tasks attach <id> <path>` (or `-` with `--name`, or
-  `--clipboard`), with `--caption "<what it shows>"`. `tasks show <id>` prints each
+- Screenshots or files for a task: `tasks attach <id> <path> <path>...`, with
+  `--caption "<what they show>"` applied to each file. The batch validates all names,
+  per-file caps, collisions and storage safety before writing, then records one
+  `attached:` note per file in one save/commit. A write/save failure removes all
+  files that call wrote. `--name`, `-` (stdin) and `--clipboard` require one source.
+  JSON returns `files: [{name, path, bytes}, ...]` even for one source, replacing
+  the old `file` object. `tasks show <id>` prints each
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.

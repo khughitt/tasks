@@ -184,6 +184,39 @@ fn attach_and_detach_commit_the_file_with_the_record() {
 }
 
 #[test]
+fn attach_batch_commits_all_files_and_notes_once() {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let id = add(&env, &root, "a task");
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "one").unwrap();
+    std::fs::write(&b, "two").unwrap();
+    let count = subjects(&root).len();
+    env.json(
+        &root,
+        &["attach", &id, a.to_str().unwrap(), b.to_str().unwrap()],
+    );
+    assert_eq!(subjects(&root).len(), count + 1);
+    let files = last_files(&root);
+    for path in [
+        format!("tasks/{id}.md"),
+        format!("tasks/files/{id}/a.txt"),
+        format!("tasks/files/{id}/b.txt"),
+    ] {
+        assert!(files.contains(&path), "{files:?}");
+    }
+    assert_eq!(
+        git(&root, &["show", &format!("HEAD:tasks/files/{id}/a.txt")]),
+        "one"
+    );
+    assert_eq!(
+        git(&root, &["show", &format!("HEAD:tasks/files/{id}/b.txt")]),
+        "two"
+    );
+}
+
+#[test]
 fn a_staged_file_defers_the_commit_with_a_warning_and_exit_zero() {
     let mut env = TestEnv::new();
     let root = project(&mut env, "tst", true);
