@@ -1455,4 +1455,42 @@ mod tests {
             "a task locator must use its actual project prefix"
         );
     }
+    #[test]
+    fn retained_verify_locator_requires_an_existing_named_branch() {
+        if isolated(
+            "retained::verify::tests::retained_verify_locator_requires_an_existing_named_branch",
+        ) {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let p = project(root.path());
+        repo(root.path());
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "-qm", "project"]);
+        let commit = String::from_utf8(git(root.path(), &["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+        let id = crate::model::TaskId::parse("sci-a00001").unwrap();
+        let mut b = Basis {
+            project: "sci".into(),
+            layout: "in-tree".into(),
+            records_subdir: ".".into(),
+            task_path: "tasks/sci-a00001.md".into(),
+            commit,
+            retained_ref: "refs/heads/main".into(),
+        };
+        assert!(basis::validate_locator(&p, &id, &b).is_ok());
+        for expression in [
+            "refs/heads/main^{commit}",
+            "refs/heads/main~0",
+            "refs/heads/absent",
+        ] {
+            b.retained_ref = expression.into();
+            assert!(
+                basis::validate_locator(&p, &id, &b).is_err(),
+                "{expression} is not an existing named branch"
+            );
+        }
+    }
 }

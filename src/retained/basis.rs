@@ -139,6 +139,15 @@ pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result
     {
         return Err(Error::RetainedHistoryBlocked("Records pairing/layout changed; record a verified locator for the same exact history before retry".into()));
     }
+    let branch = crate::git::at(&project.records)
+        .args(["show-ref", "--verify", "--quiet", &basis.retained_ref])
+        .output()?;
+    if !branch.status.success() {
+        return Err(Error::RetainedHistoryBlocked(format!(
+            "Retained ref {} is not an existing named branch; recover that exact ref",
+            basis.retained_ref
+        )));
+    }
     let out = crate::git::at(&project.records)
         .args([
             "merge-base",
