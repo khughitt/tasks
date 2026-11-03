@@ -487,8 +487,10 @@ fn attach_removes_its_file_when_the_save_fails_and_keeps_an_earlier_one() {
             second.to_str().unwrap(),
         ],
     );
+    let adopted_kind = env.fail(&dir, &["attach", &id, earlier.to_str().unwrap()]);
     std::fs::set_permissions(&tasks, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(kind, "io");
+    assert_eq!(adopted_kind, "io");
     assert!(!stored(&dir, &id, "new.png").exists());
     assert!(!stored(&dir, &id, "second.png").exists());
     assert_eq!(std::fs::read(earlier).unwrap(), b"earlier");

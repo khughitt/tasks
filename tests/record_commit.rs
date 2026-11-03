@@ -192,6 +192,9 @@ fn attach_batch_commits_all_files_and_notes_once() {
     let b = root.join("b.txt");
     std::fs::write(&a, "one").unwrap();
     std::fs::write(&b, "two").unwrap();
+    let adopted = root.join(format!("tasks/files/{id}/a.txt"));
+    std::fs::create_dir_all(adopted.parent().unwrap()).unwrap();
+    std::fs::copy(&a, adopted).unwrap();
     let count = subjects(&root).len();
     env.json(
         &root,
@@ -214,6 +217,47 @@ fn attach_batch_commits_all_files_and_notes_once() {
         git(&root, &["show", &format!("HEAD:tasks/files/{id}/b.txt")]),
         "two"
     );
+}
+
+#[test]
+fn interrupted_attach_commits_adopted_bytes_with_the_record() {
+    for tracked in [false, true] {
+        let mut env = TestEnv::new();
+        let root = project(&mut env, "tst", true);
+        let id = add(&env, &root, "a task");
+        let record = format!("tasks/{id}.md");
+        let attachment = format!("tasks/files/{id}/shot.png");
+        let target = root.join(&attachment);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        if tracked {
+            std::fs::write(&target, "earlier bytes").unwrap();
+            git(&root, &["add", &attachment]);
+            git(&root, &["commit", "-qm", "earlier payload"]);
+        }
+        let bytes = b"recovered\0bytes\r\n";
+        std::fs::write(&target, bytes).unwrap();
+        let source = env.home.path().join("shot.png");
+        std::fs::write(&source, bytes).unwrap();
+
+        let out = env.json(&root, &["attach", &id, source.to_str().unwrap()]);
+        assert_eq!(out["warnings"], serde_json::json!([]), "{out}");
+        let files = last_files(&root);
+        assert!(
+            files.contains(&record) && files.contains(&attachment),
+            "{files:?}"
+        );
+        assert_eq!(
+            git(&root, &["show", &format!("HEAD:{attachment}")]).as_bytes(),
+            bytes
+        );
+        let committed_record = git(&root, &["show", &format!("HEAD:{record}")]);
+        assert_eq!(
+            committed_record,
+            std::fs::read_to_string(root.join(record)).unwrap()
+        );
+        assert!(committed_record.contains("attached: shot.png (17 bytes)"));
+        assert!(clean(&root));
+    }
 }
 
 #[test]

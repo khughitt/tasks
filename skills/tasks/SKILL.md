@@ -658,9 +658,10 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
   After interrupted attachment publication, retry the same name and bytes through
   `tasks attach`, then verify both the live ledger and the payload at the intended
-  Git basis. Same-bytes adoption can repair the audit while leaving the file
-  untracked (tasks-b2bb36). Inspect the pending `tasks/` sweep, resolve unrelated
-  writes, run `tasks commit` when publication is missing, then verify exact bytes
+  Git basis. The retry publishes adopted payloads with the ledger record. With
+  older builds that leave an adopted file untracked, inspect the pending `tasks/`
+  sweep, resolve unrelated writes and run `tasks commit` when publication is
+  missing, then verify exact bytes
   with `git show <basis>:<attachment-path>` in the records repository. A successful
   audit or exit 0 alone does not establish committed evidence.
 - A checker needing an exact local attachment verdict uses

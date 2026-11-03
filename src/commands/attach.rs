@@ -167,7 +167,6 @@ pub fn attach(
                 }
                 attachments::write_new(target, bytes)?;
                 written.push(target);
-                crate::written::record(&ctx.project.records, target);
             }
         }
         save(&mut ctx, &mut task)
@@ -191,6 +190,9 @@ pub fn attach(
             }
         }
         return Err(error);
+    }
+    for (target, _, _) in &pending {
+        crate::written::record(&ctx.project.records, target);
     }
     super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachments landed");
     super::finish(&mut ctx);
