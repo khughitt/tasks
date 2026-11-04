@@ -116,6 +116,7 @@ pub struct Project {
     pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
+    pub multipart: crate::multipart::MultipartConfig,
     pub growth_warn_bytes: Option<u64>,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.
     pub retired: Option<Retirement>,
@@ -373,6 +374,12 @@ struct FeedbackConfig {
 struct AttachmentsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    multipart_max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    multipart_max_parts: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    multipart_validators: Option<Vec<crate::multipart::ValidatorSpec>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -392,6 +399,32 @@ fn attachments_max_bytes(raw: Option<AttachmentsConfig>) -> Result<u64> {
         ))),
         Some(bytes) => Ok(bytes),
     }
+}
+
+fn multipart_config(raw: Option<&AttachmentsConfig>) -> Result<crate::multipart::MultipartConfig> {
+    use crate::multipart::{MultipartConfig, RECOVERY_MAX_BYTES, RECOVERY_MAX_PARTS};
+
+    let max_bytes = raw
+        .and_then(|table| table.multipart_max_bytes)
+        .unwrap_or(16_777_216);
+    let max_parts = raw
+        .and_then(|table| table.multipart_max_parts)
+        .unwrap_or(16);
+    if max_bytes > RECOVERY_MAX_BYTES {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [attachments] multipart_max_bytes must not exceed {RECOVERY_MAX_BYTES}"
+        )));
+    }
+    if max_parts > RECOVERY_MAX_PARTS {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [attachments] multipart_max_parts must not exceed {RECOVERY_MAX_PARTS}"
+        )));
+    }
+    Ok(MultipartConfig {
+        max_bytes,
+        max_parts,
+        validators: raw.and_then(|table| table.multipart_validators.clone()),
+    })
 }
 
 /// A dictionary entry is a valid tag with a one-line, non-empty meaning; anything else
@@ -823,6 +856,7 @@ impl Project {
             tags: tag_dictionary(config.tags)?,
             feedback: feedback_scope(config.feedback)?,
             needs: need_vocabulary(config.needs)?,
+            multipart: multipart_config(config.attachments.as_ref())?,
             attachments_max_bytes: attachments_max_bytes(config.attachments)?,
             growth_warn_bytes: match config.growth.and_then(|growth| growth.warn_bytes) {
                 Some(0) => {
@@ -1532,6 +1566,42 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multipart_config_defaults() {
+        for text in ["prefix = \"tst\"\n", "prefix = \"tst\"\n[attachments]\n"] {
+            let (_dir, project) = project_with_config(text);
+            let config = project.unwrap().multipart;
+            assert_eq!(config.max_bytes, 16_777_216);
+            assert_eq!(config.max_parts, 16);
+            assert!(config.validators.is_none());
+        }
+    }
+
+    #[test]
+    fn multipart_config_reads_limits_and_validators() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"tst\"\n[attachments]\nmax_bytes = 123\nmultipart_max_bytes = 268435456\nmultipart_max_parts = 256\nmultipart_validators = [{ match = \"*.md\", command = [\"checker\", \"{name}\"] }]\n",
+        );
+        let project = project.unwrap();
+        assert_eq!(project.attachments_max_bytes, 123);
+        assert_eq!(project.multipart.max_bytes, 268_435_456);
+        assert_eq!(project.multipart.max_parts, 256);
+        let validators = project.multipart.validators.unwrap();
+        assert_eq!(validators.len(), 1);
+        assert_eq!(validators[0].glob, "*.md");
+        assert_eq!(validators[0].command, ["checker", "{name}"]);
+    }
+
+    #[test]
+    fn multipart_config_preserves_explicit_zero_and_empty_validators() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"tst\"\n[attachments]\nmultipart_max_bytes = 0\nmultipart_validators = []\n",
+        );
+        let config = project.unwrap().multipart;
+        assert_eq!(config.max_bytes, 0);
+        assert!(config.validators.unwrap().is_empty());
+    }
 
     #[test]
     fn external_doc_roots_reserve_first_segment_colons() {

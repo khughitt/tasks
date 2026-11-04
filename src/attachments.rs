@@ -34,6 +34,54 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
 }
 
+pub fn refuse_reserved(
+    project: &crate::repo::Project,
+    task: &crate::model::Task,
+    name: &str,
+) -> Result<()> {
+    use crate::multipart::{self, audit::DeclState};
+
+    let reserved = multipart::audit::reserved_names(task);
+    for (logical, state) in multipart::audit::declarations(task) {
+        match state {
+            DeclState::Live(_)
+                if logical == name || multipart::audit::is_member(name, &logical) =>
+            {
+                if logical == name {
+                    return Err(Error::AttachmentExists(format!(
+                        "{} already has multipart attachment {name}; run tasks commit, then tasks export {} {name} --at HEAD --verify",
+                        task.id, task.id
+                    )));
+                }
+                return Err(Error::MultipartMember(format!(
+                    "{name} is a member of multipart attachment {logical}; use its logical name"
+                )));
+            }
+            DeclState::Closed(decl)
+                if reserved.get(name) == Some(&logical)
+                    || (multipart::audit::is_member(name, &logical)
+                        && multipart::audit::recovery_bounds(&decl).is_err()) =>
+            {
+                match multipart::audit::removal_state(project, task, &decl) {
+                    Ok(multipart::audit::RemovalState::Complete { .. }) => {}
+                    result => {
+                        let detail = match result {
+                            Err(error) => format!("{error}; "),
+                            _ => String::new(),
+                        };
+                        return Err(Error::MultipartRemovalUnpublished(format!(
+                            "{name} is reserved by unpublished removal of {logical}; {detail}{}",
+                            multipart::audit::removal_next(project, task, &decl)
+                        )));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 pub fn files_root(project: &Project) -> PathBuf {
     project.tasks_dir().join(FILES_DIR)
 }
@@ -373,7 +421,7 @@ fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Ve
                         Severity::Error,
                         "attachment_unnoted",
                         shown,
-                        format!("{name} is not attached in {}'s notes; attach it again with the same bytes, or detach it", task.id),
+                        format!("{name} is not attached in {}'s notes; rerun tasks attach {} <source> --name {name} with the same bytes, or detach it", task.id, task.id),
                     ));
                 }
                 files.push(Attachment {
@@ -394,6 +442,7 @@ fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Ve
             ));
         }
     }
+    problems.extend(crate::multipart::audit::audit(project, task)?);
     Ok((files, problems))
 }
 

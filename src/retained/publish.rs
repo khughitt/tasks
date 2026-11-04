@@ -554,6 +554,10 @@ pub fn batch(
     }
 
     for artifact in artifacts {
+        crate::attachments::refuse_reserved(&context.project, &task, &artifact.name)?;
+    }
+
+    for artifact in artifacts {
         crate::attachments::validate_name(&artifact.name)?;
         if artifact.bytes.len() as u64 > context.project.attachments_max_bytes {
             return Err(Error::AttachmentTooLarge("Retained artifact exceeds the configured cap; preserve raw bytes and use the labelled portable fallback before retry".into()));

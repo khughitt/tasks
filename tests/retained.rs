@@ -1414,3 +1414,60 @@ fn retained_state_uses_historical_artifacts_without_current_bytes() {
     );
     assert_eq!(f.state()["complete"], true);
 }
+
+#[test]
+fn review_retained_checkpoint_refuses_multipart_artifact_name() {
+    let f = checkpoint_fixture();
+    let config = f.records.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        config,
+        format!("{text}\n[attachments]\nmultipart_validators = []\n"),
+    )
+    .unwrap();
+    let name =
+        "retained-manifest-8bcae181d21321b79e1cee4976a6c9759a0f03769dde64b6f821ab5d22a33921.json";
+    let source = f.dir.join("source");
+    std::fs::write(&source, "{}").unwrap();
+    let attached = f.json(&[
+        "attach",
+        &f.id,
+        source.to_str().unwrap(),
+        "--multipart",
+        "--name",
+        name,
+    ]);
+    assert_eq!(attached["publication"]["state"], "published");
+    let scratch = f.dir.join("scratch");
+    std::fs::create_dir(&scratch).unwrap();
+    let request = checkpoint_request(&f, 1, json!([declaration(&scratch, "scratch")]));
+    let path = f.request("request.json", &request);
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "attachment_exists");
+    let stored = f.records.join(format!("tasks/files/{}/{name}", f.id));
+    assert!(!stored.exists());
+    let out = f
+        .cmd()
+        .args(["export", &f.id, name, "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"{}");
+}

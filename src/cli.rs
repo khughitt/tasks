@@ -617,6 +617,19 @@ pub enum Command {
         #[arg(long)]
         no_fetch: bool,
     },
+    /// Export or verify a task attachment, optionally at a Git revision.
+    #[command(group(clap::ArgGroup::new("export_target").args(["output", "verify"]).required(true)))]
+    Export {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        name: String,
+        #[arg(long, value_name = "REF")]
+        at: Option<String>,
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        verify: bool,
+    },
     /// Working documents under each project's records, with the tasks that link them.
     #[command(
         after_help = "Lists the Markdown files directly under the project's spec and plan directories and\ndocs/notes. Kind comes from the directory, then the filename: *-brief.md, *-handoff.md,\nelse note. A task links a document through its spec, its plan, or a --ref entry.\n\nExamples:\n  tasks docs --kind plan\n  tasks docs --all-projects --search \"records root\""
@@ -756,7 +769,7 @@ pub enum Command {
         #[arg(long, conflicts_with = "no_reviewed")]
         awaiting_user: bool,
     },
-    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
+    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note; --multipart accepts exactly one source and conflicts with --clipboard
     #[command(
         after_help = "Examples:\n  tasks attach sci-4f2a9c ~/Pictures/before.png --caption \"the stale row\"\n  grim - | tasks attach sci-4f2a9c - --name after.png\n  tasks attach sci-4f2a9c --clipboard"
     )]
@@ -769,6 +782,9 @@ pub enum Command {
         /// Read an image from the Wayland clipboard through wl-paste.
         #[arg(long)]
         clipboard: bool,
+        /// Store one UTF-8 text source as bounded parts and a catalog.
+        #[arg(long, conflicts_with = "clipboard")]
+        multipart: bool,
         /// Single source only: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
         #[arg(long)]
         name: Option<String>,

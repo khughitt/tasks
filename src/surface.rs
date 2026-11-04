@@ -219,10 +219,11 @@ pub fn table(text: &str, cli: &str) -> BTreeSet<Row> {
             .into_iter()
             .flatten()
         {
-            let names = match opt.get("shared") {
+            let mut names = match opt.get("shared") {
                 Some(key) => strings(vocab[key.as_str().unwrap()].get("names")),
                 None => strings(opt.get("names")),
             };
+            names.sort();
             let value = opt["value"].as_str().unwrap().to_string();
             let flag = value == "none";
             rows.insert(Row::Option {

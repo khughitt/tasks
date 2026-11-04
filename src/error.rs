@@ -121,6 +121,20 @@ pub enum Error {
     #[error("{0}")]
     ClipboardUnavailable(String),
     #[error("{0}")]
+    MultipartUncuttable(String),
+    #[error("{0}")]
+    MultipartTooLarge(String),
+    #[error("{0}")]
+    MultipartValidatorsUndeclared(String),
+    #[error("{0}")]
+    MultipartMember(String),
+    #[error("{0}")]
+    MultipartRemovalUnpublished(String),
+    #[error("{0}")]
+    MultipartNotText(String),
+    #[error("{0}")]
+    MultipartInvalidContent(String),
+    #[error("{0}")]
     ClipboardNoImage(String),
     #[error("io: {0}")]
     Io(String),
@@ -202,6 +216,19 @@ impl Error {
             Error::AttachmentMissing(detail) => Error::AttachmentMissing(detail + suffix),
             Error::AttachmentUnsafe(detail) => Error::AttachmentUnsafe(detail + suffix),
             Error::AttachmentTooLarge(detail) => Error::AttachmentTooLarge(detail + suffix),
+            Error::MultipartUncuttable(detail) => Error::MultipartUncuttable(detail + suffix),
+            Error::MultipartTooLarge(detail) => Error::MultipartTooLarge(detail + suffix),
+            Error::MultipartValidatorsUndeclared(detail) => {
+                Error::MultipartValidatorsUndeclared(detail + suffix)
+            }
+            Error::MultipartMember(detail) => Error::MultipartMember(detail + suffix),
+            Error::MultipartRemovalUnpublished(detail) => {
+                Error::MultipartRemovalUnpublished(detail + suffix)
+            }
+            Error::MultipartNotText(detail) => Error::MultipartNotText(detail + suffix),
+            Error::MultipartInvalidContent(detail) => {
+                Error::MultipartInvalidContent(detail + suffix)
+            }
             Error::ClipboardUnavailable(detail) => Error::ClipboardUnavailable(detail + suffix),
             Error::ClipboardNoImage(detail) => Error::ClipboardNoImage(detail + suffix),
             Error::CheckoutMissing(detail) => Error::CheckoutMissing(detail + suffix),
@@ -268,6 +295,13 @@ impl Error {
             Error::AttachmentMissing(_) => "attachment_missing",
             Error::AttachmentUnsafe(_) => "attachment_unsafe",
             Error::AttachmentTooLarge(_) => "attachment_too_large",
+            Error::MultipartUncuttable(_) => "multipart_uncuttable",
+            Error::MultipartTooLarge(_) => "multipart_too_large",
+            Error::MultipartValidatorsUndeclared(_) => "multipart_validators_undeclared",
+            Error::MultipartMember(_) => "multipart_member",
+            Error::MultipartRemovalUnpublished(_) => "multipart_removal_unpublished",
+            Error::MultipartNotText(_) => "multipart_not_text",
+            Error::MultipartInvalidContent(_) => "multipart_invalid_content",
             Error::ClipboardUnavailable(_) => "clipboard_unavailable",
             Error::ClipboardNoImage(_) => "clipboard_no_image",
             Error::Io(_) => "io",

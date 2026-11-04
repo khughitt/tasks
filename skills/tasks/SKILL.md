@@ -712,6 +712,45 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   missing, then verify exact bytes
   with `git show <basis>:<attachment-path>` in the records repository. A successful
   audit or exit 0 alone does not establish committed evidence.
+- Oversized text evidence: `tasks attach <id> <path> --multipart`, or pipe the
+  whole document into `tasks attach <id> - --name <name> --multipart`. This accepts
+  one UTF-8 source, preserves exact bytes and validates `.json` syntax; clipboard,
+  binary content and compression are excluded. The logical name is at most 115
+  bytes. Parts `<name>.part-0001` … and `<name>.catalog.json` each obey the ordinary
+  per-file cap. Defaults admit one logical artifact up to 16 MiB and 16 parts;
+  `[attachments] multipart_max_bytes = 0` stops admissions. Limits bound one
+  artifact, not cumulative history. Absent `multipart_validators` refuses
+  admission; `[]` explicitly declares no extra whole-document gates. Domain/schema
+  validation requires configured `{ match = "<glob>", command = [...] }` gates.
+  They receive the whole document on stdin at the records Git top level (records
+  directory outside Git), substitute only `{name}`, and run with a temporary
+  HOME and only PATH, HOME, LANG and TASKS_ATTACHMENT_NAME, a 120-second timeout
+  and bounded captured output. Validator containment covers owned descendants,
+  not service-manager or IPC launches outside that tree. Uncertain cleanup stops
+  subsequent validators as unavailable. Executable selection is fixed before
+  launch: a broken earlier PATH entry requires fixing/removing it or configuring
+  an explicit valid path, never falling through to a later executable.
+  Read `publication.state`: `published` binds successful reconstruction and current
+  validation to `publication.commit`; `local` carries `cause` and `next` even on
+  exit 0. Resolve that cause, commit as needed, and verify the exact resulting
+  commit before relying on portable evidence. `show`/`next` expose logical
+  `multipart` entries and member files marked `member_of`. Use `files:<name>` to
+  reference the whole artifact and export it to read it; a member is not a valid
+  task document reference and no whole-file storage path exists.
+  `tasks export <id> <name> --at <commit> -o <dest>` recovers exact bytes from one
+  commit, including archived ledger notes; omit `--at` for the working tree or use
+  `-o -` for byte-exact stdout. Recovery ignores current validators and admission
+  limits but enforces integrity and fixed ceilings of 256 MiB / 256 parts.
+  `--verify` writes no file and reports `current_runtime` validation with config
+  and program identity, not historical schema validation; inspect the verdict.
+  Detach the logical name to remove the whole set; individual members refuse.
+  After interruption, retry that logical detach and follow `publication.next`.
+  Names stay reserved until committed removal and local cleanup succeed.
+  `published` with `reuse: "blocked"` proves the removal commit but still requires
+  local recovery, for example when a hook recreated old-owned members. Later
+  legitimate ordinary ownership is preserved. Rollout order: upgrade every reader
+  binary, commit reviewed multipart config keys, then attach; older parsers reject
+  the keys. Install the merged CLI before activating its shared skill/config.
 - A checker needing an exact local attachment verdict uses
   `tasks -C <project> attachments tasks/files/<id>/<name>...` (1–128 unique paths).
   This read-only query uses only the explicit project's local configuration,

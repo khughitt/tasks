@@ -168,6 +168,28 @@ pub struct IdOut {
 }
 
 #[derive(Serialize)]
+pub struct ExportOut {
+    pub id: String,
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    pub integrity: crate::multipart::publication::Integrity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation: Option<crate::multipart::validate::Validation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct RawOut {
+    pub bytes: Vec<u8>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct DocOut {
     pub body: String,
     pub warnings: Vec<String>,
@@ -435,6 +457,14 @@ pub struct InventoryRow {
     pub step_found: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multipart: Option<MultipartRefOut>,
+}
+
+#[derive(Serialize)]
+pub struct MultipartRefOut {
+    pub name: String,
+    pub parts: usize,
 }
 
 impl InventoryRow {
@@ -453,6 +483,7 @@ impl InventoryRow {
             step: None,
             step_found: None,
             cause: None,
+            multipart: None,
         }
     }
 
@@ -507,6 +538,8 @@ pub struct ShowFields {
     pub deferred: Option<DeferredInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<FileInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub multipart: Vec<MultipartOut>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inventory: Vec<InventoryRow>,
 }
@@ -817,12 +850,43 @@ pub struct FileInfo {
     pub name: String,
     pub path: String,
     pub bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_of: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct MultipartOut {
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub parts: usize,
+    pub catalog: String,
+    pub caption: Option<String>,
+}
+
+impl From<&crate::multipart::declaration::Declaration> for MultipartOut {
+    fn from(declaration: &crate::multipart::declaration::Declaration) -> Self {
+        Self {
+            name: declaration.name.clone(),
+            bytes: declaration.bytes,
+            sha256: declaration.sha256.clone(),
+            parts: declaration.parts,
+            catalog: crate::multipart::names::catalog_name(&declaration.name),
+            caption: declaration.caption.clone(),
+        }
+    }
 }
 
 #[derive(Serialize)]
 pub struct AttachOut {
     pub id: String,
     pub files: Vec<FileInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multipart: Option<MultipartOut>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<crate::multipart::publication::Publication>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation: Option<crate::multipart::validate::Validation>,
     pub warnings: Vec<String>,
 }
 
@@ -857,6 +921,8 @@ pub struct DetachOut {
     pub path: String,
     /// False when the ledger alone recorded the detach: no file was present.
     pub removed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<crate::multipart::publication::Publication>,
     pub warnings: Vec<String>,
 }
 
@@ -1510,6 +1576,8 @@ pub enum Output {
     Groups(GroupsOut),
     Show(Box<ShowOut>),
     Doc(DocOut),
+    Raw(RawOut),
+    Export(ExportOut),
     Next(Box<NextOut>),
     List(ListOut),
     Parked(ParkedOut),
@@ -1922,6 +1990,49 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         }
         Output::Show(o) => crate::show_text::render(&o.fields, painter, layout.width),
         Output::Doc(o) => o.body.clone(),
+        Output::Raw(_) => unreachable!("raw bytes are written directly"),
+        Output::Export(o) => {
+            let mut text = format!(
+                "{} {}: {} bytes, sha256 {}\nintegrity: {}",
+                o.id,
+                o.name,
+                o.bytes,
+                o.sha256,
+                if o.integrity.passed {
+                    "passed"
+                } else {
+                    "failed"
+                }
+            );
+            if let Some(commit) = &o.commit {
+                text.push_str(&format!("\ncommit: {commit}"));
+            }
+            if let Some(validation) = &o.validation {
+                let verdict = if validation.passed {
+                    "passed"
+                } else {
+                    match crate::multipart::publication::validation_cause(validation) {
+                        "validation_unavailable" => "unavailable",
+                        _ => "failed",
+                    }
+                };
+                text.push_str(&format!("\nvalidation: {verdict} ({})", validation.basis));
+                for run in validation
+                    .validators
+                    .iter()
+                    .filter(|run| run.outcome != "passed")
+                {
+                    text.push_str(&format!("\nvalidator {:?}: {}", run.command, run.outcome));
+                    if let Some(exit) = run.exit {
+                        text.push_str(&format!(", exit {exit}"));
+                    }
+                    if !run.stderr.trim().is_empty() {
+                        text.push_str(&format!("\n{}", run.stderr.trim()));
+                    }
+                }
+            }
+            text
+        }
         Output::Next(o) => format!(
             "{}{}",
             halt_line(&o.halts),
@@ -2259,12 +2370,42 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
         ),
         Output::ArchiveApply(o) => format!("{}: {} ({})", o.id, o.action, o.archive_name),
+        Output::Attach(o) if o.publication.is_some() => {
+            let publication = o.publication.as_ref().expect("present");
+            match publication.cause {
+                Some(cause) => format!(
+                    "local ({cause}); {}",
+                    publication.next.as_deref().unwrap_or("")
+                ),
+                None => format!(
+                    "published at {}",
+                    publication.commit.as_deref().unwrap_or("")
+                ),
+            }
+        }
         Output::Attach(o) => o
             .files
             .iter()
             .map(|file| file.path.as_str())
             .collect::<Vec<_>>()
             .join("\n"),
+        Output::Detach(o) if o.publication.is_some() => {
+            let publication = o.publication.as_ref().expect("present");
+            let mut text = match publication.cause {
+                Some(cause) => format!("local ({cause})"),
+                None => format!(
+                    "published at {}",
+                    publication.commit.as_deref().unwrap_or("")
+                ),
+            };
+            if let Some(reuse) = publication.reuse {
+                text.push_str(&format!("; reuse: {reuse}"));
+            }
+            if let Some(next) = &publication.next {
+                text.push_str(&format!("; {next}"));
+            }
+            text
+        }
         Output::Detach(o) if o.removed => format!(
             "removed {}; git history keeps committed bytes, uncommitted ones are gone",
             o.path
@@ -2976,6 +3117,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
         Output::Doc(o) => o.warnings.clone(),
+        Output::Raw(o) => o.warnings.clone(),
+        Output::Export(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
         Output::Parked(o) => o.warnings.clone(),

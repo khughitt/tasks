@@ -10,6 +10,7 @@ pub mod dep;
 pub mod doc;
 pub mod docs;
 pub mod edit;
+pub mod export;
 pub mod feedback;
 pub mod goals;
 pub mod graph;
@@ -1458,6 +1459,10 @@ pub fn finish(ctx: &mut Ctx) -> std::collections::BTreeSet<std::path::PathBuf> {
     crate::record_commit::commit_written(&mut ctx.warnings)
 }
 
+pub fn finish_report(ctx: &mut Ctx) -> Vec<crate::record_commit::Committed> {
+    crate::record_commit::commit_written_report(&mut ctx.warnings)
+}
+
 pub fn id_out(mut ctx: Ctx, task: &Task) -> Output {
     finish(&mut ctx);
     Output::Id(crate::output::IdOut {
@@ -2234,6 +2239,23 @@ fn dispatch(cli: Cli) -> Result<Output> {
             },
             fetch(no_fetch),
         ),
+        Command::Export {
+            id,
+            name,
+            at,
+            output,
+            verify: _,
+        } => export::run(
+            open_id_ctx(dir, &id)?,
+            id,
+            name,
+            at,
+            match output {
+                Some(path) if path == Path::new("-") => export::ExportTarget::Stdout,
+                Some(path) => export::ExportTarget::Path(path),
+                None => export::ExportTarget::Verify,
+            },
+        ),
         Command::Docs {
             kinds,
             search,
@@ -2359,12 +2381,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             id,
             source,
             clipboard,
+            multipart,
             name,
             caption,
         } => attach::attach(
             open_id_write_ctx(dir, &id)?,
             id,
             attach::Source::from_args(source, clipboard)?,
+            multipart,
             name,
             caption,
         ),

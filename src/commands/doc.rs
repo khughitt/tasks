@@ -26,7 +26,20 @@ pub fn run(mut ctx: Ctx, id: String, target: DocTarget, fetch: Fetch) -> Result<
                 .ok_or_else(|| {
                     Error::DocNotFound(format!("{} has no reference {handle}", task.id))
                 })?;
-            if matches!(crate::refs::location(&entry.reference)?, Location::External) {
+            if let Location::Attachment(name) = crate::refs::location(&entry.reference)? {
+                crate::refs::refuse_member(project, &task, name)?;
+            }
+            if let Location::Attachment(name) = crate::refs::location(&entry.reference)?
+                && matches!(
+                    crate::multipart::audit::declarations(&task).get(name),
+                    Some(crate::multipart::audit::DeclState::Live(_))
+                )
+            {
+                String::from_utf8(crate::multipart::audit::rebuild(
+                    project, &task, name, None,
+                )?)
+                .map_err(|_| Error::RefNotText(format!("{name} is not UTF-8 text")))?
+            } else if matches!(crate::refs::location(&entry.reference)?, Location::External) {
                 resolver.read_external(&entry.reference)?.required()?.body
             } else {
                 let path = match crate::refs::present(&resolver, project, &task, entry)? {

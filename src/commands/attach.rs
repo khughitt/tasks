@@ -1,7 +1,15 @@
 use super::{Ctx, append_note, load, owner_name, save};
 use crate::attachments::{self, EntryState, Ledger};
 use crate::error::{Error, Result};
-use crate::output::{AttachOut, DetachOut, FileInfo, Output};
+use crate::multipart::{
+    self,
+    audit::DeclState,
+    catalog::{Catalog, CatalogPart},
+    content::sha256_hex,
+    declaration::Declaration,
+    publication::{self, Publication},
+};
+use crate::output::{AttachOut, DetachOut, FileInfo, MultipartOut, Output};
 use std::path::{Path, PathBuf};
 
 pub enum Source {
@@ -54,12 +62,33 @@ pub fn attach(
     mut ctx: Ctx,
     id: String,
     source: Source,
+    multipart: bool,
     name: Option<String>,
     caption: Option<String>,
 ) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
-    let max = ctx.project.attachments_max_bytes;
+    let max = if multipart {
+        ctx.project
+            .multipart
+            .max_bytes
+            .min(multipart::RECOVERY_MAX_BYTES)
+    } else {
+        ctx.project.attachments_max_bytes
+    };
+    if multipart
+        && (matches!(&source, Source::Clipboard)
+            || matches!(&source, Source::Paths(paths) if paths.len() != 1))
+    {
+        return Err(Error::Validation(
+            "--multipart needs one path or a single - with --name".into(),
+        ));
+    }
+    if multipart && (max == 0 || ctx.project.multipart.max_parts == 0) {
+        return Err(Error::MultipartTooLarge(
+            "multipart admissions disabled by multipart_max_bytes or multipart_max_parts".into(),
+        ));
+    }
     // Storage safety comes before any read of the source.
     attachments::check_storage(&ctx.project, &task.id)?;
     // A given --name and the caption are validated before any source read, so a bad
@@ -90,7 +119,7 @@ pub fn attach(
                 }
                 let file = std::fs::File::open(&path)
                     .map_err(|error| Error::Io(format!("{}: {error}", path.display())))?;
-                let bytes = attachments::read_capped(file, max, &path.display().to_string())
+                let bytes = read_source(file, max, &path.display().to_string(), multipart)
                     .map_err(|error| match error {
                         Error::Io(detail) => Error::Io(format!("{}: {detail}", path.display())),
                         other => other,
@@ -105,7 +134,7 @@ pub fn attach(
             })?;
             vec![(
                 name,
-                attachments::read_capped(std::io::stdin().lock(), max, "stdin")?,
+                read_source(std::io::stdin().lock(), max, "stdin", multipart)?,
             )]
         }
         Source::Clipboard => {
@@ -117,16 +146,129 @@ pub fn attach(
             vec![(name, image.bytes)]
         }
     };
+    let (sources, declaration, mut validation) = if multipart {
+        let (name, bytes) = sources.into_iter().next().expect("one source checked");
+        multipart::names::validate_logical_name(&name)?;
+        attachments::refuse_reserved(&ctx.project, &task, &name)?;
+        if attachments::ledger(&task).get(&name) == Some(&Ledger::Attached) {
+            return Err(Error::AttachmentExists(format!(
+                "{} already has {name}",
+                task.id
+            )));
+        }
+        let logical_path = attachments::task_dir(&ctx.project, &task.id).join(&name);
+        match attachments::entry_state(&logical_path)? {
+            EntryState::Absent => {}
+            EntryState::File(_) => {
+                return Err(Error::AttachmentExists(format!(
+                    "{} already holds {name}; detach it or choose another --name",
+                    task.id
+                )));
+            }
+            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
+        }
+        multipart::content::builtin(&name, &bytes)?;
+        let validation = publication::validate(&ctx.project, &name, &bytes)?;
+        if !validation.passed {
+            return Err(Error::MultipartInvalidContent(format!(
+                "multipart whole-document validation {}: {}",
+                publication::validation_cause(&validation),
+                serde_json::to_string(&validation).expect("validation serializes")
+            )));
+        }
+        let ranges = multipart::cut::cut(&bytes, ctx.project.attachments_max_bytes)?;
+        let limit = ctx
+            .project
+            .multipart
+            .max_parts
+            .min(multipart::RECOVERY_MAX_PARTS);
+        if ranges.len() > limit {
+            return Err(Error::MultipartTooLarge(format!(
+                "{} parts exceeds [attachments] multipart_max_parts = {limit}",
+                ranges.len()
+            )));
+        }
+        let parts: Vec<_> = ranges
+            .iter()
+            .enumerate()
+            .map(|(index, range)| CatalogPart {
+                name: multipart::names::part_name(&name, index + 1),
+                bytes: range.len() as u64,
+                sha256: sha256_hex(&bytes[range.clone()]),
+            })
+            .collect();
+        let catalog = Catalog {
+            name: name.clone(),
+            bytes: bytes.len() as u64,
+            sha256: sha256_hex(&bytes),
+            parts,
+        };
+        let catalog_bytes = catalog.to_bytes();
+        if catalog_bytes.len() as u64 > ctx.project.attachments_max_bytes {
+            return Err(Error::AttachmentTooLarge(format!(
+                "multipart catalog exceeds [attachments] max_bytes = {}",
+                ctx.project.attachments_max_bytes
+            )));
+        }
+        let declaration = Declaration {
+            name: name.clone(),
+            bytes: bytes.len() as u64,
+            parts: ranges.len(),
+            sha256: catalog.sha256,
+            catalog_sha256: sha256_hex(&catalog_bytes),
+            caption: caption.clone(),
+        };
+        let expected = multipart::names::member_names(&name, ranges.len());
+        for (member, state) in attachments::ledger(&task) {
+            if state == Ledger::Attached {
+                refuse_extra_member(&name, &expected, &member)?;
+            }
+        }
+        if attachments::check_storage(&ctx.project, &task.id)? {
+            for entry in std::fs::read_dir(attachments::task_dir(&ctx.project, &task.id))? {
+                if let Some(member) = entry?.file_name().to_str() {
+                    refuse_extra_member(&name, &expected, member)?;
+                }
+            }
+        }
+        let mut sources: Vec<_> = ranges
+            .iter()
+            .enumerate()
+            .map(|(index, range)| {
+                (
+                    multipart::names::part_name(&name, index + 1),
+                    bytes[range.clone()].to_vec(),
+                    Some(format!("part {}/{} of {name}", index + 1, ranges.len())),
+                )
+            })
+            .collect();
+        sources.push((
+            multipart::names::catalog_name(&name),
+            catalog_bytes,
+            Some(format!("catalog of {name}")),
+        ));
+        (sources, Some(declaration), Some(validation))
+    } else {
+        (
+            sources
+                .into_iter()
+                .map(|(name, bytes)| (name, bytes, caption.clone()))
+                .collect(),
+            None,
+            None,
+        )
+    };
     let ledger = attachments::ledger(&task);
     let mut pending = Vec::new();
     let mut files = Vec::new();
-    for (name, bytes) in sources {
+    for (name, bytes, caption) in sources {
+        attachments::refuse_reserved(&ctx.project, &task, &name)?;
         let note = attachments::attached_note(&name, bytes.len() as u64, caption.as_deref());
         crate::format::validate_note_text(&note)?;
         let target = attachments::task_dir(&ctx.project, &task.id).join(&name);
         let live = ledger.get(&name) == Some(&Ledger::Attached);
         let state = attachments::entry_state(&target)?;
-        if live && state != EntryState::Absent {
+        if live && (multipart || state != EntryState::Absent) {
             return Err(Error::AttachmentExists(format!(
                 "{} already has {name}",
                 task.id
@@ -149,11 +291,16 @@ pub fn attach(
             name,
             path: target.display().to_string(),
             bytes: bytes.len() as u64,
+            member_of: None,
         });
         pending.push((target, bytes, write));
         append_note(&mut task, &owner, &note)?;
     }
 
+    if let Some(declaration) = &declaration {
+        append_note(&mut task, &owner, &declaration.note())?;
+        crate::refs::refuse_members(&ctx.project, &task)?;
+    }
     // Identity and the claim store resolve before any write, as for `note`.
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
@@ -195,12 +342,73 @@ pub fn attach(
         crate::written::record(&ctx.project.records, target);
     }
     super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachments landed");
-    super::finish(&mut ctx);
+    let publication = if let Some(declaration) = &declaration {
+        let commits = super::finish_report(&mut ctx);
+        if let Some(cause) =
+            multipart::git_objects::commit_cause(ctx.project.commit_records, &ctx.warnings)
+        {
+            Some(Publication::local(&task.id, &declaration.name, cause))
+        } else if let Some(committed) = commits.into_iter().find(|commit| {
+            commit
+                .paths
+                .contains(&ctx.project.records.join(format!("tasks/{}.md", task.id)))
+                && ctx.project.records.starts_with(&commit.toplevel)
+        }) {
+            let (result, report) = publication::report(
+                &ctx.project,
+                &task.id,
+                &declaration.name,
+                committed.commit,
+                &mut ctx.warnings,
+            );
+            validation = report;
+            Some(result)
+        } else {
+            Some(Publication::local(
+                &task.id,
+                &declaration.name,
+                "verify_failed",
+            ))
+        }
+    } else {
+        super::finish(&mut ctx);
+        None
+    };
+    let multipart = declaration.as_ref().map(MultipartOut::from);
     Ok(Output::Attach(AttachOut {
         id: task.id.to_string(),
         files,
+        multipart,
+        publication,
+        validation,
         warnings: ctx.warnings,
     }))
+}
+
+fn read_source(
+    reader: impl std::io::Read,
+    max: u64,
+    what: &str,
+    multipart: bool,
+) -> Result<Vec<u8>> {
+    attachments::read_capped(reader, max, what).map_err(|error| match error {
+        Error::AttachmentTooLarge(_) if multipart => Error::MultipartTooLarge(format!(
+            "{what} exceeds [attachments] multipart_max_bytes = {max}"
+        )),
+        Error::AttachmentTooLarge(_) => {
+            error.with_suffix("; use --multipart for one oversized UTF-8 text source")
+        }
+        other => other,
+    })
+}
+
+fn refuse_extra_member(logical: &str, expected: &[String], member: &str) -> Result<()> {
+    if multipart::audit::is_member(member, logical) && !expected.iter().any(|name| name == member) {
+        return Err(Error::AttachmentExists(format!(
+            "{member} conflicts with multipart attachment {logical}; detach it or choose another --name"
+        )));
+    }
+    Ok(())
 }
 
 /// Spec, "detach": the ledger is written before the file is deleted, and a rerun
@@ -239,6 +447,30 @@ pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Out
     }
     let note = attachments::detached_note(&name, &why);
     crate::format::validate_note_text(&note)?;
+    let states = multipart::audit::declarations(&task);
+    if let Some(state) = states.get(&name) {
+        match state {
+            DeclState::Live(decl) => {
+                let decl = decl.clone();
+                return detach_multipart(ctx, task, &owner, decl, true, &why);
+            }
+            DeclState::Closed(decl) if !multipart::audit::later_owned(&task, &name, &name) => {
+                let decl = decl.clone();
+                return detach_multipart(ctx, task, &owner, decl, false, &why);
+            }
+            _ => {}
+        }
+    }
+    for (logical, state) in states {
+        if multipart::audit::is_member(&name, &logical)
+            && (matches!(state, DeclState::Live(_))
+                || !multipart::audit::later_owned(&task, &logical, &name))
+        {
+            return Err(Error::MultipartMember(format!(
+                "{name} is a member of multipart attachment {logical}; use its logical name"
+            )));
+        }
+    }
     let dir_exists = attachments::check_storage(&ctx.project, &task.id)?;
     let target = attachments::task_dir(&ctx.project, &task.id).join(&name);
     let present = dir_exists
@@ -275,6 +507,145 @@ pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Out
         name,
         path: target.display().to_string(),
         removed: present,
+        publication: None,
         warnings: ctx.warnings,
     }))
+}
+
+fn detach_multipart(
+    mut ctx: Ctx,
+    mut task: crate::model::Task,
+    owner: &str,
+    decl: Declaration,
+    live: bool,
+    why: &str,
+) -> Result<Output> {
+    use multipart::audit::{self, RemovalState};
+    // Bound derived allocation even when a declaration was entered manually.
+    audit::recovery_bounds(&decl)?;
+    attachments::check_storage(&ctx.project, &task.id)?;
+    let dir = attachments::task_dir(&ctx.project, &task.id);
+    if !live {
+        match audit::removal_state(&ctx.project, &task, &decl) {
+            Ok(RemovalState::Complete { commit }) => {
+                return Ok(Output::Detach(DetachOut {
+                    id: task.id.to_string(),
+                    path: dir.join(&decl.name).display().to_string(),
+                    name: decl.name,
+                    removed: false,
+                    publication: Some(Publication::published(commit)),
+                    warnings: ctx.warnings,
+                }));
+            }
+            Err(error) => ctx
+                .warnings
+                .push(format!("removal verification failed: {error}")),
+            _ => {}
+        }
+    }
+    let members = if live {
+        multipart::names::member_names(&decl.name, decl.parts)
+    } else {
+        audit::removal_members(&task, &decl)?
+    };
+    let mut targets = Vec::new();
+    for member in &members {
+        let path = dir.join(member);
+        let present = match attachments::entry_state(&path)? {
+            EntryState::File(_) => true,
+            EntryState::Absent => false,
+            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
+        };
+        targets.push((path, present));
+    }
+    let me = ctx.resolve_for_guard()?;
+    ctx.claims_mut()?;
+    if live {
+        for member in &members {
+            append_note(
+                &mut task,
+                owner,
+                &attachments::detached_note(member, &format!("part of {}", decl.name)),
+            )?;
+        }
+        append_note(
+            &mut task,
+            owner,
+            &attachments::detached_note(&decl.name, why),
+        )?;
+        save(&mut ctx, &mut task)?;
+        super::follow_holder(&mut ctx, &task.id, Some(&me), "the detach landed");
+    }
+    let record = ctx.project.records.join(format!("tasks/{}.md", task.id));
+    crate::written::record(&ctx.project.records, &record);
+    for (path, _) in &targets {
+        crate::written::record(&ctx.project.records, path);
+    }
+    let mut removed = false;
+    for (path, present) in targets {
+        if present {
+            std::fs::remove_file(path)?;
+            removed = true;
+        }
+    }
+    if attachments::dir_state(&dir)? == attachments::DirState::Directory
+        && std::fs::read_dir(&dir)?.next().is_none()
+    {
+        std::fs::remove_dir(&dir)?;
+    }
+    let commits = super::finish_report(&mut ctx);
+    let mut publication = if let Some(cause) =
+        multipart::git_objects::commit_cause(ctx.project.commit_records, &ctx.warnings)
+    {
+        removal_local(&ctx.project, &task, &decl, cause)
+    } else if let Some(committed) = commits.into_iter().find(|commit| {
+        commit.paths.contains(&record) && ctx.project.records.starts_with(&commit.toplevel)
+    }) {
+        match audit::removal_at(&ctx.project, &task, &decl, &committed.commit) {
+            Ok(Some(commit)) => Publication::published(commit),
+            result => {
+                if let Err(error) = result {
+                    ctx.warnings
+                        .push(format!("removal verification failed: {error}"));
+                }
+                removal_local(&ctx.project, &task, &decl, "verify_failed")
+            }
+        }
+    } else if !live {
+        match audit::removal_state(&ctx.project, &task, &decl) {
+            Ok(RemovalState::Complete { commit }) => Publication::published(commit),
+            _ => removal_local(&ctx.project, &task, &decl, "verify_failed"),
+        }
+    } else {
+        removal_local(&ctx.project, &task, &decl, "verify_failed")
+    };
+    if publication.state == "published"
+        && !matches!(
+            audit::removal_state(&ctx.project, &task, &decl),
+            Ok(RemovalState::Complete { .. })
+        )
+    {
+        publication.reuse = Some("blocked");
+        publication.next = Some(audit::removal_next(&ctx.project, &task, &decl));
+    }
+    Ok(Output::Detach(DetachOut {
+        id: task.id.to_string(),
+        path: dir.join(&decl.name).display().to_string(),
+        name: decl.name,
+        removed,
+        publication: Some(publication),
+        warnings: ctx.warnings,
+    }))
+}
+
+fn removal_local(
+    project: &crate::repo::Project,
+    task: &crate::model::Task,
+    decl: &Declaration,
+    cause: &'static str,
+) -> Publication {
+    let mut publication = Publication::local(&task.id, &decl.name, cause);
+    publication.next = Some(multipart::audit::removal_next(project, task, decl));
+    publication.reuse = Some("blocked");
+    publication
 }

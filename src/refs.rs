@@ -35,6 +35,19 @@ pub fn present(
             LocatedEntry::Special(path) => Presence::Special(path),
         }),
         Location::Attachment(name) => {
+            if matches!(
+                crate::multipart::audit::declarations(task).get(name),
+                Some(crate::multipart::audit::DeclState::Live(_))
+            ) {
+                let path = attachments::task_dir(project, &task.id)
+                    .join(crate::multipart::names::catalog_name(name));
+                return Ok(
+                    match crate::multipart::audit::rebuild(project, task, name, None) {
+                        Ok(_) => Presence::Here(path),
+                        Err(_) => Presence::Absent(path),
+                    },
+                );
+            }
             let path = attachments::task_dir(project, &task.id).join(name);
             match attachments::check_storage(project, &task.id) {
                 Ok(false) => return Ok(Presence::Absent(path)),
@@ -80,6 +93,7 @@ pub fn require_targets(
     task: &Task,
     original: Option<&Task>,
 ) -> Result<()> {
+    refuse_members(project, task)?;
     for entry in &task.refs {
         if entry.relation == Relation::Output
             || matches!(location(&entry.reference)?, Location::External)
@@ -109,7 +123,42 @@ pub fn require_targets(
     Ok(())
 }
 
+pub fn refuse_members(project: &Project, task: &Task) -> Result<()> {
+    for entry in &task.refs {
+        if let Location::Attachment(name) = location(&entry.reference)? {
+            refuse_member(project, task, name)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn refuse_member(project: &Project, task: &Task, name: &str) -> Result<()> {
+    use crate::multipart::audit::{self, DeclState, RemovalState};
+
+    let reserved = audit::reserved_names(task);
+    for (logical, state) in audit::declarations(task) {
+        if !audit::is_member(name, &logical) || audit::later_owned(task, &logical, name) {
+            continue;
+        }
+        if let DeclState::Closed(declaration) = state
+            && ((audit::recovery_bounds(&declaration).is_ok()
+                && reserved.get(name) != Some(&logical))
+                || matches!(
+                    audit::removal_state(project, task, &declaration),
+                    Ok(RemovalState::Complete { .. })
+                ))
+        {
+            continue;
+        }
+        return Err(Error::MultipartMember(format!(
+            "{name} is a member of multipart attachment {logical}; use files:{logical}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()> {
+    refuse_members(project, task)?;
     let mut missing = Vec::new();
     for entry in &task.refs {
         if entry.relation != Relation::Output
