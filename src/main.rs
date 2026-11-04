@@ -231,6 +231,8 @@ fn main() {
     // Read commands can report their warnings before a width error. Reject it before
     // writers run, so a presentation error cannot follow a successful mutation.
     if let Err(error) = &width
+        && !matches!(&cli.command, cli::Command::Export { output: Some(path), .. }
+            if path == std::path::Path::new("-"))
         && !matches!(
             &cli.command,
             cli::Command::Projects { .. }
@@ -241,7 +243,6 @@ fn main() {
                 | cli::Command::Show { .. }
                 | cli::Command::Doc { .. }
                 | cli::Command::Docs { .. }
-                | cli::Command::Export { .. }
                 | cli::Command::List { .. }
                 | cli::Command::Search { .. }
                 | cli::Command::Ready { .. }

@@ -2134,3 +2134,114 @@ fn export_refuses_committed_unnoted_extra_parts_at_the_same_basis() {
         }
     }
 }
+
+#[test]
+fn export_pretty_verification_reports_the_current_runtime_verdict_and_commit() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"evidence\n");
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    let config = dir.join("tasks/.config.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    for (command, verdict, detail) in [
+        ("['/bin/true']", "passed", None),
+        (
+            "['/bin/sh','-c','echo schema-invalid >&2; exit 7']",
+            "failed",
+            Some("schema-invalid"),
+        ),
+        (
+            "['tasks-test-missing-validator-486d']",
+            "unavailable",
+            Some("tasks-test-missing-validator-486d"),
+        ),
+    ] {
+        std::fs::write(
+            &config,
+            original.replace(
+                "multipart_validators = []",
+                &format!("multipart_validators = [{{match='*',command={command}}}]"),
+            ),
+        )
+        .unwrap();
+        let text = env.pretty(
+            &dir,
+            &["export", &id, "evidence.txt", "--at", &commit, "--verify"],
+        );
+        assert!(text.contains("integrity: passed"), "{text}");
+        assert!(
+            text.contains(&format!("validation: {verdict} (current_runtime)")),
+            "{text}"
+        );
+        assert!(text.contains(&format!("commit: {commit}")), "{text}");
+        if let Some(detail) = detail {
+            assert!(text.contains(detail), "{text}");
+        }
+        if verdict == "failed" {
+            assert!(text.contains("/bin/sh"), "{text}");
+            assert!(text.contains(": rejected, exit 7"), "{text}");
+            assert!(text.lines().any(|line| line == "schema-invalid"), "{text}");
+        }
+    }
+}
+
+#[test]
+fn export_pretty_file_preflights_width_before_touching_any_destination() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"evidence\n");
+    for existing in [false, true] {
+        let destination = dir.join("output");
+        if existing {
+            std::fs::write(&destination, "sentinel").unwrap();
+        }
+        let out = env
+            .cmd(&dir)
+            .env("COLUMNS", "wide")
+            .args([
+                "--pretty",
+                "export",
+                &id,
+                "evidence.txt",
+                "-o",
+                destination.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        assert!(out.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "config");
+        if existing {
+            assert_eq!(std::fs::read(&destination).unwrap(), b"sentinel");
+        } else {
+            assert!(
+                !destination.exists(),
+                "output was created despite failed preflight"
+            );
+        }
+    }
+}
+
+#[test]
+fn export_pretty_raw_stdout_ignores_width_and_preserves_binary_bytes() {
+    let mut env = TestEnv::new();
+    let dir = env.init("tst");
+    let id = task(&env, &dir);
+    let bytes = b"\x00\xff\x80raw\r\n";
+    let source = dir.join("raw.bin");
+    std::fs::write(&source, bytes).unwrap();
+    env.json(
+        &dir,
+        &["attach", &id, source.to_str().unwrap(), "--caption", "raw"],
+    );
+    let out = env
+        .cmd(&dir)
+        .env("COLUMNS", "wide")
+        .args([
+            "--pretty", "--color", "always", "export", &id, "raw.bin", "-o", "-",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, bytes);
+}

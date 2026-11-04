@@ -1957,10 +1957,48 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         Output::Show(o) => crate::show_text::render(&o.fields, painter, layout.width),
         Output::Doc(o) => o.body.clone(),
         Output::Raw(_) => unreachable!("raw bytes are written directly"),
-        Output::Export(o) => format!(
-            "{} {}: {} bytes, sha256 {}",
-            o.id, o.name, o.bytes, o.sha256
-        ),
+        Output::Export(o) => {
+            let mut text = format!(
+                "{} {}: {} bytes, sha256 {}\nintegrity: {}",
+                o.id,
+                o.name,
+                o.bytes,
+                o.sha256,
+                if o.integrity.passed {
+                    "passed"
+                } else {
+                    "failed"
+                }
+            );
+            if let Some(commit) = &o.commit {
+                text.push_str(&format!("\ncommit: {commit}"));
+            }
+            if let Some(validation) = &o.validation {
+                let verdict = if validation.passed {
+                    "passed"
+                } else {
+                    match crate::multipart::publication::validation_cause(validation) {
+                        "validation_unavailable" => "unavailable",
+                        _ => "failed",
+                    }
+                };
+                text.push_str(&format!("\nvalidation: {verdict} ({})", validation.basis));
+                for run in validation
+                    .validators
+                    .iter()
+                    .filter(|run| run.outcome != "passed")
+                {
+                    text.push_str(&format!("\nvalidator {:?}: {}", run.command, run.outcome));
+                    if let Some(exit) = run.exit {
+                        text.push_str(&format!(", exit {exit}"));
+                    }
+                    if !run.stderr.trim().is_empty() {
+                        text.push_str(&format!("\n{}", run.stderr.trim()));
+                    }
+                }
+            }
+            text
+        }
         Output::Next(o) => format!(
             "{}{}",
             halt_line(&o.halts),
