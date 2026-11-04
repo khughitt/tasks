@@ -1191,3 +1191,143 @@ fn multipart_missing_path_validator_fails_closed_before_writes() {
     assert_eq!(std::fs::read(record).unwrap(), before);
     assert!(!stored(&dir, &id, "a.txt.part-0001").exists());
 }
+
+#[test]
+fn multipart_path_identity_never_falls_through_to_another_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let (env, dir, id) = attach_fixture(
+        "max_bytes = 65536\nmultipart_validators = [{match='*',command=['check-doc']}]",
+    );
+    let first = dir.join("first");
+    let second = dir.join("second");
+    std::fs::create_dir(&first).unwrap();
+    std::fs::create_dir(&second).unwrap();
+    for (path, bytes) in [
+        (
+            first.join("check-doc"),
+            b"#!/missing-interpreter-for-task-validator\n".as_slice(),
+        ),
+        (
+            second.join("check-doc"),
+            b"#!/bin/sh\nprintf wrongly-ran > second-ran\n".as_slice(),
+        ),
+    ] {
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let source = dir.join("source");
+    std::fs::write(&source, "hello").unwrap();
+    let record = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    let out = env
+        .cmd(&dir)
+        .env(
+            "PATH",
+            format!("{}:{}:/usr/bin:/bin", first.display(), second.display()),
+        )
+        .args([
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--multipart",
+            "--name",
+            "a.txt",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "multipart_invalid_content");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("validation_unavailable")
+    );
+    assert!(!dir.join("second-ran").exists());
+    assert_eq!(std::fs::read(record).unwrap(), before);
+    assert!(!stored(&dir, &id, "a.txt.part-0001").exists());
+}
+
+#[test]
+fn publication_path_selection_preserves_argv_zero() {
+    let (env, dir, id) = attach_fixture(
+        "max_bytes = 65536\nmultipart_validators = [{match='*',command=['argv-check','-c','printf %s \"$0\" > ran']}]",
+    );
+    enable_git(&dir);
+    let tools = dir.join("tools");
+    std::fs::create_dir(&tools).unwrap();
+    std::os::unix::fs::symlink("/bin/sh", tools.join("argv-check")).unwrap();
+    let source = dir.join("source");
+    std::fs::write(&source, "hello").unwrap();
+    let out = env
+        .cmd(&dir)
+        .env("PATH", format!("{}:/usr/bin:/bin", tools.display()))
+        .args([
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--multipart",
+            "--name",
+            "a.txt",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["publication"]["state"], "published", "{value}");
+    assert_eq!(std::fs::read(dir.join("ran")).unwrap(), b"argv-check");
+    assert_eq!(
+        value["validation"]["validators"][0]["command"][0],
+        "argv-check"
+    );
+}
+
+#[test]
+fn publication_path_selection_keeps_the_selected_symlink_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let (env, dir, id) = attach_fixture(
+        "max_bytes = 65536\nmultipart_validators = [{match='*',command=['check-doc']}]",
+    );
+    enable_git(&dir);
+    let tools = dir.join("tools");
+    let actual = dir.join("actual");
+    std::fs::create_dir(&tools).unwrap();
+    std::fs::create_dir(&actual).unwrap();
+    let script = b"#!/bin/sh\nbase=${0%/*}\ncat \"$base/resource\" > ran\n";
+    std::fs::write(actual.join("check-doc"), script).unwrap();
+    std::fs::set_permissions(
+        actual.join("check-doc"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::write(actual.join("resource"), "wrong canonical location").unwrap();
+    std::fs::write(tools.join("resource"), "selected location").unwrap();
+    std::os::unix::fs::symlink("../actual/check-doc", tools.join("check-doc")).unwrap();
+    let source = dir.join("source");
+    std::fs::write(&source, "hello").unwrap();
+    let out = env
+        .cmd(&dir)
+        .env("PATH", format!("{}:/usr/bin:/bin", tools.display()))
+        .args([
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--multipart",
+            "--name",
+            "a.txt",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["publication"]["state"], "published", "{value}");
+    assert_eq!(
+        std::fs::read(dir.join("ran")).unwrap(),
+        b"selected location"
+    );
+    assert_eq!(
+        value["validation"]["validators"][0]["program_sha256"],
+        digest(script)
+    );
+}

@@ -22,6 +22,8 @@ pub struct ValidatorRun {
     #[serde(rename = "match")]
     pub glob: String,
     pub command: Vec<String>,
+    #[serde(skip)]
+    selected_program: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,16 +114,21 @@ fn matches_name(glob: &str, name: &str) -> io::Result<bool> {
 fn program_identity(
     program: &str,
     toplevel: &Path,
-) -> io::Result<(Option<String>, Option<&'static str>)> {
-    let path = if program.contains('/') {
-        toplevel.join(program)
+) -> io::Result<(Option<String>, Option<&'static str>, PathBuf)> {
+    let selected_program = if program.contains('/') {
+        PathBuf::from(program)
     } else {
         use std::os::unix::ffi::OsStrExt;
         let search = std::env::var_os("PATH").ok_or_else(|| io::Error::other("PATH is not set"))?;
         let mut selected = None;
         for entry in std::env::split_paths(&search) {
             // Relative and empty PATH entries resolve in the validator's cwd.
-            let candidate = toplevel.join(entry).join(program);
+            let selected_path = if entry.as_os_str().is_empty() {
+                PathBuf::from(".").join(program)
+            } else {
+                entry.join(program)
+            };
+            let candidate = toplevel.join(&selected_path);
             match fs::metadata(&candidate) {
                 Ok(metadata) if !metadata.is_file() => continue,
                 Ok(_) => (),
@@ -140,7 +147,7 @@ fn program_identity(
                 libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS)
             } == 0
             {
-                selected = Some(candidate);
+                selected = Some(selected_path);
                 break;
             }
             let error = io::Error::last_os_error();
@@ -157,12 +164,12 @@ fn program_identity(
                 format!("validator program {program:?} is not executable on PATH"),
             )
         })?
-    }
-    .canonicalize()?;
+    };
+    let path = toplevel.join(&selected_program).canonicalize()?;
     if path.starts_with(toplevel.canonicalize()?) {
-        Ok((Some(sha256_hex(&fs::read(path)?)), None))
+        Ok((Some(sha256_hex(&fs::read(path)?)), None, selected_program))
     } else {
-        Ok((None, Some("external")))
+        Ok((None, Some("external"), selected_program))
     }
 }
 
@@ -177,13 +184,14 @@ fn report(spec: &ValidatorSpec, name: &str, toplevel: &Path) -> ValidatorRun {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| io::Error::other("validator command is empty"))
         .and_then(|program| program_identity(program, toplevel));
-    let (program_sha256, program, stderr) = match identity {
-        Ok((hash, external)) => (hash, external, String::new()),
-        Err(error) => (None, None, error.to_string()),
+    let (program_sha256, program, selected_program, stderr) = match identity {
+        Ok((hash, external, selected)) => (hash, external, Some(selected), String::new()),
+        Err(error) => (None, None, None, error.to_string()),
     };
     ValidatorRun {
         glob: spec.glob.clone(),
         command,
+        selected_program,
         program_sha256,
         program,
         exit: None,
@@ -385,7 +393,13 @@ fn execute(
     timeout: Duration,
 ) -> io::Result<()> {
     let home = Home::create()?;
-    let mut child = Command::new(&run.command[0])
+    // Launch exactly the path identified above, without a second PATH search.
+    let program = run
+        .selected_program
+        .as_ref()
+        .ok_or_else(|| io::Error::other("validator program was not resolved"))?;
+    let mut child = Command::new(program)
+        .arg0(&run.command[0])
         .args(&run.command[1..])
         .current_dir(toplevel)
         .env_clear()
@@ -729,19 +743,24 @@ mod tests {
     fn program_hash_is_reported_for_repository_programs_only() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("check"), b"abc").unwrap();
-        let (hash, external) = program_identity("./check", dir.path()).unwrap();
+        let (hash, external, selected) = program_identity("./check", dir.path()).unwrap();
+        assert_eq!(selected, Path::new("./check"));
         assert_eq!(
             hash.as_deref(),
             Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         );
         assert_eq!(external, None);
         assert_eq!(
-            program_identity("sh", dir.path()).unwrap(),
+            program_identity("sh", dir.path())
+                .map(|(hash, external, _)| (hash, external))
+                .unwrap(),
             (None, Some("external"))
         );
         std::os::unix::fs::symlink("/bin/sh", dir.path().join("outside")).unwrap();
         assert_eq!(
-            program_identity("./outside", dir.path()).unwrap(),
+            program_identity("./outside", dir.path())
+                .map(|(hash, external, _)| (hash, external))
+                .unwrap(),
             (None, Some("external"))
         );
         assert!(program_identity("./missing", dir.path()).is_err());
