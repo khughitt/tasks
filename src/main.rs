@@ -5,6 +5,9 @@ mod claims;
 mod cli;
 mod clipboard;
 mod commands;
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod common;
 mod complete;
 mod complexity;
 mod config;
@@ -48,6 +51,7 @@ mod relay;
 mod rename;
 mod repo;
 mod resolve;
+mod retained;
 mod review;
 mod scope;
 mod shorthand;

@@ -871,6 +871,173 @@ or referenced document before shortening it with `tasks edit <id> --body`.
 Protected note history remains append-only; use `tasks archive-notes <id>` for a
 read-only preview of lossless note archival.
 
+### Retained state
+
+`tasks retained state <id> [--at <revision>] [--host <host>]` replays retained
+notes in logical ordinal order from one immutable Git commit. JSON includes
+`version: 1`, `contract: "retention-1"`, `task`, `basis`, `host_filter`,
+`complete`, `items`, `checkpoints`, `operations`, `diagnostics`, and `warnings`.
+Each item has its identity, effective record, exact source ordinal, observation
+time and checkpoint coverage. `--pretty` renders the same evidence for inspection.
+
+The default reads committed HEAD and refuses dirty required task or archive files.
+`--at` reads only that revision's bytes, including its note archives; dirty current
+files do not affect it. The basis names a reachable local branch, the full commit,
+records layout and task path. Missing archives, invalid locators and conflicting
+checkpoint or repair bases fail explicitly. Malformed retained notes quarantine
+their known identity, host or whole task: `complete: false` and a null effective
+record prevent an older valid note from silently becoming current. A host filter
+never hides task-wide uncertainty. Historical observations do not verify current
+filesystem bytes.
+
+Machine `retention operation:` and JSON `retention checkpoint:` envelopes require
+owned lifecycle publication; generic notes cannot forge them. A pending operation
+allows queries, unrelated appended notes, normal start/claim refresh and park;
+closure, archival and competing task/evidence changes must wait for completion or
+reconciliation. Terminal note archival preserves logical ordinals and attachment
+paths. Move, migrate and rename refuse retention operation history or protected
+`retained-op-*.request.json`, `retained-manifest-*.json`, and
+`retained-checkpoint-*.json` artifacts until locator migration is supported.
+Protected artifacts cannot be detached.
+
+In operation schemas, an attachment locator without `basis` resolves against its
+containing committed note only when both name the same task. Foreign locators and
+request preservation inputs require an explicit basis. This avoids a commit hash
+self-reference when request bytes, attachment ledger and intent publish together.
+
+### Retained checkpoints
+
+`tasks retained checkpoint <id> --request <path>` performs one whole-host accounting
+operation. Use one coordinated writer host for all participating tasks: other hosts
+must not write them until completion or reconciliation has committed and records
+have synchronized. Claims and locks are host-local and do not coordinate remote
+writers. Start the task first, use Git records with `[git] commit = true`, and copy
+the exact current `basis` object from `tasks retained state <id>` into the request.
+Keep the mutable request outside the inventoried directory. For example, replace
+the task, host, commit and paths below with the actual state and declaration:
+
+```json
+{
+  "version": 1,
+  "operation_id": "0123456789abcdef0123456789abcdef",
+  "host": "host1",
+  "inputs": [{
+    "task": "sci-a00001",
+    "basis": {
+      "project": "sci", "layout": "in-tree", "records_subdir": ".",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "task_path": "tasks/sci-a00001.md", "retained_ref": "refs/heads/main"
+    }
+  }],
+  "declarations": [{
+    "kind": "scratch", "path": "$WORK_ROOT/sci/sci-a00001/evidence",
+    "purpose": "Review evidence", "cleanup_trigger": "Review completes"
+  }]
+}
+```
+
+Reuse an operation id only to retry that same parsed request. Whitespace changes
+are harmless; changed terms or bases require a new operation. A fresh operation
+rejects stale inputs. A retry verifies its durable intent and prior phases, and
+adopts byte-identical interrupted attachments before commit hooks run. An
+unpublished completion is preserved as immutable recovery evidence before a fresh
+inspection. Completed retries return the original publication references, with a
+warning that current filesystem bytes were not inspected.
+
+Every known kept identity on the executing host is inspected, including those
+omitted from `declarations`. Unchanged v1 items still receive full hashing; their
+item notes and exact manifests are reused. Historical objects receive explicit v1
+successors. Worktrees receive Git and ignored-file observations, never a content
+hash. The tool does not discover unrecorded host items or inspect other hosts.
+
+Changed evidence needs `preserved_previous` entries of `{identity, artifact}`;
+request schemas describe exact Git/attachment locators and preserved directory
+roots. Missing prior payloads, unreadable files and unexpected changes remain
+kept/unknown, with null current hashes and concrete actions. Directory inventories
+include hidden members, empty directories and literal symlink targets. Unsupported
+historical manifests and a manifest destination inside its own container refuse.
+An unknown result retains the prior-version requirement in history; another
+checkpoint cannot accept an unexplained replacement. Referenced prior payloads are
+rechecked on later observations. A directory proof needs its old manifest and
+every old member; later immutable members may coexist in that preserved root.
+Supply an explicit, fully verified replacement locator to repair an unavailable
+prior location.
+
+`resolutions` pairs an exact bad `{basis, ordinal}` with complete `declarations`
+and a `reason`. A correction must cover its blocked identity or all known
+identities in its blocked host/task scope; it never selects an older valid note as
+a fallback. A scope spanning other hosts requires explicit history recovery.
+
+Successful JSON has `version`, `operation`, `outcome`, `publications`, `counts`,
+`actions`, `metrics`, and `warnings`. `verified` means the observed local kept set
+verified; `accounted_unknown` is complete accounting with unresolved observations;
+`no_local_items` creates no empty checkpoint. Failed publication returns nonzero
+and preserves the reservation. The command does not park or close the task.
+`wall_ns` measures the held-lock operation, `hash_ns`/`bytes_hashed` accumulate the
+command thread's SHA-256 work (including recovery, archive validation and repeated
+verification), and `history_bytes_read` includes repeated task/archive and
+operation-metadata reads. These counters exclude Git's private I/O; hash and
+history channels may overlap. Count CLI invocations and actual UTF-8 stdout
+separately when comparing caller context.
+
+### Retained transfers
+
+`tasks retained transfer <from> <to> --request <path>` transfers custody of selected
+identities while leaving their bytes in place. Both tasks must be open and claimed
+by the acting session. Its request has `version: 1`, `operation_id`, the current
+`host`, two exact `inputs` in sender/receiver order, nonempty `items` containing
+sender `{host, kind, path}` identities, and receiving `purpose` and `cleanup_trigger`.
+Use another operation for items needing different terms. A receiver identity already
+present is a conflict, including equal hashes. Selecting a container leaves its
+independent child identities and their owners unchanged.
+
+The command publishes both intents, fully verifies current and referenced prior
+bytes, commits receiver kept records, revalidates both histories and attachment
+bytes, and rechecks payloads before a separate sender release commit. Same-repository
+transfers retain that ordering. Cross-project worktrees use their verified absolute
+host path on the receiver; other identity spellings stay unchanged. Sender release
+purpose is exactly `Transferred to <receiver-task-id>; custody transferred and bytes remain in place`.
+The release note timestamp is strictly after every committed receiving kept note
+and the previous sender update, including future-dated receiver notes.
+
+A failure before release keeps sender custody and durable pending evidence. Retry
+the original request; a committed release needs only its missing final receipts,
+including when bytes later become unavailable. Completed replay returns historical
+publication references and participant counts from the original completed bases.
+Transfer counts describe recorded local identities on both participants; only the
+selected identities receive fresh byte inspection. They are not a host checkpoint.
+No copying, deletion, automatic closure or assignment of independent children occurs.
+
+### Retained reconciliation
+
+`tasks retained reconcile <coordinator> --request <path>` ends an irrecoverable
+pending operation without completing its requested checkpoint or transfer. Its
+request has `version: 1`, the original `operation` key, a stable hexadecimal
+`reconciliation_id`, fresh `inputs` for every participant, and a concrete `reason`.
+Run from the original input's named retained branch and keep that ref available.
+Reuse the same parsed directive on retry; another directive refuses while it is
+bound. Original request bytes remain unchanged.
+
+Reconciliation preserves current custody, publishes observation changes and each
+participant's ready receipt, then publishes the coordinator terminal citing every
+exact ready basis. A ready note alone leaves the reservation in place. Missing or
+changed payloads become kept/unknown; malformed retained history stays blocked.
+It observes the effective history rather than applying an abandoned replacement
+or source correction. Use a fresh checkpoint to apply such a repair. A committed
+sender release always refuses reconciliation, including after an incomplete phase;
+finish the original transfer's missing receipts instead.
+
+`reconciled` never means transferred or a complete host checkpoint. Result counts
+cover interpretable recorded identities at the ready bases; `actions` preserves
+unknown or blocked scopes. Independent exceptions and existing owners stay intact.
+The command copies or deletes no payloads and releases no kept identity. Unknown
+observations still block reliance or disposal after the reservation ends. Terminal
+replay verifies its immutable directive and ready publications without inspecting
+current payloads. A later operation needs fresh input bases.
+
+Do not install this intermediate build before full delivery and envelope-consumer
+acceptance.
+
 ### Note archives
 
 `tasks archive-notes <id>` reports `id`, `source_sha256`, `archive_name`,

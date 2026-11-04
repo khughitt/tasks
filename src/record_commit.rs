@@ -156,12 +156,8 @@ fn discover(dir: &Path, git: Git) -> Result<Option<Repo>, String> {
 }
 
 fn lock_for(common: &Path, state: &Path) -> Result<MutationLock, String> {
-    use sha2::Digest;
-    let digest = sha2::Sha256::digest(common.as_os_str().as_encoded_bytes());
-    let hex: String = digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let digest = crate::history::sha256(common.as_os_str().as_encoded_bytes());
+    let hex = &digest[..16];
     let path = state.join(format!("tasks/claims/.commit-{hex}.lock"));
     MutationLock::acquire_at(&path).map_err(|error| error.to_string())
 }
@@ -328,17 +324,29 @@ fn commit_paths_report_in(
     after_commit: &mut dyn FnMut(),
     git: Git,
 ) -> (Vec<String>, Option<Committed>) {
+    let repo = match discover(dir, git) {
+        Ok(Some(repo)) => repo,
+        Ok(None) => return (vec![unavailable(dir, paths)], None),
+        Err(error) => return (vec![failed(dir, paths, &error, None)], None),
+    };
+    let _lock = match lock_for(&repo.common, state) {
+        Ok(lock) => lock,
+        Err(error) => return (vec![failed(dir, paths, &error, None)], None),
+    };
+    commit_under_lock(&repo, dir, paths, message, before_commit, after_commit)
+}
+
+fn commit_under_lock(
+    repo: &Repo,
+    dir: &Path,
+    paths: &[PathBuf],
+    message: &str,
+    before_commit: &mut dyn FnMut(),
+    after_commit: &mut dyn FnMut(),
+) -> (Vec<String>, Option<Committed>) {
+    let git = repo.git;
     let mut committed = None;
     let warnings = (|| {
-        let repo = match discover(dir, git) {
-            Ok(Some(repo)) => repo,
-            Ok(None) => return vec![unavailable(dir, paths)],
-            Err(error) => return vec![failed(dir, paths, &error, None)],
-        };
-        let _lock = match lock_for(&repo.common, state) {
-            Ok(lock) => lock,
-            Err(error) => return vec![failed(dir, paths, &error, None)],
-        };
         if let Some(what) = in_progress(&repo.git_dir) {
             return vec![deferred(
                 dir,
@@ -352,7 +360,7 @@ fn commit_paths_report_in(
         {
             return vec![deferred(dir, paths, "HEAD is detached", None)];
         }
-        match staged(&repo) {
+        match staged(repo) {
             Ok(already) if !already.is_empty() => {
                 return vec![deferred(
                     dir,
@@ -402,12 +410,12 @@ fn commit_paths_report_in(
                 Ok(output) => cause_of(args[0], &output),
                 Err(error) => error.to_string(),
             };
-            return vec![failed(dir, paths, &cause, cleanup(&repo, &ours))];
+            return vec![failed(dir, paths, &cause, cleanup(repo, &ours))];
         }
         before_commit();
-        let now = match staged(&repo) {
+        let now = match staged(repo) {
             Ok(now) => now,
-            Err(error) => return vec![failed(dir, paths, &error, cleanup(&repo, &ours))],
+            Err(error) => return vec![failed(dir, paths, &error, cleanup(repo, &ours))],
         };
         if now.is_empty() {
             return Vec::new(); // the files already match HEAD
@@ -415,11 +423,11 @@ fn commit_paths_report_in(
         let foreign: Vec<&String> = now.iter().filter(|path| !ours.contains(path)).collect();
         if !foreign.is_empty() {
             let cause = format!("staged changes appeared: {}", listed(&foreign));
-            return vec![deferred(dir, paths, &cause, cleanup(&repo, &ours))];
+            return vec![deferred(dir, paths, &cause, cleanup(repo, &ours))];
         }
-        let expected = match path_blobs(&repo, None, &ours) {
+        let expected = match path_blobs(repo, None, &ours) {
             Ok(blobs) => blobs,
-            Err(error) => return vec![failed(dir, paths, &error, cleanup(&repo, &ours))],
+            Err(error) => return vec![failed(dir, paths, &error, cleanup(repo, &ours))],
         };
         let output = git(
             &repo.toplevel,
@@ -444,22 +452,17 @@ fn commit_paths_report_in(
                     dir,
                     paths,
                     &cause_of("commit", &output),
-                    cleanup(&repo, &ours),
+                    cleanup(repo, &ours),
                 )];
             }
             Err(error) => {
-                return vec![failed(
-                    dir,
-                    paths,
-                    &error.to_string(),
-                    cleanup(&repo, &ours),
-                )];
+                return vec![failed(dir, paths, &error.to_string(), cleanup(repo, &ours))];
             }
         };
         let identified = commit_identity(&output.stdout).filter(|sha| {
             git(&repo.toplevel, &["cat-file", "-t", sha])
                 .is_ok_and(|out| out.status.success() && out.stdout == b"commit\n")
-                && path_blobs(&repo, Some(sha), &ours).is_ok_and(|blobs| blobs == expected)
+                && path_blobs(repo, Some(sha), &ours).is_ok_and(|blobs| blobs == expected)
         });
         match identified {
             Some(commit) => {
@@ -682,6 +685,40 @@ fn commit_drained(
         }
     }
     (committed, paths)
+}
+
+pub struct CommitLock {
+    common: PathBuf,
+    _guard: MutationLock,
+}
+pub fn common_dir(dir: &Path) -> Result<PathBuf, String> {
+    discover(dir, git)?
+        .map(|r| r.common)
+        .ok_or_else(|| "retained publication requires Git records".into())
+}
+pub fn lock(dir: &Path) -> Result<CommitLock, String> {
+    let common = common_dir(dir)?;
+    let guard = lock_for(&common, &state_home()?)?;
+    Ok(CommitLock {
+        common,
+        _guard: guard,
+    })
+}
+impl CommitLock {
+    pub fn commit_paths(&self, dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
+        let repo = match discover(dir, git) {
+            Ok(Some(r)) if r.common == self.common => r,
+            _ => {
+                return vec![failed(
+                    dir,
+                    paths,
+                    "held commit lock no longer matches records repository",
+                    None,
+                )];
+            }
+        };
+        commit_under_lock(&repo, dir, paths, message, &mut || {}, &mut || {}).0
+    }
 }
 
 #[cfg(test)]

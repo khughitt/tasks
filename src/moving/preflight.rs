@@ -22,6 +22,11 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         commands::Writer::Command,
     )?;
     commands::guard_write(&ctx.registry, &ctx.source.shorthand, &source)?;
+    crate::retained::publish::permission(
+        &ctx.source.project,
+        &source,
+        crate::retained::publish::WriteAction::Identity,
+    )?;
     let id = &source.id;
     if !source.status.is_open() {
         return Err(Error::Validation(format!(

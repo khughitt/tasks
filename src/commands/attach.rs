@@ -449,6 +449,11 @@ fn refuse_extra_member(logical: &str, expected: &[String], member: &str) -> Resu
 /// finishes an interrupted detach without a second note.
 pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
+    crate::retained::publish::permission(
+        &ctx.project,
+        &task,
+        crate::retained::publish::WriteAction::Detach(&name),
+    )?;
     let owner = owner_name(&ctx.project)?;
     attachments::validate_name(&name)?;
     if task

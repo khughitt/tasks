@@ -525,6 +525,54 @@ contract is unavailable, resolve that missing input before asserting a checkpoin
 Follow its fresh inspection and immutable-basis procedure even when every item is
 unchanged. A recorded observation is not proof of current filesystem state.
 
+### Retained-state queries
+
+Use `tasks retained state <id> [--at <revision>] [--host <host>]` to inspect
+Git-pinned logical retention history. JSON reports the immutable basis, effective
+items and their source ordinals, checkpoint coverage, operation phases and scoped
+diagnostics. `complete: false` or a null item record means unresolved uncertainty;
+never substitute its predecessor. Default reads refuse dirty required records;
+explicit historical reads use only pinned task/archive blobs. Missing or
+conflicting evidence fails explicitly. This query does not inspect current bytes.
+Lifecycle mutations require one coordinated writer host for every participating
+task. Prevent other-host writes until completion or reconciliation has committed
+and records have synchronized; claims and locks are host-local.
+`tasks retained checkpoint <id> --request <path>` performs fresh whole-host
+accounting after an owned start, with Git-backed auto-commit records and the exact
+current input basis. It includes every known local kept identity even when omitted
+from declarations. Keep request/manifest metadata outside the inventoried container.
+Retry the same operation id with the same parsed request; preserve prior changed
+payloads through explicit immutable locators. `accounted_unknown` is successful
+accounting, not verification. A completed retry returns historical publication
+references and explicitly leaves current bytes unchecked. Errors keep the durable
+reservation; they do not park or close the task. See README's retained checkpoint
+request and resolution contract.
+
+`tasks retained transfer <from> <to> --request <path>` moves selected custody after
+both owned starts and exact current input bases. Its strict request lists the
+sender identities and common receiving purpose/trigger. It leaves physical bytes
+and unselected independent identities in place. Receiver kept records commit
+before sender release, with full verification again at the release boundary.
+Receiver collisions refuse even with equal hashes. Retry the original immutable
+request after interruption; committed release needs only missing final receipts.
+A completed retry returns dated historical results, not current verification.
+`tasks retained reconcile <coordinator> --request <path>` explicitly ends an
+irrecoverable pending operation using a stable directive and fresh participant
+bases. It keeps custody, records unknown observations, verifies all ready commits,
+and only then ends reservations through the coordinator terminal. It never releases
+bytes or completes the requested transfer/checkpoint; committed sender release
+requires finishing the original operation. Malformed history remains blocked and
+needs explicit repair. Keep original named retained refs available. Use fresh
+checkpoint inputs for later repair; retain the installed manual procedure until
+full delivery and consumer acceptance.
+
+Pending retained operations reserve task/evidence mutation while permitting reads,
+unrelated appended notes, start/claim refresh and park. Complete or reconcile them
+before closure or archival. Terminal archival keeps logical note ordinals; ID-changing
+move/migrate/rename refuse protected retention locators. Never detach protected
+retained request, manifest or checkpoint artifacts, or forge machine operation/checkpoint
+notes through `tasks note`.
+
 ### Record commits
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.

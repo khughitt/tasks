@@ -1557,6 +1557,8 @@ pub struct AttachmentEligibilityOut {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum Output {
+    RetainedState(crate::retained::state::RetainedState),
+    RetainedMutation(crate::retained::model::MutationResult),
     AttachmentEligibility(AttachmentEligibilityOut),
     Init(InitOut),
     Rename(RenameOut),
@@ -1801,6 +1803,12 @@ fn migrate_review(o: &MigrateOut) -> String {
 
 fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> String {
     match out {
+        Output::RetainedMutation(out) => {
+            serde_json::to_string_pretty(out).expect("retained mutation serializes")
+        }
+        Output::RetainedState(out) => {
+            serde_json::to_string_pretty(out).expect("retained state serializes")
+        }
         Output::AttachmentEligibility(out) => out
             .attachments
             .iter()
@@ -3072,6 +3080,8 @@ pub fn pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usi
 
 pub fn warnings_of(out: &Output) -> Vec<String> {
     match out {
+        Output::RetainedState(o) => o.warnings.clone(),
+        Output::RetainedMutation(o) => o.warnings.clone(),
         Output::AttachmentEligibility(_) => Vec::new(),
         Output::Init(o) => o.warnings.clone(),
         Output::Retire(o) => o.warnings.clone(),
