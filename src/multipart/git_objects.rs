@@ -69,9 +69,9 @@ impl Revision {
         let metadata =
             std::str::from_utf8(metadata).map_err(|error| Error::Validation(error.to_string()))?;
         let fields: Vec<_> = metadata.split_whitespace().collect();
-        if fields.len() != 3 || fields[1] != "blob" {
+        if fields.len() != 3 || fields[1] != "blob" || !matches!(fields[0], "100644" | "100755") {
             return Err(Error::Validation(format!(
-                "{} is not a blob at {}",
+                "{} is not a regular file at {}",
                 rel.display(),
                 self.commit
             )));

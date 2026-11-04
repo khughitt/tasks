@@ -123,33 +123,36 @@ pub fn require_targets(
     Ok(())
 }
 
-fn refuse_members(project: &Project, task: &Task) -> Result<()> {
+pub fn refuse_members(project: &Project, task: &Task) -> Result<()> {
+    for entry in &task.refs {
+        if let Location::Attachment(name) = location(&entry.reference)? {
+            refuse_member(project, task, name)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn refuse_member(project: &Project, task: &Task, name: &str) -> Result<()> {
     use crate::multipart::audit::{self, DeclState, RemovalState};
 
-    let declarations = audit::declarations(task);
     let reserved = audit::reserved_names(task);
-    for entry in &task.refs {
-        let Location::Attachment(name) = location(&entry.reference)? else {
+    for (logical, state) in audit::declarations(task) {
+        if !audit::is_member(name, &logical) || audit::later_owned(task, &logical, name) {
             continue;
-        };
-        for (logical, state) in &declarations {
-            if !audit::is_member(name, logical) || audit::later_owned(task, logical, name) {
-                continue;
-            }
-            if let DeclState::Closed(declaration) = state
-                && ((audit::recovery_bounds(declaration).is_ok()
-                    && reserved.get(name) != Some(logical))
-                    || matches!(
-                        audit::removal_state(project, task, declaration),
-                        Ok(RemovalState::Complete { .. })
-                    ))
-            {
-                continue;
-            }
-            return Err(Error::MultipartMember(format!(
-                "{name} is a member of multipart attachment {logical}; use files:{logical}"
-            )));
         }
+        if let DeclState::Closed(declaration) = state
+            && ((audit::recovery_bounds(&declaration).is_ok()
+                && reserved.get(name) != Some(&logical))
+                || matches!(
+                    audit::removal_state(project, task, &declaration),
+                    Ok(RemovalState::Complete { .. })
+                ))
+        {
+            continue;
+        }
+        return Err(Error::MultipartMember(format!(
+            "{name} is a member of multipart attachment {logical}; use files:{logical}"
+        )));
     }
     Ok(())
 }

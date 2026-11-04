@@ -208,6 +208,13 @@ pub fn rebuild_with(
     mut load: impl FnMut(&str, u64) -> Result<Vec<u8>>,
 ) -> Result<Vec<u8>> {
     recovery_bounds(declaration)?;
+    if ledger.get(&declaration.name) == Some(&Ledger::Attached) {
+        return Err(invalid(
+            declaration,
+            &declaration.name,
+            "logical name is also an ordinary attachment",
+        ));
+    }
     let members = member_names(&declaration.name, declaration.parts);
     for (name, entry) in ledger {
         if *entry == Ledger::Attached
@@ -380,11 +387,11 @@ pub fn rebuild(
             }
             rebuild_with(&declaration, project.attachments_max_bytes, &ledger, load)
         }
-        Some(DeclState::Closed(_)) => Err(Error::AttachmentMissing(format!("{name} is detached"))),
-        None if ledger.get(name) == Some(&Ledger::Attached) => {
-            load(name, super::RECOVERY_MAX_BYTES)
+        Some(DeclState::Closed(_)) if !later_owned(task, name, name) => {
+            Err(Error::AttachmentMissing(format!("{name} is detached")))
         }
-        None => Err(Error::AttachmentMissing(format!(
+        _ if ledger.get(name) == Some(&Ledger::Attached) => load(name, super::RECOVERY_MAX_BYTES),
+        _ => Err(Error::AttachmentMissing(format!(
             "{name} is not a live attachment"
         ))),
     }
@@ -402,6 +409,9 @@ pub fn audit(project: &Project, task: &Task) -> Result<Vec<Problem>> {
         file: format!("tasks/files/{}/{member}", task.id),
         detail,
     };
+    if let Err(error) = crate::refs::refuse_members(project, task) {
+        problems.push(problem("multipart_broken", "", error.to_string()));
+    }
     for (name, state) in states {
         let declaration = state.declaration();
         if let Err(error) = recovery_bounds(declaration) {

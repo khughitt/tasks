@@ -2688,3 +2688,270 @@ fn done_refuses_a_manually_recorded_member_output() {
         "multipart_member"
     );
 }
+
+#[test]
+fn review_existing_output_member_blocks_admission_before_writes() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    env.json(
+        &dir,
+        &["edit", &id, "--ref", "part (output): files:a.txt.part-0001"],
+    );
+    let record = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    let source = dir.join("source");
+    std::fs::write(&source, vec![b'x'; 70000]).unwrap();
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--multipart",
+                "--name",
+                "a.txt"
+            ]
+        ),
+        "multipart_member"
+    );
+    assert_eq!(std::fs::read(record).unwrap(), before);
+    assert!(
+        !stored(&dir, &id, "a.txt.part-0001")
+            .parent()
+            .unwrap()
+            .exists()
+    );
+}
+
+#[test]
+fn review_doc_refuses_a_stored_member_reference() {
+    let (env, dir, id, _) = reference_fixture("output");
+    let record = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&record).unwrap();
+    std::fs::write(
+        record,
+        text.replace("files:evidence.txt\n", "files:evidence.txt.part-0001\n"),
+    )
+    .unwrap();
+    assert_eq!(env.fail(&dir, &["doc", &id, "whole"]), "multipart_member");
+}
+
+#[test]
+fn review_check_reports_a_stored_member_reference() {
+    let (env, dir, id, _) = reference_fixture("output");
+    let record = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&record).unwrap();
+    std::fs::write(
+        record,
+        text.replace("files:evidence.txt\n", "files:evidence.txt.part-0001\n"),
+    )
+    .unwrap();
+    broken(&env, &dir, "evidence.txt", "evidence.txt.part-0001");
+}
+
+#[test]
+fn review_logical_ordinary_collision_is_broken() {
+    let (env, dir, id) = attach_fixture("multipart_validators = []");
+    multipart_attach(&env, &dir, &id, "a.txt", b"whole");
+    std::fs::write(stored(&dir, &id, "a.txt"), b"other").unwrap();
+    env.json(&dir, &["note", &id, "attached: a.txt (5 bytes)"]);
+    broken(&env, &dir, "a.txt", "a.txt");
+    assert_eq!(
+        env.fail(&dir, &["export", &id, "a.txt", "-o", "-"]),
+        "multipart_invalid_content"
+    );
+}
+
+#[test]
+fn review_physical_logical_path_blocks_admission() {
+    for case in ["different", "identical", "symlink", "directory"] {
+        let (env, dir, id) = attach_fixture("multipart_validators = []");
+        let path = stored(&dir, &id, "a.txt");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = dir.join("source");
+        std::fs::write(&source, b"whole").unwrap();
+        match case {
+            "different" => std::fs::write(&path, b"original").unwrap(),
+            "identical" => std::fs::write(&path, b"whole").unwrap(),
+            "symlink" => std::os::unix::fs::symlink(&source, &path).unwrap(),
+            "directory" => std::fs::create_dir(&path).unwrap(),
+            _ => unreachable!(),
+        }
+        let record = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&record).unwrap();
+        let kind = if matches!(case, "symlink" | "directory") {
+            "attachment_unsafe"
+        } else {
+            "attachment_exists"
+        };
+        assert_eq!(
+            env.fail(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--multipart",
+                    "--name",
+                    "a.txt"
+                ]
+            ),
+            kind,
+            "{case}"
+        );
+        assert_eq!(std::fs::read(record).unwrap(), before);
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        match case {
+            "different" => assert_eq!(std::fs::read(path).unwrap(), b"original"),
+            "identical" => assert_eq!(std::fs::read(path).unwrap(), b"whole"),
+            "symlink" => assert_eq!(std::fs::read_link(path).unwrap(), source),
+            "directory" => assert!(path.is_dir()),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn review_export_ordinary_reuse_at_each_basis() {
+    let (env, dir, id) = detach_fixture();
+    let closed =
+        env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"])["publication"]["commit"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    let source = dir.join("new");
+    std::fs::write(&source, b"new").unwrap();
+    env.json(
+        &dir,
+        &[
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--name",
+            "evidence.txt",
+        ],
+    );
+    for at in [vec![], vec!["--at", "HEAD"]] {
+        let out = env
+            .cmd(&dir)
+            .args(["export", &id, "evidence.txt", "-o", "-"])
+            .args(at)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"new");
+    }
+    assert_eq!(
+        env.fail(
+            &dir,
+            &["export", &id, "evidence.txt", "--at", &closed, "-o", "-"]
+        ),
+        "attachment_missing"
+    );
+}
+
+#[test]
+fn review_same_blob_symlink_is_never_published_or_recovered() {
+    let (env, dir, id) = attach_fixture("multipart_validators = []");
+    enable_git(&dir);
+    let member = format!("tasks/files/{id}/a.txt.part-0001");
+    hook(
+        &dir,
+        "pre-commit",
+        &format!("rm {member}\nln -s payload {member}\ngit add {member}"),
+    );
+    let out = multipart_attach(&env, &dir, &id, "a.txt", b"payload");
+    assert_eq!(out["publication"]["state"], "local", "{out}");
+    assert!(git_text(&dir, &["ls-tree", "HEAD", "--", &member]).starts_with("120000"));
+    broken(&env, &dir, "a.txt", "a.txt.part-0001");
+    for at in [vec![], vec!["--at", "HEAD"]] {
+        let out = env
+            .cmd(&dir)
+            .args(["export", &id, "a.txt", "-o", "-"])
+            .args(at)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+    }
+    assert_eq!(
+        env.fail(&dir, &["export", &id, "a.txt", "--at", "HEAD", "--verify"]),
+        "multipart_invalid_content"
+    );
+}
+
+#[test]
+fn review_git_catalog_symlink_refuses_but_executable_files_work() {
+    use std::os::unix::fs::PermissionsExt;
+    let (env, dir, id) = attach_fixture("multipart_validators = []");
+    enable_git(&dir);
+    multipart_attach(&env, &dir, &id, "a.txt", b"payload");
+    let member = stored(&dir, &id, "a.txt.part-0001");
+    std::fs::set_permissions(member, std::fs::Permissions::from_mode(0o755)).unwrap();
+    common::git(&dir, &["add", "tasks"]);
+    common::git(&dir, &["commit", "-qm", "executable regular member"]);
+    let out = env
+        .cmd(&dir)
+        .args(["export", &id, "a.txt", "--at", "HEAD", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"payload");
+    let catalog = stored(&dir, &id, "a.txt.catalog.json");
+    let bytes = std::fs::read_to_string(&catalog).unwrap();
+    std::fs::remove_file(&catalog).unwrap();
+    std::os::unix::fs::symlink(bytes, &catalog).unwrap();
+    common::git(&dir, &["add", "tasks"]);
+    common::git(&dir, &["commit", "-qm", "unsafe catalog"]);
+    let out = env
+        .cmd(&dir)
+        .args(["export", &id, "a.txt", "--at", "HEAD", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn review_pretty_detach_reports_publication_and_reuse() {
+    for case in ["disabled", "deferred", "published", "leftover"] {
+        let (env, dir, id) = detach_fixture();
+        match case {
+            "disabled" => commit_switch(&dir, false),
+            "deferred" => {
+                std::fs::write(dir.join("unrelated"), "staged").unwrap();
+                common::git(&dir, &["add", "unrelated"]);
+            }
+            "leftover" => hook(
+                &dir,
+                "post-commit",
+                &format!(
+                    "mkdir -p tasks/files/{id}\nprintf restored > tasks/files/{id}/evidence.txt.part-0001"
+                ),
+            ),
+            _ => {}
+        }
+        let text = env.pretty(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+        if matches!(case, "disabled" | "deferred") {
+            assert!(text.starts_with("local"), "{case}: {text}");
+            assert!(text.contains(&format!("commit_{case}")), "{text}");
+        } else {
+            assert!(text.starts_with("published"), "{case}: {text}");
+            assert!(
+                text.contains(&git_text(&dir, &["rev-parse", "HEAD"])),
+                "{text}"
+            );
+        }
+        if case != "published" {
+            assert!(text.contains("reuse: blocked"), "{case}: {text}");
+            assert!(text.contains("tasks detach"), "{text}");
+        }
+    }
+}

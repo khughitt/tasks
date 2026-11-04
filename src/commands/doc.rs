@@ -26,6 +26,9 @@ pub fn run(mut ctx: Ctx, id: String, target: DocTarget, fetch: Fetch) -> Result<
                 .ok_or_else(|| {
                     Error::DocNotFound(format!("{} has no reference {handle}", task.id))
                 })?;
+            if let Location::Attachment(name) = crate::refs::location(&entry.reference)? {
+                crate::refs::refuse_member(project, &task, name)?;
+            }
             if let Location::Attachment(name) = crate::refs::location(&entry.reference)?
                 && matches!(
                     crate::multipart::audit::declarations(&task).get(name),

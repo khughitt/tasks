@@ -149,12 +149,23 @@ pub fn attach(
     let (sources, declaration, mut validation) = if multipart {
         let (name, bytes) = sources.into_iter().next().expect("one source checked");
         multipart::names::validate_logical_name(&name)?;
-        refuse_reserved(&ctx.project, &task, &name)?;
+        attachments::refuse_reserved(&ctx.project, &task, &name)?;
         if attachments::ledger(&task).get(&name) == Some(&Ledger::Attached) {
             return Err(Error::AttachmentExists(format!(
                 "{} already has {name}",
                 task.id
             )));
+        }
+        let logical_path = attachments::task_dir(&ctx.project, &task.id).join(&name);
+        match attachments::entry_state(&logical_path)? {
+            EntryState::Absent => {}
+            EntryState::File(_) => {
+                return Err(Error::AttachmentExists(format!(
+                    "{} already holds {name}; detach it or choose another --name",
+                    task.id
+                )));
+            }
+            EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
         }
         multipart::content::builtin(&name, &bytes)?;
         let validation = publication::validate(&ctx.project, &name, &bytes)?;
@@ -251,7 +262,7 @@ pub fn attach(
     let mut pending = Vec::new();
     let mut files = Vec::new();
     for (name, bytes, caption) in sources {
-        refuse_reserved(&ctx.project, &task, &name)?;
+        attachments::refuse_reserved(&ctx.project, &task, &name)?;
         let note = attachments::attached_note(&name, bytes.len() as u64, caption.as_deref());
         crate::format::validate_note_text(&note)?;
         let target = attachments::task_dir(&ctx.project, &task.id).join(&name);
@@ -288,6 +299,7 @@ pub fn attach(
 
     if let Some(declaration) = &declaration {
         append_note(&mut task, &owner, &declaration.note())?;
+        crate::refs::refuse_members(&ctx.project, &task)?;
     }
     // Identity and the claim store resolve before any write, as for `note`.
     let me = ctx.resolve_for_guard()?;
@@ -388,52 +400,6 @@ fn read_source(
         }
         other => other,
     })
-}
-
-fn refuse_reserved(
-    project: &crate::repo::Project,
-    task: &crate::model::Task,
-    name: &str,
-) -> Result<()> {
-    let reserved = multipart::audit::reserved_names(task);
-    for (logical, state) in multipart::audit::declarations(task) {
-        match state {
-            DeclState::Live(_)
-                if logical == name || multipart::audit::is_member(name, &logical) =>
-            {
-                if logical == name {
-                    return Err(Error::AttachmentExists(format!(
-                        "{} already has multipart attachment {name}; run tasks commit, then tasks export {} {name} --at HEAD --verify",
-                        task.id, task.id
-                    )));
-                }
-                return Err(Error::MultipartMember(format!(
-                    "{name} is a member of multipart attachment {logical}; use its logical name"
-                )));
-            }
-            DeclState::Closed(decl)
-                if reserved.get(name) == Some(&logical)
-                    || (multipart::audit::is_member(name, &logical)
-                        && multipart::audit::recovery_bounds(&decl).is_err()) =>
-            {
-                match multipart::audit::removal_state(project, task, &decl) {
-                    Ok(multipart::audit::RemovalState::Complete { .. }) => {}
-                    result => {
-                        let detail = match result {
-                            Err(error) => format!("{error}; "),
-                            _ => String::new(),
-                        };
-                        return Err(Error::MultipartRemovalUnpublished(format!(
-                            "{name} is reserved by unpublished removal of {logical}; {detail}{}",
-                            multipart::audit::removal_next(project, task, &decl)
-                        )));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 fn refuse_extra_member(logical: &str, expected: &[String], member: &str) -> Result<()> {

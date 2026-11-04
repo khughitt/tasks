@@ -60,7 +60,11 @@ fn path_blobs(
         }
         blobs.insert(
             path.to_string(),
-            fields[if commit.is_some() { 2 } else { 1 }].to_string(),
+            format!(
+                "{} {}",
+                fields[0],
+                fields[if commit.is_some() { 2 } else { 1 }]
+            ),
         );
     }
     Ok(blobs)

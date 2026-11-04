@@ -2389,6 +2389,23 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             .map(|file| file.path.as_str())
             .collect::<Vec<_>>()
             .join("\n"),
+        Output::Detach(o) if o.publication.is_some() => {
+            let publication = o.publication.as_ref().expect("present");
+            let mut text = match publication.cause {
+                Some(cause) => format!("local ({cause})"),
+                None => format!(
+                    "published at {}",
+                    publication.commit.as_deref().unwrap_or("")
+                ),
+            };
+            if let Some(reuse) = publication.reuse {
+                text.push_str(&format!("; reuse: {reuse}"));
+            }
+            if let Some(next) = &publication.next {
+                text.push_str(&format!("; {next}"));
+            }
+            text
+        }
         Output::Detach(o) if o.removed => format!(
             "removed {}; git history keeps committed bytes, uncommitted ones are gone",
             o.path
