@@ -1,9 +1,7 @@
 # Front door for tests. Focused: `just test-one <runner args>`. Fast: `just test-fast`.
 # Full suite: `just test`. Gates: checks at pre-commit, check + suite at pre-push.
-# The git hooks in .githooks/ call
-# `hook-pre-commit` and `hook-pre-push`, which run the very same commands under their own
-# target names so the report can price the hooks separately from runs typed by hand.
-# Every recipe runs through the vendored timing wrapper tools/tt (source: ops bin/tt).
+# Hooks time mandatory hygiene once; broad children record their own policy decisions.
+# Leaf recipes run through tools/tt (source: ops bin/tt); compositions are untimed.
 # Design: ops docs/specs/2026-09-28-test-ci-act-design.md.
 
 set quiet
@@ -11,7 +9,7 @@ set positional-arguments
 
 tt := "python3 tools/tt"
 
-# The three commands, each written once. Recipes and hooks all run these, so a hook can
+# Commands, each written once. Recipes and hooks all run these, so a hook can
 # never drift from the gate it is supposed to be. Avoid single quotes inside them.
 # This is a single Rust crate, so there is no affected-only selection; the two grains
 # it does have are the ones the baseline showed being used. `test-one` accepts runner
@@ -24,17 +22,17 @@ tt := "python3 tools/tt"
 test_env := "ceiling=$(realpath -e -- \"${TMPDIR:-/tmp}\") && GIT_CEILING_DIRECTORIES=$ceiling"
 fast_cmd := test_env + " cargo test --no-fail-fast"
 test_cmd := test_env + " cargo test --no-fail-fast -- --include-ignored"
-check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
+check_hygiene_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
+ci_hygiene_cmd := "python3 tools/ops-check && python3 tools/ops-docs check"
+check_code_cmd := "cargo fmt --check && cargo clippy --all-targets -- -D warnings"
 
 # README and design documents stay on the full check; only the agent guide skips Rust checks.
 docs_paths := "AGENTS.md"
-docs_check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
+docs_check_cmd := check_hygiene_cmd
 
-# No CI workflow: every push retains the full local gate.
+# Local gate retained until the hosted pilot is accepted and policy activation approved.
 ci_suite_refs := ""
 ci_remote := "origin"
-# Fixed non-ignored set: this single crate has no base-aware affected selection.
-push_fast_cmd := fast_cmd
 one_cmd := test_env + " cargo test"
 
 # Keep generated directories off the synced tree on hosts with work-link.
@@ -57,9 +55,25 @@ test-one +args:
 test:
     {{tt}} test -- sh -c '{{test_cmd}}'
 
-# Seconds, not minutes: hygiene, the guide contract, format, lint, tasks check.
+# Deliberate full-suite verification; only the inner test target records timing.
+test-full:
+    TT_FORCE=1 just test
+
+# Mandatory local hygiene, including detached task-record consistency.
+check-hygiene:
+    {{tt}} check-hygiene -- sh -c '{{check_hygiene_cmd}}'
+
+# Hosted runners have no private detached task records.
+ci-check-hygiene:
+    {{tt}} ci-check-hygiene -- sh -c '{{ci_hygiene_cmd}}'
+
+# Broad Rust static checks across all targets.
+check-code:
+    {{tt}} check-code -- sh -c '{{check_code_cmd}}'
+
 check:
-    {{tt}} check -- sh -c '{{check_cmd}}'
+    just check-hygiene
+    just check-code
 
 gate: check test
 
@@ -74,18 +88,24 @@ docs:
 install-skills:
     {{tt}} install-skills -- sh -c 'set -e; for dest in "$HOME/.claude/skills" "$HOME/.agents/skills"; do mkdir -p "$dest"; for skill in "{{justfile_directory()}}"/skills/*; do [ -d "$skill" ] || continue; name=$(basename "$skill"); ln -sfn "$skill" "$dest/$name"; echo "$dest/$name"; done; done'
 
-# What the pre-commit hook runs: `check`'s command under its own hook target.
+# Hook timers cover mandatory hygiene only; broad children record their own decisions.
+# Split-hook durations are incomparable with the earlier whole-hook series.
 hook-pre-commit:
-    {{tt}} hook-pre-commit -- sh -c '{{check_cmd}}'
+    {{tt}} hook-pre-commit -- sh -c '{{check_hygiene_cmd}}'
+    just check-code
 
 # Guide/task-only changes retain hygiene and task consistency checks.
 hook-pre-commit-docs:
     {{tt}} hook-pre-commit-docs -- sh -c '{{docs_check_cmd}}'
 
-# What the pre-push hook runs: the same commands as `gate`, under one hook target.
+# Uncovered pushes retain the same children as gate.
 hook-pre-push:
-    {{tt}} hook-pre-push -- sh -c '{{check_cmd}} && {{test_cmd}}'
+    {{tt}} hook-pre-push -- sh -c '{{check_hygiene_cmd}}'
+    just check-code
+    just test
 
 # CI carries the full suite only when every pushed ref is covered on ci_remote.
 hook-pre-push-fast:
-    {{tt}} hook-pre-push-fast -- sh -c '{{check_cmd}} && {{push_fast_cmd}}'
+    {{tt}} hook-pre-push-fast -- sh -c '{{check_hygiene_cmd}}'
+    just check-code
+    just test-fast
