@@ -280,6 +280,32 @@ fn receiving_only() -> (RetainedEnv, String, std::path::PathBuf) {
     (f, to, file)
 }
 #[test]
+fn retained_reconcile_omitted_participant_is_typed_refusal() {
+    let (f, to, file) = receiving_only();
+    let before = [f.state(), f.json(&["retained", "state", &to])];
+    let mut req = reconcile_request(&f, &to);
+    req["inputs"].as_array_mut().unwrap().pop();
+    let path = f.request("reconcile.json", &req);
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "reconcile",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "retained_input");
+    assert_eq!(f.state(), before[0]);
+    assert_eq!(f.json(&["retained", "state", &to]), before[1]);
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "payload");
+}
+#[test]
 fn retained_reconcile_irrecoverable() {
     let (f, to, file) = receiving_only();
     std::fs::remove_file(file).unwrap();

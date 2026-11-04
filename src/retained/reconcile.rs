@@ -92,6 +92,7 @@ fn load_original(ctx: &mut OperationCtx, from: &TaskId) -> Result<Binding> {
             "reconciliation is restricted to the original executing host",
         ));
     }
+    publish::validate_bases(ctx, &intent.input_bases)?;
     for input in &intent.input_bases {
         let id = TaskId::parse(&input.task)?;
         let original = basis::read_exact(ctx.project(&id), &id, &input.basis)?;
@@ -761,21 +762,6 @@ pub fn run(
         if ctx.tasks[&id].basis.retained_ref != input.basis.retained_ref {
             return Err(Error::RetainedStaleBasis("Reconcile from the original input's named retained branch; recover that exact publication context first".into()));
         }
-    }
-    if request
-        .inputs
-        .iter()
-        .map(|i| &i.task)
-        .collect::<BTreeSet<_>>()
-        != binding
-            .inputs
-            .iter()
-            .map(|i| &i.task)
-            .collect::<BTreeSet<_>>()
-    {
-        return Err(invalid(
-            "reconciliation participants differ from original request",
-        ));
     }
     let exact = basis::read_exact(ctx.project(&from), &from, &ctx.tasks[&from].basis)?;
     ctx.metrics.history_bytes_read += exact.history_bytes_read;
