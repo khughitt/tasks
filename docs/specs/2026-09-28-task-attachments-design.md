@@ -3,6 +3,7 @@
 Status: reviewed 2026-09-28 (approved at e76dcc7) after two review rounds (collision ownership, storage symlinks,
 rename baseline, detach ordering; entry validation, clipboard retry, R9–R11, blob-verified collision split);
 amended at plan review 2026-09-28 (a streamed clipboard read, fresh-rename strays)
+Commands and configuration updated for multipart attachments under tasks-e16bbe.
 Task: tasks-a2d903 (goal tasks-ce2f58, idea tasks-e7a870)
 Brief: docs/notes/2026-09-25-task-attachments-brief.md
 
@@ -12,7 +13,8 @@ A task can carry a screenshot or another file that travels with the record acros
 checkouts, worktrees, and hosts. An agent reading the task gets a path it can open.
 Success means `tasks attach` stores a file beside the record, `show` (and `next`)
 print its path, `check` reports attachment drift, and `rename` moves attachments with
-their records. Older binaries keep reading every record unchanged.
+their records. Multipart uses ordinary ledger notes; every reader must be upgraded
+before adding its new configuration keys, which older parsers reject.
 
 ## Decisions
 
@@ -80,11 +82,22 @@ directories must be real directories inside the project:
 
     [attachments]
     max_bytes = 2097152
+    multipart_max_bytes = 16777216
+    multipart_max_parts = 16
+    multipart_validators = []
 
 `max_bytes` is optional, and so is the table. The default is 2 MiB (2097152). The
 value must be a positive integer, or `open` fails with `Error::Config`. The new
 `AttachmentsConfig` struct is `deny_unknown_fields`, like `[feedback]`. Rename's
 config rewrite goes through `toml::Value`, so the table survives a rename.
+
+Multipart defaults are 16 MiB and 16 parts per logical artifact. An absent
+`multipart_validators` refuses new multipart admission; `[]` explicitly declares
+no extra whole-document gates. Zero `multipart_max_bytes` stops new admissions.
+Fixed recovery ceilings are 268435456 bytes and 256 parts; configuration above
+either fails with kind `config`. Admission limits bound one artifact, not
+cumulative history, and lowering them does not block recovery. Rollout order is
+every reader upgraded, reviewed configuration keys committed, then attach.
 
 ## Commands
 
@@ -93,6 +106,7 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
     tasks attach <id> <path>... [--caption <text>]
     tasks attach <id> <path | -> [--name <name>] [--caption <text>]
     tasks attach <id> --clipboard [--name <name>] [--caption <text>]
+    tasks attach <id> <path | -> --multipart [--name <name>] [--caption <text>]
 
 - **Routing and locking:** routes by the id's prefix and holds the mutation lock
   (`open_id_write_ctx`), like `note`. Any status is accepted, including closed tasks:
@@ -107,7 +121,7 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
   clipboard, the default is `clipboard-<UTC yyyymmddThhmmssZ>.<ext>`, with the
   extension taken from the chosen MIME type. An invalid name fails
   `invalid_attachment_name`. Nothing is ever overwritten.
-- **Size:** at most `max_bytes + 1` bytes are read from any source. A larger file fails
+- **Ordinary size:** at most `max_bytes + 1` bytes are read from any source. A larger file fails
   `attachment_too_large` with the size (or "more than") and the cap, before anything is
   written.
 - **Clipboard:** runs `wl-paste --list-types`, then picks the first of `image/png`,
@@ -150,6 +164,44 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
   including a one-element array for a single source, replacing the former `file`
   object. Each `path` is absolute. `--pretty` prints one path per line in source order.
 
+#### Multipart admission and publication
+
+`--multipart` accepts exactly one path or stdin source, never clipboard. Stdin
+needs `--name`; logical names follow the ordinary rules with a 115-byte maximum.
+Admission requires UTF-8, valid JSON for a `.json` name, declared validators and
+logical byte/part limits. It validates the whole document before splitting at
+newlines where possible, otherwise UTF-8 boundaries. It preserves exact bytes;
+there is no compression or binary route. Each part `<name>.part-0001` … and
+`<name>.catalog.json` stays within the unchanged per-file cap. All namespace
+collisions and storage checks pass before writes; write/save failure rolls back
+newly written members while preserving adopted identical bytes.
+
+The deterministic catalog is version 1 with `name`, `bytes`, `sha256`, and ordered
+`parts` entries carrying `name`, `bytes`, `sha256`, one part per line. Each member
+has an ordinary attached note (`part i/n of <name>` or `catalog of <name>`), with
+one additional declaration saved in the same record commit:
+
+    multipart: <name> (<bytes> bytes, <n> parts, sha256 <whole-hex>, catalog sha256 <catalog-hex>)[: <caption>]
+
+Attach output adds `multipart`, `validation`, and `publication`. Publication is
+`{"state":"published","commit":"…"}` only after rebuilding the whole artifact
+from that exact commit and passing current validation. Otherwise a successful
+local write reports `{"state":"local","cause":"…","next":"…"}` and exits 0.
+Causes are `commit_disabled`, `commit_deferred`, `commit_failed`, `commit_unavailable`,
+`verify_failed`, `validation_failed`, `validation_unavailable`. Consumers inspect
+the state and follow the action, rather than treating exit 0 as publication proof.
+
+Validator entries are `{ match = "<glob>", command = [...] }`. Whole bytes go to
+stdin; `{name}` is the only argument substitution. Cwd is the records Git top
+level (records directory outside Git). The environment contains only PATH, a
+temporary HOME, LANG and TASKS_ATTACHMENT_NAME; timeout is 120 seconds and output
+is capped. Config SHA-256 and program identity describe `current_runtime`:
+programs inside that Git top level are hashed, others marked `external`. Selection
+resolves once and launches that same path; an earlier broken PATH executable
+requires repair or an explicit valid path, with no fall-through to a later one.
+Cleanup owns descendants, excluding service-manager/IPC launches outside that
+tree. Uncertain cleanup reports unavailable and stops subsequent validators.
+
 ### detach
 
     tasks detach <id> <name> "<why>"
@@ -177,6 +229,33 @@ Recovery:
 - **Uncommitted files:** removal is permanent for a file that was never committed.
   Git history keeps committed bytes. The help text and `--pretty` output say this.
 
+For multipart, detach the logical name to remove the complete set; detaching a
+member fails `multipart_member`. Save `detached: <member>: part of <name>` for each
+member, then `detached: <name>: <why>`, before deleting members. Retry the same
+logical detach after interruption and follow `publication.next` to finish cleanup
+and publication. Output includes publication state for the verified removal
+commit. Names remain reserved until removal is committed and local old-owned
+members are gone; blocked reuse fails `multipart_removal_unpublished`. Even
+`published` may include `reuse: "blocked"` when a hook recreates old-owned files:
+commit portability and local name release are separate. Cleanup preserves later
+legitimate ordinary ownership.
+
+### export
+
+    tasks export <id> <name> <-o <path | -> | --verify> [--at <commit>]
+
+Choose exactly one of `-o` and `--verify`. Export handles ordinary and multipart
+attachments. Default input is the working tree; `--at` resolves one Git commit
+for the record (including archived ledger notes), catalog and all parts. Rebuild
+checks declaration/catalog/member agreement, sizes, order, SHA-256, and absence
+of extra members before writing. Recovery enforces fixed ceilings but ignores
+current validators and admission limits. Output files are atomic; stdout is raw
+bytes even under pretty/JSON/color settings. No whole reconstruction is retained
+beside the parts. File output reports name, bytes, SHA-256, integrity, path and,
+with `--at`, commit. `--verify` writes no file and adds a `current_runtime`
+validation report using current config/program identity, not historical schema
+validation. Inspect `validation.passed`; exit 0 can carry a negative verdict.
+
 ### show and next
 
 `ShowFields` gains `files: Vec<FileInfo>`, which `next` shares. It is omitted when
@@ -190,6 +269,11 @@ warning for each finding that `check` would report: an unsafe directory, an inva
 entry, an unnoted file, or a missing file. An unsafe directory lists nothing and is
 never read through.
 
+Multipart members remain in `files` with `member_of`; an additive `multipart`
+array describes each logical name, bytes, parts, whole hash, catalog and caption.
+There is no whole-file storage path. Document references use `files:<logical-name>`
+and `export` for whole bytes; individual members are refused as document inputs.
+
 ### check
 
 A new pass reads `tasks/files/` directly:
@@ -202,6 +286,9 @@ A new pass reads `tasks/files/` directly:
 | `attachment_missing` | error | A name live in a record's ledger with no file in its directory. Causes: a file removed by hand, or a record renamed without its files. |
 | `attachment_invalid` | warning | A task's directory holds a subdirectory, a symlink, a leftover temp file, or a file with an invalid name. |
 | `attachment_too_large` | warning | A file is above `max_bytes`, because it was added by hand or the cap was lowered later. |
+| `multipart_broken` | error | The logical declaration, catalog or member set is inconsistent, missing or corrupt. |
+| `multipart_leftover` | error | Old-owned members remain after logical detach. |
+| `multipart_removal_unpublished` | warning | Logical detach has not reached a verified removal commit and local cleanup. |
 
 A stray regular file directly under `tasks/files/` is `attachment_orphan`. The pass
 runs over every task, open or closed, and compares every record's ledger with its

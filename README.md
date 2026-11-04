@@ -971,13 +971,119 @@ task text is returned. `--pretty` displays each verdict and its problems.
 
 An interrupted `attach` leaves a file that `check` reports as `attachment_unnoted`.
 Rerun it with the same bytes and `--name <name>` to finish, or `detach` the file. An
-interrupted `detach` finishes when rerun.
+interrupted ordinary `detach` finishes when rerun.
+
+#### Multipart text attachments
+
+`tasks attach <id> <path> --multipart` stores one UTF-8 document as bounded parts
+and a catalog. Stdin requires `--name`; clipboard and multiple sources are refused.
+For example, pipe a generated manifest directly into
+`tasks attach <id> - --name manifest.json --multipart`. The whole source need not
+be saved first. A `.json` name requires valid JSON; domain schemas require a
+configured validator. Bytes are preserved exactly, with cuts at newlines where
+possible and otherwise at UTF-8 boundaries. Binary content and compression have
+no multipart route.
+
+The logical name follows ordinary attachment naming rules with a 115-byte limit.
+Storage is `<name>.part-0001`, `<name>.part-0002`, … and `<name>.catalog.json` under
+the task's attachment directory. Each part and the catalog obey `max_bytes`.
+The deterministic version-1 catalog gives the name, whole byte count and SHA-256,
+and ordered parts with their byte counts and SHA-256. The record owns every member
+through ordinary `attached:` notes plus one declaration:
+
+```text
+multipart: <name> (<bytes> bytes, <n> parts, sha256 <whole-hex>, catalog sha256 <catalog-hex>)[: <caption>]
+```
+
+`show` and `next` expose both `files` (members have `member_of`) and logical
+`multipart` entries. A reference `files:<name>` names the whole document; recover
+it with `export`, since no whole-file path exists in storage. Individual members
+cannot be detached or used as task document references. `check` adds errors
+`multipart_broken` (invalid or incomplete set) and `multipart_leftover` (detached
+members remain), plus warning `multipart_removal_unpublished`.
+
+Declare admission policy in tasks/.config.toml:
+
+```toml
+[attachments]
+max_bytes = 2097152
+multipart_max_bytes = 16777216
+multipart_max_parts = 16
+multipart_validators = []
+```
+
+The logical defaults are 16 MiB and 16 parts. `multipart_max_bytes = 0` stops new
+admissions. An absent `multipart_validators` refuses admission; `[]` explicitly
+declares no extra whole-document gates. These limits bound one artifact, not
+cumulative task or Git history. Recovery has fixed ceilings of 256 MiB and 256
+parts; configurations above either ceiling fail to load. Lowering admission
+limits later does not make existing evidence unrecoverable.
+
+Multipart attach JSON adds `multipart`, `validation`, and `publication`.
+`publication: {"state":"published","commit":"…"}` means the declaration,
+catalog and every part were rebuilt from that exact commit and passed current
+validation. `{"state":"local","cause":"…","next":"…"}` means the local
+write succeeded but portability is unproven. Both states exit 0: inspect the state,
+cause and next action before relying on committed evidence. Causes include
+`commit_disabled`, `commit_deferred`, `commit_failed`, `commit_unavailable`,
+`verify_failed`, `validation_failed` and `validation_unavailable`. Resolve the
+reported cause, publish with `tasks commit` where needed, and verify the resulting
+commit explicitly.
+
+`tasks detach <id> <name> "<why>"` removes the whole set, recording member
+detach notes before the logical detach note and deleting members. Detaching one
+member fails `multipart_member`. Retry the same logical detach after interruption;
+resolve commit problems and follow `publication.next`. Names stay reserved until
+the removal is committed and local old-owned members are gone. A verified removal
+can report `published` together with `reuse: "blocked"` when a hook recreates local
+members: the commit is portable but local cleanup still needs the reported action.
+Later legitimate ordinary attachments using released names are preserved.
+
+#### Export and recovery
+
+```sh
+tasks export <id> <name> -o <destination>
+tasks export <id> <name> --at <commit> -o <destination>
+tasks export <id> <name> --at <commit> --verify
+tasks export <id> <name> --at <commit> -o -
+```
+
+`export` handles ordinary and multipart attachments. Without `--at` it reads the
+working tree; with it, the record, catalog and parts come from one resolved Git
+commit, including archived ledger notes. It checks member order, sizes and hashes
+and the whole hash before writing. File output is atomic; stdout output is exact
+bytes even with `--json`, `--pretty` or color enabled. No reconstructed whole file
+is retained alongside the members. Recovery output needs byte integrity only:
+current admission limits and validators do not gate it. A clean clone at the
+reported publication commit can recover the same bytes without the original
+scratch directory.
+
+`--verify` writes no output file and reports integrity plus current validation.
+Validation has basis `current_runtime`, configuration SHA-256 and selected program
+identity; it does not establish historical schema validation. Programs inside the
+records Git top level have `program_sha256`; others report `program: "external"`.
+Inspect `validation.passed` and each outcome; a report's exit 0 alone is no verdict.
 
 #### Multipart validators
 
+Each validator is `{ match = "<glob>", command = ["<program>", "<arg>", ...] }`.
+Matching commands receive the whole document on stdin; `{name}` is the only
+argument substitution. They run at the records directory's Git top level (or the
+records directory outside Git), with only `PATH`, a temporary `HOME`, `LANG` and
+`TASKS_ATTACHMENT_NAME`, a 120-second timeout, and bounded captured output.
+The selected executable is resolved once, identified and launched by that same
+path. A broken earlier executable on `PATH` (for example a missing interpreter)
+makes validation unavailable; fix/remove that entry or configure a valid explicit
+path. There is no retry using a later `PATH` candidate.
+
 Validators must be self-contained commands: processes started outside their process
 tree through a service manager, D-Bus activation or another daemon are outside
-validator containment and cannot be detected or cleaned up by tasks.
+validator containment and cannot be detected or cleaned up by tasks. Uncertain
+cleanup makes validation unavailable and stops subsequent validators.
+
+Roll out in this order: upgrade every reader binary, commit reviewed multipart
+configuration keys, then attach. Older configuration parsers reject the new keys.
+Install the merged CLI before activating the matching shared skill or configuration.
 
 ### Moving tasks
 

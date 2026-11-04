@@ -1849,6 +1849,95 @@ fn detach_publication_keeps_its_own_commit_when_head_moves() {
 }
 
 #[test]
+fn scratch_identity_checkpoint_publishes_and_recovers() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    let scratch = env.home.path().join("scratch");
+    let runtime = env.home.path().join("tmp");
+    std::fs::create_dir(&scratch).unwrap();
+    std::fs::create_dir(&runtime).unwrap();
+    let entries: Vec<_> = (0..1024)
+        .map(|i| {
+            let path = format!("evidence-{i:04}.txt");
+            std::fs::write(scratch.join(&path), b"scratch evidence\n").unwrap();
+            serde_json::json!({"path": path, "type": "file", "sha256": digest(b"scratch evidence\n")})
+        })
+        .collect();
+    let manifest = serde_json::to_vec_pretty(&serde_json::json!({
+        "version": 1, "entries": entries
+    }))
+    .unwrap();
+    assert!(manifest.len() > 65536);
+    let out = env
+        .cmd(&dir)
+        .env("TMPDIR", &runtime)
+        .args(["attach", &id, "-", "--name", "manifest.json", "--multipart"])
+        .write_stdin(manifest.clone())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let attached: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(attached["publication"]["state"], "published", "{attached}");
+    let commit = attached["publication"]["commit"].as_str().unwrap();
+    assert_eq!(commit, git_text(&dir, &["rev-parse", "HEAD"]));
+
+    let clone = tempfile::tempdir().unwrap();
+    common::git(clone.path(), &["clone", "-q", dir.to_str().unwrap(), "."]);
+    common::git_fixture::assert_repo(env.home.path(), clone.path());
+    common::git(clone.path(), &["checkout", "-q", commit]);
+    let shown = env.json(clone.path(), &["show", &id]);
+    let declaration = &shown["multipart"][0];
+    assert_eq!(declaration["name"], "manifest.json");
+    assert_eq!(declaration["sha256"], digest(&manifest));
+    assert!(declaration["parts"].as_u64().unwrap() > 1);
+    let dest = clone.path().join("recovered-manifest.json");
+    let out = env
+        .cmd(clone.path())
+        .env("TMPDIR", &runtime)
+        .args([
+            "export",
+            &id,
+            "manifest.json",
+            "--at",
+            commit,
+            "-o",
+            dest.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let exported: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(exported["commit"], commit);
+    assert_eq!(exported["sha256"], declaration["sha256"]);
+    assert_eq!(exported["integrity"]["passed"], true);
+    assert_eq!(std::fs::read(&dest).unwrap(), manifest);
+
+    let mut pending = vec![
+        dir,
+        clone.path().to_path_buf(),
+        env.home.path().to_path_buf(),
+    ];
+    let mut whole_files = Vec::new();
+    while let Some(path) = pending.pop() {
+        let metadata = std::fs::symlink_metadata(&path).unwrap();
+        if metadata.is_dir() {
+            pending.extend(
+                std::fs::read_dir(path)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path()),
+            );
+        } else if metadata.is_file()
+            && metadata.len() == manifest.len() as u64
+            && std::fs::read(&path).unwrap() == manifest
+        {
+            whole_files.push(path);
+        }
+    }
+    assert_eq!(whole_files, vec![dest]);
+    assert!(std::fs::read_dir(runtime).unwrap().next().is_none());
+}
+
+#[test]
 fn export_rebuilds_from_the_working_tree_and_from_a_commit_in_a_clean_clone() {
     let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
     enable_git(&dir);
