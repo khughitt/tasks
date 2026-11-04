@@ -35,8 +35,16 @@ just install-skills
 
 The binary has no service dependency. `--locked` uses checked dependency versions.
 `install-skills` links each shipped skill into `~/.claude/skills` and
-`~/.agents/skills`. For a pinned per-project skill, copy the chosen `skills/<name>`
-directory into that project's .claude/skills/ instead. Reinstall after CLI changes.
+`~/.agents/skills`. A pinned per-project setup keeps a full checkout at the desired
+revision and links the selected skill from the project's .claude/skills/:
+
+```sh
+mkdir -p <project>/.claude/skills
+ln -s <absolute-pinned-checkout>/skills/tasks <project>/.claude/skills/tasks
+```
+
+Keep that checkout and its documentation available: relative contract links resolve
+through the skill link into the checkout. Reinstall the binary after CLI changes.
 
 ### 2. Initialize a project
 

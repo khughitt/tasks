@@ -26,12 +26,14 @@ The accepted top-level keys/tables are exactly those below.
 | `[attachments]` | Limits and multipart validator declarations described below. |
 | `[growth]` | Optional positive `warn_bytes`; default min(65,536, floor(max_bytes/4)), at least 1. An explicit larger threshold is accepted with a warning, not clamped. |
 | `[checkout]` | Required `path` when present; relative to records or absolute. Missing `kind` means linked; the other accepted kind is `detached`. Managed by init/relocation. |
-| `[retired]` | Required `date`, optional `successor` and `reason`; lifecycle metadata managed by retire/migrate. |
+| `[retired]` | Required `date` (real `YYYY-MM-DD` from year 1) and `reason` (nonblank single line without control characters); optional `successor` (well-formed prefix). Lifecycle metadata managed by retire/migrate. |
 | `[git]` | Only `commit`, boolean default false; opt-in scoped automatic record commits. |
 
 `spec_dirs`/`plan_dirs` define allowed working-document roots, not a public
-reference index. Paths are checked by the document resolver; explicit empty roots
-are distinct from omitted defaults. See [documents](documents.md).
+reference index. Root lists must be nonempty and contain normalized relative
+directories, with no empty, `.` or `..` components or colon in the first segment.
+One trailing slash is stripped. Omitted lists use defaults; empty lists are errors.
+See [documents](documents.md).
 
 Attachment limits are byte counts. `max_bytes` is positive, default 2,097,152
 (2 MiB). `multipart_max_bytes` defaults to 16,777,216 (16 MiB), with maximum

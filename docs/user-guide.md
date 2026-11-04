@@ -60,8 +60,11 @@ work prevents lower-priority starts in that project without an explicit override
 are satisfied, excluding
 held work, busy lanes and unavailable exclusive resources. A closed dependency
 is satisfied; an unresolved dependency is a warning and cannot establish
-readiness. `next` chooses the first ready task, or returns `next: null`.
-Priority, size and creation/id tie breakers keep selection deterministic.
+readiness. `next` first resumes the most recent eligible agent-waiting park, then
+falls back to ready order, under the applicable picker gates. A parked idea can
+be returned to resume scoping; it is not scoped implementation work. With no
+eligible choice the result is `next: null`. Priority, size and creation/id tie
+breakers keep ordinary ready selection deterministic.
 `prime` combines actionable work, claims, parks, review state, lanes and roadmap.
 
 Repeated values of one filter widen selection; different filters narrow it.
