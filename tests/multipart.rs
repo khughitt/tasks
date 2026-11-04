@@ -2245,3 +2245,357 @@ fn export_pretty_raw_stdout_ignores_width_and_preserves_binary_bytes() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(out.stdout, bytes);
 }
+
+fn reference_fixture(relation: &str) -> (TestEnv, std::path::PathBuf, String, Vec<u8>) {
+    let (env, dir, id) = attach_fixture("max_bytes = 1024\nmultipart_validators = []");
+    let bytes = vec![b'x'; 1500];
+    multipart_attach(&env, &dir, &id, "evidence.txt", &bytes);
+    let record = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&record).unwrap();
+    let section = format!("## References\n\n- whole ({relation}): files:evidence.txt\n\n");
+    std::fs::write(
+        &record,
+        text.replacen("## Notes", &(section + "## Notes"), 1),
+    )
+    .unwrap();
+    (env, dir, id, bytes)
+}
+
+#[test]
+fn show_lists_members_and_the_logical_artifact() {
+    let (env, dir, id, bytes) = reference_fixture("input");
+    let source = dir.join("ordinary.txt");
+    std::fs::write(&source, "ordinary").unwrap();
+    let attach = env.json(&dir, &["attach", &id, source.to_str().unwrap()]);
+    assert!(attach["files"][0].get("member_of").is_none());
+    let shown = env.json(&dir, &["show", &id]);
+    let logical = &shown["multipart"][0];
+    assert_eq!(logical["name"], "evidence.txt");
+    assert_eq!(logical["bytes"], bytes.len());
+    assert_eq!(logical["parts"], 2);
+    assert_eq!(logical["sha256"], digest(&bytes));
+    assert_eq!(logical["catalog"], "evidence.txt.catalog.json");
+    assert_eq!(logical["caption"], "whole document");
+    let files = shown["files"].as_array().unwrap();
+    assert_eq!(files.len(), 4);
+    for file in files {
+        if file["name"] == "ordinary.txt" {
+            assert!(file.get("member_of").is_none());
+        } else {
+            assert_eq!(file["member_of"], "evidence.txt");
+        }
+    }
+    let next = env.json(&dir, &["next"]);
+    assert_eq!(next["next"]["multipart"], shown["multipart"]);
+    assert_eq!(next["next"]["files"], shown["files"]);
+}
+
+#[test]
+fn inventory_row_points_at_the_catalog_and_reports_a_broken_set_missing() {
+    let (env, dir, id, _) = reference_fixture("output");
+    let shown = env.json(&dir, &["show", &id]);
+    let row = shown["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["handle"] == "whole")
+        .unwrap();
+    assert_eq!(row["location"], "attachment");
+    assert_eq!(row["status"], "present");
+    assert_eq!(
+        row["path"],
+        stored(&dir, &id, "evidence.txt.catalog.json")
+            .to_str()
+            .unwrap()
+    );
+    assert_eq!(
+        row["multipart"],
+        serde_json::json!({"name": "evidence.txt", "parts": 2})
+    );
+    std::fs::write(stored(&dir, &id, "evidence.txt.part-0002"), "wrong").unwrap();
+    let shown = env.json(&dir, &["show", &id]);
+    let row = shown["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["handle"] == "whole")
+        .unwrap();
+    assert_eq!(row["status"], "missing");
+    assert_eq!(row["multipart"]["name"], "evidence.txt");
+}
+
+#[test]
+fn doc_returns_the_rebuilt_whole() {
+    let (env, dir, id, bytes) = reference_fixture("input");
+    let out = env.cmd(&dir).args(["doc", &id, "whole"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, bytes);
+    std::fs::write(stored(&dir, &id, "evidence.txt.part-0001"), "bad").unwrap();
+    let out = env.cmd(&dir).args(["doc", &id, "whole"]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn refs_refuse_a_member_name() {
+    let (env, dir, id, _) = reference_fixture("input");
+    for name in [
+        "evidence.txt.part-0001",
+        "evidence.txt.catalog.json",
+        "evidence.txt.part-9999",
+    ] {
+        for relation in ["input", "output", "context"] {
+            let reference = format!("member ({relation}): files:{name}");
+            assert_eq!(
+                env.fail(&dir, &["edit", &id, "--ref", &reference]),
+                "multipart_member"
+            );
+        }
+    }
+    env.json(
+        &dir,
+        &[
+            "edit",
+            &id,
+            "--rm-ref",
+            "whole",
+            "--ref",
+            "context (context): files:evidence.txt",
+        ],
+    );
+}
+
+#[test]
+fn done_accepts_a_declared_artifact_as_an_output() {
+    for edit in [false, true] {
+        let (env, dir, id, _) = reference_fixture("output");
+        env.json(&dir, &["start", &id]);
+        if edit {
+            env.json(&dir, &["edit", &id, "--status", "done"]);
+        } else {
+            env.json(&dir, &["done", &id, "evidence saved"]);
+        }
+    }
+    let (env, dir, id, _) = reference_fixture("output");
+    env.json(&dir, &["start", &id]);
+    std::fs::remove_file(stored(&dir, &id, "evidence.txt.part-0001")).unwrap();
+    assert_eq!(
+        env.fail(&dir, &["done", &id, "broken"]),
+        "ref_output_missing"
+    );
+}
+
+#[test]
+fn detach_refuses_while_a_reference_cites_it() {
+    let (env, dir, id, _) = reference_fixture("input");
+    let before = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    assert_eq!(
+        env.fail(&dir, &["detach", &id, "evidence.txt", "obsolete"]),
+        "ref_cites_attachment"
+    );
+    assert!(stored(&dir, &id, "evidence.txt.part-0001").exists());
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+        before
+    );
+    env.json(&dir, &["edit", &id, "--rm-ref", "whole"]);
+    env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+}
+
+#[test]
+fn doc_survives_lowered_and_zeroed_limits() {
+    let (env, dir, id, bytes) = reference_fixture("input");
+    let config = dir.join("tasks/.config.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    for limit in [1, 0] {
+        let mut parsed: toml::Value = toml::from_str(&original).unwrap();
+        let attachments = parsed["attachments"].as_table_mut().unwrap();
+        attachments.insert("multipart_max_bytes".into(), limit.into());
+        attachments.insert("multipart_max_parts".into(), 1.into());
+        attachments.remove("multipart_validators");
+        std::fs::write(&config, toml::to_string(&parsed).unwrap()).unwrap();
+        let out = env.cmd(&dir).args(["doc", &id, "whole"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, bytes);
+        let shown = env.json(&dir, &["show", &id]);
+        assert_eq!(shown["inventory"][0]["status"], "present");
+    }
+}
+
+#[test]
+fn eligibility_rows_for_members_are_unchanged() {
+    let (env, dir, id, _) = reference_fixture("input");
+    let path = format!("tasks/files/{id}/evidence.txt.part-0001");
+    let rows = env.json(&dir, &["attachments", &path]);
+    assert_eq!(rows["version"], 1);
+    assert_eq!(
+        rows["attachments"][0]["file_sha256"],
+        digest(&std::fs::read(dir.join(&path)).unwrap())
+    );
+    assert!(rows["attachments"][0].get("multipart").is_none());
+}
+
+#[test]
+fn refs_allow_future_ordinary_output_after_complete_multipart_removal() {
+    let (env, dir, id) = detach_fixture();
+    env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    for name in [
+        "evidence.txt.part-0002",
+        "evidence.txt.part-9999",
+        "evidence.txt.catalog.json",
+        "evidence.txt",
+    ] {
+        env.json(
+            &dir,
+            &[
+                "edit",
+                &id,
+                "--ref",
+                &format!("future (output): files:{name}"),
+            ],
+        );
+        let source = dir.join("ordinary");
+        std::fs::write(&source, "new ordinary bytes").unwrap();
+        env.json(
+            &dir,
+            &["attach", &id, source.to_str().unwrap(), "--name", name],
+        );
+        let shown = env.json(&dir, &["show", &id]);
+        let row = shown["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap();
+        assert!(row.get("member_of").is_none(), "{shown}");
+        assert!(shown.get("multipart").is_none(), "{shown}");
+        let row = shown["inventory"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["handle"] == "future")
+            .unwrap();
+        assert!(row.get("multipart").is_none(), "{row}");
+        assert_eq!(row["status"], "present");
+        let out = env.cmd(&dir).args(["doc", &id, "future"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"new ordinary bytes");
+        env.json(&dir, &["edit", &id, "--rm-ref", "future"]);
+    }
+}
+
+#[test]
+fn refs_editor_and_unchanged_entries_refuse_members() {
+    let (env, dir, id, _) = reference_fixture("input");
+    let record = dir.join(format!("tasks/{id}.md"));
+    let original = std::fs::read_to_string(&record).unwrap();
+    let editor = common::editor_script(
+        env.home.path(),
+        "sed -i 's/files:evidence.txt$/files:evidence.txt.part-0001/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &editor)
+        .args(["edit", &id, "--editor"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "multipart_member");
+    assert_eq!(std::fs::read_to_string(&record).unwrap(), original);
+    std::fs::write(
+        &record,
+        original.replace("files:evidence.txt\n", "files:evidence.txt.part-0001\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "-p", "1"]),
+        "multipart_member"
+    );
+}
+
+#[test]
+fn doc_and_reference_presence_ignore_an_unrelated_broken_artifact() {
+    let (env, dir, id, bytes) = reference_fixture("input");
+    multipart_attach(&env, &dir, &id, "other.txt", b"other whole");
+    std::fs::write(stored(&dir, &id, "other.txt.part-0001"), "bad").unwrap();
+    let shown = env.json(&dir, &["show", &id]);
+    let row = shown["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["handle"] == "whole")
+        .unwrap();
+    assert_eq!(row["status"], "present", "{shown}");
+    let out = env.cmd(&dir).args(["doc", &id, "whole"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, bytes);
+}
+
+#[test]
+fn refs_closed_names_stay_reserved_until_published_removal() {
+    let (env, dir, id, _) = reference_fixture("input");
+    env.json(&dir, &["edit", &id, "--rm-ref", "whole"]);
+    let detached = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    assert_eq!(detached["publication"]["state"], "local");
+    for name in ["evidence.txt.part-0001", "evidence.txt.catalog.json"] {
+        assert_eq!(
+            env.fail(
+                &dir,
+                &[
+                    "edit",
+                    &id,
+                    "--ref",
+                    &format!("future (output): files:{name}")
+                ]
+            ),
+            "multipart_member"
+        );
+    }
+    env.json(
+        &dir,
+        &[
+            "edit",
+            &id,
+            "--ref",
+            "future (output): files:evidence.txt.part-9999",
+        ],
+    );
+}
+
+#[test]
+fn refs_over_ceiling_declarations_protect_member_names_without_expansion() {
+    let (env, dir, id) = attach_fixture("max_bytes = 1024\nmultipart_validators = []");
+    let hash = "0".repeat(64);
+    env.json(&dir, &["note", &id, &format!("multipart: oversized.txt (1 bytes, 257 parts, sha256 {hash}, catalog sha256 {hash})")]);
+    env.json(&dir, &["note", &id, "detached: oversized.txt: closed"]);
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "edit",
+                &id,
+                "--ref",
+                "future (output): files:oversized.txt.part-9999"
+            ]
+        ),
+        "multipart_member"
+    );
+}
+
+#[test]
+fn done_refuses_a_manually_recorded_member_output() {
+    let (env, dir, id, _) = reference_fixture("output");
+    env.json(&dir, &["start", &id]);
+    let record = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&record).unwrap();
+    std::fs::write(
+        &record,
+        text.replace("files:evidence.txt\n", "files:evidence.txt.part-0001\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        env.fail(&dir, &["done", &id, "fragment is not the output"]),
+        "multipart_member"
+    );
+}

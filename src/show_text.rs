@@ -785,6 +785,7 @@ mod tests {
             periodic: None,
             deferred: None,
             files: vec![],
+            multipart: vec![],
             inventory: vec![],
         }
     }

@@ -280,6 +280,7 @@ pub fn attach(
             name,
             path: target.display().to_string(),
             bytes: bytes.len() as u64,
+            member_of: None,
         });
         pending.push((target, bytes, write));
         append_note(&mut task, &owner, &note)?;
@@ -361,14 +362,7 @@ pub fn attach(
         super::finish(&mut ctx);
         None
     };
-    let multipart = declaration.map(|d| MultipartOut {
-        catalog: multipart::names::catalog_name(&d.name),
-        name: d.name,
-        bytes: d.bytes,
-        sha256: d.sha256,
-        parts: d.parts,
-        caption: d.caption,
-    });
+    let multipart = declaration.as_ref().map(MultipartOut::from);
     Ok(Output::Attach(AttachOut {
         id: task.id.to_string(),
         files,

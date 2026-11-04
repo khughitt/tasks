@@ -457,6 +457,14 @@ pub struct InventoryRow {
     pub step_found: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multipart: Option<MultipartRefOut>,
+}
+
+#[derive(Serialize)]
+pub struct MultipartRefOut {
+    pub name: String,
+    pub parts: usize,
 }
 
 impl InventoryRow {
@@ -475,6 +483,7 @@ impl InventoryRow {
             step: None,
             step_found: None,
             cause: None,
+            multipart: None,
         }
     }
 
@@ -529,6 +538,8 @@ pub struct ShowFields {
     pub deferred: Option<DeferredInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<FileInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub multipart: Vec<MultipartOut>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inventory: Vec<InventoryRow>,
 }
@@ -839,6 +850,8 @@ pub struct FileInfo {
     pub name: String,
     pub path: String,
     pub bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_of: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -849,6 +862,19 @@ pub struct MultipartOut {
     pub parts: usize,
     pub catalog: String,
     pub caption: Option<String>,
+}
+
+impl From<&crate::multipart::declaration::Declaration> for MultipartOut {
+    fn from(declaration: &crate::multipart::declaration::Declaration) -> Self {
+        Self {
+            name: declaration.name.clone(),
+            bytes: declaration.bytes,
+            sha256: declaration.sha256.clone(),
+            parts: declaration.parts,
+            catalog: crate::multipart::names::catalog_name(&declaration.name),
+            caption: declaration.caption.clone(),
+        }
+    }
 }
 
 #[derive(Serialize)]

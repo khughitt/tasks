@@ -251,9 +251,26 @@ pub fn describe(
     let inventory =
         crate::inventory::build(&resolver, project, &task, step_found, fetch, warnings)?;
     warnings.extend(resolver.take_warnings());
+    let declarations = crate::multipart::audit::declarations(&task);
+    let multipart = declarations
+        .values()
+        .filter_map(|state| match state {
+            crate::multipart::audit::DeclState::Live(declaration) => {
+                Some(crate::output::MultipartOut::from(declaration))
+            }
+            crate::multipart::audit::DeclState::Closed(_) => None,
+        })
+        .collect();
     let files = attached
         .into_iter()
         .map(|file| crate::output::FileInfo {
+            member_of: declarations
+                .keys()
+                .find(|logical| {
+                    crate::multipart::audit::is_member(&file.name, logical)
+                        && !crate::multipart::audit::later_owned(&task, logical, &file.name)
+                })
+                .cloned(),
             name: file.name,
             path: file.path.display().to_string(),
             bytes: file.bytes,
@@ -306,6 +323,7 @@ pub fn describe(
         periodic: crate::output::PeriodicInfo::of(&task, now),
         deferred: crate::output::DeferredInfo::of(&task, now),
         files,
+        multipart,
         inventory,
         task,
     })
