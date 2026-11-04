@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 pub mod docs;
 pub mod git_fixture;
+pub mod multipart;
 use assert_cmd::Command;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;

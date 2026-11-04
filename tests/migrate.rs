@@ -2,6 +2,24 @@ mod common;
 use common::TestEnv;
 use sha2::{Digest, Sha256};
 
+#[test]
+fn migrate_carries_a_multipart_artifact() {
+    let mut env = TestEnv::new();
+    let source = env.init("forge");
+    let destination = env.init("forge2");
+    let id = id_of(env.json(&source, &["add", "Evidence"]));
+    let bytes = common::multipart::seed(&env, &source, &id, "evidence.txt");
+    let list = uniform_list(&env, &source, &[&id], "carry");
+    let migrated = env.json(&source, &["migrate", list.to_str().unwrap()]);
+    let moved = new_id(&migrated, &id);
+    common::multipart::assert_intact(&env, &destination, &moved, "evidence.txt", &bytes);
+    assert_eq!(
+        env.check(&source),
+        serde_json::json!({"errors": [], "warnings": []})
+    );
+    assert!(!source.join("tasks/files").join(&id).exists());
+}
+
 fn id_of(v: serde_json::Value) -> String {
     v["id"].as_str().unwrap().to_string()
 }

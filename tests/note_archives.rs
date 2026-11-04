@@ -5,6 +5,32 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+#[test]
+fn archived_notes_keep_the_multipart_declaration() {
+    let (env, root, id) = archivable();
+    let bytes = common::multipart::seed(&env, &root, &id, "evidence.txt");
+    let before = env.json(&root, &["show", &id]);
+    let preview = env.json(&root, &["archive-notes", &id]);
+    assert_eq!(preview["eligible"], true, "{preview}");
+    let archived = env.json(
+        &root,
+        &[
+            "archive-notes",
+            &id,
+            "--expect",
+            preview["source_sha256"].as_str().unwrap(),
+        ],
+    );
+    assert_eq!(archived["action"], "archived");
+    assert!(
+        !env.read(&root, &format!("tasks/{id}.md"))
+            .contains("multipart: ")
+    );
+    let after = env.json(&root, &["show", &id]);
+    assert_eq!(after["multipart"], before["multipart"]);
+    common::multipart::assert_intact(&env, &root, &id, "evidence.txt", &bytes);
+}
+
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }

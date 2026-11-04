@@ -2,6 +2,54 @@ mod common;
 use common::TestEnv;
 
 #[test]
+fn move_carries_a_multipart_artifact() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let id = id_of(env.json(&source, &["add", "Evidence"]));
+    let bytes = common::multipart::seed(&env, &source, &id, "evidence.txt");
+    let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
+    common::multipart::assert_intact(&env, &destination, &moved, "evidence.txt", &bytes);
+    assert_eq!(
+        env.check(&source),
+        serde_json::json!({"errors": [], "warnings": []})
+    );
+    assert!(!source.join("tasks/files").join(&id).exists());
+}
+
+#[test]
+fn rename_keeps_a_multipart_artifact_intact() {
+    let mut env = TestEnv::new();
+    let root = env.init("dots");
+    let id = id_of(env.json(&root, &["add", "Evidence"]));
+    let name = format!("{id}-evidence.txt");
+    let bytes = common::multipart::seed(&env, &root, &id, &name);
+    let before = env.json(&root, &["show", &id]);
+    let files: Vec<_> = before["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| {
+            let name = file["name"].as_str().unwrap().to_string();
+            let bytes = std::fs::read(root.join("tasks/files").join(&id).join(&name)).unwrap();
+            (name, bytes)
+        })
+        .collect();
+    env.json(&root, &["rename", "dots", "new"]);
+    let renamed = id.replacen("dots-", "new-", 1);
+    common::multipart::assert_intact(&env, &root, &renamed, &name, &bytes);
+    let after = env.json(&root, &["show", &renamed]);
+    assert_eq!(after["multipart"], before["multipart"]);
+    for (name, bytes) in files {
+        assert_eq!(
+            std::fs::read(root.join("tasks/files").join(&renamed).join(name)).unwrap(),
+            bytes
+        );
+    }
+    assert!(!root.join("tasks/files").join(&id).exists());
+}
+
+#[test]
 fn move_git_fixtures_ignore_hostile_environment() {
     if common::git_fixture::hostile_parent("move_git_fixtures_ignore_hostile_environment") {
         return;
