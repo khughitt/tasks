@@ -146,7 +146,9 @@ false booleans, zero numbers and empty body remain. Response containers such as
 Summary/park/goal rows are projections, not interchangeable full Task objects.
 Additive output fields are allowed; clients should ignore unknown output fields.
 
-JSON success goes to stdout. Application failures exit 1 with a typed error;
+JSON success goes to stdout; a clean `tasks check` is silent with exit 0.
+Document/export bodies and version/help/completion output have their own formats.
+Application failures exit 1 with a typed error;
 CLI usage failures exit 2. Warnings on success must not be discarded. Parse
 errors, missing archive history and invalid configuration never become empty
 successful results. Pretty output is presentation and may change.
