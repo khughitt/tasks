@@ -1,6 +1,10 @@
 # Attachments and artifact integrity
 
 Type: protocol, data model; document types 1.
+The ordinary ledger/protocol is currently unversioned; accepted multipart catalogs,
+note-archive descriptors and eligibility responses are version 1. This defines
+artifact storage, publication and recovery alongside the [task model](task-model.md)
+and [retained custody](retention.md).
 
 ## Participants and ordinary storage
 

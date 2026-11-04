@@ -1,6 +1,9 @@
 # Work ownership
 
 Type: protocol; document types 1.
+The claim/park protocol is currently unversioned; its optional relay input accepts
+registry schema 2. This defines ownership across worktrees and links the
+[task model](task-model.md) and [project recovery guide](project-operations.md).
 
 ## Participants and state
 

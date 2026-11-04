@@ -1,6 +1,10 @@
 # Retained lifecycle
 
 Type: protocol, data model; document types 1.
+This is retention-1: current record, manifest, request and operation formats are
+version 1, with explicitly supported unversioned item records accepted historically.
+It defines observation and custody alongside the [task model](task-model.md) and
+[attachment integrity](attachments.md).
 
 ## Participants and boundary
 

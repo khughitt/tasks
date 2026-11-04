@@ -1,6 +1,9 @@
 # Task records
 
 Type: data model; document types 1.
+The task format is currently unversioned; note-archive descriptors accept version 1.
+Related contracts are [configuration](configuration.md), [ownership](ownership.md)
+and [artifact integrity](attachments.md).
 
 This is the current persisted and logical task contract. Records are Markdown
 with strict frontmatter, body, references and append-only notes. The task file

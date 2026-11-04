@@ -1,6 +1,9 @@
 # Documents and references
 
 Type: guide, data model; document types 1.
+This covers working-document resolution and reference/provider formats, currently
+unversioned. Related
+contracts are the [task model](task-model.md) and [configuration](configuration.md).
 
 This reference combines using documents with their small reference and provider
 formats: resolution rules are needed to interpret the stored values correctly.

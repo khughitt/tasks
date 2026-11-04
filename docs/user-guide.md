@@ -1,6 +1,8 @@
 # Using tasks
 
 Type: guide; document types 1.
+This guide covers choosing and recording work, with the [task model](task-model.md), [configuration](configuration.md)
+and [ownership protocol](ownership.md) for the detailed contracts.
 
 Tasks stores work as Markdown records and prints JSON by default. Start with the
 [README](../README.md) for installation; use `tasks --help` and

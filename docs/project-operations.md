@@ -1,6 +1,8 @@
 # Project operations and recovery
 
 Type: guide; document types 1.
+This guide covers project adoption, routing, record commits and lifecycle recovery.
+See [ownership](ownership.md) for claims and [documents](documents.md) for link resolution.
 
 Use the CLI for ordinary changes. Migration and recovery span records, checkout,
 registry and host-local state; preserve every verified copy before deleting one.

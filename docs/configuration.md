@@ -1,6 +1,8 @@
 # Configuration
 
 Type: data model; document types 1.
+Project and host TOML formats are currently unversioned. Related references are
+the [task model](task-model.md) and [document protocol](documents.md).
 
 Project settings are committed with records. Host settings and the registry are
 local to a machine. Unknown project/host keys and malformed present files are
