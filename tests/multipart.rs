@@ -2102,3 +2102,35 @@ fn export_refuses_an_unnoted_extra_part_in_the_working_tree() {
         "multipart_invalid_content"
     );
 }
+
+#[test]
+fn export_refuses_committed_unnoted_extra_parts_at_the_same_basis() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"evidence\n");
+    std::fs::write(stored(&dir, &id, "evidence.txt.part-0002"), "unnoted").unwrap();
+    common::git(&dir, &["add", "tasks"]);
+    common::git(&dir, &["commit", "-qm", "unnoted extra"]);
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    let clone = tempfile::tempdir().unwrap();
+    common::git(clone.path(), &["clone", "-q", dir.to_str().unwrap(), "."]);
+    for root in [dir.as_path(), clone.path()] {
+        for at in [false, true] {
+            let mut args = vec!["export", &id, "evidence.txt"];
+            if at {
+                args.extend(["--at", &commit]);
+            }
+            let mut stdout = args.clone();
+            stdout.extend(["-o", "-"]);
+            assert_eq!(env.fail(root, &stdout), "multipart_invalid_content");
+            let destination = root.join("recovered");
+            args.extend(["-o", destination.to_str().unwrap()]);
+            env.fail(root, &args);
+            assert!(!destination.exists());
+            std::fs::write(&destination, "preserve").unwrap();
+            env.fail(root, &args);
+            assert_eq!(std::fs::read(&destination).unwrap(), b"preserve");
+            std::fs::remove_file(destination).unwrap();
+        }
+    }
+}

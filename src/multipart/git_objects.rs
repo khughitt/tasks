@@ -124,6 +124,42 @@ impl Revision {
         Ok(Some(bytes))
     }
 
+    /// Streams one directory's names without retaining unrelated attachment metadata.
+    pub fn verify_members(&self, rel: &Path, logical: &str, expected: &[String]) -> Result<()> {
+        if rel.as_os_str().is_empty()
+            || rel
+                .components()
+                .any(|part| !matches!(part, Component::Normal(_)))
+        {
+            return Err(Error::Validation(
+                "revision directory must stay inside the repository".into(),
+            ));
+        }
+        let rel = rel
+            .to_str()
+            .ok_or_else(|| Error::Validation("revision directory is not UTF-8".into()))?;
+        let mut child = crate::git::at(&self.toplevel)
+            .args([
+                "ls-tree",
+                "-z",
+                "--name-only",
+                &format!("{}:{rel}", self.commit),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let result = verify_member_names(child.stdout.take().unwrap(), logical, expected);
+        if result.is_err() {
+            let _ = child.kill();
+        }
+        let status = child.wait()?;
+        result?;
+        if !status.success() {
+            return Err(Error::Validation("cannot read revision directory".into()));
+        }
+        Ok(())
+    }
+
     pub fn task_at(&self, project: &Project, id: &TaskId) -> Result<Option<Task>> {
         let records = project.records.strip_prefix(&self.toplevel).map_err(|_| {
             Error::Validation("project records are outside this revision's repository".into())
@@ -161,6 +197,37 @@ impl Revision {
         })
         .map(Some)
     }
+}
+
+fn verify_member_names(reader: impl Read, logical: &str, expected: &[String]) -> Result<()> {
+    let mut name = Vec::with_capacity(128);
+    let mut overlong = false;
+    for byte in BufReader::new(reader).bytes() {
+        let byte = byte?;
+        if byte == 0 {
+            if !overlong
+                && let Ok(member) = std::str::from_utf8(&name)
+                && super::audit::is_member(member, logical)
+                && !expected.iter().any(|name| name == member)
+            {
+                return Err(Error::Validation(format!(
+                    "extra member {member} in attachment directory"
+                )));
+            }
+            name.clear();
+            overlong = false;
+        } else if name.len() < 128 {
+            name.push(byte);
+        } else {
+            overlong = true;
+        }
+    }
+    if !name.is_empty() || overlong {
+        return Err(Error::Validation(
+            "truncated revision directory metadata".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn commit_cause(commit_records: bool, warnings: &[String]) -> Option<&'static str> {
@@ -233,6 +300,23 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         true
+    }
+
+    #[test]
+    fn member_metadata_stream_has_no_aggregate_limit() {
+        let unrelated = b"ordinary.txt\0".repeat(100_000);
+        let expected = vec![
+            "evidence.txt.part-0001".into(),
+            "evidence.txt.catalog.json".into(),
+        ];
+        let mut metadata = unrelated;
+        metadata.extend_from_slice(b"evidence.txt.part-0001\0");
+        metadata.extend_from_slice(&vec![b'x'; 10_000]);
+        metadata.push(0);
+        verify_member_names(metadata.as_slice(), "evidence.txt", &expected).unwrap();
+        metadata.extend_from_slice(b"evidence.txt.part-0002\0");
+        assert!(verify_member_names(metadata.as_slice(), "evidence.txt", &expected).is_err());
+        assert!(verify_member_names(&b"truncated"[..], "evidence.txt", &expected).is_err());
     }
 
     #[test]

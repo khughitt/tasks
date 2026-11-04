@@ -355,15 +355,26 @@ pub fn rebuild(
     match declarations(task).remove(name) {
         Some(DeclState::Live(declaration)) => {
             recovery_bounds(&declaration)?;
-            if revision.is_none() && attachments::check_storage(project, &task.id)? {
-                let members = member_names(name, declaration.parts);
+            let members = member_names(name, declaration.parts);
+            let check_member = |member: &str| {
+                if is_member(member, name) && !members.iter().any(|expected| expected == member) {
+                    return Err(invalid(
+                        &declaration,
+                        member,
+                        "extra member in attachment directory",
+                    ));
+                }
+                Ok(())
+            };
+            if let Some(revision) = revision {
+                revision
+                    .verify_members(relative.as_ref().unwrap(), name, &members)
+                    .map_err(|error| invalid(&declaration, name, error))?;
+            } else if attachments::check_storage(project, &task.id)? {
                 for entry in std::fs::read_dir(&dir)? {
                     let entry = entry?;
-                    if let Some(member) = entry.file_name().to_str()
-                        && is_member(member, name)
-                        && !members.iter().any(|expected| expected == member)
-                    {
-                        return Err(invalid(&declaration, member, "extra member on disk"));
+                    if let Some(member) = entry.file_name().to_str() {
+                        check_member(member)?;
                     }
                 }
             }
