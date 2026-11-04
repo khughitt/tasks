@@ -612,6 +612,19 @@ pub enum Command {
         #[arg(long)]
         no_fetch: bool,
     },
+    /// Export or verify a task attachment, optionally at a Git revision.
+    #[command(group(clap::ArgGroup::new("export_target").args(["output", "verify"]).required(true)))]
+    Export {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        name: String,
+        #[arg(long, value_name = "REF")]
+        at: Option<String>,
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        verify: bool,
+    },
     /// Working documents under each project's records, with the tasks that link them.
     #[command(
         after_help = "Lists the Markdown files directly under the project's spec and plan directories and\ndocs/notes. Kind comes from the directory, then the filename: *-brief.md, *-handoff.md,\nelse note. A task links a document through its spec, its plan, or a --ref entry.\n\nExamples:\n  tasks docs --kind plan\n  tasks docs --all-projects --search \"records root\""

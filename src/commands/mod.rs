@@ -10,6 +10,7 @@ pub mod dep;
 pub mod doc;
 pub mod docs;
 pub mod edit;
+pub mod export;
 pub mod feedback;
 pub mod goals;
 pub mod graph;
@@ -2221,6 +2222,23 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 None => doc::DocTarget::Spec,
             },
             fetch(no_fetch),
+        ),
+        Command::Export {
+            id,
+            name,
+            at,
+            output,
+            verify: _,
+        } => export::run(
+            open_id_ctx(dir, &id)?,
+            id,
+            name,
+            at,
+            match output {
+                Some(path) if path == Path::new("-") => export::ExportTarget::Stdout,
+                Some(path) => export::ExportTarget::Path(path),
+                None => export::ExportTarget::Verify,
+            },
         ),
         Command::Docs {
             kinds,

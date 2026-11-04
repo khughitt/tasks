@@ -147,31 +147,15 @@ fn rebuild_published(project: &Project, id: &TaskId, name: &str, commit: &str) -
     let task = revision
         .task_at(project, id)?
         .ok_or_else(|| Error::Validation(format!("missing task {id} at {commit}")))?;
-    let declaration = match audit::declarations(&task).remove(name) {
-        Some(DeclState::Live(declaration)) => declaration,
-        _ => {
-            return Err(Error::Validation(format!(
-                "no live multipart attachment {name} at {commit}"
-            )));
-        }
-    };
-    let toplevel = crate::record_commit::working_tree(&project.records)
-        .map_err(Error::Validation)?
-        .ok_or_else(|| Error::Validation("records are outside a Git work tree".into()))?;
-    let members = crate::attachments::task_dir(project, id);
-    let rel = members
-        .strip_prefix(&toplevel)
-        .map_err(|error| Error::Validation(error.to_string()))?;
-    audit::rebuild_with(
-        &declaration,
-        project.attachments_max_bytes,
-        &crate::attachments::ledger(&task),
-        |member, cap| {
-            revision
-                .read(&rel.join(member), cap)?
-                .ok_or_else(|| Error::Validation(format!("missing member {member} at {commit}")))
-        },
-    )
+    if !matches!(
+        audit::declarations(&task).get(name),
+        Some(DeclState::Live(_))
+    ) {
+        return Err(Error::Validation(format!(
+            "no live multipart attachment {name} at {commit}"
+        )));
+    }
+    audit::rebuild(project, &task, name, Some(&revision))
 }
 
 #[cfg(test)]

@@ -309,6 +309,76 @@ pub fn rebuild_with(
     Ok(whole)
 }
 
+/// Reads one live attachment at the selected basis, without running declared validators.
+pub fn rebuild(
+    project: &Project,
+    task: &Task,
+    name: &str,
+    revision: Option<&Revision>,
+) -> Result<Vec<u8>> {
+    attachments::validate_name(name)?;
+    let ledger = attachments::ledger(task);
+    let dir = attachments::task_dir(project, &task.id);
+    let relative = if revision.is_some() {
+        let root = crate::record_commit::working_tree(&project.records)
+            .map_err(Error::Validation)?
+            .ok_or_else(|| Error::Validation("records are outside a Git work tree".into()))?;
+        Some(
+            dir.strip_prefix(root)
+                .map_err(|error| Error::Validation(error.to_string()))?
+                .to_path_buf(),
+        )
+    } else {
+        None
+    };
+    let load = |member: &str, cap| {
+        if let Some(revision) = revision {
+            return revision
+                .read(&relative.as_ref().unwrap().join(member), cap)?
+                .ok_or_else(|| {
+                    Error::AttachmentMissing(format!(
+                        "{member} is missing at {}",
+                        revision.commit()
+                    ))
+                });
+        }
+        attachments::check_storage(project, &task.id)?;
+        let path = dir.join(member);
+        match attachments::entry_state(&path)? {
+            EntryState::File(_) => {
+                attachments::read_capped(std::fs::File::open(path)?, cap, member)
+            }
+            EntryState::Absent => Err(Error::AttachmentMissing(format!("{member} is missing"))),
+            EntryState::Unsafe(detail) => Err(Error::AttachmentUnsafe(detail)),
+        }
+    };
+    match declarations(task).remove(name) {
+        Some(DeclState::Live(declaration)) => {
+            recovery_bounds(&declaration)?;
+            if revision.is_none() && attachments::check_storage(project, &task.id)? {
+                let members = member_names(name, declaration.parts);
+                for entry in std::fs::read_dir(&dir)? {
+                    let entry = entry?;
+                    if let Some(member) = entry.file_name().to_str()
+                        && is_member(member, name)
+                        && !members.iter().any(|expected| expected == member)
+                    {
+                        return Err(invalid(&declaration, member, "extra member on disk"));
+                    }
+                }
+            }
+            rebuild_with(&declaration, project.attachments_max_bytes, &ledger, load)
+        }
+        Some(DeclState::Closed(_)) => Err(Error::AttachmentMissing(format!("{name} is detached"))),
+        None if ledger.get(name) == Some(&Ledger::Attached) => {
+            load(name, super::RECOVERY_MAX_BYTES)
+        }
+        None => Err(Error::AttachmentMissing(format!(
+            "{name} is not a live attachment"
+        ))),
+    }
+}
+
 pub fn audit(project: &Project, task: &Task) -> Result<Vec<Problem>> {
     let states = declarations(task);
     let ledger = attachments::ledger(task);

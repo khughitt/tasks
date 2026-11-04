@@ -627,6 +627,18 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["export"]
+summary = "Export or verify a task attachment, optionally at a Git revision"
+protocol = "Exactly one of --output or --verify is required; they conflict. --output - writes raw attachment bytes to stdout"
+exception = "attachment export to stdout is raw even under JSON/pretty flags"
+args = [{ name = "id", value = "ref", required = true }, { name = "name", value = "string", required = true }]
+options = [
+  { names = ["--at"], value = "ref" },
+  { names = ["-o", "--output"], value = "path" },
+  { names = ["--verify"], value = "none" },
+]
+
+[[cli.tasks.commands]]
 path = ["archive-notes"]
 summary = "Read-only note archive preview; --expect applies the verified source hash"
 args = [{ name = "id", value = "ref", required = true }]

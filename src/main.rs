@@ -71,8 +71,8 @@ use std::io::{IsTerminal, Write};
 /// The flush is explicit: a piped stdout is block-buffered, so for output smaller than the
 /// pipe buffer the write lands in the buffer and the failure surfaces only at the flush --
 /// which, left implicit at process exit, is performed and its error discarded.
-fn write_to(mut stream: impl Write, text: &str) -> std::io::Result<()> {
-    stream.write_all(text.as_bytes())?;
+fn write_to(mut stream: impl Write, text: impl AsRef<[u8]>) -> std::io::Result<()> {
+    stream.write_all(text.as_ref())?;
     stream.flush()
 }
 
@@ -241,6 +241,7 @@ fn main() {
                 | cli::Command::Show { .. }
                 | cli::Command::Doc { .. }
                 | cli::Command::Docs { .. }
+                | cli::Command::Export { .. }
                 | cli::Command::List { .. }
                 | cli::Command::Search { .. }
                 | cli::Command::Ready { .. }
@@ -264,9 +265,14 @@ fn main() {
     }
     match commands::run(cli) {
         Ok(out) => {
-            if let output::Output::Doc(doc) = &out {
-                let warnings = output::pretty_warnings(&doc.warnings, &stderr_painter, None);
-                if let Err(error) = write_to(std::io::stdout().lock(), &doc.body)
+            let raw = match &out {
+                output::Output::Doc(doc) => Some((doc.body.as_bytes(), &doc.warnings)),
+                output::Output::Raw(raw) => Some((raw.bytes.as_slice(), &raw.warnings)),
+                _ => None,
+            };
+            if let Some((bytes, warnings)) = raw {
+                let warnings = output::pretty_warnings(warnings, &stderr_painter, None);
+                if let Err(error) = write_to(std::io::stdout().lock(), bytes)
                     && error.kind() != std::io::ErrorKind::BrokenPipe
                 {
                     to_stderr(&warnings);
@@ -359,7 +365,7 @@ fn main() {
             let written = if silent {
                 Ok(())
             } else {
-                write_to(std::io::stdout().lock(), &format!("{rendered}\n"))
+                write_to(std::io::stdout().lock(), format!("{rendered}\n"))
             };
             match written {
                 Ok(()) => {}

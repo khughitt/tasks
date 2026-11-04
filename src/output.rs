@@ -168,6 +168,28 @@ pub struct IdOut {
 }
 
 #[derive(Serialize)]
+pub struct ExportOut {
+    pub id: String,
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    pub integrity: crate::multipart::publication::Integrity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation: Option<crate::multipart::validate::Validation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct RawOut {
+    pub bytes: Vec<u8>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct DocOut {
     pub body: String,
     pub warnings: Vec<String>,
@@ -1526,6 +1548,8 @@ pub enum Output {
     Groups(GroupsOut),
     Show(Box<ShowOut>),
     Doc(DocOut),
+    Raw(RawOut),
+    Export(ExportOut),
     Next(Box<NextOut>),
     List(ListOut),
     Parked(ParkedOut),
@@ -1932,6 +1956,11 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         }
         Output::Show(o) => crate::show_text::render(&o.fields, painter, layout.width),
         Output::Doc(o) => o.body.clone(),
+        Output::Raw(_) => unreachable!("raw bytes are written directly"),
+        Output::Export(o) => format!(
+            "{} {}: {} bytes, sha256 {}",
+            o.id, o.name, o.bytes, o.sha256
+        ),
         Output::Next(o) => format!(
             "{}{}",
             halt_line(&o.halts),
@@ -2997,6 +3026,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
         Output::Doc(o) => o.warnings.clone(),
+        Output::Raw(o) => o.warnings.clone(),
+        Output::Export(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
         Output::Parked(o) => o.warnings.clone(),

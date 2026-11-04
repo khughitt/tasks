@@ -1847,3 +1847,258 @@ fn detach_publication_keeps_its_own_commit_when_head_moves() {
     );
     assert_removal_clone(&dir, &id, out["publication"]["commit"].as_str().unwrap());
 }
+
+#[test]
+fn export_rebuilds_from_the_working_tree_and_from_a_commit_in_a_clean_clone() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    let bytes = "abc\né日\n".repeat(20000).into_bytes();
+    multipart_attach(&env, &dir, &id, "evidence.txt", &bytes);
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    let dest = dir.join("rebuilt");
+    let report = env.json(
+        &dir,
+        &["export", &id, "evidence.txt", "-o", dest.to_str().unwrap()],
+    );
+    assert_eq!(report["bytes"], bytes.len());
+    assert_eq!(report["sha256"], digest(&bytes));
+    assert_eq!(report["integrity"]["passed"], true);
+    assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+    let clone = tempfile::tempdir().unwrap();
+    common::git(clone.path(), &["clone", "-q", dir.to_str().unwrap(), "."]);
+    std::fs::remove_file(stored(clone.path(), &id, "evidence.txt.part-0001")).unwrap();
+    for format in ["--json", "--pretty"] {
+        let out = env
+            .cmd(clone.path())
+            .args([
+                format,
+                "--color",
+                "always",
+                "export",
+                &id,
+                "evidence.txt",
+                "--at",
+                &commit,
+                "-o",
+                "-",
+            ])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, bytes);
+    }
+}
+
+#[test]
+fn export_refuses_on_any_mismatch_and_writes_nothing() {
+    for member in [
+        "evidence.txt.part-0001",
+        "missing",
+        "evidence.txt.catalog.json",
+    ] {
+        let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+        multipart_attach(&env, &dir, &id, "evidence.txt", &vec![b'x'; 140000]);
+        if member == "missing" {
+            std::fs::remove_file(stored(&dir, &id, "evidence.txt.part-0001")).unwrap();
+        } else {
+            std::fs::write(stored(&dir, &id, member), "altered").unwrap();
+        }
+        let dest = dir.join("rebuilt");
+        env.fail(
+            &dir,
+            &["export", &id, "evidence.txt", "-o", dest.to_str().unwrap()],
+        );
+        assert!(!dest.exists());
+        std::fs::write(&dest, "keep").unwrap();
+        env.fail(
+            &dir,
+            &["export", &id, "evidence.txt", "-o", dest.to_str().unwrap()],
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"keep");
+        env.fail(&dir, &["export", &id, "evidence.txt", "-o", "-"]);
+        assert_eq!(
+            std::fs::read_dir(&dir)
+                .unwrap()
+                .filter(|e| e
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("export-"))
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn export_at_a_commit_survives_lowered_and_zeroed_limits() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    let bytes = vec![b'x'; 140000];
+    multipart_attach(&env, &dir, &id, "evidence.txt", &bytes);
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    let config = dir.join("tasks/.config.toml");
+    for limit in [1, 0] {
+        let text = std::fs::read_to_string(&config).unwrap();
+        let mut parsed: toml::Value = toml::from_str(&text).unwrap();
+        parsed["attachments"]
+            .as_table_mut()
+            .unwrap()
+            .insert("multipart_max_bytes".into(), limit.into());
+        parsed["attachments"]
+            .as_table_mut()
+            .unwrap()
+            .insert("multipart_max_parts".into(), 1.into());
+        std::fs::write(&config, toml::to_string(&parsed).unwrap()).unwrap();
+        common::git(&dir, &["add", "tasks/.config.toml"]);
+        common::git(&dir, &["commit", "-qm", "lower limits"]);
+        assert_eq!(env.check(&dir)["errors"], serde_json::json!([]));
+        for args in [
+            vec!["export", &id, "evidence.txt", "-o", "-"],
+            vec!["export", &id, "evidence.txt", "--at", &commit, "-o", "-"],
+        ] {
+            let out = env.cmd(&dir).args(args).output().unwrap();
+            assert!(out.status.success(), "{out:?}");
+            assert_eq!(out.stdout, bytes);
+        }
+    }
+}
+
+#[test]
+fn export_at_reads_a_record_with_archived_notes() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"archived evidence\n");
+    let preview = env.json(&dir, &["archive-notes", &id]);
+    env.json(
+        &dir,
+        &[
+            "archive-notes",
+            &id,
+            "--expect",
+            preview["source_sha256"].as_str().unwrap(),
+        ],
+    );
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    std::fs::remove_file(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["export", &id, "evidence.txt", "--at", &commit, "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, b"archived evidence\n");
+}
+
+#[test]
+fn export_verify_reports_current_runtime_basis() {
+    use std::os::unix::fs::PermissionsExt;
+    let (env, dir, id) = attach_fixture(
+        "max_bytes = 65536\nmultipart_validators = [{match='*',command=['./validator']}] ",
+    );
+    enable_git(&dir);
+    let script = b"#!/bin/sh\ncat >/dev/null\nexit 0\n";
+    std::fs::write(dir.join("validator"), script).unwrap();
+    std::fs::set_permissions(
+        dir.join("validator"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"evidence\n");
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    let changed = b"#!/bin/sh\ncat >/dev/null\ntest -f schema\n";
+    std::fs::write(dir.join("validator"), changed).unwrap();
+    for passed in [false, true] {
+        if passed {
+            std::fs::write(dir.join("schema"), "available").unwrap();
+        }
+        let out = env.json(
+            &dir,
+            &["export", &id, "evidence.txt", "--at", &commit, "--verify"],
+        );
+        assert_eq!(out["integrity"]["passed"], true);
+        assert_eq!(out["validation"]["basis"], "current_runtime");
+        assert_eq!(out["validation"]["passed"], passed);
+        assert_eq!(
+            out["validation"]["validators"][0]["program_sha256"],
+            digest(changed)
+        );
+        assert_eq!(out["commit"], commit);
+    }
+}
+
+#[test]
+fn export_recovery_ignores_validators() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"evidence\n");
+    let config = dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap().replace(
+        "multipart_validators = []",
+        "multipart_validators = [{match='*',command=['/bin/false']}]",
+    );
+    std::fs::write(&config, text).unwrap();
+    assert_eq!(
+        env.json(&dir, &["export", &id, "evidence.txt", "--verify"])["validation"]["passed"],
+        false
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["export", &id, "evidence.txt", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, b"evidence\n");
+    let text = std::fs::read_to_string(&config)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("multipart_validators"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&config, text).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["export", &id, "evidence.txt", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, b"evidence\n");
+}
+
+#[test]
+fn export_copies_an_ordinary_attachment() {
+    let mut env = TestEnv::new();
+    let dir = env.init("tst");
+    let id = task(&env, &dir);
+    let bytes = b"\x00\xff\x80\x1b[31mbinary\r\n";
+    let source = dir.join("raw.bin");
+    std::fs::write(&source, bytes).unwrap();
+    env.json(
+        &dir,
+        &["attach", &id, source.to_str().unwrap(), "--caption", "raw"],
+    );
+    enable_git(&dir);
+    for at in [false, true] {
+        let mut args = vec!["export", &id, "raw.bin", "-o", "-"];
+        if at {
+            args.extend(["--at", "HEAD"]);
+        }
+        let out = env.cmd(&dir).args(args).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, bytes);
+    }
+    env.usage(&dir, &["export", &id, "raw.bin"]);
+    env.usage(&dir, &["export", &id, "raw.bin", "-o", "-", "--verify"]);
+}
+
+#[test]
+fn export_refuses_an_unnoted_extra_part_in_the_working_tree() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"evidence\n");
+    std::fs::write(stored(&dir, &id, "evidence.txt.part-0002"), "unnoted").unwrap();
+    broken(&env, &dir, "evidence.txt", "evidence.txt.part-0002");
+    assert_eq!(
+        env.fail(&dir, &["export", &id, "evidence.txt", "-o", "-"]),
+        "multipart_invalid_content"
+    );
+}
