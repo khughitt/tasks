@@ -26,7 +26,7 @@ fn phases(task: &Task, key: &OperationKey) -> Result<Vec<(usize, OperationNote)>
     }
     Ok(out)
 }
-fn validate_original(bytes: &[u8], note: &OperationNote) -> Result<()> {
+pub(super) fn validate_original(bytes: &[u8], note: &OperationNote) -> Result<()> {
     if note
         .input_bases
         .first()

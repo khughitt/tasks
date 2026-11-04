@@ -908,7 +908,10 @@ self-reference when request bytes, attachment ledger and intent publish together
 ### Retained checkpoints
 
 `tasks retained checkpoint <id> --request <path>` performs one whole-host accounting
-operation. Start the task first, use Git records with `[git] commit = true`, and copy
+operation. Use one coordinated writer host for all participating tasks: other hosts
+must not write them until completion or reconciliation has committed and records
+have synchronized. Claims and locks are host-local and do not coordinate remote
+writers. Start the task first, use Git records with `[git] commit = true`, and copy
 the exact current `basis` object from `tasks retained state <id>` into the request.
 Keep the mutable request outside the inventoried directory. For example, replace
 the task, host, commit and paths below with the actual state and declaration:

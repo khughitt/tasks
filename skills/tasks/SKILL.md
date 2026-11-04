@@ -534,6 +534,9 @@ diagnostics. `complete: false` or a null item record means unresolved uncertaint
 never substitute its predecessor. Default reads refuse dirty required records;
 explicit historical reads use only pinned task/archive blobs. Missing or
 conflicting evidence fails explicitly. This query does not inspect current bytes.
+Lifecycle mutations require one coordinated writer host for every participating
+task. Prevent other-host writes until completion or reconciliation has committed
+and records have synchronized; claims and locks are host-local.
 `tasks retained checkpoint <id> --request <path>` performs fresh whole-host
 accounting after an owned start, with Git-backed auto-commit records and the exact
 current input basis. It includes every known local kept identity even when omitted

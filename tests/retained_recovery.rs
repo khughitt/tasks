@@ -1,6 +1,8 @@
 mod common;
-use common::retained::cross_receiver;
 use common::retained::{RetainedEnv, host, transfer, transfer_fixture, transfer_request};
+use common::retained::{
+    checkpoint, checkpoint_fixture, checkpoint_request, cross_receiver, declaration,
+};
 use serde_json::json;
 fn intent(f: &RetainedEnv) -> serde_json::Value {
     let b = f.state()["basis"].clone();
@@ -88,13 +90,13 @@ fn retained_reserved_forgery() {
 
 #[test]
 fn retained_terminal_archive() {
-    let f = RetainedEnv::new("in-tree");
-    let mut n = intent(&f);
-    f.note(f.record());
-    f.seed_note(&format!("retention operation: {n}"));
-    n["phase"] = json!("completed");
-    n["outputs"] = json!({"outcome":"verified","publications":[],"checkpoint":null});
-    f.seed_note(&format!("retention operation: {n}"));
+    let f = checkpoint_fixture();
+    let payload = f.dir.join("payload");
+    std::fs::write(&payload, "immutable").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 1, json!([declaration(&payload, "evidence")])),
+    );
     let before = f.state();
     let preview = f.json(&["archive-notes", &f.id]);
     assert_eq!(preview["eligible"], true);

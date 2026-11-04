@@ -4,6 +4,7 @@ use crate::model::{Task, TaskId};
 use crate::repo::Project;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct PinnedTask {
     pub basis: Basis,
     pub task: Task,

@@ -11,6 +11,7 @@ pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> 
     }
     let id = parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let pinned = basis::read(&ctx.project, &id, at.as_deref())?;
+    crate::retained::proof::validate_history(&ctx.project, &pinned, host.as_deref())?;
     crate::retained::reconcile::validate_terminal_history(&ctx.project, &pinned)?;
     let mut out = history::replay(&pinned.task, &pinned.basis, host.as_deref())?;
     out.warnings.extend(ctx.warnings);

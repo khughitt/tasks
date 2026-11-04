@@ -1127,7 +1127,7 @@ fn phase_artifacts(note: &OperationNote) -> Result<Vec<ArtifactLocator>> {
     }
     Ok(artifacts)
 }
-fn observation_artifacts(
+pub(super) fn observation_artifacts(
     project: &Project,
     task: &Task,
     note: &OperationNote,

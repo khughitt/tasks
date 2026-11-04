@@ -164,9 +164,11 @@ fn retained_state_checkpoint_intervening_change() {
     let basis = f.state()["basis"].clone();
     f.seed_note(&format!(
         "retention operation: {}",
-        op(&f, basis, "intent", json!({}))
+        op(&f, basis.clone(), "intent", json!({}))
     ));
-    let basis = f.state()["basis"].clone();
+    // This deliberately malformed request is not evidence for a successful state query.
+    let mut basis = basis;
+    basis["commit"] = json!(f.basis());
     let mut r = f.record();
     r["purpose"] = json!("Changed after observation");
     f.note(r);
@@ -1332,4 +1334,83 @@ fn retained_transfer_dirty_receiver_evidence() {
             .unwrap()["record"]["state"],
         "kept"
     );
+}
+
+#[test]
+fn retained_state_proves_immutable_operation_dependencies() {
+    for corruption in ["request", "publication"] {
+        let (f, to, _) = transfer_fixture();
+        transfer(&f, &to, &transfer_request(&f, &to));
+        let original = f.state();
+        let task = f.records.join(format!("tasks/{}.md", f.id));
+        let raw = std::fs::read_to_string(&task).unwrap();
+        let changed = match corruption {
+            "request" => raw.replace(
+                original["operations"][0]["note"]["request"]["sha256"]
+                    .as_str()
+                    .unwrap(),
+                &"0".repeat(64),
+            ),
+            "publication" => {
+                let completed = &original["operations"][2]["note"];
+                raw.replace(
+                    completed["outputs"]["publications"][0]["basis"]["commit"]
+                        .as_str()
+                        .unwrap(),
+                    completed["input_bases"][0]["basis"]["commit"]
+                        .as_str()
+                        .unwrap(),
+                )
+            }
+            _ => unreachable!(),
+        };
+        assert_ne!(raw, changed);
+        std::fs::write(&task, changed).unwrap();
+        common::git(&f.records, &["add", "."]);
+        common::git(
+            &f.records,
+            &["commit", "-qm", "corrupt immutable receipt dependency"],
+        );
+        let out = f.cmd().args(["retained", "state", &f.id]).output().unwrap();
+        assert!(
+            !out.status.success(),
+            "{corruption}: corrupt dependency reported complete"
+        );
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+        f.json(&[
+            "retained",
+            "state",
+            &f.id,
+            "--at",
+            original["basis"]["commit"].as_str().unwrap(),
+        ]);
+    }
+}
+
+#[test]
+fn retained_state_uses_historical_artifacts_without_current_bytes() {
+    let f = checkpoint_fixture();
+    let tree = f.dir.join("payload");
+    std::fs::create_dir(&tree).unwrap();
+    std::fs::write(tree.join("report"), "payload").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 1, json!([declaration(&tree, "scratch")])),
+    );
+    let state = f.state();
+    let name = state["operations"][0]["note"]["request"]["name"]
+        .as_str()
+        .unwrap();
+    std::fs::write(
+        f.records.join(format!("tasks/files/{}/{name}", f.id)),
+        "changed current request",
+    )
+    .unwrap();
+    std::fs::remove_dir_all(tree).unwrap();
+    common::git(&f.records, &["add", "."]);
+    common::git(
+        &f.records,
+        &["commit", "-qm", "change only current artifact bytes"],
+    );
+    assert_eq!(f.state()["complete"], true);
 }
