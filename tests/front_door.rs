@@ -514,6 +514,29 @@ fn front_door_test_one_preserves_arguments_and_test_full_forces_suite() {
 }
 
 #[test]
+fn front_door_full_suite_merges_cargo_streams_before_tt_capture() {
+    let fixture = FrontDoorFixture::new(None);
+    fixture.script(
+        "suite",
+        r#"#!/usr/bin/env python3
+import sys
+sys.stderr.write('Running unittests src/main.rs (target/debug/deps/tasks-123)\n')
+sys.stderr.flush()
+sys.stdout.write('test result: ok. 2 passed; 0 failed; 0 ignored;\n')
+"#,
+    );
+    set_variable(fixture.dir.path(), "test_cmd", "\"python3 bin/suite\"");
+    let out = fixture.run(&["test"], &[]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "Running unittests src/main.rs (target/debug/deps/tasks-123)\ntest result: ok. 2 passed; 0 failed; 0 ignored;\n"
+    );
+    assert!(out.stderr.is_empty(), "{:?}", out.stderr);
+    assert_eq!(fixture.rows("runs.jsonl")[0]["tests"], 2);
+}
+
+#[test]
 fn front_door_hosted_broad_targets_require_force_and_propagate_failure() {
     let fixture = FrontDoorFixture::new(Some(false));
     for recipe in [

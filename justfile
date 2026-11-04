@@ -51,9 +51,9 @@ test-fast:
 test-one +args:
     {{tt}} test-one -- sh -c '{{one_cmd}} "$@" 2>&1' test-one "$@"
 
-# The full suite, ignored tests included.
+# Merge Cargo headers and summaries before the wrapper captures them for coverage evidence.
 test:
-    {{tt}} test -- sh -c '{{test_cmd}}'
+    {{tt}} test -- sh -c '{{test_cmd}} 2>&1'
 
 # Deliberate full-suite verification; only the inner test target records timing.
 test-full:
