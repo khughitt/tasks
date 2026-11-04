@@ -21,13 +21,13 @@ the locked Cargo dependencies; safe to rerun.
 
 Tests: `just test-one <name>` for a test-name filter, or `just test-one --test cli <name>`
 for one integration test; runner arguments are forwarded intact and at least one is
-required. Run `just test-fast` before committing; it accepts no arguments and runs the
-non-ignored suite. `just test` includes the slow `#[ignore]`d exhaustive enumeration;
-`just test-full` is the untimed alias for `TT_FORCE=1 just test`.
-Local policy remains enabled: `.tt.toml` is absent and `ci_suite_refs` is empty,
-so the pre-push hook carries the full gate until an approved hosted pilot succeeds.
-Run `just test` yourself only if hooks are not installed or the fast set does not cover
-affected behavior. Never run `cargo test` directly: the recipe records
+required. This is the local inner loop; run focused tests and mandatory hygiene before
+committing. `.tt.toml` disables automatic local `test`, `test-fast`, and `check-code`
+execution. Their policy skips have null outcomes and are not passing checks.
+`test-fast` selects the fixed non-ignored suite; `test` includes the slow `#[ignore]`d
+exhaustive enumeration. `just test-full` is the untimed alias for `TT_FORCE=1 just test`;
+`TT_FORCE=1 just check-code` deliberately runs broad Rust checks locally.
+Never run `cargo test` directly: the recipe records
 the run and stops git discovery at `$TMPDIR`, so a stray `.git` there cannot fail the
 fixtures. `just check` composes `just check-hygiene` (`tools/ops-check`,
 `tools/ops-docs check`, `tasks check`) and `just check-code` (`cargo fmt --check`,
@@ -44,16 +44,17 @@ with the earlier whole-hook timing series. Guide/task-only commits retain hygien
 alone; renames count on both sides and failed classification runs the full check.
 On a fresh clone, run `git config core.hooksPath .githooks` once.
 
-The prepared `.github/workflows/ci.yml` runs on every branch push (including nested
+The `.github/workflows/ci.yml` runs on every branch push (including nested
 names) and manual dispatch, on `ubuntu-24.04` with pinned Rust and just. Job-scope
 `TT_FORCE=1` runs `just setup`, `just ci-check-hygiene`, `just check-code`, and the full
 `just test` suite. Coverage verification derives all executable test targets from
 Cargo metadata and requires zero failures, zero ignored tests, and a matching forced
-timing record. Remote coverage (`refs/heads/*` on `origin`) is declared only after the
-hosted pilot is accepted; preparing this workflow does not activate the local policy.
+timing record. Covered branch pushes (`refs/heads/*` on `origin`) run mandatory
+local hygiene while the hosted workflow carries broad checks and the full suite.
+Pushes outside that coverage warn; policy still controls local broad execution.
 `tools/tt` reads `.tt.toml` only at the invoking code checkout's Git top level.
-When a future approved policy disables broad targets, `just test-one` and mandatory
-hygiene still run; `TT_FORCE=1` explicitly forces broad checks, including nested recipes.
+`just test-one` and mandatory hygiene always run; `TT_FORCE=1` explicitly forces
+broad checks, including nested recipes. A hosted would-be skip without force fails.
 
 Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
 `cargo install --locked --path .`

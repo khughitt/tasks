@@ -30,8 +30,8 @@ check_code_cmd := "cargo fmt --check && cargo clippy --all-targets -- -D warning
 docs_paths := "AGENTS.md"
 docs_check_cmd := check_hygiene_cmd
 
-# Local gate retained until the hosted pilot is accepted and policy activation approved.
-ci_suite_refs := ""
+# CI workflow covers every branch push on origin.
+ci_suite_refs := "refs/heads/*"
 ci_remote := "origin"
 one_cmd := test_env + " cargo test"
 
