@@ -37,6 +37,7 @@ pub fn declarations(task: &Task) -> BTreeMap<String, DeclState> {
     state
 }
 
+#[allow(dead_code)] // Logical detach consumes this derived-name inventory in Task 7.
 pub fn reserved_names(task: &Task) -> BTreeMap<String, String> {
     let mut reserved = BTreeMap::new();
     for (name, state) in declarations(task) {
@@ -71,7 +72,7 @@ fn recovery_bounds(declaration: &Declaration) -> Result<()> {
     Ok(())
 }
 
-fn is_member(name: &str, logical: &str) -> bool {
+pub fn is_member(name: &str, logical: &str) -> bool {
     name == catalog_name(logical)
         || name
             .strip_prefix(logical)

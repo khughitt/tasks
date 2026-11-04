@@ -182,9 +182,16 @@ fn check_reports_missing_extra_detached_and_altered_parts() {
         match case {
             "missing" => std::fs::remove_file(path).unwrap(),
             "extra" => {
-                let source = dir.join("evidence.txt.part-0002");
-                std::fs::write(&source, b"extra").unwrap();
-                env.json(&dir, &["attach", &id, source.to_str().unwrap()]);
+                // The writer refuses this drift; seed corruption for the auditor directly.
+                std::fs::write(stored(&dir, &id, "evidence.txt.part-0002"), b"extra").unwrap();
+                env.json(
+                    &dir,
+                    &[
+                        "note",
+                        &id,
+                        "attached: evidence.txt.part-0002 (5 bytes): manual drift",
+                    ],
+                );
             }
             "detached" => {
                 env.json(
@@ -971,4 +978,216 @@ fn multipart_save_failure_rolls_back_new_members_and_keeps_adopted_bytes() {
     assert_eq!(std::fs::read(first).unwrap(), bytes[..65536]);
     assert!(!stored(&dir, &id, "a.txt.part-0002").exists());
     assert!(!stored(&dir, &id, "a.txt.catalog.json").exists());
+}
+
+#[test]
+fn multipart_namespace_collision_before_declaration_writes_nothing() {
+    for state in ["live", "unnoted", "missing-live"] {
+        let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+        let source = dir.join("source");
+        std::fs::write(&source, "hello").unwrap();
+        let extra = stored(&dir, &id, "a.txt.part-0002");
+        if state == "unnoted" {
+            std::fs::create_dir_all(extra.parent().unwrap()).unwrap();
+            std::fs::write(&extra, "existing").unwrap();
+        } else {
+            env.json(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--name",
+                    "a.txt.part-0002",
+                ],
+            );
+            if state == "missing-live" {
+                std::fs::remove_file(&extra).unwrap();
+            }
+        }
+        let record = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&record).unwrap();
+        assert_eq!(
+            env.fail(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--multipart",
+                    "--name",
+                    "a.txt"
+                ]
+            ),
+            "attachment_exists",
+            "{state}"
+        );
+        assert_eq!(std::fs::read(record).unwrap(), before);
+        assert!(!stored(&dir, &id, "a.txt.part-0001").exists());
+        assert!(!stored(&dir, &id, "a.txt.catalog.json").exists());
+        assert_eq!(extra.exists(), state != "missing-live");
+        if state != "missing-live" {
+            assert_eq!(
+                std::fs::read(extra).unwrap(),
+                if state == "unnoted" {
+                    b"existing".as_slice()
+                } else {
+                    b"hello".as_slice()
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn multipart_namespace_collision_after_declaration_writes_nothing() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    let record = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    for name in ["a.txt.part-0000", "a.txt.part-0002", "a.txt.part-9999"] {
+        let source = dir.join("source");
+        assert_eq!(
+            env.fail(
+                &dir,
+                &["attach", &id, source.to_str().unwrap(), "--name", name]
+            ),
+            "multipart_member"
+        );
+        assert_eq!(std::fs::read(&record).unwrap(), before);
+        assert!(!stored(&dir, &id, name).exists());
+    }
+    assert!(env.check(&dir)["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn publication_hashes_the_executable_selected_from_path() {
+    use std::os::unix::fs::PermissionsExt;
+    for case in [
+        "repository",
+        "external",
+        "relative",
+        "empty",
+        "skip-non-executable",
+    ] {
+        let (env, dir, id) = attach_fixture(
+            "max_bytes = 65536\nmultipart_validators = [{match='*',command=['check-doc']}]",
+        );
+        enable_git(&dir);
+        let external = tempfile::tempdir().unwrap();
+        let tools = dir.join("tools");
+        std::fs::create_dir(&tools).unwrap();
+        let selected = b"#!/bin/sh\nprintf selected > ran\n";
+        let wrong = b"#!/bin/sh\nprintf wrong > ran\n";
+        let local_program = if case == "empty" {
+            dir.join("check-doc")
+        } else {
+            tools.join("check-doc")
+        };
+        std::fs::write(
+            &local_program,
+            if case == "external" {
+                wrong.as_slice()
+            } else {
+                selected.as_slice()
+            },
+        )
+        .unwrap();
+        std::fs::set_permissions(&local_program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let other = external.path().join("check-doc");
+        std::fs::write(
+            &other,
+            if case == "skip-non-executable" {
+                wrong.as_slice()
+            } else {
+                selected.as_slice()
+            },
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &other,
+            std::fs::Permissions::from_mode(if case == "skip-non-executable" {
+                0o644
+            } else {
+                0o755
+            }),
+        )
+        .unwrap();
+        let path = match case {
+            "relative" => "tools:/usr/bin:/bin".into(),
+            "empty" => ":/usr/bin:/bin".into(),
+            "external" | "skip-non-executable" => format!(
+                "{}:{}:/usr/bin:/bin",
+                external.path().display(),
+                tools.display()
+            ),
+            _ => format!("{}:/usr/bin:/bin", tools.display()),
+        };
+        let source = dir.join("source");
+        std::fs::write(&source, "hello").unwrap();
+        let out = env
+            .cmd(&dir)
+            .env("PATH", path)
+            .args([
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--multipart",
+                "--name",
+                "a.txt",
+            ])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{case}: {out:?}");
+        let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            value["publication"]["state"], "published",
+            "{case}: {value}"
+        );
+        assert_eq!(
+            std::fs::read(dir.join("ran")).unwrap(),
+            b"selected",
+            "{case}"
+        );
+        let validation = &value["validation"]["validators"][0];
+        assert_eq!(validation["command"][0], "check-doc");
+        if case == "external" {
+            assert_eq!(validation["program"], "external");
+            assert!(validation.get("program_sha256").is_none());
+        } else {
+            assert_eq!(
+                validation["program_sha256"],
+                digest(selected),
+                "{case}: {value}"
+            );
+            assert!(validation.get("program").is_none());
+        }
+    }
+}
+
+#[test]
+fn multipart_missing_path_validator_fails_closed_before_writes() {
+    let (env, dir, id) = attach_fixture(
+        "max_bytes = 65536\nmultipart_validators = [{match='*',command=['absent-validator-for-task-test']}]",
+    );
+    let source = dir.join("source");
+    std::fs::write(&source, "hello").unwrap();
+    let record = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--multipart",
+                "--name",
+                "a.txt"
+            ]
+        ),
+        "multipart_invalid_content"
+    );
+    assert_eq!(std::fs::read(record).unwrap(), before);
+    assert!(!stored(&dir, &id, "a.txt.part-0001").exists());
 }

@@ -207,6 +207,19 @@ pub fn attach(
             catalog_sha256: sha256_hex(&catalog_bytes),
             caption: caption.clone(),
         };
+        let expected = multipart::names::member_names(&name, ranges.len());
+        for (member, state) in attachments::ledger(&task) {
+            if state == Ledger::Attached {
+                refuse_extra_member(&name, &expected, &member)?;
+            }
+        }
+        if attachments::check_storage(&ctx.project, &task.id)? {
+            for entry in std::fs::read_dir(attachments::task_dir(&ctx.project, &task.id))? {
+                if let Some(member) = entry?.file_name().to_str() {
+                    refuse_extra_member(&name, &expected, member)?;
+                }
+            }
+        }
         let mut sources: Vec<_> = ranges
             .iter()
             .enumerate()
@@ -384,9 +397,13 @@ fn read_source(
 }
 
 fn refuse_reserved(task: &crate::model::Task, name: &str) -> Result<()> {
-    let declarations = multipart::audit::declarations(task);
-    if let Some(logical) = multipart::audit::reserved_names(task).get(name)
-        && matches!(declarations.get(logical), Some(DeclState::Live(_)))
+    if let Some((logical, _)) =
+        multipart::audit::declarations(task)
+            .into_iter()
+            .find(|(logical, state)| {
+                matches!(state, DeclState::Live(_))
+                    && (logical == name || multipart::audit::is_member(name, logical))
+            })
     {
         if logical == name {
             return Err(Error::AttachmentExists(format!(
@@ -396,6 +413,15 @@ fn refuse_reserved(task: &crate::model::Task, name: &str) -> Result<()> {
         }
         return Err(Error::MultipartMember(format!(
             "{name} is a member of multipart attachment {logical}; use its logical name"
+        )));
+    }
+    Ok(())
+}
+
+fn refuse_extra_member(logical: &str, expected: &[String], member: &str) -> Result<()> {
+    if multipart::audit::is_member(member, logical) && !expected.iter().any(|name| name == member) {
+        return Err(Error::AttachmentExists(format!(
+            "{member} conflicts with multipart attachment {logical}; detach it or choose another --name"
         )));
     }
     Ok(())

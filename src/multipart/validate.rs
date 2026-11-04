@@ -113,10 +113,52 @@ fn program_identity(
     program: &str,
     toplevel: &Path,
 ) -> io::Result<(Option<String>, Option<&'static str>)> {
-    if !program.contains('/') {
-        return Ok((None, Some("external")));
+    let path = if program.contains('/') {
+        toplevel.join(program)
+    } else {
+        use std::os::unix::ffi::OsStrExt;
+        let search = std::env::var_os("PATH").ok_or_else(|| io::Error::other("PATH is not set"))?;
+        let mut selected = None;
+        for entry in std::env::split_paths(&search) {
+            // Relative and empty PATH entries resolve in the validator's cwd.
+            let candidate = toplevel.join(entry).join(program);
+            match fs::metadata(&candidate) {
+                Ok(metadata) if !metadata.is_file() => continue,
+                Ok(_) => (),
+                Err(error)
+                    if matches!(
+                        error.raw_os_error(),
+                        Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES)
+                    ) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+            let path = std::ffi::CString::new(candidate.as_os_str().as_bytes())?;
+            if unsafe {
+                libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS)
+            } == 0
+            {
+                selected = Some(candidate);
+                break;
+            }
+            let error = io::Error::last_os_error();
+            if !matches!(
+                error.raw_os_error(),
+                Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES)
+            ) {
+                return Err(error);
+            }
+        }
+        selected.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("validator program {program:?} is not executable on PATH"),
+            )
+        })?
     }
-    let path = toplevel.join(program).canonicalize()?;
+    .canonicalize()?;
     if path.starts_with(toplevel.canonicalize()?) {
         Ok((Some(sha256_hex(&fs::read(path)?)), None))
     } else {
