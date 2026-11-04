@@ -112,6 +112,12 @@ pub enum Error {
     #[error("{0}")]
     MultipartUncuttable(String),
     #[error("{0}")]
+    MultipartTooLarge(String),
+    #[error("{0}")]
+    MultipartValidatorsUndeclared(String),
+    #[error("{0}")]
+    MultipartMember(String),
+    #[error("{0}")]
     MultipartNotText(String),
     #[error("{0}")]
     MultipartInvalidContent(String),
@@ -190,6 +196,11 @@ impl Error {
             Error::AttachmentUnsafe(detail) => Error::AttachmentUnsafe(detail + suffix),
             Error::AttachmentTooLarge(detail) => Error::AttachmentTooLarge(detail + suffix),
             Error::MultipartUncuttable(detail) => Error::MultipartUncuttable(detail + suffix),
+            Error::MultipartTooLarge(detail) => Error::MultipartTooLarge(detail + suffix),
+            Error::MultipartValidatorsUndeclared(detail) => {
+                Error::MultipartValidatorsUndeclared(detail + suffix)
+            }
+            Error::MultipartMember(detail) => Error::MultipartMember(detail + suffix),
             Error::MultipartNotText(detail) => Error::MultipartNotText(detail + suffix),
             Error::MultipartInvalidContent(detail) => {
                 Error::MultipartInvalidContent(detail + suffix)
@@ -255,6 +266,9 @@ impl Error {
             Error::AttachmentUnsafe(_) => "attachment_unsafe",
             Error::AttachmentTooLarge(_) => "attachment_too_large",
             Error::MultipartUncuttable(_) => "multipart_uncuttable",
+            Error::MultipartTooLarge(_) => "multipart_too_large",
+            Error::MultipartValidatorsUndeclared(_) => "multipart_validators_undeclared",
+            Error::MultipartMember(_) => "multipart_member",
             Error::MultipartNotText(_) => "multipart_not_text",
             Error::MultipartInvalidContent(_) => "multipart_invalid_content",
             Error::ClipboardUnavailable(_) => "clipboard_unavailable",

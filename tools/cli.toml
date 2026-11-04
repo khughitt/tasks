@@ -617,12 +617,13 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["attach"]
-summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note"
+summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note; --multipart accepts exactly one source and conflicts with --clipboard"
 args = [{ name = "id", value = "ref", required = true }, { name = "source", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--caption"], value = "string" },
   { names = ["--clipboard"], value = "none" },
   { names = ["--name"], value = "string" },
+  { names = ["--multipart"], value = "none" },
 ]
 
 [[cli.tasks.commands]]

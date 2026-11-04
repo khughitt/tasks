@@ -10,7 +10,6 @@ use std::process::Output;
 const SHOWN: usize = 5;
 
 #[derive(Debug)]
-#[allow(dead_code)] // Used by multipart publication in the following plan tasks.
 pub struct Committed {
     pub toplevel: PathBuf,
     pub commit: String,
@@ -424,7 +423,18 @@ fn commit_paths_report_in(
         };
         let output = git(
             &repo.toplevel,
-            &["-c", "core.abbrev=no", "commit", "-m", message],
+            &[
+                "-c",
+                "core.abbrev=no",
+                // Admission may make us a subreaper; detached maintenance becomes our child.
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "commit",
+                "-m",
+                message,
+            ],
         );
         after_commit();
         let output = match output {

@@ -9,7 +9,6 @@ pub struct Declaration {
 }
 
 impl Declaration {
-    #[allow(dead_code)] // Multipart attach writes this format in the following steps.
     pub fn note(&self) -> String {
         let mut note = format!(
             "multipart: {} ({} bytes, {} parts, sha256 {}, catalog sha256 {})",

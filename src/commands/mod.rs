@@ -1453,7 +1453,6 @@ pub fn finish(ctx: &mut Ctx) -> std::collections::BTreeSet<std::path::PathBuf> {
     crate::record_commit::commit_written(&mut ctx.warnings)
 }
 
-#[allow(dead_code)] // Used by multipart publication in the following plan tasks.
 pub fn finish_report(ctx: &mut Ctx) -> Vec<crate::record_commit::Committed> {
     crate::record_commit::commit_written_report(&mut ctx.warnings)
 }
@@ -2348,12 +2347,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             id,
             source,
             clipboard,
+            multipart,
             name,
             caption,
         } => attach::attach(
             open_id_write_ctx(dir, &id)?,
             id,
             attach::Source::from_args(source, clipboard)?,
+            multipart,
             name,
             caption,
         ),

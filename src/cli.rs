@@ -751,7 +751,7 @@ pub enum Command {
         #[arg(long, conflicts_with = "no_reviewed")]
         awaiting_user: bool,
     },
-    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
+    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note; --multipart accepts exactly one source and conflicts with --clipboard
     #[command(
         after_help = "Examples:\n  tasks attach sci-4f2a9c ~/Pictures/before.png --caption \"the stale row\"\n  grim - | tasks attach sci-4f2a9c - --name after.png\n  tasks attach sci-4f2a9c --clipboard"
     )]
@@ -764,6 +764,9 @@ pub enum Command {
         /// Read an image from the Wayland clipboard through wl-paste.
         #[arg(long)]
         clipboard: bool,
+        /// Store one UTF-8 text source as bounded parts and a catalog.
+        #[arg(long, conflicts_with = "clipboard")]
+        multipart: bool,
         /// Single source only: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
         #[arg(long)]
         name: Option<String>,

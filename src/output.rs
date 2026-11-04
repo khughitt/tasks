@@ -820,9 +820,25 @@ pub struct FileInfo {
 }
 
 #[derive(Serialize)]
+pub struct MultipartOut {
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub parts: usize,
+    pub catalog: String,
+    pub caption: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct AttachOut {
     pub id: String,
     pub files: Vec<FileInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multipart: Option<MultipartOut>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<crate::multipart::publication::Publication>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation: Option<crate::multipart::validate::Validation>,
     pub warnings: Vec<String>,
 }
 
@@ -2251,6 +2267,19 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
         ),
         Output::ArchiveApply(o) => format!("{}: {} ({})", o.id, o.action, o.archive_name),
+        Output::Attach(o) if o.publication.is_some() => {
+            let publication = o.publication.as_ref().expect("present");
+            match publication.cause {
+                Some(cause) => format!(
+                    "local ({cause}); {}",
+                    publication.next.as_deref().unwrap_or("")
+                ),
+                None => format!(
+                    "published at {}",
+                    publication.commit.as_deref().unwrap_or("")
+                ),
+            }
+        }
         Output::Attach(o) => o
             .files
             .iter()

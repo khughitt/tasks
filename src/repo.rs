@@ -116,7 +116,6 @@ pub struct Project {
     pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
-    #[allow(dead_code)] // Consumed by the multipart admission path in the next steps.
     pub multipart: crate::multipart::MultipartConfig,
     pub growth_warn_bytes: Option<u64>,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.

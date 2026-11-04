@@ -374,3 +374,601 @@ fn check_ignores_members_detached_by_a_task_move() {
     assert_eq!(env.check(&dir)["errors"], serde_json::json!([]));
     assert_eq!(env.check(&destination)["errors"], serde_json::json!([]));
 }
+
+fn attach_fixture(config: &str) -> (TestEnv, std::path::PathBuf, String) {
+    let mut env = TestEnv::new();
+    let dir = env.init("tst");
+    configure(&dir, config);
+    let id = common::id_of(env.json(&dir, &["add", "Evidence"]));
+    (env, dir, id)
+}
+fn multipart_attach(
+    env: &TestEnv,
+    dir: &Path,
+    id: &str,
+    name: &str,
+    bytes: &[u8],
+) -> serde_json::Value {
+    let source = dir.join("source");
+    std::fs::write(&source, bytes).unwrap();
+    env.json(
+        dir,
+        &[
+            "attach",
+            id,
+            source.to_str().unwrap(),
+            "--multipart",
+            "--name",
+            name,
+            "--caption",
+            "whole document",
+        ],
+    )
+}
+fn git_text(dir: &Path, args: &[&str]) -> String {
+    let home = tempfile::tempdir().unwrap();
+    let out = common::git_fixture::command(home.path(), dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout).unwrap().trim().into()
+}
+fn enable_git(dir: &Path) {
+    let config = dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
+    common::git(dir, &["init", "-q", "-b", "main"]);
+    common::git(dir, &["add", "tasks"]);
+    common::git(dir, &["commit", "-qm", "fixture"]);
+}
+#[test]
+fn multipart_attach_round_trips_exactly() {
+    for bytes in [
+        "abc\né日\n".repeat(15000).into_bytes(),
+        "é日".repeat(30000).into_bytes(),
+    ] {
+        let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+        let out = multipart_attach(&env, &dir, &id, "evidence.txt", &bytes);
+        assert_eq!(out["multipart"]["sha256"], digest(&bytes));
+        assert_eq!(out["multipart"]["caption"], "whole document");
+        let cat: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(stored(&dir, &id, "evidence.txt.catalog.json")).unwrap(),
+        )
+        .unwrap();
+        let rebuilt: Vec<u8> = cat["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|p| std::fs::read(stored(&dir, &id, p["name"].as_str().unwrap())).unwrap())
+            .collect();
+        assert_eq!(rebuilt, bytes);
+        assert!(out["validation"]["passed"].as_bool().unwrap());
+        assert!(env.check(&dir)["errors"].as_array().unwrap().is_empty());
+    }
+}
+#[test]
+fn multipart_attach_is_one_save_and_one_commit() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    let before: usize = git_text(&dir, &["rev-list", "--count", "HEAD"])
+        .parse()
+        .unwrap();
+    let out = multipart_attach(&env, &dir, &id, "evidence.txt", &vec![b'a'; 140000]);
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert_eq!(out["publication"]["commit"], commit);
+    assert_eq!(
+        git_text(&dir, &["rev-list", "--count", "HEAD"])
+            .parse::<usize>()
+            .unwrap(),
+        before + 1
+    );
+    let files = git_text(&dir, &["show", "--pretty=", "--name-only", &commit]);
+    assert_eq!(files.lines().count(), 5);
+    for file in out["files"].as_array().unwrap() {
+        assert!(files.contains(file["name"].as_str().unwrap()));
+    }
+}
+#[test]
+fn multipart_admits_exactly_the_byte_limit() {
+    let (env, dir, id) =
+        attach_fixture("max_bytes = 65536\nmultipart_max_bytes = 1000\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "exact.txt", &vec![b'a'; 1000]);
+    let before = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let source = dir.join("source");
+    std::fs::write(&source, vec![b'a'; 1001]).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args([
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--multipart",
+            "--name",
+            "over.txt",
+        ])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "multipart_too_large");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("multipart_max_bytes")
+    );
+    assert_eq!(
+        before,
+        std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap()
+    );
+    assert!(!stored(&dir, &id, "over.txt.part-0001").exists());
+}
+#[test]
+fn multipart_refusals_write_nothing() {
+    for (config, name, bytes, kind) in [
+        (
+            "max_bytes = 65536\nmultipart_validators = []",
+            "a.txt",
+            vec![255],
+            "multipart_not_text",
+        ),
+        (
+            "max_bytes = 65536\nmultipart_validators = []",
+            "a.json",
+            b"{bad}".to_vec(),
+            "multipart_invalid_content",
+        ),
+        (
+            "max_bytes = 65536",
+            "a.txt",
+            b"abc".to_vec(),
+            "multipart_validators_undeclared",
+        ),
+        (
+            "max_bytes = 1\nmultipart_validators = []",
+            "a.txt",
+            "é".as_bytes().to_vec(),
+            "multipart_uncuttable",
+        ),
+        (
+            "max_bytes = 1\nmultipart_validators = []",
+            "a.txt",
+            b"abc".to_vec(),
+            "attachment_too_large",
+        ),
+        (
+            "max_bytes = 65536\nmultipart_max_bytes = 0\nmultipart_validators = []",
+            "a.txt",
+            vec![],
+            "multipart_too_large",
+        ),
+        (
+            "max_bytes = 65536\nmultipart_max_parts = 0\nmultipart_validators = []",
+            "a.txt",
+            vec![],
+            "multipart_too_large",
+        ),
+        (
+            "max_bytes = 65536\nmultipart_max_parts = 1\nmultipart_validators = []",
+            "a.txt",
+            vec![b'x'; 65537],
+            "multipart_too_large",
+        ),
+        (
+            "max_bytes = 65536\nmultipart_validators = [{match='*',command=['sh','-c','! grep -q TOKEN']}]",
+            "a.txt",
+            [vec![b'a'; 65534], b"TOKEN".to_vec()].concat(),
+            "multipart_invalid_content",
+        ),
+    ] {
+        let (env, dir, id) = attach_fixture(config);
+        let source = dir.join("source");
+        std::fs::write(&source, bytes).unwrap();
+        let record = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&record).unwrap();
+        assert_eq!(
+            env.fail(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--multipart",
+                    "--name",
+                    name
+                ]
+            ),
+            kind,
+            "{config}"
+        );
+        assert_eq!(std::fs::read(record).unwrap(), before);
+        assert!(!dir.join(format!("tasks/files/{id}")).exists());
+    }
+}
+#[test]
+fn multipart_source_constraints() {
+    let (env, dir, id) = attach_fixture("multipart_validators = []");
+    env.usage(&dir, &["attach", &id, "--multipart", "--clipboard"]);
+    assert_eq!(
+        env.fail(&dir, &["attach", &id, "one", "two", "--multipart"]),
+        "validation"
+    );
+    assert!(!dir.join(format!("tasks/files/{id}")).exists());
+}
+#[test]
+fn one_part_artifact_when_it_fits() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    let out = multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    assert_eq!(out["multipart"]["parts"], 1);
+    assert_eq!(out["files"].as_array().unwrap().len(), 2);
+    assert_eq!(out["publication"]["cause"], "commit_disabled");
+    assert!(
+        out["publication"]["next"]
+            .as_str()
+            .unwrap()
+            .contains("tasks commit")
+    );
+}
+#[test]
+fn ordinary_attach_refuses_a_declared_member_name() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    let source = dir.join("source");
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--name",
+                "a.txt.part-0001"
+            ]
+        ),
+        "multipart_member"
+    );
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--multipart",
+                "--name",
+                "a.txt"
+            ]
+        ),
+        "attachment_exists"
+    );
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--multipart",
+                "--name",
+                "a.txt.part-0001"
+            ]
+        ),
+        "multipart_member"
+    );
+}
+#[test]
+fn oversize_without_flag_names_multipart() {
+    let (env, dir, id) = attach_fixture("max_bytes = 1");
+    let source = dir.join("source");
+    std::fs::write(&source, "ab").unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["attach", &id, source.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "attachment_too_large");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--multipart")
+    );
+}
+#[test]
+fn publication_local_for_each_cause() {
+    for cause in [
+        "commit_deferred",
+        "commit_failed",
+        "validation_failed",
+        "validation_unavailable",
+        "commit_unavailable",
+    ] {
+        let validators = if cause.starts_with("validation_") {
+            "multipart_validators = [{match='*', command=['sh','-c','if test -e ran; then exit 3; fi; touch ran']}]"
+        } else {
+            "multipart_validators = []"
+        };
+        let (env, dir, id) = attach_fixture(&format!("max_bytes = 65536\n{validators}"));
+        if cause == "commit_unavailable" {
+            let config = dir.join("tasks/.config.toml");
+            let text = std::fs::read_to_string(&config).unwrap();
+            std::fs::write(config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
+        } else {
+            enable_git(&dir);
+            if cause == "commit_deferred" {
+                std::fs::write(dir.join("unrelated"), "x").unwrap();
+                common::git(&dir, &["add", "unrelated"]);
+            }
+            if cause == "commit_failed" || cause == "validation_unavailable" {
+                use std::os::unix::fs::PermissionsExt;
+                let hook = dir.join(".git/hooks/pre-commit");
+                let body = if cause == "commit_failed" {
+                    "#!/bin/sh\nexit 1\n"
+                } else {
+                    "#!/bin/sh\nrm -f validator\n"
+                };
+                std::fs::write(&hook, body).unwrap();
+                std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        if cause == "validation_unavailable" {
+            let config = dir.join("tasks/.config.toml");
+            let text = std::fs::read_to_string(&config).unwrap().replace(
+                "command=['sh','-c','if test -e ran; then exit 3; fi; touch ran']",
+                "command=['./validator']",
+            );
+            std::fs::write(config, text).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(dir.join("validator"), "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(
+                dir.join("validator"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        let out = multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+        assert_eq!(out["publication"]["state"], "local", "{cause}: {out}");
+        assert_eq!(out["publication"]["cause"], cause, "{out}");
+        if cause == "commit_unavailable" {
+            assert!(
+                out["publication"]["next"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Git work tree")
+            );
+        }
+    }
+}
+#[test]
+fn interrupted_attach_reruns_adopt_and_commit_every_member() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    let bytes = vec![b'x'; 140000];
+    let member = stored(&dir, &id, "a.txt.part-0001");
+    std::fs::create_dir_all(member.parent().unwrap()).unwrap();
+    std::fs::write(member, &bytes[..65536]).unwrap();
+    std::fs::write(stored(&dir, &id, "a.txt.part-0002"), &bytes[65536..131072]).unwrap();
+    let out = multipart_attach(&env, &dir, &id, "a.txt", &bytes);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    let tree = git_text(&dir, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    for file in out["files"].as_array().unwrap() {
+        assert!(tree.contains(file["name"].as_str().unwrap()));
+    }
+}
+
+fn hook(dir: &Path, name: &str, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(format!(".git/hooks/{name}"));
+    std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn publication_binds_current_validators_to_exact_config_bytes() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    hook(
+        &dir,
+        "post-commit",
+        r#"sed -i "s/multipart_validators = \[\]/multipart_validators = [{match='*', command=['sh','-c','exit 3']}] /" tasks/.config.toml"#,
+    );
+    let out = multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    assert_eq!(out["publication"]["cause"], "validation_failed", "{out}");
+    assert_eq!(
+        out["validation"]["config_sha256"],
+        digest(&std::fs::read(dir.join("tasks/.config.toml")).unwrap())
+    );
+    assert_eq!(out["validation"]["validators"][0]["exit"], 3);
+}
+
+#[test]
+fn publication_invalid_runtime_config_is_unavailable() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    hook(
+        &dir,
+        "post-commit",
+        "printf 'broken = [' > tasks/.config.toml",
+    );
+    let out = multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    assert_eq!(
+        out["publication"]["cause"], "validation_unavailable",
+        "{out}"
+    );
+    assert_ne!(out["publication"]["state"], "published");
+    assert!(
+        out.get("validation").is_none(),
+        "setup failure must not retain an earlier passing report: {out}"
+    );
+}
+
+#[test]
+fn publication_commit_guard_detects_hook_corruption() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    hook(
+        &dir,
+        "pre-commit",
+        &format!(
+            "printf altered > tasks/files/{id}/a.txt.part-0001\ngit add tasks/files/{id}/a.txt.part-0001"
+        ),
+    );
+    let out = multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    assert_eq!(out["publication"]["cause"], "commit_failed", "{out}");
+}
+
+#[test]
+fn publication_validates_committed_bytes_after_working_bytes_change() {
+    let (env, dir, id) = attach_fixture(
+        "max_bytes = 65536\nmultipart_validators = [{match='*',command=['sh','-c','test \"$(cat)\" = hello']}]",
+    );
+    enable_git(&dir);
+    hook(
+        &dir,
+        "post-commit",
+        &format!("printf altered > tasks/files/{id}/a.txt.part-0001"),
+    );
+    let out = multipart_attach(&env, &dir, &id, "a.txt", b"hello");
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, "a.txt.part-0001")).unwrap(),
+        b"altered"
+    );
+    assert_eq!(
+        git_text(
+            &dir,
+            &["show", &format!("HEAD:tasks/files/{id}/a.txt.part-0001")]
+        ),
+        "hello"
+    );
+}
+
+#[test]
+fn multipart_collisions_refuse_without_writing_members_or_record() {
+    for live in [false, true] {
+        let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+        let source = dir.join("source");
+        std::fs::write(&source, "different").unwrap();
+        if live {
+            env.json(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--name",
+                    "a.txt.part-0001",
+                ],
+            );
+        } else {
+            std::fs::create_dir_all(stored(&dir, &id, "a.txt.part-0001").parent().unwrap())
+                .unwrap();
+            std::fs::write(stored(&dir, &id, "a.txt.part-0001"), "different").unwrap();
+        }
+        let record = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&record).unwrap();
+        std::fs::write(&source, vec![b'x'; 70000]).unwrap();
+        assert_eq!(
+            env.fail(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--multipart",
+                    "--name",
+                    "a.txt"
+                ]
+            ),
+            "attachment_exists"
+        );
+        assert_eq!(std::fs::read(record).unwrap(), before);
+        assert_eq!(
+            std::fs::read_dir(stored(&dir, &id, "a.txt.part-0001").parent().unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn multipart_part_limit_error_names_the_setting() {
+    let (env, dir, id) =
+        attach_fixture("max_bytes = 65536\nmultipart_max_parts = 1\nmultipart_validators = []");
+    let source = dir.join("source");
+    std::fs::write(&source, vec![b'x'; 65537]).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["attach", &id, source.to_str().unwrap(), "--multipart"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "multipart_too_large");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("multipart_max_parts")
+    );
+    assert!(!dir.join(format!("tasks/files/{id}")).exists());
+}
+
+#[test]
+fn multipart_stdin_uses_the_same_admission_and_storage() {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    let out = env
+        .cmd(&dir)
+        .args(["attach", &id, "-", "--name", "a.txt", "--multipart"])
+        .write_stdin("hello\n")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, "a.txt.part-0001")).unwrap(),
+        b"hello\n"
+    );
+    assert_eq!(
+        env.fail(&dir, &["attach", &id, "-", "--multipart"]),
+        "invalid_attachment_name"
+    );
+}
+
+#[test]
+fn multipart_save_failure_rolls_back_new_members_and_keeps_adopted_bytes() {
+    use std::os::unix::fs::PermissionsExt;
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    let source = dir.join("source");
+    let bytes = vec![b'x'; 70000];
+    std::fs::write(&source, &bytes).unwrap();
+    let first = stored(&dir, &id, "a.txt.part-0001");
+    std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+    std::fs::write(&first, &bytes[..65536]).unwrap();
+    let record = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    let tasks = dir.join("tasks");
+    std::fs::set_permissions(&tasks, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args([
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--multipart",
+            "--name",
+            "a.txt",
+        ])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&tasks, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "io");
+    assert_eq!(std::fs::read(record).unwrap(), before);
+    assert_eq!(std::fs::read(first).unwrap(), bytes[..65536]);
+    assert!(!stored(&dir, &id, "a.txt.part-0002").exists());
+    assert!(!stored(&dir, &id, "a.txt.catalog.json").exists());
+}

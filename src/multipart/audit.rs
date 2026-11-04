@@ -37,7 +37,6 @@ pub fn declarations(task: &Task) -> BTreeMap<String, DeclState> {
     state
 }
 
-#[allow(dead_code)] // Attach and detach consume reservations in the following steps.
 pub fn reserved_names(task: &Task) -> BTreeMap<String, String> {
     let mut reserved = BTreeMap::new();
     for (name, state) in declarations(task) {
