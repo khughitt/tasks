@@ -1,7 +1,7 @@
 //! What a stored dependency means once resolved, shared by every caller that judges one:
 //! the move-aware lookup and the single satisfaction rule. Each caller supplies its own
 //! lookup, so which copy of a record answers stays the caller's policy. See
-//! docs/specs/2026-10-25-blocker-ranking-design.md (existing contracts).
+//! docs/task-model.md (existing contracts).
 
 use crate::error::Result;
 use crate::model::{Task, TaskId};

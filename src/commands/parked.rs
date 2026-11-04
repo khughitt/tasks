@@ -71,7 +71,7 @@ fn sourced_rows(
         .collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
     // The registered rows' view; a row read from its recorded checkout builds that
-    // checkout's own in `resolve_recorded` (wait-aware spec §4.3).
+    // checkout's own in `resolve_recorded` (docs/user-guide.md).
     let deps = super::list::review_deps(ctx, all)?;
     let mut rows = Vec::new();
     for (key, park) in entries {
@@ -174,7 +174,7 @@ fn unavailable(
 }
 
 /// The row from the checkout the park recorded, judged with that checkout's own scan and
-/// dependency view (wait-aware spec §4.3).
+/// dependency view (docs/user-guide.md).
 fn resolve_recorded(
     ctx: &mut ReadCtx,
     id: &TaskId,
@@ -195,9 +195,9 @@ fn resolve_recorded(
 
 /// Opens the checkout a store entry recorded and reads `id` there, with that checkout's
 /// whole scan so the task's children, dependencies, and documents resolve there too (park
-/// design §5.3). A recorded code worktree of a linked or detached project holds no config;
+/// docs/ownership.md). A recorded code worktree of a linked or detached project holds no config;
 /// its project is the one its repository is paired or linked to (ops linked-checkouts
-/// §4.1, records-detached spec §3.2). `None` when
+/// docs/project-operations.md). `None` when
 /// the checkout is gone, belongs to another prefix, or lacks the record.
 pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Task, Vec<Task>)>> {
     let project = if crate::scope::has_config(worktree)? {
@@ -224,7 +224,7 @@ pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Ta
     Ok(Some((project, task, scan)))
 }
 
-/// `deps` is `all`'s dependency view (wait-aware spec §4.3).
+/// `deps` is `all`'s dependency view (docs/user-guide.md).
 pub fn candidates(
     ctx: &mut ReadCtx,
     all: &[Task],
@@ -270,7 +270,7 @@ pub fn candidates(
         if held {
             continue;
         }
-        // Lanes design §3.4: a candidate in a paused lane is set aside once it has passed
+        // Current contract (docs/user-guide.md): a candidate in a paused lane is set aside once it has passed
         // the dependency check; a deferred one is in neither the deferred nor the paused
         // count.
         let in_paused_lane = crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some();

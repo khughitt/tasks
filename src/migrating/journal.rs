@@ -1,4 +1,4 @@
-//! The host-local migration journal (spec §4.5): `move`'s journal widened to a set. It holds
+//! The host-local migration journal (docs/project-operations.md): `move`'s journal widened to a set. It holds
 //! the list's bytes and sha256, every listed record's bytes and the texts the run writes,
 //! the attachment digests and the claim-store entries before and after, so a resume writes
 //! the same bytes and any invocation can rebuild the paths the run owns.
@@ -28,7 +28,7 @@ pub struct CarriedEntry {
     pub source_digest: String,
     pub target_text: String,
     pub tombstone_text: String,
-    /// The rewrite notes' texts, for the output (spec §4.7).
+    /// The rewrite notes' texts, for the output (docs/project-operations.md).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rewrites: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

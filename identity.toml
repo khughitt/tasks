@@ -7,12 +7,15 @@ aliases = []
 purpose = "The file-based task tracker every project here uses"
 # One to three sentences, at most 400 characters: what it does and for whom.
 abstract = """
-Tracks a project's work as one markdown file per task, checked into the project, for
-coding agents and the people supervising them. A single Rust binary is the only writer
-and answers in JSON by default; the skills shipped beside it teach agents the session
-protocol. Each host registers its projects, so one command can read across all of them.
+Tracks work as Markdown records for people and coding agents, with records in-tree,
+linked to a code checkout, or detached in a records repository. One Rust CLI validates
+writes and answers in JSON; shipped skills teach the session protocol. A host registry
+supports reading across projects.
 """
 # Documents that are the authority for what is built or decided; each must be tracked.
-authority = ["docs/specs/2026-08-29-tasks-design.md"]
+authority = ["docs/task-model.md"]
 # Directories with their own identity.toml, README.md, and AGENTS.md.
 subsystems = []
+
+[documents]
+standard = 1

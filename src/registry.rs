@@ -19,13 +19,13 @@ pub struct Registry {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub records: BTreeMap<String, PathBuf>,
     /// Group name -> member prefixes, each a live prefix, sorted and distinct
-    /// (docs/specs/2026-10-03-lanes-needs-groups-design.md §6). Host-local like the rest
+    /// (docs/user-guide.md). Host-local like the rest
     /// of the registry. Not written when empty, so a registry without groups keeps its
     /// shape on save.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub groups: BTreeMap<String, Vec<String>>,
     /// Live prefix -> where the project has lived on this host
-    /// (docs/specs/2026-10-06-project-resolution-design.md §2). Not written when empty.
+    /// (docs/project-operations.md). Not written when empty.
     #[serde(
         default,
         skip_serializing_if = "locations_empty",
@@ -91,7 +91,7 @@ impl Registry {
     /// `load_from` with the home directory that expands a leading `~/` passed in, so
     /// tests never mutate the process-wide `HOME`.
     fn load_with_home(path: &Path, home: Option<OsString>) -> Result<Registry> {
-        // Only an absent registry is empty. `exists()` is false when an ancestor is
+        // Only an absent registry is empty. `exists` is false when an ancestor is
         // unreadable too, which would read a permission error as "no projects".
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
@@ -355,7 +355,7 @@ impl Registry {
         self.repoint(target, &root)?;
         // In the rename branch the source's table already moved to the target, and the
         // merge collapses its own pairs. In the registered-target branch it joins the
-        // target's (§2.2). The source's storage record leaves with `Displaced`, never
+        // target's. The source's storage record leaves with `Displaced`, never
         // as the target's record.
         self.locations.remove(source);
         let storage = history.storage.clone();
@@ -382,7 +382,7 @@ impl Registry {
         }
     }
 
-    /// Records `prefix`'s location history after a command wrote its entry (spec §2.1).
+    /// Records `prefix`'s location history after a command wrote its entry (docs/task-model.md).
     /// `previous` is the root it was registered at before, with that root's storage
     /// record, when the command may have moved it. A different root joins `former` with
     /// its storage: the live link if it still resolves, else `previous.storage`. Then the
@@ -475,7 +475,7 @@ impl Registry {
         }
     }
 
-    /// The live prefix `prefix` resolves to. One hop: aliases never chain (§2).
+    /// The live prefix `prefix` resolves to. One hop: aliases never chain.
     pub fn canonical_prefix<'a>(&'a self, prefix: &'a str) -> &'a str {
         self.aliases.get(prefix).map_or(prefix, String::as_str)
     }
@@ -1313,7 +1313,7 @@ mod tests {
     #[test]
     fn a_dangling_link_at_a_new_root_leaves_no_record_and_the_old_storage_under_former() {
         // The second host: --adopt runs before its storage move, so the new link dangles
-        // and the old root is already gone (spec §2.1, §2.2).
+        // and the old root is already gone (docs/task-model.md).
         let base = tempfile::tempdir().unwrap();
         let base = base.path().canonicalize().unwrap();
         let (gone, s_old, b) = (base.join("tack"), base.join("w/tack"), base.join("hq"));

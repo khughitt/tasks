@@ -54,7 +54,7 @@ pub fn same_session(claim_session: &str, harness: &str, session_id: &str) -> boo
         || (harness == "claude-code" && claim_session == format!("claude:{session_id}"))
 }
 
-/// Why nothing qualified. Spec §5 requires the harness and platform refusals to name what
+/// Why nothing qualified. docs/task-model.md requires the harness and platform refusals to name what
 /// was wrong, which the bare "no match" line cannot do, so a row that *is* this process is
 /// diagnosed against each predicate in turn. A row with no handle cannot be tied to this
 /// process, but when the session hint names it, the agent is present and only its handle
@@ -124,7 +124,7 @@ fn no_match(
 
 /// The actor hint names none of the qualifying rows. When one of them is this caller's own
 /// Codex root, the caller is a worker relay has not registered, and it must not claim as its
-/// controller (delegated identity §4, 2026-10-15 amendment). Neither message names a session.
+/// controller (delegated identity , 2026-10-15 amendment). Neither message names a session.
 fn hint_mismatch(root: Option<&str>, candidates: &[&crate::relay::snapshot::Agent]) -> Error {
     let detail = if root.is_some_and(|root| candidates.iter().any(|agent| agent.session_id == root))
     {
@@ -179,7 +179,7 @@ pub fn resolve(
     // diagnosed without becoming a match failure.
     let hint = hint_for(harness, get)?;
     // Both Codex exports, already validated by `hint_for`. The root is the claim's
-    // association (§2) and names this caller's own root row in a refusal; only the thread
+    // association  and names this caller's own root row in a refusal; only the thread
     // can select a worker row.
     let (root, thread) = if harness == "codex" {
         (
@@ -190,7 +190,7 @@ pub fn resolve(
         (None, None)
     };
     // The loader's own errors name the cause and the path, but they are registry errors,
-    // not identity errors: they must still carry the §5 recovery instruction, because a
+    // not identity errors: they must still carry the  recovery instruction, because a
     // caller whose registry is missing needs to be told how to name itself.
     let snapshot = load().map_err(|error| refuse(error.to_string()))?;
 
@@ -207,7 +207,7 @@ pub fn resolve(
         })
         .collect();
 
-    // Every predicate of spec §4.3 applies *before* cardinality: a row that cannot qualify
+    // Every docs/task-model.md applies *before* cardinality: a row that cannot qualify
     // — wrong harness, wrong platform, an earlier boot — is not a rival candidate, and
     // counting it would turn one good match into a false ambiguity.
     let qualifying: Vec<&crate::relay::snapshot::Agent> = same_process
@@ -875,7 +875,7 @@ mod tests {
 
     #[test]
     fn relay_worker_rows_session_only_selects_the_root() {
-        // §1's known limit: without a thread, the root's session names the root row.
+        // 's known limit: without a thread, the root's session names the root row.
         let resolved = workers(&env(&[("CODEX_SESSION_ID", R)])).unwrap().unwrap();
         assert_eq!(resolved.session, format!("codex:{R}"));
     }

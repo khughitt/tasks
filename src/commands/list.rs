@@ -52,7 +52,7 @@ pub(super) fn satisfied(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<bool
     )
 }
 
-/// The dependency view for rows of `scan` (wait-aware spec §4.3): one per scan, never
+/// The dependency view for rows of `scan` (docs/user-guide.md): one per scan, never
 /// shared, so each row is judged against the copies its own checkout holds.
 pub(super) fn review_deps(ctx: &mut ReadCtx, scan: &[Task]) -> Result<crate::review::Deps> {
     let deps = crate::review::Deps::of_scan(scan, |id| resolve_dependency(ctx, scan, id))?;
@@ -119,7 +119,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
         let periodic_ok = !periodic || task.every.is_some();
         let deferred_ok = !deferred || task.defer.is_some();
         // The default pool when --status is absent: open, or every status
-        // for --periodic, since most of a healthy series is closed (spec §5.2).
+        // for --periodic, since most of a healthy series is closed (docs/task-model.md).
         let pool_ok = !filter.statuses().is_empty() || periodic || task.status.is_open();
         periodic_ok
             && deferred_ok
@@ -287,7 +287,7 @@ fn closing_hint(id: &str, status: Status) -> String {
 }
 
 /// Ready tasks in ready order; pushes a warning per unreachable dependency. `deps` is
-/// `all`'s dependency view (wait-aware spec §4.3).
+/// `all`'s dependency view (docs/user-guide.md).
 pub fn ready_tasks(
     ctx: &mut ReadCtx,
     all: &[Task],
@@ -345,7 +345,7 @@ pub fn ready_tasks(
         }
     }
     sort_ready(&mut ready);
-    // Lanes design §3.4: a paused lane keeps its subtree out of every picker. Its work
+    // Current contract (docs/user-guide.md): a paused lane keeps its subtree out of every picker. Its work
     // leaves here, before the claim and park checks that warn about what they drop, and
     // passes those same checks silently, so the paused count holds only work that would
     // otherwise be offered. A deferred task in a paused lane is in neither count.
@@ -466,7 +466,7 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
     }
 }
 
-/// Lanes design §3.4: one `<n> task(s) hidden by paused lane <id>` warning per lane,
+/// Current contract (docs/user-guide.md): one `<n> task(s) hidden by paused lane <id>` warning per lane,
 /// counted before exclusive holds. The pickers already applied the dependency, defer,
 /// claim, and park checks to `paused`; this applies the halt, `--without`, and cutoff
 /// gates the caller applies to its own list, without their warnings, then counts each
@@ -498,7 +498,7 @@ fn warn_paused(
     ctx.warnings.extend(paused_omissions(&by_lane));
 }
 
-/// Lanes/needs design §4.5: drop tasks held back by another session's exclusive hold,
+/// Current contract (docs/user-guide.md): drop tasks held back by another session's exclusive hold,
 /// with one warning per need and holder; order is unchanged. Whether a hold is this
 /// session's is the read views' rule, `read_holds`: with a resolved identity, as
 /// `occupants` decides a claim (the identity, or else the claim's process proof); with
@@ -553,7 +553,7 @@ pub(super) fn view_holds(
 }
 
 /// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and
-/// the vocabulary each task's needs are judged by (spec §4.3). It borrows the scope
+/// the vocabulary each task's needs are judged by (docs/task-model.md). It borrows the scope
 /// alone, so a caller may hold it while pushing to `ctx.warnings`.
 pub(super) fn vocabularies(scope: &Scope) -> Vocabularies<'_> {
     scope
@@ -728,7 +728,7 @@ pub fn next(
 
 /// Live claims on tasks this scan does not hold: work started in a checkout whose branch
 /// has not merged. Each is read from the claim's recorded worktree, with that checkout's
-/// scan, the way park design §5.3 resolves a store-only park, so `doing` never drops a
+/// scan, the docs/ownership.md resolves a store-only park, so `doing` never drops a
 /// live claim without a word. None is a `ready` or `next` candidate: `start` reads the
 /// local file, so the warning names where to resume instead.
 fn claimed_elsewhere(
@@ -876,7 +876,7 @@ pub fn prime(
     let mut closeout: Vec<Task> = Vec::new();
     let mut held: Vec<String> = Vec::new();
     for task in &all {
-        // spec §4.3: todo, doing, or blocked; an idea is open but not a candidate
+        // Current contract (docs/task-model.md): todo, doing, or blocked; an idea is open but not a candidate
         if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
             || crate::hierarchy::children(&all, &task.id, &ctx.registry).is_empty()
             || !crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry).is_empty()

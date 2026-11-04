@@ -1,5 +1,5 @@
 //! The `moved` tombstone and the pointer between a moved task's two records. See
-//! docs/specs/2026-10-08-task-move-design.md §3.
+//! docs/project-operations.md
 
 use crate::error::{Error, Result};
 use crate::model::{Status, Task, TaskId};
@@ -145,7 +145,7 @@ pub fn refuse_reference(task: &Task, role: &str) -> Result<()> {
 }
 
 /// The record a dependency on `first` means: itself when live, else the end of its
-/// `moved_to` chain (spec §3.4). `None` when a hop is unreachable or the chain revisits an
+/// `moved_to` chain (docs/task-model.md). `None` when a hop is unreachable or the chain revisits an
 /// id; callers already treat `None` as an open, unreachable dependency.
 pub fn follow(
     first: Option<Task>,
@@ -166,7 +166,7 @@ pub fn follow(
 }
 
 /// The edges a record contributes to the dependency graph. A tombstone's retained
-/// `depends` are history; its only edge is its pointer (spec §3.4).
+/// `depends` are history; its only edge is its pointer (docs/task-model.md).
 pub fn edges(task: &Task) -> Vec<TaskId> {
     match (task.status, &task.moved_to) {
         (Status::Moved, Some(to)) => vec![to.clone()],

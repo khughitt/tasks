@@ -1,5 +1,5 @@
 //! `tasks group set|rm` and `tasks groups`: named sets of registered projects
-//! (docs/specs/2026-10-03-lanes-needs-groups-design.md §6). Registry-only, like
+//! (docs/user-guide.md). Registry-only, like
 //! `unregister`: no project context, and the registry lock around every write.
 
 use crate::error::{Error, Result};

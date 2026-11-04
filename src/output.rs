@@ -114,7 +114,7 @@ pub struct WokenOut {
     pub shelves: Vec<String>,
 }
 
-/// `tasks migrate <list>`: spec §4.7. `refusals` and `body_changes` appear on `--explain`.
+/// `tasks migrate <list>`: docs/task-model.md `refusals` and `body_changes` appear on `--explain`.
 #[derive(Serialize)]
 pub struct MigrateOut {
     pub source: String,
@@ -224,7 +224,7 @@ pub struct RootOut {
     pub warnings: Vec<String>,
 }
 
-/// `tasks where` (ops linked-checkouts §4, §8.1). Every project object carries `root`,
+/// `tasks where` (docs/project-operations.md). Every project object carries `root`,
 /// `checkout` and `records`; `linked` equals `kind == "linked"`.
 #[derive(Serialize)]
 pub struct WhereOut {
@@ -251,7 +251,7 @@ pub struct ResolveOut {
     pub warnings: Vec<String>,
 }
 
-/// One input's answer (spec §3.2). Fields that do not apply are omitted.
+/// One input's answer (docs/task-model.md). Fields that do not apply are omitted.
 #[derive(Serialize, Default)]
 pub struct ResolveRow {
     pub input: String,
@@ -569,7 +569,7 @@ pub struct HaltRow {
     pub present_locally: bool,
 }
 
-/// Each in-scope prefix's configured colour (comfy-tables spec §5).
+/// Each in-scope prefix's configured colour (docs/user-guide.md).
 pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
 
 pub fn color_of(colors: &ProjectColors, id: &str) -> Option<crate::palette::Rgb> {
@@ -601,7 +601,7 @@ fn paint_lane(colors: &ProjectColors, lane: &mut crate::lanes::LaneRow) {
 
 impl Output {
     /// Fill `project_color` on every task row a pretty view of this output shows. `claims`
-    /// is left alone: it opens no checkout (comfy-tables spec §5).
+    /// is left alone: it opens no checkout (docs/user-guide.md).
     pub fn paint_projects(&mut self, colors: &ProjectColors) {
         match self {
             Output::List(o) => o
@@ -669,9 +669,9 @@ pub struct TaskSummary {
     pub awaiting_user: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reviewed_at: Option<String>,
-    /// The row needs a look (review-state spec §4). Computed from the scan, never stored.
+    /// The row needs a look (docs/user-guide.md). Computed from the scan, never stored.
     pub needs_review: bool,
-    /// Why the row needs a look (wait-aware spec §4.2); present exactly when
+    /// Why the row needs a look (docs/user-guide.md); present exactly when
     /// `needs_review` is true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_reason: Option<crate::review::ReviewReason>,
@@ -736,7 +736,7 @@ pub struct ClaimInfo {
     pub started: String,
     pub seen: String,
     pub live: bool,
-    /// Why a held claim could not be judged from here (claim PID-view design §5). `live`
+    /// Why a held claim could not be judged from here (docs/ownership.md). `live`
     /// stays `true` for it, so consumers that read `false` as "free" stay safe.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unverified: Option<String>,
@@ -776,15 +776,15 @@ pub struct ClaimRow {
 }
 
 /// `tasks claims`. No `warnings`: every store is read or the command fails, so there is
-/// nothing partial to warn about (ai docs/specs/2026-09-24-turn-boundary-gate-design.md
-/// §3.1).
+/// nothing partial to warn about (docs/ownership.md)
+///.
 #[derive(Serialize)]
 pub struct ClaimsOut {
     pub claims: Vec<ClaimRow>,
 }
 
 /// The park entry as JSON: everything but the title snapshot, which is the row's own
-/// `title` (spec §5.4).
+/// `title` (docs/task-model.md).
 #[derive(Debug, Clone, Serialize)]
 pub struct ParkInfo {
     pub at: String,
@@ -819,7 +819,7 @@ impl ParkInfo {
     }
 }
 
-/// A record's cadence and where it sits in the cycle (spec §5.4). `due_now` is carried
+/// A record's cadence and where it sits in the cycle (docs/task-model.md). `due_now` is carried
 /// explicitly because an absent `due` cannot distinguish "not applicable" from "due now with
 /// no anchor".
 #[derive(Debug, Clone, Serialize)]
@@ -926,7 +926,7 @@ pub struct DetachOut {
     pub warnings: Vec<String>,
 }
 
-/// A record's deferral and whether the clock has spent it (spec §5.4). Named apart from
+/// A record's deferral and whether the clock has spent it (docs/task-model.md). Named apart from
 /// the raw `Task.defer` string so the two shapes never collide.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeferredInfo {
@@ -946,7 +946,7 @@ impl DeferredInfo {
 
 impl TaskSummary {
     /// `all` is the scan the row came from; counts are computed against it, and `deps` is
-    /// that scan's dependency view (wait-aware spec §4.3).
+    /// that scan's dependency view (docs/user-guide.md).
     pub fn of(
         task: &Task,
         all: &[Task],
@@ -1027,12 +1027,12 @@ pub struct ParkedRow {
     pub parallel: bool,
     /// Marked as a lane; always present, like `parallel`.
     pub lane: bool,
-    /// From the record; omitted on an unresolved row (review-state spec §5.4).
+    /// From the record; omitted on an unresolved row (docs/user-guide.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reviewed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub needs_review: Option<bool>,
-    /// Omitted on an unresolved row, as `needs_review` is (wait-aware spec §5.1).
+    /// Omitted on an unresolved row, as `needs_review` is (docs/user-guide.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_reason: Option<crate::review::ReviewReason>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1178,7 +1178,7 @@ pub struct QuietOut {
     pub warnings: Vec<String>,
 }
 
-/// `tasks goals` (goals-view spec §5.5).
+/// `tasks goals` (docs/user-guide.md).
 #[derive(Serialize)]
 pub struct GoalsOut {
     pub observed_at: String,
@@ -1354,20 +1354,20 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
     }
 }
 
-/// What `prime` says about the cadences that are not yet due (spec §5.3). Due records are
+/// What `prime` says about the cadences that are not yet due (docs/task-model.md). Due records are
 /// work, not schedule, and are counted nowhere here.
 #[derive(Serialize, Default)]
 pub struct PeriodicSummary {
     pub scheduled: usize,
     pub next_due: Option<String>,
     /// Pretty-only, like `PrimeOut::closed`: calendar days from the command's captured
-    /// `now` to `next_due` (spec §5.3), so the line can say "in 7d" without reaching for a
+    /// `now` to `next_due` (docs/task-model.md), so the line can say "in 7d" without reaching for a
     /// second clock.
     #[serde(skip)]
     pub in_days: Option<i64>,
 }
 
-/// The `prime` line for deferrals (defer §5.3): what is waiting, the soonest date, and
+/// The `prime` line for deferrals (defer): what is waiting, the soonest date, and
 /// what has come due but still carries its date — the revisit queue.
 #[derive(Serialize, Default)]
 pub struct DeferredSummary {
@@ -1425,7 +1425,7 @@ pub struct PrimeOut {
     pub warnings: Vec<String>,
 }
 
-/// `tasks lanes` (lanes design §5.3).
+/// `tasks lanes` (docs/user-guide.md).
 #[derive(Serialize)]
 pub struct LanesOut {
     pub lanes: Vec<LaneRow>,
@@ -1638,7 +1638,7 @@ fn halt_line(halts: &[HaltRow]) -> String {
     format!("halt: {named}; allowed: halt work, linked work, or equally urgent priority{missing}\n")
 }
 
-/// The migration review the user reads (spec §4.8): refusals, the successor tree for the
+/// The migration review the user reads (docs/task-model.md): refusals, the successor tree for the
 /// carried tasks, drops with the dependents they release, closes, removed edges and dropped
 /// links, then body diffs.
 fn migrate_review(o: &MigrateOut) -> String {
@@ -2415,7 +2415,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
 }
 
 /// One row per lane: id, priority, title, then its state with the pick or its main
-/// cause (lanes design §5.3). `detail` adds the guidance and the active claims under each
+/// cause (docs/user-guide.md). `detail` adds the guidance and the active claims under each
 /// row, as `tasks lanes` prints them; `prime` leaves them out.
 fn lane_table(
     rows: &[LaneRow],
@@ -2519,7 +2519,7 @@ fn waiting_text(causes: &Causes) -> String {
 /// per-section decision cannot shift columns between adjacent sections.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Marks {
-    /// The `* ` prefix on the id cell (review-state spec §5.3).
+    /// The `* ` prefix on the id cell (docs/user-guide.md).
     pub review: bool,
     /// The `||` column.
     pub parallel: bool,
@@ -2596,7 +2596,7 @@ pub fn any_type_tree(nodes: &[TreeNode]) -> bool {
 }
 
 /// Whether a pretty rendering of `out` paints from the theme's colors, and so whether
-/// the stdout painter needs them (date spec §3.1; priority spec §3.1). Every output showing
+/// the stdout painter needs them (docs/user-guide.md ; docs/user-guide.md). Every output showing
 /// a priority also shows dates, including show and next.
 pub fn needs_theme(out: &Output) -> bool {
     matches!(
@@ -2616,7 +2616,7 @@ pub fn needs_theme(out: &Output) -> bool {
 }
 
 /// Whether a pretty rendering of `out` shows priorities, and so whether a palette
-/// without magenta costs it anything (priority spec §3.3).
+/// without magenta costs it anything (docs/user-guide.md).
 pub fn shows_priority(out: &Output) -> bool {
     matches!(
         out,
@@ -2902,7 +2902,7 @@ pub fn parked_table(
     crate::table::render(&parked_columns(), &built, layout, widths, painter)
 }
 
-/// The pretty goals view (goals-view spec §5.5): open rows, then a separator and the
+/// The pretty goals view (docs/user-guide.md): open rows, then a separator and the
 /// recently closed rows, dimmed. Fixed columns line up across both sections.
 pub fn goals_table(
     rows: &[crate::goals::GoalRow],
@@ -2936,7 +2936,7 @@ pub fn goals_table(
         }
         text
     };
-    // Prerequisites outside the subtree, shown only while one is not yet satisfied (§5.2a).
+    // Prerequisites outside the subtree, shown only while one is not yet satisfied.
     let progress = |row: &crate::goals::GoalRow| {
         let mut text = progress(&row.pieces);
         if let Some(deps) = row
@@ -3518,7 +3518,7 @@ mod tests {
 
     #[test]
     fn the_date_column_carries_the_recency_role() {
-        // row() is updated 2026-09-06, the painter's today: full cyan.
+        // row is updated 2026-09-06, the painter's today: full cyan.
         let rows = [row("xx-000001", false)];
         let text = render_tasks(
             &rows,

@@ -1,4 +1,4 @@
-//! G9's check (spec §4.5): every path the run owns is clean in its repository, for the
+//! G9's check (docs/project-operations.md): every path the run owns is clean in its repository, for the
 //! records directories that opt in to record commits.
 
 use crate::error::{Error, Result};

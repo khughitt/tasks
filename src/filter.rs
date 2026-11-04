@@ -1,5 +1,5 @@
 //! One selection over record fields for the read commands that filter
-//! (docs/specs/2026-09-30-task-filters-design.md). Repeats of one field widen (any of
+//! (docs/user-guide.md). Repeats of one field widen (any of
 //! them); different fields narrow (all of them); `--tag` and `--need` are all-of. Each command
 //! keeps its own default status pool; an explicit `--status` replaces it here.
 

@@ -1,5 +1,5 @@
 //! Who a drop or close releases, which shelves it wakes, and who depends on a carried task
-//! (spec §4.3 "Dropped and closed tasks: who they release", §4.7 `inbound`/`woken`). Read
+//! (docs/project-operations.md "Dropped and closed tasks: who they release", `inbound`/`woken`). Read
 //! across every reachable registered project, retired ones included, as `move`'s inbound
 //! dependents are; a project that cannot be read is named, never guessed at.
 

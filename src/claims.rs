@@ -17,7 +17,7 @@ pub enum PidSource {
 
 /// Who holds a claim, and the pid that proves it is still alive. `session` is raw, for
 /// matching against the store; `tagged` is the same session with the scheme of the level
-/// that resolved it, for records that outlive the claim (a park entry, spec §6).
+/// that resolved it, for records that outlive the claim (a park entry, docs/ownership.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
     pub session: String,
@@ -26,7 +26,7 @@ pub struct Identity {
     pub proof: Option<Proof>,
     pub root_session: Option<String>,
     /// How `pid` was obtained, which decides whether a claim write can establish its PID
-    /// view (claim PID-view design §2). `None` when there is no pid, or when the pid is
+    /// view (docs/ownership.md). `None` when there is no pid, or when the pid is
     /// carried from a claim rather than supplied by this write.
     pub pid_source: Option<PidSource>,
 }
@@ -88,7 +88,7 @@ pub fn identity_from(
             pid_source: pid.map(|_| PidSource::Exported),
         });
     }
-    // Stage 1 of spec §7 is above: an explicit pair short-circuits, so the relay level is
+    // Stage 1 docs/ownership.md is above: an explicit pair short-circuits, so the relay level is
     // never invoked and none of its stages run.
     if let Some(resolved) = relay()? {
         return Ok(Identity {
@@ -179,8 +179,8 @@ pub struct Claim {
     pub pid_start: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boot_id: Option<String>,
-    /// The PID view `pid` was established in, `"<dev>:<ino>"` (claim PID-view design §2).
-    /// Absent when no write could establish it; such a pid is then never judged (§3).
+    /// The PID view `pid` was established in, `"<dev>:<ino>"` (docs/ownership.md).
+    /// Absent when no write could establish it; such a pid is then never judged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid_view: Option<String>,
     pub host: String,
@@ -188,7 +188,7 @@ pub struct Claim {
     pub started: String,
     pub seen: String,
     /// The exclusive needs this claim holds: the task's needs that its own project declares
-    /// exclusive, computed on every acquire (lanes/needs design §4.4). Absent in entries
+    /// exclusive, computed on every acquire (docs/user-guide.md). Absent in entries
     /// written before holds existed, which therefore hold nothing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holds: Vec<String>,
@@ -331,7 +331,7 @@ pub fn describe_stop(
 
 /// A task set down with its next step: the store's other entry kind. No liveness, no
 /// heartbeat, never pruned by a read; `start` replaces it, `done` and `drop` remove it.
-/// See docs/specs/2026-09-09-park-design.md §4.
+/// See docs/ownership.md
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Park {
     pub owner: String,
@@ -350,7 +350,7 @@ pub struct Park {
     pub needs: Option<Needs>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minutes: Option<u32>,
-    /// Snapshot at park time, for rows whose task file is unreachable (spec §5.3).
+    /// Snapshot at park time, for rows whose task file is unreachable (docs/ownership.md).
     pub title: String,
 }
 
@@ -358,7 +358,7 @@ pub struct Park {
 /// raised its rating. Shared outside git so every checkout's picker sees the new level
 /// before the record merges; survives `start` and later parks; removed only by an explicit
 /// `edit --complexity`/`--no-complexity` or by closing the task. See
-/// docs/specs/2026-09-12-task-complexity-design.md §5.1.
+/// docs/user-guide.md
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Escalation {
     pub level: crate::model::Complexity,
@@ -506,7 +506,7 @@ impl ClaimStore {
         self.claims.get(&id.to_string())
     }
 
-    /// A claim displaces a park on the same id: one entry per task (spec §4).
+    /// A claim displaces a park on the same id: one entry per task (docs/ownership.md).
     pub fn insert(&mut self, id: &TaskId, claim: Claim) {
         let key = id.to_string();
         self.parks.remove(&key);
@@ -711,8 +711,8 @@ pub enum Liveness {
     Live,
     Stale(String),
     /// Judged through a PID view other than the one that recorded the pid, or where
-    /// either is unknown (claim PID-view design §3). Protected like `Live`: only `Stale`
-    /// permits pruning, takeover without `--force`, or releasing holds (§4).
+    /// either is unknown (docs/ownership.md). Protected like `Live`: only `Stale`
+    /// permits pruning, takeover without `--force`, or releasing holds.
     Unverifiable(String),
 }
 
@@ -793,7 +793,7 @@ impl ClaimSnapshot {
         self.by_id.get(&id.to_string())
     }
 
-    /// The claim on `id` unless it is stale: `Live` and `Unverifiable` both hold (§4).
+    /// The claim on `id` unless it is stale: `Live` and `Unverifiable` both hold.
     pub fn held(&self, id: &TaskId) -> Option<&Claim> {
         match self.get(id) {
             Some((claim, liveness)) if !liveness.is_stale() => Some(claim),
@@ -858,7 +858,7 @@ pub fn boot_id() -> Option<String> {
         .map(|id| id.trim().to_string())
 }
 
-/// The process evidence a claim write records (claim PID-view design §2).
+/// The process evidence a claim write records (docs/ownership.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evidence {
     pub pid: Option<u32>,
@@ -882,10 +882,10 @@ impl Evidence {
 /// continues it (a heartbeat), and `None` for a fresh acquisition or a takeover. A view is
 /// recorded only when this write establishes the pid in a known view. Exported pids
 /// establish one only in the initial PID namespace, because no numeric match can prove an
-/// inherited number's namespace (spec round 2). A heartbeat that establishes nothing keeps
-/// the recorded evidence unless it reports a different pid (§2's table), or that evidence
+/// inherited number's namespace. A heartbeat that establishes nothing keeps
+/// the recorded evidence unless it reports a different pid ('s table), or that evidence
 /// already reads stale from this view: keeping a dead pid would write the owner's own claim
-/// stale, free for anyone to take (final review, Important 1).
+/// stale, free for anyone to take.
 ///
 /// A pid this view refutes is no liveness handle, and the write records a pid-less (TTL)
 /// claim instead, heartbeat or not: pid 0, a Unix session id this procfs numbers and
@@ -989,7 +989,7 @@ pub fn liveness_with(
     };
 
     let Some(pid) = claim.pid else { return ttl() };
-    // A reboot ends every view, so it needs no view check (§3 rule 1).
+    // A reboot ends every view, so it needs no view check (rule 1).
     if let (Some(current), Some(recorded)) = (boot_id, &claim.boot_id)
         && current != recorded
     {
@@ -1024,7 +1024,7 @@ pub fn liveness_with(
     }
 }
 
-/// A resolution that may be carried rather than raised. Spec §6.2.2: an identity error is
+/// A resolution that may be carried rather than raised. docs/ownership.md: an identity error is
 /// deferred across the two steps where a right to act can be established without it, and
 /// raised the moment acquisition is reached.
 pub enum Resolution {
@@ -1058,7 +1058,7 @@ pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
 }
 
 /// The identity to record when ownership was established by **proof alone** — the claim's
-/// own. Spec §6.4: `existing.session` is never rewritten, so a claim keeps the identity it
+/// own. docs/ownership.md: `existing.session` is never rewritten, so a claim keeps the identity it
 /// was created with, and enabling relay mid-flight cannot re-key a natively-held claim.
 ///
 /// This is deliberately *not* used when the resolved identity already matched the claim.
@@ -1096,7 +1096,7 @@ pub fn name_the_claim(error: Error, held: Option<&str>) -> Error {
     }
 }
 
-/// Spec §6.2: does this caller own `claim`, proved from the claim's own recorded process
+/// Current contract (docs/ownership.md): does this caller own `claim`, proved from the claim's own recorded process
 /// handle and the caller's ancestry, with no registry read?
 pub fn proves_ownership(
     claim: &Claim,
@@ -2692,7 +2692,7 @@ mod tests {
         }
     }
 
-    /// Just after `sample()`'s `seen`, inside the TTL.
+    /// Just after `sample`'s `seen`, inside the TTL.
     fn t0() -> time::OffsetDateTime {
         at("2026-09-05T08:00:01Z")
     }

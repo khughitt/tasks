@@ -1,6 +1,6 @@
 //! `tasks blockers`: one captured scan, the downstream-impact analysis of
 //! `crate::blockers`, then this host's park and claim evidence on the ranked rows. Writes
-//! nothing. See docs/specs/2026-10-25-blocker-ranking-design.md.
+//! nothing. See docs/task-model.md
 
 use super::ReadCtx;
 use crate::blockers::{Coverage, CoverageMode, Impact};

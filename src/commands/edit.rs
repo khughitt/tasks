@@ -50,7 +50,7 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     if edited.created != original.created {
         return Err(Error::Validation("created is immutable".into()));
     }
-    // Both stamps are written by `transition()` and by nothing else. Unlike `last_done`,
+    // Both stamps are written by `transition` and by nothing else. Unlike `last_done`,
     // no other field's edit needs to clear them, so clearing is refused as well.
     if edited.started != original.started {
         return Err(Error::Validation(
@@ -94,7 +94,7 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     Ok(())
 }
 
-/// Spec §5.3: the one change the editor may make to notes is removing trailing spaces and
+/// Current contract (docs/task-model.md): the one change the editor may make to notes is removing trailing spaces and
 /// tabs from existing texts. Count, order, stamps, authors, and provenance stay, and so
 /// does every attachment-ledger entry a text records.
 fn notes_unchanged_or_trimmed(original: &[Note], edited: &[Note]) -> bool {
@@ -302,7 +302,7 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         }
     }
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
-    // Lanes/needs design §4.4: needs change under no live claim or the caller's own, and
+    // Current contract (docs/user-guide.md): needs change under no live claim or the caller's own, and
     // under the caller's own the claim's holds follow in the same save.
     // The target's override notes are appended here and land with its save. The
     // holders' notes are held in `holder_notes` until that save has succeeded.
@@ -332,7 +332,7 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
             transition(&mut ctx, &mut task, to, args.force)?;
         }
     }
-    // Review-state spec §3.3: after any status change, so `--status idea --reviewed`
+    // Current contract (docs/user-guide.md): after any status change, so `--status idea --reviewed`
     // sets it and `--status todo --reviewed` is refused.
     if args.reviewed || args.no_reviewed || args.awaiting_user || args.no_awaiting_user {
         crate::review::apply(
@@ -352,7 +352,7 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         ctx.warnings.push(warning);
     }
     save(&mut ctx, &mut task)?;
-    // Lanes/needs design §4.5: a holder learns of the override only once it has landed.
+    // Current contract (docs/user-guide.md): a holder learns of the override only once it has landed.
     // A save refused by its own validation (a parent cycle, say) writes no note anywhere.
     if let Some(notes) = holder_notes {
         super::note_need_holders(&mut ctx, notes);
@@ -408,7 +408,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         )));
     }
 
-    // Spec record-home §3.1: the lock was released while the editor was open, so another
+    // Record ownership (docs/ownership.md): the lock was released while the editor was open, so another
     // checkout may have written since the first check.
     super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command).map_err(
         |error| match error {
@@ -483,7 +483,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     ctx.warnings.extend(from_main);
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;
     let status = edited.status;
-    // spec §2.2: a save may change the status or the date, never both, since the
+    // Current contract (docs/task-model.md): a save may change the status or the date, never both, since the
     // transition below clears the date and would silently discard a new one.
     if status != original.status
         && edited.defer != original.defer
@@ -495,7 +495,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
                 .into(),
         )));
     }
-    // Lanes-needs spec §4.4: status and needs change in separate operations, as status
+    // Current contract (docs/user-guide.md): status and needs change in separate operations, as status
     // and defer do, so every acquire reads the needs already on the record.
     if status != original.status && edited.needs != original.needs {
         return Err(keep(Error::Validation(
@@ -504,7 +504,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
                 .into(),
         )));
     }
-    // spec §3.2: the status rule is the writers' to enforce. A status-changing save
+    // Current contract (docs/task-model.md): the status rule is the writers' to enforce. A status-changing save
     // reaches `transition`, which clears the field; an equal-status save must not leave
     // a deferral on a status that cannot carry one.
     if status == original.status && edited.defer.is_some() && !crate::defer::can_carry(status) {
@@ -514,7 +514,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             status.as_str()
         ))));
     }
-    // Lanes-needs spec §4.2: only names this save adds must be declared (the grammar
+    // Current contract (docs/user-guide.md): only names this save adds must be declared (the grammar
     // was checked by `parse_physical`); one the vocabulary has since dropped may stay or go.
     let added: Vec<String> = edited
         .needs
@@ -533,7 +533,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
         ctx.preserve_claim_store(&original.id);
-        // Lanes/needs design §4.4: no flags here, so a held need refuses and names
+        // Current contract (docs/user-guide.md): no flags here, so a held need refuses and names
         // `tasks edit <id> --need <n> --force --reason`.
         if edited.needs != original.needs {
             ctx.update_holds(&edited, false).map_err(keep)?;
@@ -578,7 +578,7 @@ fn refuse_shelving(id: &crate::model::TaskId) -> Result<()> {
     )))
 }
 
-/// Lanes design §3.4: marking a goal that is already `blocked` as a lane pauses it, which
+/// Current contract (docs/user-guide.md): marking a goal that is already `blocked` as a lane pauses it, which
 /// hides its whole subtree from the pickers at once.
 fn pause_warning(task: &Task, was_lane: bool) -> Option<String> {
     (task.lane && !was_lane && task.status == Status::Blocked).then(|| {

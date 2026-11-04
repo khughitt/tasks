@@ -1,4 +1,4 @@
-//! The checks a decision list passes before anything is written (spec §4.3): coverage,
+//! The checks a decision list passes before anything is written (docs/project-operations.md): coverage,
 //! header, staleness, claims, other checkouts, reasons, keys and pending operations.
 //! Every refusal is reported, not the first; each names the key or command that settles it.
 

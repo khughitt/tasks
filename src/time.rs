@@ -9,7 +9,7 @@ pub fn now() -> String {
 /// The stamp a write to a record loaded at `loaded` sets: now, or one second past `loaded`
 /// when the clock has not passed it. Stamps have second precision, so a plain `now` in the
 /// same second as the loaded write would give two checkouts' different copies one stamp
-/// (record-home spec §3.1); strictly increasing stamps keep the written copy the newest.
+/// (docs/project-operations.md); strictly increasing stamps keep the written copy the newest.
 pub fn after(loaded: &str) -> Result<String> {
     let floor = parse(loaded)?
         .checked_add(time::Duration::SECOND)

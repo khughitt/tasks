@@ -24,7 +24,7 @@ pub fn choose(offered: &[String]) -> Option<(&'static str, &'static str)> {
         .copied()
 }
 
-/// `clipboard-<yyyymmddThhmmssZ>.<ext>` from an RFC 3339 UTC stamp such as `time::now()`.
+/// `clipboard-<yyyymmddThhmmssZ>.<ext>` from an RFC 3339 UTC stamp such as `time::now`.
 pub fn default_name(now: &str, extension: &str) -> String {
     let compact: String = now.chars().filter(|c| *c != '-' && *c != ':').collect();
     format!("clipboard-{compact}.{extension}")

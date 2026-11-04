@@ -301,7 +301,7 @@ fn main() {
             let mut theme_warning = None;
             let stdout_painter = if stdout_painter.enabled() && output::needs_theme(&out) {
                 // Redirected stdout is never queried: a pager may be reading the same
-                // terminal (date spec §3.2).
+                // terminal (docs/user-guide.md).
                 let resolved = match palette {
                     Some(palette) => Ok(palette),
                     None => match theme {

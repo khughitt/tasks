@@ -131,12 +131,12 @@ pub fn render_graph(tasks: &[Task], format: GraphFormat) -> String {
 }
 
 /// An open `todo` or a recurrence that has come back around: the pool `ready` draws from
-/// before the deferral gate (periodic §4.2).
+/// before the deferral gate (periodic).
 pub fn is_candidate(task: &Task, now: OffsetDateTime) -> bool {
     task.status == Status::Todo || crate::periodic::is_due(task, now)
 }
 
-/// Eligible to be worked on now (defer §4.1): a candidate that no deferral is holding.
+/// Eligible to be worked on now (defer): a candidate that no deferral is holding.
 pub fn is_actionable(task: &Task, now: OffsetDateTime) -> bool {
     is_candidate(task, now) && !crate::defer::is_deferred(task, now)
 }
@@ -166,7 +166,7 @@ pub fn readiness(
 }
 
 /// What a picker found: the tasks it may hand out, the ones a deferral held back, and the
-/// ones a paused lane kept out (lanes design §3.4). `paused` holds only work that passed
+/// ones a paused lane kept out (docs/user-guide.md). `paused` holds only work that passed
 /// the picker's own dependency, defer, claim, and park checks; the caller applies its
 /// session gates to it before counting.
 #[derive(Default)]
@@ -258,7 +258,7 @@ pub fn sort_ready(tasks: &mut [Task]) {
     tasks.sort_by(ready_order);
 }
 
-/// The order `list --periodic` prints in (periodic design §5.2): unanchored due-now first,
+/// The order `list --periodic` prints in (docs/user-guide.md): unanchored due-now first,
 /// then anchored records by due date ascending, then everything with no pending
 /// recurrence. Id breaks ties inside each group.
 pub fn sort_periodic(tasks: &mut [Task], now: OffsetDateTime) {

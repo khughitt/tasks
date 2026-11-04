@@ -294,7 +294,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             return Ok(out);
         }
     }
-    // The `records` stage (spec §5.4): a plain rename, as every other stage is; git
+    // The `records` stage (docs/project-operations.md): a plain rename, as every other stage is; git
     // records it at the user's commit. From here on nothing opens `records_from`.
     if recovery != Recovery::ResumeCleanup
         && let (Some(from), Some(to)) = (&inventory.records_from, &inventory.records_to)
@@ -358,7 +358,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             return Ok(out);
         }
     }
-    // Keep the .lock inode: other processes can already be waiting on it.
+    // Keep the.lock inode: other processes can already be waiting on it.
     match std::fs::remove_file(ClaimStore::path_for(&invocation.source)?) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

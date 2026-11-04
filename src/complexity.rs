@@ -1,5 +1,5 @@
 //! The cutoff a session picks under, and the effective rating it is compared with.
-//! See docs/specs/2026-09-12-task-complexity-design.md §4.
+//! See docs/user-guide.md
 
 use crate::claims::ClaimSnapshot;
 use crate::error::{Error, Result};
@@ -9,7 +9,7 @@ pub const ENV: &str = "TASKS_MAX_COMPLEXITY";
 
 /// The cutoff in force: the flag, else `TASKS_MAX_COMPLEXITY`. The variable is validated
 /// whenever a picker runs, even when the flag overrides it, so a harness with a bad value
-/// hears about it at once (spec §4.2).
+/// hears about it at once (docs/user-guide.md).
 pub fn cutoff(flag: Option<&str>) -> Result<Option<Complexity>> {
     cutoff_with(flag, Some(std::env::var(ENV)))
 }
@@ -38,7 +38,7 @@ pub fn cutoff_with(
     }
 }
 
-/// The higher of a rating and an escalation, or whichever is set (spec §4.1). The one
+/// The higher of a rating and an escalation, or whichever is set (docs/user-guide.md). The one
 /// place the rule lives; `park` checks the same thing over its own store view.
 pub fn higher(record: Option<Complexity>, escalated: Option<Complexity>) -> Option<Complexity> {
     match (record, escalated) {
@@ -47,7 +47,7 @@ pub fn higher(record: Option<Complexity>, escalated: Option<Complexity>) -> Opti
     }
 }
 
-/// The record's rating or the shared escalation, whichever is higher (spec §4.1).
+/// The record's rating or the shared escalation, whichever is higher (docs/user-guide.md).
 pub fn effective(task: &Task, claims: &ClaimSnapshot) -> Option<Complexity> {
     let escalated = claims
         .escalation(&task.id)
@@ -62,7 +62,7 @@ pub struct Hidden {
 }
 
 /// Removes what the cutoff hides and counts it by cause. Unassessed is hidden, never
-/// defaulted (spec §4.3).
+/// defaulted (docs/user-guide.md).
 pub fn apply(tasks: &mut Vec<Task>, cutoff: Complexity, claims: &ClaimSnapshot) -> Hidden {
     let mut hidden = Hidden::default();
     tasks.retain(|task| match effective(task, claims) {

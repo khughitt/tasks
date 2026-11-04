@@ -5,7 +5,7 @@
 //! `COMPREPLY` when the completer exits non-zero, and a write to stderr corrupts the
 //! prompt — so every failure yields an empty candidate list instead. This is the
 //! deliberate exception to the repo's fail-early rule recorded in
-//! `docs/specs/2026-09-05-shell-completions-design.md`.
+//! `docs/user-guide.md`.
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -196,7 +196,7 @@ pub fn sorts() -> Vec<CompletionCandidate> {
 }
 
 /// Common cadences. A convenience, not the accepted set: any interval matching the
-/// grammar in the periodic design §3.1 is valid.
+/// grammar in docs/user-guide.md is valid.
 pub fn intervals() -> Vec<CompletionCandidate> {
     plain(["7d", "14d", "30d", "90d"])
 }
@@ -484,8 +484,8 @@ fn typed_prefix(current: &str) -> Option<&str> {
     crate::model::is_valid_prefix(prefix).then_some(prefix)
 }
 
-/// Local first, foreign by typed prefix — the write-side rule in §6 of
-/// `docs/specs/2026-08-29-tasks-design.md`. A prefix equal to `base`'s completes from
+/// Local first, foreign by typed prefix — the write-side rule in  of
+/// `docs/task-model.md`. A prefix equal to `base`'s completes from
 /// `base`, so a worktree beats the registered root of the same project.
 fn local_or_foreign(registry: &Registry, base: Option<Project>, current: &str) -> Vec<Task> {
     if let Some(prefix) = typed_prefix(current)
@@ -507,8 +507,8 @@ fn described(id: &str, task: Option<&Task>) -> CompletionCandidate {
     CompletionCandidate::new(id).help(help)
 }
 
-/// Open before closed, then id ascending — the ordering both `candidates()` and
-/// `dependencies()` present. An id with no status to be "open" with (an unresolvable
+/// Open before closed, then id ascending — the ordering both `candidates` and
+/// `dependencies` present. An id with no status to be "open" with (an unresolvable
 /// dependency) sorts alongside the closed ones.
 fn open_then_id(a_open: bool, a_id: &TaskId, b_open: bool, b_id: &TaskId) -> std::cmp::Ordering {
     b_open.cmp(&a_open).then_with(|| a_id.cmp(b_id))
@@ -589,7 +589,7 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
             Some(name) => registry.groups.get(name).cloned().unwrap_or_default(),
             None => registry.projects.keys().cloned().collect(),
         };
-        // Wide reads leave a retired project out (ops lifecycle spec §4), so its ids
+        // Wide reads leave a retired project out (docs/project-operations.md), so its ids
         // are not offered either.
         for prefix in &members {
             if let Some(project) = open_prefix(&registry, prefix)
@@ -686,7 +686,7 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
         })
         .collect();
     // Open dependencies before closed-or-unresolvable, each group by id ascending —
-    // the same ordering `candidates()` applies, via the same helper.
+    // the same ordering `candidates` applies, via the same helper.
     resolved.sort_by(|(a_id, a_task, _), (b_id, b_task, _)| {
         let a_open = a_task.as_ref().is_some_and(|task| task.status.is_open());
         let b_open = b_task.as_ref().is_some_and(|task| task.status.is_open());

@@ -5,7 +5,7 @@ use crate::repo::{CONFIG_REL, Kind, Project};
 use std::path::{Path, PathBuf};
 
 /// How a prefix reached the resolver, which decides the error kind when it cannot be
-/// opened (spec §3.1): an id that cannot be followed is `unresolvable_id`; a prefix a
+/// opened (docs/task-model.md): an id that cannot be followed is `unresolvable_id`; a prefix a
 /// person typed is `config`. A registered project whose config disagrees with the
 /// registry is `config` either way.
 #[derive(Clone, Copy)]
@@ -41,7 +41,7 @@ pub fn config_dir(registry: &Registry, prefix: &str) -> Option<PathBuf> {
 /// path shares: registered, config present (in its `config_dir`), prefix agrees, and for
 /// a paired prefix a detached config whose checkout is the registered root. A pairing
 /// mismatch is a `config` error naming the `init --records --force` that repairs it
-/// (relocation design §4.4).
+/// (docs/project-operations.md).
 pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project> {
     match open_registered_declared(registry, prefix, origin)? {
         Registered::Paired(project) => Ok(project),
@@ -58,7 +58,7 @@ pub(crate) enum Registered {
     Paired(Project),
     /// A paired prefix whose detached config parses and declares another checkout than
     /// the registry's root: the state every host is in between the sync of a relocated
-    /// checkout and its own re-point (relocation design §4.3). The project is the config's,
+    /// checkout and its own re-point (docs/project-operations.md). The project is the config's,
     /// so its `root` and `checkout` are the declared checkout.
     Mismatched(Project),
 }
@@ -154,7 +154,7 @@ pub(crate) fn open_registered_declared(
     Ok(Registered::Paired(project))
 }
 
-/// The first two outcomes of spec §3.2: `prefix`'s `config_dir` exists and holds a
+/// The first two docs/task-model.md: `prefix`'s `config_dir` exists and holds a
 /// config. The third (a config that does not parse or disagrees with the key) surfaces
 /// from `open_registered`, which every reachable project then goes through.
 pub fn is_reachable(registry: &Registry, prefix: &str) -> Result<bool> {
@@ -180,7 +180,7 @@ pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>
             ));
         }
         Ok(_) | Err(Error::NoProject(_)) => {}
-        // Spec §3.2: only a registered root can be unpaired. A portfolio read does not
+        // Current contract (docs/task-model.md): only a registered root can be unpaired. A portfolio read does not
         // open the cwd's project, so it reports the remedy and carries on.
         Err(Error::RecordsUnpaired(detail)) => warnings.push(detail),
         Err(error) => return Err(error),
@@ -213,7 +213,7 @@ impl Scope {
 
     /// Every reachable registered project, retired ones included. Only an inventory that
     /// must see history in projects that are over (`move`'s inbound dependents, spec
-    /// 2026-10-08-task-move-design §3.4) reads this; wide reads use `open_all`.
+    /// docs/project-operations.md) reads this; wide reads use `open_all`.
     pub fn open_all_with_retired(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)> {
         let members = registry.projects.keys().cloned().collect();
         Self::open_members(registry, cwd, members, None, true)
@@ -250,7 +250,7 @@ impl Scope {
                 continue;
             }
             let project = open_registered(registry, prefix, Origin::Prefix)?;
-            // A retired project is over (ops lifecycle spec §4): wide reads leave it out
+            // A retired project is over (docs/project-operations.md): wide reads leave it out
             // without a warning, so it leaves `members` too, which the warnings about
             // absent projects read; `--project` still reads it.
             if project.retired.is_some() && !keep_retired {
@@ -356,7 +356,7 @@ mod tests {
         ));
     }
 
-    /// Records-detached spec §3.2: an existing root with no config and no `[records]` row
+    /// Current contract (docs/project-operations.md): an existing root with no config and no `[records]` row
     /// is `records_unpaired` whatever the origin, never "run `tasks init` there" alone.
     #[test]
     fn missing_config_is_records_unpaired_whatever_the_origin() {

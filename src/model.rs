@@ -377,7 +377,7 @@ impl Size {
 
 /// The reasoning and judgment a task demands given its current spec, plan, and context.
 /// Three levels, ordered; absent means unassessed and is never defaulted. See
-/// docs/specs/2026-09-12-task-complexity-design.md §3.
+/// docs/user-guide.md
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, serde::Deserialize,
 )]
@@ -598,43 +598,43 @@ pub struct Task {
     pub size: Option<Size>,
     /// The judgment the task demands; absent is unassessed. Set by `add`/`edit
     /// --complexity` and by `park --reason capability`. See
-    /// docs/specs/2026-09-12-task-complexity-design.md.
+    /// docs/user-guide.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
     /// Chosen explicitly; never inferred from complexity, parentage, or document links.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
-    /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
+    /// infers or validates it. See docs/user-guide.md
     pub parallel: bool,
     /// A goal meant to proceed alongside other lanes; its members are the `parent` tree
     /// below it. Hand-set by `add`/`edit --lane`, cleared by `--no-lane`. See
-    /// docs/specs/2026-10-03-lanes-needs-groups-design.md §3.
+    /// docs/user-guide.md
     pub lane: bool,
     /// A scope pass has reviewed this idea and recorded its verdict. Meaningful only on an
     /// idea: `save` refuses it elsewhere (parsing accepts it, for `check` and the editor)
     /// and every status transition clears it.
-    /// See docs/specs/2026-10-11-review-state-design.md §3.
+    /// See docs/user-guide.md
     pub reviewed: bool,
     /// The idea waits on the user's answer. Only on a reviewed idea; cleared with
     /// `reviewed` and by every status transition.
-    /// See docs/specs/2026-10-17-wait-aware-review-design.md §3.1.
+    /// See docs/user-guide.md
     pub awaiting_user: bool,
     /// When the latest review was recorded: set and cleared with `reviewed`. Absent on a
-    /// review recorded before the field existed. Same spec §3.2.
+    /// review recorded before the field existed. docs/task-model.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reviewed_at: Option<String>,
     /// Shared resources the work uses, each declared in the project's `[needs]`
     /// vocabulary. Checked against it on write and by `check`, carried as-is on read.
-    /// See docs/specs/2026-10-03-lanes-needs-groups-design.md §4.2.
+    /// See docs/user-guide.md
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     /// The recurrence interval. A closed task carrying one falls due again; an open one is
-    /// an ordinary task. See docs/specs/2026-09-09-periodic-design.md.
+    /// an ordinary task. See docs/user-guide.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub every: Option<crate::periodic::Interval>,
     /// A picker deferral, or a shelf's next review checkpoint, due on its UTC day. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status
-    /// transition. See docs/specs/2026-09-15-defer-design.md.
+    /// transition. See docs/user-guide.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer: Option<crate::defer::Defer>,
     /// Completion evidence for shelf review, independent of execution dependencies.
@@ -645,21 +645,21 @@ pub struct Task {
     pub created: String,
     pub updated: String,
     /// When work first began: stamped by the first transition into `doing` and never
-    /// moved. See docs/specs/2026-09-11-park-reason-and-stamps-design.md §3.
+    /// moved. See docs/ownership.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<String>,
     /// When the task was last completed: stamped by every completing transition and
     /// cleared by any transition out of `done`. Unlike `last_done` it exists on every
-    /// record and does not survive a reopen. Same spec, §3.
+    /// record and does not survive a reopen. docs/task-model.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
     /// When the task last closed (done or dropped): stamped with `completed` on a
     /// completion and alone on a drop, cleared by reopening, never set by `move`.
-    /// Same spec §3.3.
+    /// docs/task-model.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<String>,
     /// The completion that anchors the current cycle. Stamped only alongside `every`, and
-    /// only by a transition that actually completes the task (spec §4.4).
+    /// only by a transition that actually completes the task (docs/task-model.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_done: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -670,18 +670,18 @@ pub struct Task {
     pub tags: Vec<String>,
     /// Where the task came from: an opaque, single-line reference such as a URL or a
     /// message id. Stored and returned, never interpreted or resolved. See
-    /// docs/specs/2026-09-06-task-source-design.md.
+    /// docs/task-model.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// The model id the harness reported (`TASKS_MODEL`) for the session that ran the
     /// latest completion transition; `None` when unknown or cleared. Stored and returned,
-    /// never interpreted. See docs/specs/2026-09-10-model-provenance-design.md.
+    /// never interpreted. See docs/task-model.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// The harness and model that filed the task (`<harness>/<model>`, or the harness
     /// alone), from `add --agent` or `TASKS_AGENT` at creation; `None` when unknown.
     /// Stored and returned, never interpreted. Independent of `model`, which is the
-    /// completion side. See docs/specs/2026-09-13-creation-provenance-design.md.
+    /// completion side. See docs/task-model.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// Who supplied the task: `user`, `agent` or `mixed`; `None` when unknown.
@@ -693,10 +693,10 @@ pub struct Task {
     pub plan: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
-    /// Set only by `tasks move`; see docs/specs/2026-10-08-task-move-design.md §3.2.
+    /// Set only by `tasks move`; see docs/project-operations.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moved_to: Option<TaskId>,
-    /// Set only by `tasks move`; see docs/specs/2026-10-08-task-move-design.md §3.2.
+    /// Set only by `tasks move`; see docs/project-operations.md
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<TaskId>,
     pub body: String,

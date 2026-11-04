@@ -1,5 +1,5 @@
 //! Pending proposals: a curate or scope note awaiting the human's decision. Shared by
-//! `sample`'s pool and the review state (wait-aware spec §4.1).
+//! `sample`'s pool and the review state (docs/user-guide.md).
 
 use crate::model::Task;
 

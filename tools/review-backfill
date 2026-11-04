@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time backfill of the `reviewed` flag (docs/specs/2026-10-11-review-state-design.md §7.2).
+"""One-time reviewed-flag backfill; see docs/project-operations.md, Retirement and backfills.
 
 The first run on a project freezes its candidates -- open, unreviewed ideas whose latest
 note starts with `scope:` or is a `curate:`/`scope:` note carrying a pending `proposal:`
@@ -8,7 +8,7 @@ record is still an unreviewed idea with an unchanged stamp, and reports the rest
 are read only at the freeze.
 
 Run every apply pass inside a writer pause: no other session may write the project's
-task records on any host (spec §7.2). --writers-paused is the operator's confirmation;
+task records on any host (see the public backfill procedure). --writers-paused is the operator's confirmation;
 the tool also refuses while this host's claim store holds a live claim in the project.
 """
 import argparse
