@@ -896,13 +896,19 @@ mod tests {
             .collect();
         let mut guard = EmergencyCleanup(pids.clone());
         assert!(!pids.is_empty());
+        // Children reaped by the validator itself do not appear in the runner's cleanup list.
+        assert!(
+            validation.validators[0].survivors.is_empty(),
+            "{}",
+            serde_json::to_string(validation).unwrap()
+        );
         for pid in pids {
-            assert!(
-                validation.validators[0].cleaned.contains(&pid),
-                "missing {pid}: {}",
+            assert_eq!(
+                unsafe { libc::kill(pid as i32, 0) },
+                -1,
+                "surviving {pid}: {}",
                 serde_json::to_string(validation).unwrap()
             );
-            assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
             assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
         }
         guard.0.clear();
@@ -1024,6 +1030,10 @@ mod tests {
                     assert!(start.elapsed() < Duration::from_secs(3));
                     assert_descendants_gone(&dir, &value);
                 }
+                let value = run(&dir, "sleep 0 & echo $! > pids; wait", b"", normal);
+                assert!(value.passed);
+                assert!(value.validators[0].cleaned.is_empty());
+                assert_descendants_gone(&dir, &value);
             }
             "validator_setsid_and_double_fork_descendants_are_cleaned" => {
                 for code in [
