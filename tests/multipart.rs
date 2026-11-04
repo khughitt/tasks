@@ -1331,3 +1331,519 @@ fn publication_path_selection_keeps_the_selected_symlink_path() {
         digest(script)
     );
 }
+
+const DETACH_MEMBERS: [&str; 4] = [
+    "evidence.txt.part-0001",
+    "evidence.txt.part-0002",
+    "evidence.txt.part-0003",
+    "evidence.txt.catalog.json",
+];
+
+fn detach_fixture() -> (TestEnv, std::path::PathBuf, String) {
+    let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    enable_git(&dir);
+    let out = multipart_attach(&env, &dir, &id, "evidence.txt", &vec![b'x'; 140000]);
+    assert_eq!(out["publication"]["state"], "published");
+    (env, dir, id)
+}
+
+fn commit_switch(dir: &Path, enabled: bool) {
+    let path = dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            &format!("commit = {}", !enabled),
+            &format!("commit = {enabled}"),
+        ),
+    )
+    .unwrap();
+}
+
+fn close_notes(env: &TestEnv, dir: &Path, id: &str) {
+    let mut notes: Vec<_> = DETACH_MEMBERS
+        .iter()
+        .map(|member| format!("detached: {member}: part of evidence.txt"))
+        .collect();
+    notes.push("detached: evidence.txt: obsolete".into());
+    env.cmd(dir)
+        .args(["note", id, "--stdin"])
+        .write_stdin(format!("{}\n", notes.join("\n")))
+        .assert()
+        .success();
+}
+
+fn assert_removal_clone(dir: &Path, id: &str, commit: &str) {
+    let clone = tempfile::tempdir().unwrap();
+    common::git(clone.path(), &["clone", "-q", dir.to_str().unwrap(), "."]);
+    common::git(clone.path(), &["checkout", "-q", commit]);
+    let env = TestEnv::new();
+    let task = env.json(clone.path(), &["show", id]);
+    assert!(
+        task["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("detached: evidence.txt: "))
+    );
+    for member in DETACH_MEMBERS {
+        assert!(!stored(clone.path(), id, member).exists(), "{member}");
+    }
+    let check = env.check(clone.path());
+    assert_eq!(check["errors"], serde_json::json!([]), "{check}");
+    assert_eq!(check["warnings"], serde_json::json!([]), "{check}");
+}
+
+#[test]
+fn detach_by_logical_name_removes_the_set_in_one_commit() {
+    let (env, dir, id) = detach_fixture();
+    let before = git_text(&dir, &["rev-list", "--count", "HEAD"])
+        .parse::<usize>()
+        .unwrap();
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert_eq!(out["publication"]["commit"], commit);
+    assert_eq!(
+        git_text(&dir, &["rev-list", "--count", "HEAD"])
+            .parse::<usize>()
+            .unwrap(),
+        before + 1
+    );
+    assert_eq!(
+        git_text(&dir, &["show", "--pretty=", "--name-only", "HEAD"])
+            .lines()
+            .count(),
+        5
+    );
+    assert_removal_clone(&dir, &id, &commit);
+}
+
+#[test]
+fn detaching_a_member_refuses_naming_the_artifact() {
+    let (env, dir, id) = detach_fixture();
+    for member in DETACH_MEMBERS {
+        let out = env
+            .cmd(&dir)
+            .args(["detach", &id, member, "obsolete"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "multipart_member");
+        assert!(
+            error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("evidence.txt")
+        );
+    }
+    assert!(git_text(&dir, &["status", "--porcelain", "--", "tasks"]).is_empty());
+}
+
+#[test]
+fn detach_interrupted_at_each_point_recovers() {
+    for removed in [vec![], vec![0], vec![3], vec![0, 1, 2, 3]] {
+        let (env, dir, id) = detach_fixture();
+        commit_switch(&dir, false);
+        close_notes(&env, &dir, &id);
+        for index in removed {
+            std::fs::remove_file(stored(&dir, &id, DETACH_MEMBERS[index])).unwrap();
+        }
+        let record = dir.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&record).unwrap();
+        let count = git_text(&dir, &["rev-list", "--count", "HEAD"])
+            .parse::<usize>()
+            .unwrap();
+        commit_switch(&dir, true);
+        let out = env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+        assert_eq!(out["publication"]["state"], "published", "{out}");
+        assert_eq!(std::fs::read(&record).unwrap(), before);
+        assert_eq!(
+            git_text(&dir, &["rev-list", "--count", "HEAD"])
+                .parse::<usize>()
+                .unwrap(),
+            count + 1
+        );
+        assert_removal_clone(&dir, &id, out["publication"]["commit"].as_str().unwrap());
+    }
+}
+
+#[test]
+fn rerun_after_a_complete_detach_returns_published_without_writing() {
+    let (env, dir, id) = detach_fixture();
+    let first = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let second = env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+    assert_eq!(second["publication"], first["publication"]);
+    assert_eq!(second["removed"], false);
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+        record
+    );
+    assert_eq!(
+        git_text(&dir, &["rev-parse", "HEAD"]),
+        first["publication"]["commit"]
+    );
+}
+
+#[test]
+fn reuse_before_committed_removal_is_refused() {
+    let (env, dir, id) = detach_fixture();
+    commit_switch(&dir, false);
+    let detached = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    assert_eq!(detached["publication"]["cause"], "commit_disabled");
+    assert_eq!(detached["publication"]["reuse"], "blocked");
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let source = dir.join("small.txt");
+    std::fs::write(&source, "small").unwrap();
+    for name in ["evidence.txt", "evidence.txt.part-0002"] {
+        for multipart in [false, true] {
+            let mut args = vec!["attach", &id, source.to_str().unwrap(), "--name", name];
+            if multipart {
+                args.push("--multipart");
+            }
+            assert_eq!(env.fail(&dir, &args), "multipart_removal_unpublished");
+        }
+    }
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+        record
+    );
+    assert!(!stored(&dir, &id, "evidence.txt.part-0001").exists());
+    commit_switch(&dir, true);
+    env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+    let out = multipart_attach(&env, &dir, &id, "evidence.txt", b"small");
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    let tree = git_text(&dir, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(!tree.contains("evidence.txt.part-0002"));
+    assert!(!tree.contains("evidence.txt.part-0003"));
+    assert_eq!(env.check(&dir)["errors"], serde_json::json!([]));
+    let clone = tempfile::tempdir().unwrap();
+    common::git(clone.path(), &["clone", "-q", dir.to_str().unwrap(), "."]);
+    common::git(
+        clone.path(),
+        &[
+            "checkout",
+            "-q",
+            out["publication"]["commit"].as_str().unwrap(),
+        ],
+    );
+    assert!(!stored(clone.path(), &id, "evidence.txt.part-0002").exists());
+    assert!(!stored(clone.path(), &id, "evidence.txt.part-0003").exists());
+    let clone_env = TestEnv::new();
+    assert_eq!(
+        clone_env.check(clone.path())["errors"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        clone_env.check(clone.path())["warnings"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn reuse_blocked_under_commit_unavailable_names_the_git_route() {
+    let (env, dir, id) = attach_fixture("max_bytes = 1024\nmultipart_validators = []");
+    multipart_attach(&env, &dir, &id, "evidence.txt", b"hello");
+    let config = dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    assert_eq!(out["publication"]["cause"], "commit_unavailable", "{out}");
+    assert_eq!(out["publication"]["reuse"], "blocked");
+    assert!(
+        out["publication"]["next"]
+            .as_str()
+            .unwrap()
+            .contains("Git work tree")
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["attach", &id, "source", "--name", "evidence.txt"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "multipart_removal_unpublished");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Git work tree")
+    );
+}
+
+#[test]
+fn check_warns_when_removal_is_not_yet_in_head() {
+    let (env, dir, id) = detach_fixture();
+    commit_switch(&dir, false);
+    env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    let check = env.check(&dir);
+    assert!(
+        check["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "multipart_removal_unpublished"),
+        "{check}"
+    );
+    commit_switch(&dir, true);
+    hook(
+        &dir,
+        "pre-commit",
+        &format!(
+            "'{}' check >check-result",
+            assert_cmd::cargo::cargo_bin("tasks").display()
+        ),
+    );
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert!(
+        std::fs::read_to_string(dir.join("check-result"))
+            .unwrap()
+            .contains("multipart_removal_unpublished")
+    );
+    assert_eq!(env.check(&dir)["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn reuse_ordinary_member_survives_later_logical_detach_recovery() {
+    let (env, dir, id) = detach_fixture();
+    env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    let member = "evidence.txt.part-0002";
+    let source = dir.join("ordinary");
+    std::fs::write(&source, "new ordinary bytes").unwrap();
+    env.json(
+        &dir,
+        &["attach", &id, source.to_str().unwrap(), "--name", member],
+    );
+    assert_eq!(env.check(&dir)["errors"], serde_json::json!([]));
+    assert_eq!(env.check(&dir)["warnings"], serde_json::json!([]));
+    let commit = git_text(&dir, &["rev-parse", "HEAD"]);
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    std::fs::write(stored(&dir, &id, member), "uncommitted ordinary edit").unwrap();
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "retry old removal"]);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, member)).unwrap(),
+        b"uncommitted ordinary edit"
+    );
+    assert_eq!(git_text(&dir, &["rev-parse", "HEAD"]), commit);
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+        record
+    );
+    env.json(&dir, &["detach", &id, member, "ordinary detach"]);
+    std::fs::create_dir_all(stored(&dir, &id, member).parent().unwrap()).unwrap();
+    std::fs::write(
+        stored(&dir, &id, member),
+        "later interrupted ordinary cleanup",
+    )
+    .unwrap();
+    env.json(&dir, &["detach", &id, "evidence.txt", "retry old removal"]);
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, member)).unwrap(),
+        b"later interrupted ordinary cleanup"
+    );
+}
+
+#[test]
+fn reuse_ordinary_logical_name_can_detach_as_ordinary() {
+    let (env, dir, id) = detach_fixture();
+    env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    let source = dir.join("ordinary");
+    std::fs::write(&source, "ordinary").unwrap();
+    env.json(
+        &dir,
+        &[
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--name",
+            "evidence.txt",
+        ],
+    );
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "ordinary detach"]);
+    assert!(out.get("publication").is_none(), "{out}");
+    assert_eq!(out["removed"], true);
+    assert!(!stored(&dir, &id, "evidence.txt").exists());
+    assert_eq!(env.check(&dir)["warnings"], serde_json::json!([]));
+    assert_eq!(
+        env.fail(&dir, &["detach", &id, "evidence.txt", "ordinary retry"]),
+        "attachment_missing"
+    );
+    let target = stored(&dir, &id, "evidence.txt");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "interrupted ordinary removal").unwrap();
+    let retry = env.json(&dir, &["detach", &id, "evidence.txt", "ordinary retry"]);
+    assert!(retry.get("publication").is_none(), "{retry}");
+    assert!(!target.exists());
+}
+
+#[test]
+fn detach_published_commit_still_blocks_reuse_when_a_hook_restores_local_members() {
+    let (env, dir, id) = detach_fixture();
+    hook(
+        &dir,
+        "post-commit",
+        &format!(
+            "mkdir -p tasks/files/{id}\nprintf restored > tasks/files/{id}/evidence.txt.part-0001"
+        ),
+    );
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert_eq!(out["publication"]["reuse"], "blocked", "{out}");
+    assert!(
+        out["publication"]["next"]
+            .as_str()
+            .unwrap()
+            .contains("tasks detach")
+    );
+    assert_removal_clone(&dir, &id, out["publication"]["commit"].as_str().unwrap());
+    let check = env.cmd(&dir).arg("check").output().unwrap();
+    assert_eq!(check.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert!(
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|problem| problem["kind"] == "multipart_leftover")
+    );
+    let source = dir.join("small.txt");
+    std::fs::write(&source, "small").unwrap();
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                source.to_str().unwrap(),
+                "--name",
+                "evidence.txt"
+            ]
+        ),
+        "multipart_removal_unpublished"
+    );
+    std::fs::remove_file(dir.join(".git/hooks/post-commit")).unwrap();
+    let retry = env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+    assert_eq!(retry["publication"]["state"], "published", "{retry}");
+    assert!(retry["publication"].get("reuse").is_none());
+    assert_eq!(env.check(&dir)["errors"], serde_json::json!([]));
+    assert_eq!(env.check(&dir)["warnings"], serde_json::json!([]));
+    env.json(
+        &dir,
+        &[
+            "attach",
+            &id,
+            source.to_str().unwrap(),
+            "--name",
+            "evidence.txt",
+        ],
+    );
+}
+
+#[test]
+fn detach_same_declaration_again_needs_its_new_closing_history_published() {
+    let (env, dir, id) = detach_fixture();
+    env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    commit_switch(&dir, false);
+    multipart_attach(&env, &dir, &id, "evidence.txt", &vec![b'x'; 140000]);
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    assert_eq!(out["publication"]["state"], "local", "{out}");
+    assert_eq!(out["publication"]["reuse"], "blocked");
+    commit_switch(&dir, true);
+    let retry = env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+    assert_eq!(retry["publication"]["state"], "published", "{retry}");
+    assert_removal_clone(&dir, &id, retry["publication"]["commit"].as_str().unwrap());
+}
+
+#[test]
+fn detach_local_commit_failures_keep_names_reserved_until_recovery() {
+    for cause in ["commit_deferred", "commit_failed"] {
+        let (env, dir, id) = detach_fixture();
+        if cause == "commit_deferred" {
+            std::fs::write(dir.join("unrelated"), "staged").unwrap();
+            common::git(&dir, &["add", "unrelated"]);
+        } else {
+            hook(&dir, "pre-commit", "exit 1");
+        }
+        let out = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+        assert_eq!(out["publication"]["cause"], cause, "{out}");
+        assert_eq!(out["publication"]["reuse"], "blocked");
+        if cause == "commit_deferred" {
+            common::git(&dir, &["reset", "--", "unrelated"]);
+        } else {
+            std::fs::remove_file(dir.join(".git/hooks/pre-commit")).unwrap();
+        }
+        let retry = env.json(&dir, &["detach", &id, "evidence.txt", "retry"]);
+        assert_eq!(retry["publication"]["state"], "published", "{retry}");
+        assert_removal_clone(&dir, &id, retry["publication"]["commit"].as_str().unwrap());
+    }
+}
+
+#[test]
+fn reuse_of_members_from_an_over_ceiling_closed_declaration_refuses_before_writing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("tst");
+    let id = task(&env, &dir);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &id,
+            &format!(
+                "multipart: evidence.txt (1 bytes, {} parts, sha256 {}, catalog sha256 {})",
+                usize::MAX,
+                "a".repeat(64),
+                "b".repeat(64)
+            ),
+        ],
+    );
+    env.json(&dir, &["note", &id, "detached: evidence.txt: obsolete"]);
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let source = dir.join("source");
+    std::fs::write(&source, "ordinary").unwrap();
+    for name in [
+        "evidence.txt",
+        "evidence.txt.part-0001",
+        "evidence.txt.catalog.json",
+    ] {
+        assert_eq!(
+            env.fail(
+                &dir,
+                &["attach", &id, source.to_str().unwrap(), "--name", name]
+            ),
+            "multipart_removal_unpublished"
+        );
+    }
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+        record
+    );
+}
+
+#[test]
+fn detach_publication_keeps_its_own_commit_when_head_moves() {
+    let (env, dir, id) = detach_fixture();
+    hook(
+        &dir,
+        "post-commit",
+        "git -c core.hooksPath=/dev/null -c maintenance.auto=false -c gc.auto=0 commit -qm later --allow-empty",
+    );
+    let out = env.json(&dir, &["detach", &id, "evidence.txt", "obsolete"]);
+    assert_eq!(out["publication"]["state"], "published", "{out}");
+    assert_eq!(
+        out["publication"]["commit"],
+        git_text(&dir, &["rev-parse", "HEAD^"])
+    );
+    assert_ne!(
+        out["publication"]["commit"],
+        git_text(&dir, &["rev-parse", "HEAD"])
+    );
+    assert_removal_clone(&dir, &id, out["publication"]["commit"].as_str().unwrap());
+}

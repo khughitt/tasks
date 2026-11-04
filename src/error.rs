@@ -118,6 +118,8 @@ pub enum Error {
     #[error("{0}")]
     MultipartMember(String),
     #[error("{0}")]
+    MultipartRemovalUnpublished(String),
+    #[error("{0}")]
     MultipartNotText(String),
     #[error("{0}")]
     MultipartInvalidContent(String),
@@ -201,6 +203,9 @@ impl Error {
                 Error::MultipartValidatorsUndeclared(detail + suffix)
             }
             Error::MultipartMember(detail) => Error::MultipartMember(detail + suffix),
+            Error::MultipartRemovalUnpublished(detail) => {
+                Error::MultipartRemovalUnpublished(detail + suffix)
+            }
             Error::MultipartNotText(detail) => Error::MultipartNotText(detail + suffix),
             Error::MultipartInvalidContent(detail) => {
                 Error::MultipartInvalidContent(detail + suffix)
@@ -269,6 +274,7 @@ impl Error {
             Error::MultipartTooLarge(_) => "multipart_too_large",
             Error::MultipartValidatorsUndeclared(_) => "multipart_validators_undeclared",
             Error::MultipartMember(_) => "multipart_member",
+            Error::MultipartRemovalUnpublished(_) => "multipart_removal_unpublished",
             Error::MultipartNotText(_) => "multipart_not_text",
             Error::MultipartInvalidContent(_) => "multipart_invalid_content",
             Error::ClipboardUnavailable(_) => "clipboard_unavailable",

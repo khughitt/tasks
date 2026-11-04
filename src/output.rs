@@ -873,6 +873,8 @@ pub struct DetachOut {
     pub path: String,
     /// False when the ledger alone recorded the detach: no file was present.
     pub removed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<crate::multipart::publication::Publication>,
     pub warnings: Vec<String>,
 }
 

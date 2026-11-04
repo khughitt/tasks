@@ -11,6 +11,10 @@ pub struct Revision {
 }
 
 impl Revision {
+    pub fn commit(&self) -> &str {
+        &self.commit
+    }
+
     pub fn resolve(records: &Path, rev: &str) -> Result<Self> {
         let toplevel = crate::record_commit::working_tree(records)
             .map_err(Error::Validation)?

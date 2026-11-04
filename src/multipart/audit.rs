@@ -1,6 +1,7 @@
 use super::catalog::Catalog;
 use super::content::{builtin, sha256_hex};
 use super::declaration::{Declaration, parse_declaration_note};
+use super::git_objects::Revision;
 use super::names::{catalog_name, member_names};
 use super::{RECOVERY_MAX_BYTES, RECOVERY_MAX_PARTS};
 use crate::attachments::{self, EntryState, Ledger, Problem, Severity};
@@ -37,7 +38,6 @@ pub fn declarations(task: &Task) -> BTreeMap<String, DeclState> {
     state
 }
 
-#[allow(dead_code)] // Logical detach consumes this derived-name inventory in Task 7.
 pub fn reserved_names(task: &Task) -> BTreeMap<String, String> {
     let mut reserved = BTreeMap::new();
     for (name, state) in declarations(task) {
@@ -52,6 +52,123 @@ pub fn reserved_names(task: &Task) -> BTreeMap<String, String> {
     reserved
 }
 
+/// The first closure after the latest declaration, before any ordinary name reuse.
+fn closing_ordinal(task: &Task, name: &str) -> Option<usize> {
+    let declaration = task.notes.iter().rposition(|note| {
+        parse_declaration_note(&note.text).is_some_and(|decl| decl.name == name)
+    })?;
+    task.notes
+        .iter()
+        .enumerate()
+        .skip(declaration + 1)
+        .find_map(|(index, note)| {
+            (attachments::parse_ledger_note(&note.text) == Some((Ledger::Detached, name)))
+                .then_some(index)
+        })
+}
+
+pub fn later_owned(task: &Task, logical: &str, member: &str) -> bool {
+    closing_ordinal(task, logical).is_some_and(|closed| {
+        task.notes.iter().skip(closed + 1).any(|note| {
+            attachments::parse_ledger_note(&note.text).is_some_and(|(_, name)| name == member)
+        })
+    })
+}
+
+pub fn removal_members(task: &Task, decl: &Declaration) -> Result<Vec<String>> {
+    recovery_bounds(decl)?;
+    let ledger = attachments::ledger(task);
+    Ok(member_names(&decl.name, decl.parts)
+        .into_iter()
+        .filter(|member| {
+            !later_owned(task, &decl.name, member) && ledger.get(member) == Some(&Ledger::Detached)
+        })
+        .collect())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemovalState {
+    FilesRemain,
+    Uncommitted,
+    Complete { commit: String },
+}
+
+pub fn removal_state(project: &Project, task: &Task, decl: &Declaration) -> Result<RemovalState> {
+    recovery_bounds(decl)?;
+    attachments::check_storage(project, &task.id)?;
+    let dir = attachments::task_dir(project, &task.id);
+    for member in member_names(&decl.name, decl.parts) {
+        if !later_owned(task, &decl.name, &member)
+            && attachments::entry_state(&dir.join(member))? != EntryState::Absent
+        {
+            return Ok(RemovalState::FilesRemain);
+        }
+    }
+    if crate::record_commit::working_tree(&project.records)
+        .map_err(Error::Validation)?
+        .is_none()
+    {
+        return Ok(RemovalState::Uncommitted);
+    }
+    Ok(match removal_at(project, task, decl, "HEAD")? {
+        Some(commit) => RemovalState::Complete { commit },
+        None => RemovalState::Uncommitted,
+    })
+}
+
+/// Checks this closure's exact history and remaining ownership at one immutable basis.
+pub fn removal_at(
+    project: &Project,
+    task: &Task,
+    decl: &Declaration,
+    commit: &str,
+) -> Result<Option<String>> {
+    recovery_bounds(decl)?;
+    let Some(closed) = closing_ordinal(task, &decl.name) else {
+        return Ok(None);
+    };
+    let revision = Revision::resolve(&project.records, commit)?;
+    let Some(published) = revision.task_at(project, &task.id)? else {
+        return Ok(None);
+    };
+    if declarations(&published).get(&decl.name) != Some(&DeclState::Closed(decl.clone()))
+        || published.notes.get(..=closed) != task.notes.get(..=closed)
+        || closing_ordinal(&published, &decl.name) != Some(closed)
+    {
+        return Ok(None);
+    }
+    let toplevel = crate::record_commit::working_tree(&project.records)
+        .map_err(Error::Validation)?
+        .ok_or_else(|| Error::Validation("records are outside a Git work tree".into()))?;
+    let dir = attachments::task_dir(project, &task.id);
+    let relative = dir
+        .strip_prefix(toplevel)
+        .map_err(|error| Error::Validation(error.to_string()))?;
+    for member in member_names(&decl.name, decl.parts) {
+        if !later_owned(&published, &decl.name, &member)
+            && revision
+                .read(&relative.join(member), super::RECOVERY_MAX_BYTES)?
+                .is_some()
+        {
+            return Ok(None);
+        }
+    }
+    Ok(Some(revision.commit().to_string()))
+}
+
+pub fn removal_next(project: &Project, task: &Task, decl: &Declaration) -> String {
+    let retry = format!("tasks detach {} {} \"<why>\"", task.id, decl.name);
+    match crate::record_commit::working_tree(&project.records) {
+        Ok(None) => format!(
+            "put the records directory in a Git work tree, then run tasks commit and rerun {retry}; reuse stays blocked until removal is published"
+        ),
+        Err(error) => format!("resolve Git discovery failure ({error}), then rerun {retry}"),
+        Ok(Some(_)) => format!(
+            "rerun {retry}; if commit_disabled or commit_deferred, run tasks commit or clear the deferring cause, then rerun"
+        ),
+    }
+}
+
 fn invalid(declaration: &Declaration, member: &str, detail: impl std::fmt::Display) -> Error {
     Error::MultipartInvalidContent(format!(
         "multipart artifact {} member {member}: {detail}",
@@ -59,7 +176,7 @@ fn invalid(declaration: &Declaration, member: &str, detail: impl std::fmt::Displ
     ))
 }
 
-fn recovery_bounds(declaration: &Declaration) -> Result<()> {
+pub(crate) fn recovery_bounds(declaration: &Declaration) -> Result<()> {
     if declaration.bytes > RECOVERY_MAX_BYTES || declaration.parts > RECOVERY_MAX_PARTS {
         return Err(invalid(
             declaration,
@@ -230,11 +347,27 @@ pub fn audit(project: &Project, task: &Task) -> Result<Vec<Problem>> {
         }
         if matches!(state, DeclState::Closed(_)) {
             for member in members {
-                if attachments::entry_state(&dir.join(&member))? != EntryState::Absent {
+                if !later_owned(task, &name, &member)
+                    && attachments::entry_state(&dir.join(&member))? != EntryState::Absent
+                {
                     problems.push(problem("multipart_leftover", &member, format!(
                         "closed multipart artifact {name} still has member {member}; rerun tasks detach {} {name} \"<why>\"", task.id
                     )));
                 }
+            }
+            let detail = match removal_state(project, task, declaration) {
+                Ok(RemovalState::Uncommitted) => Some(removal_next(project, task, declaration)),
+                Err(error) => Some(format!(
+                    "{error}; {}",
+                    removal_next(project, task, declaration)
+                )),
+                _ => None,
+            };
+            if let Some(detail) = detail {
+                problems.push(Problem {
+                    severity: Severity::Warning,
+                    ..problem("multipart_removal_unpublished", &name, detail)
+                });
             }
             continue;
         }
