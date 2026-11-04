@@ -45,17 +45,19 @@ tasks done demo-abcdef "Verified the corrected behavior"
 changing status. Read [ownership](ownership.md) before takeover, release or
 automation. `block` records an explicit obstacle; dependencies alone do not
 change a task's status. `drop` closes abandoned work. Reopen a done or dropped
-task with `edit --status todo` before starting it again. A moved record is a
+nonrecurring task with `edit --status todo` before starting it again; a recurring
+done task can be started directly for its next occurrence. A moved record is a
 redirect to its successor, not editable work.
 
 `done` refuses open dependencies or descendants unless explicitly forced.
 `drop` refuses open descendants and has no force override. A `halt` tag on open
-work prevents starting other work in that project without an explicit override;
+work prevents lower-priority starts in that project without an explicit override;
 `prime` reports halts. See the [task model](task-model.md#lifecycle).
 
 ## Select work without losing context
 
-`ready` selects due `todo` leaves whose dependencies are satisfied, excluding
+`ready` selects due `todo` leaves and due completed recurrences whose dependencies
+are satisfied, excluding
 held work, busy lanes and unavailable exclusive resources. A closed dependency
 is satisfied; an unresolved dependency is a warning and cannot establish
 readiness. `next` chooses the first ready task, or returns `next: null`.
@@ -108,20 +110,25 @@ with no supported wait or wake evidence is stranded. Unassessed `todo`/`blocked`
 leaves need review when process is absent, except lanes. Use the scope skill for
 the review workflow rather than treating the mark as an execution decision.
 
-`shelve <id> "<wake condition>"` sets aside open work with a recorded reason.
-Shelves are hidden from ordinary lists, pickers, samples and roadmap, but counted
-in summaries. Set a future `--defer` date and/or `--wake-on` task ids. Any closed
-wake target or due date wakes review; missing targets still warn. A shelf without
-a usable future date or with an unresolved target is stranded unless already
-woken. Reads never unshelve it; `unshelve` makes the explicit transition. Wake
-edges are independent of execution dependencies.
+`shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` sets aside open
+work with a required future review checkpoint and optional wake targets. Shelves
+remain visible in ordinary list/search, while execution pickers and roadmap omit
+them. Any currently closed wake target or due date wakes review; missing targets
+still warn. Without a valid checkpoint or with an unresolved target, a shelf is
+stranded unless due/closed evidence already wakes it. Reads never unshelve it;
+`unshelve` returns it to an unreviewed idea. Wake edges are independent of execution
+dependencies. Shelve open descendants before shelving a goal. Renewing a shelf
+replaces its whole checkpoint/target pair; edit cannot erase its required checkpoint.
 
-`--defer YYYY-MM-DD` or a positive `Nd`/`Nw` interval postpones a task until the
-start of that day in UTC. New dates must be after today. Status transitions clear
-deferral. `--every Nd|Nw` defines recurring work, up to 36,500 days, and cannot
-coexist with defer or be put on a goal. Completion records the cycle and returns
-the recurring task to `todo` with a new due boundary; it does not create a new id.
-`last_done` remains the cycle anchor when reopened. `due` is derived at read time.
+`--defer YYYY-MM-DD` or a positive `Nd`/`Nw` interval postpones ordinary work until
+the start of that day in UTC. New dates must be after today. Status changes clear
+deferral. `--every Nd|Nw` defines recurring work, up to 36,500 days; goals cannot
+recur. Outside a shelf, recurrence and defer cannot coexist. A shelved goal or
+recurrence can carry a review checkpoint, which does not change execution cadence.
+Completion leaves a recurring record `done` and anchors its next due boundary;
+when due it appears in ready with that same id and status. Start before completing
+the next occurrence; early runs are permitted. `last_done` survives reopening and
+`due` is derived at read time, never an automatic status rewrite.
 
 ## Blockers and coverage
 

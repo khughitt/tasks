@@ -70,7 +70,8 @@ closed and satisfy dependencies. A moved record redirects resolution to its
 successor, possibly through a chain; unresolved/cyclic chains are not completion.
 
 Open states can transition to other open states or close subject to command
-guards. Closed tasks reopen only to todo. Moved records are immutable. `done`
+guards. Closed nonrecurring tasks reopen only to todo. Start can take a done recurrence
+directly to doing for a new occurrence, including an early run. Moved records are immutable. `done`
 requires closed dependencies and descendants unless forced; `drop` requires
 closed descendants with no force override. Shelved entry requires `shelve`,
 and move entry requires `move`; generic editing cannot manufacture them.
@@ -78,9 +79,12 @@ and move entry requires `move`; generic editing cannot manufacture them.
 The write paths validate parent/dependency cycles, same-project parents,
 non-nested lanes, needs declarations, recurrence and review invariants.
 `every` accepts positive canonical `Nd`/`Nw` intervals through 36,500 days.
-Recurring goals and `every` with `defer` are refused. `defer` is strict
+Recurring goals are refused; `every` and `defer` coexist only on a shelf, where
+the date is a required review checkpoint. `defer` is strict
 `YYYY-MM-DD`, due from that day's start in UTC; setting it requires a future
-date. Status transitions clear it. Shelf wake edges are independent from depends.
+date. Status transitions clear it; shelve then writes the new required checkpoint
+and wake targets. Shelf wake edges are independent from depends. Unshelve returns
+to unreviewed idea; ordinary list/search retain shelves while pickers omit them.
 Pickers and derived review states are explained in the [user guide](user-guide.md).
 
 Task timestamps are whole-second UTC stamps, not unique event ordinals. Writers
