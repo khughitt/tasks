@@ -1,0 +1,126 @@
+# Work ownership
+
+Type: protocol; document types 1.
+
+## Participants and state
+
+The operator/session chooses work, the CLI validates it under a per-project
+mutation lock, and the host-local claim store shares ownership across worktrees.
+Relay optionally supplies concrete harness process identity. Git records keep
+advisory `owner` and lifecycle notes; claims, parks and complexity escalations
+live outside git under `$XDG_STATE_HOME/tasks` or `$HOME/.local/state/tasks`.
+These stores are local to one host and are not a distributed lock.
+
+`tasks show <id>`, `tasks claims` and `tasks prime` expose current claims and
+continuations. A claim names its session, owner, host, worktree, started/seen
+stamps, and any PID/start/boot/PID-view/root evidence. A root association is
+descriptive; it grants no authority over a worker's claim.
+
+## Acquire, refresh and release
+
+`tasks start <id>` acquires/resumes a claim, records doing/owner and a started or
+resumed note, and clears that host's park. Repeated starts by the owner refresh
+the claim. Ordinary writes enforce the same ownership and stale-copy guards;
+they do not make a foreign session the owner. Claim and record writes can fail
+separately: inspect the named landed paths before retrying.
+
+Live or unverifiable foreign claims block work. `ready`, `next` and `prime` omit
+held choices and explain why. Exclusive needs and lanes also block other
+sessions' picks. A claim reserves the exclusive needs declared by that task's
+project; names share one namespace across registered projects on the host.
+An open halt in the registered checkout blocks lower-priority starts across
+worktrees. An explicit `start --force --reason "<why>"` records an override;
+it does not prove the displaced process stopped or make an unsafe action safe.
+
+The owner uses `done`, `drop` or `park` to release. Parking does not change task
+status. Its required next step is an action, with `--waiting-on user|agent` and
+optional fixed-list reason: review, decision, approval, environment, dependency,
+session, capability or quiet. A capability park can escalate complexity. A quiet
+park requires `--minutes` and `--needs idle|headless`. `tasks quiet` reports those
+resume recipes. A quiet attempt records:
+
+```text
+run: <actual> min (est <n>, <needs>); <phase> <m>, …; passed|failed|refused|hung|aborted[: <cause>]
+```
+
+Parks can outlive a close on another host. Prime warns and names the repeated
+close that clears a closed park; a read never silently deletes it. Agent-waiting
+parks are visible to every agent, not an exclusive handoff.
+
+## Identity and liveness
+
+Identity resolves as a pair from one level: explicit nonempty `TASKS_SESSION`
+with optional `TASKS_SESSION_PID`; enabled relay; native Claude session with
+optional CLAUDE_PID; native Codex thread (otherwise session) without a PID; then
+Unix session id. A missing PID is never borrowed from another level. Codex
+commands can be their own short-lived session leaders, so the native Codex level
+uses TTL rather than a command PID. Without usable process evidence a claim's
+seen stamp remains live for four hours. Session id 0 is refused; set an explicit
+session there. `TASKS_OWNER`, git branch, then USER chooses advisory owner.
+
+With `[identity] relay = true`, Linux `/proc` ancestry selects the nearest
+claude/codex/opencode/agy harness boundary (including versioned Claude binaries).
+Daemon/pty hosts are not sessions. Registry schema 2 must match host, boot, PID,
+process start and harness. Missing or conflicting evidence refuses acquisition.
+The explicit session level bypasses relay for recovery and distinguishing agents.
+It supplies no native note provenance; see [task model](task-model.md#origin-and-provenance).
+
+Codex workers can share the controller process. Both native Codex values are
+validated; a worker row is selected only by its own CODEX_THREAD_ID, with its
+root stored separately. An unregistered worker is refused rather than assigned
+the controller's row. Nested harnesses are separate sessions.
+
+Exact resolved session equality authorizes continuation. Relay proof can also
+continue an existing claim after the registry disappears, using the recorded
+host/boot/start evidence and current nearest boundary. For Codex, proof also
+requires a valid concrete CODEX_THREAD_ID matching the claim: sibling, absent,
+malformed or session-only hints cannot substitute. Proof-only continuation at an
+agy boundary is refused because conversations sharing that process are not yet
+distinguished; resolved registry identity still works. Parentage never authorizes
+a foreign claim. A mismatched explicit TASKS_SESSION disables proof fallback.
+
+Parking releases ownership, so the next start is a new acquisition and needs
+current registry evidence or an explicit session. Legitimate owners recovering
+from missing hints can inspect `show` and use its exact held session. Set a PID
+only for a real long-lived process, never for the current CLI invocation.
+
+## PID views and takeover
+
+A PID is judged only in the PID namespace view in which it was established.
+An unknown/different view makes the claim `unverifiable`: it remains held and
+is neither pruned nor stripped of its resource holds. Exported PIDs establish a
+view only in the initial namespace; a number inherited into a container cannot
+prove its origin. Relay matches also need hooks and tasks to share the PID view.
+A nearest harness at PID 1 with no parent produces a namespace diagnosis.
+Use the exact TASKS_SESSION without TASKS_SESSION_PID in that situation, or run
+with the approved host PID view. A locally gone/zombie/zero PID is not recorded
+as fresh proof; the claim uses TTL instead where supported.
+
+An owner release, reboot evidence, or forced start can clear an unverifiable
+claim. When the operator knows a foreign holder has stopped,
+`tasks release <id> "<why>"` removes its stale/unverifiable claim and records a
+single explanatory note without changing status. It refuses a live claim and
+refuses this session's own claim (use park/done). During prefix adoption use
+the refusal's exact `release ... --adopting <old>` command for the old store.
+Do not release a worker based on silence, timeout or a shared PID; establish
+worker-specific completion before forced controller takeover.
+
+## Failure and recovery
+
+`stale_copy` means another checkout has a newer record or conflicting bytes at
+the same stamp. Follow its remedy: hand work to the occupying session, rerun in
+the named checkout, or merge conflicting history. Do not overwrite the newer
+record or change the claim file to bypass the guard. The comparison is local
+across known checkouts, not proof that every host has synced.
+
+`claimed`, `need_held`, halt and identity errors retain the held state. Recheck
+the named task/session and supply an evidence-based override only when warranted.
+Failure to read identity on a read view owns no holds; it does not free them.
+Pending move/rename/migration and retired-project guards are independent of claims;
+follow [project recovery](project-operations.md), not forced claim edits.
+
+Upgrade every tasks binary that accesses a host's stores before enabling schema-2
+relay and PID-view claims. Older binaries can drop proof fields or prune a claim
+from the wrong view. Version output includes a build commit when known, but does
+not mark uncommitted source changes. Neither local locks nor this protocol offer
+cross-host exclusion or power-loss durability guarantees.

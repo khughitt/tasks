@@ -56,7 +56,7 @@ are host paths, with leading `~/` expansion supported.
 | `[records]` | Detached prefix to its actual records directory, already including the project directory. |
 | `[aliases]` | Retired prefix to canonical live prefix, flattened to one hop. |
 | `[groups]` | Group name to sorted unique live-prefix array. |
-| `[locations.<prefix>]` | Optional current `.worktrees` `storage` path and `former` array. Each former entry records `root` and optional `storage`. |
+| `[locations.<prefix>]` | Optional current `.worktrees` `storage` path and `former` array. Each former entry records `root`, optional `storage` and UTC `until` date. |
 
 Group names use the tag grammar and cannot equal live/retired prefixes or an
 unfinished rename's reservation. Members must be live registered prefixes.
@@ -80,7 +80,7 @@ The optional host file is `$XDG_CONFIG_HOME/tasks/config.toml`, otherwise
 relay = false
 
 [docs.schemes]
-# scheme = "command receiving the protocol request on stdin"
+# scheme = "document-provider-command"
 ```
 
 `identity.relay` defaults false. Enabling it changes claim identity resolution
@@ -89,8 +89,8 @@ can refuse a mutation. It does not enable arbitrary note provenance strings.
 See [ownership](ownership.md#identity-and-liveness).
 
 Scheme names match `[a-z][a-z0-9-]*`; `files` is reserved. Commands must be nonblank
-and NUL-free. [Documents](documents.md#external-providers) specifies the request,
-cache, timeout, envelope validation and no-fetch behavior. No host config file
+and NUL-free. [Documents](documents.md#external-providers) specifies the literal
+argument, closed stdin, timeout, envelope validation and no-fetch behavior. No host config file
 means no external providers. A configured command is executable host policy,
 not a command copied automatically from a task record.
 
