@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      TT_FORCE: "1"
+      GIT_CONFIG_NOSYSTEM: "1"
+      CARGO_TERM_COLOR: "never"
+    steps:
+      - name: Prepare isolated Git config and evidence directory
+        run: |
+          touch "$RUNNER_TEMP/gitconfig"
+          mkdir -p "$RUNNER_TEMP/ci-evidence"
+          echo "GIT_CONFIG_GLOBAL=$RUNNER_TEMP/gitconfig" >> "$GITHUB_ENV"
+          echo "EVIDENCE_DIR=$RUNNER_TEMP/ci-evidence" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install zsh and Rust toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y zsh
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.99.1
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: 1.59.0
+
+      - name: Record tool versions
+        run: |
+          {
+            cat /etc/os-release
+            rustc --version
+            cargo --version
+            rustfmt --version
+            cargo clippy --version
+            just --version
+            zsh --version
+            python3 --version
+            git --version
+          } > "$EVIDENCE_DIR/setup-report.txt"
+
+      - name: Run setup
+        run: |
+          just setup
+
+      - name: Run portable hygiene checks
+        run: |
+          just ci-check-hygiene
+
+      - name: Run Rust format and lint checks
+        run: |
+          just check-code
+
+      - name: Run full test suite and verify coverage
+        run: |
+          set -uo pipefail
+          rc=0
+          just test 2>&1 | tee "$EVIDENCE_DIR/test-output.log" || rc=$?
+          if [ -f "$HOME/.local/share/ops/runs.jsonl" ]; then
+            cp "$HOME/.local/share/ops/runs.jsonl" "$EVIDENCE_DIR/runs.jsonl"
+          fi
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          root = pathlib.Path.cwd().resolve()
+          evidence = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          metadata = json.loads(subprocess.check_output(
+              ['cargo', 'metadata', '--no-deps', '--format-version', '1'], text=True))
+          package, = [p for p in metadata['packages']
+                      if pathlib.Path(p['manifest_path']).resolve() == root / 'Cargo.toml']
+          expected = {}
+          for target in package['targets']:
+              assert not target.get('doctest'), f"Unverified doctest target: {target['name']}"
+              if not target.get('test'):
+                  continue
+              kind, = target['kind']
+              assert kind in ('bin', 'test'), f"Unverified test target kind: {kind}"
+              path = pathlib.Path(target['src_path']).relative_to(root).as_posix()
+              header = ('unittests ' if kind == 'bin' else '') + path
+              assert header not in expected, f'Duplicate metadata target: {header}'
+              expected[header] = dict(name=target['name'], path=path, kind=kind)
+          assert expected, 'No executable test targets declared'
+
+          active = None
+          results = {}
+          for line in (evidence / 'test-output.log').read_text().splitlines():
+              header = re.fullmatch(r'\s*Running (.+?) \(.+\)\s*', line)
+              summary = re.match(r'test result: (\S+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', line)
+              if header:
+                  name = header[1]
+                  assert active is None, f'Target lacks summary: {active}'
+                  assert name in expected and name not in results, f'Unexpected or duplicate target: {name}'
+                  active = name
+              elif summary:
+                  assert active is not None, 'Summary without target header'
+                  verdict, passed, failed, ignored = summary.groups()
+                  assert verdict == 'ok' and int(failed) == int(ignored) == 0, f'{active}: {line}'
+                  results[active] = dict(**expected[active], executed_tests=int(passed))
+                  active = None
+          assert active is None and results.keys() == expected.keys(), 'Missing test target or summary'
+          total = sum(target['executed_tests'] for target in results.values())
+          assert total > 0, 'No tests executed'
+          rows = [json.loads(line) for line in (evidence / 'runs.jsonl').read_text().splitlines()]
+          tests = [row for row in rows if row.get('target') == 'test']
+          assert tests, 'No tt test record'
+          row = tests[-1]
+          assert (row.get('execution'), row.get('execution_reason'), row.get('exit')) == ('ran', 'forced', 0), row
+          assert type(row.get('tests')) is int and row['tests'] == total, (row, total)
+          report = dict(
+              revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              target_count=len(results), targets=sorted(results.values(), key=lambda target: target['path']),
+              executed_tests=total, failed_tests=0, ignored_tests=0, excluded_modules=0,
+              skipped_tests=0, tt_record=row)
+          (evidence / 'coverage-summary.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(f'Verified {total} tests across {len(results)} targets; 0 excluded modules, 0 skipped tests')
+          PY
+
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-evidence
+          path: ${{ env.EVIDENCE_DIR }}
+          retention-days: 7
+          if-no-files-found: error

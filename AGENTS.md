@@ -14,7 +14,7 @@ whether brainstorming runs.
 ## Gates
 
 Run `just setup` in a fresh checkout or worktree, or after dependency changes. It
-uses `work-link` when available to keep `target/` off the synced tree, then fetches
+uses `work-link` when available to keep target/ off the synced tree, then fetches
 the locked Cargo dependencies; safe to rerun.
 
     just gate
@@ -22,22 +22,38 @@ the locked Cargo dependencies; safe to rerun.
 Tests: `just test-one <name>` for a test-name filter, or `just test-one --test cli <name>`
 for one integration test; runner arguments are forwarded intact and at least one is
 required. Run `just test-fast` before committing; it accepts no arguments and runs the
-non-ignored suite. `just test` includes the slow `#[ignore]`d exhaustive enumeration.
-No CI workflow runs the full suite on push (`ci_suite_refs` is empty), so the pre-push
-hook carries it. Run `just test` yourself only if hooks are not installed or the fast
-set does not cover affected behavior. Never run `cargo test` directly: the recipe records
+non-ignored suite. `just test` includes the slow `#[ignore]`d exhaustive enumeration;
+`just test-full` is the untimed alias for `TT_FORCE=1 just test`.
+Local policy remains enabled: `.tt.toml` is absent and `ci_suite_refs` is empty,
+so the pre-push hook carries the full gate until an approved hosted pilot succeeds.
+Run `just test` yourself only if hooks are not installed or the fast set does not cover
+affected behavior. Never run `cargo test` directly: the recipe records
 the run and stops git discovery at `$TMPDIR`, so a stray `.git` there cannot fail the
-fixtures. `just check` runs hygiene (`tools/ops-check`), the guide contract
-(`tools/ops-docs check`), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-and `tasks check`. `just docs` regenerates the identity regions of `README.md` and
-`AGENTS.md` from `identity.toml`; edit that file, never the regions. Every recipe runs
-through the vendored timing wrapper `tools/tt`, which records the run for the
-cross-project test and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`).
-The git hooks in `.githooks/` run the check at pre-commit, or hygiene, the guide contract
-and `tasks check` alone when every staged path matches `AGENTS.md` or `tasks/*.md`
-(renames count on both sides and failed classification runs the full check). Pre-push
-runs the full gate unless every pushed ref is covered by full-suite CI on `ci_remote`; on
-a fresh clone, run `git config core.hooksPath .githooks` once.
+fixtures. `just check` composes `just check-hygiene` (`tools/ops-check`,
+`tools/ops-docs check`, `tasks check`) and `just check-code` (`cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`). `just ci-check-hygiene` runs the
+portable hygiene checks; `tasks check` requires the private detached records repository
+and stays on the mandatory local path at every commit and push.
+`just docs` regenerates the identity regions of `README.md` and
+`AGENTS.md` from `identity.toml`; edit that file, never the regions. Leaf recipes run
+through the vendored timing wrapper `tools/tt`; compositions (`check`, `gate`,
+`test-full`) add no enclosing timer (ops docs/specs/2026-09-04-test-ci-audit-design.md).
+The `hook-pre-commit`, `hook-pre-push`, and `hook-pre-push-fast` timers cover mandatory
+hygiene only, then call broad children separately. These durations are incomparable
+with the earlier whole-hook timing series. Guide/task-only commits retain hygiene
+alone; renames count on both sides and failed classification runs the full check.
+On a fresh clone, run `git config core.hooksPath .githooks` once.
+
+The prepared `.github/workflows/ci.yml` runs on every branch push (including nested
+names) and manual dispatch, on `ubuntu-24.04` with pinned Rust and just. Job-scope
+`TT_FORCE=1` runs `just setup`, `just ci-check-hygiene`, `just check-code`, and the full
+`just test` suite. Coverage verification derives all executable test targets from
+Cargo metadata and requires zero failures, zero ignored tests, and a matching forced
+timing record. Remote coverage (`refs/heads/*` on `origin`) is declared only after the
+hosted pilot is accepted; preparing this workflow does not activate the local policy.
+`tools/tt` reads `.tt.toml` only at the invoking code checkout's Git top level.
+When a future approved policy disables broad targets, `just test-one` and mandatory
+hygiene still run; `TT_FORCE=1` explicitly forces broad checks, including nested recipes.
 
 Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
 `cargo install --locked --path .`
@@ -57,7 +73,7 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 - `justfile`, `tools/tt`, `.githooks/` — the test front door and its timing wrapper (see Gates).
 - `identity.toml`, `tools/ops-docs` — the project's declared identity and the vendored
   tool that renders it into both guides and checks their shape (ops
-  `docs/specs/2026-09-22-project-guides-design.md`).
+  docs/specs/2026-09-22-project-guides-design.md).
 - `tools/cli.toml` — the vendored CLI surface from ops (see `tools/README.md`): the shared
   vocabulary plus a row for every in-scope command and option. `src/surface.rs` builds the
   live parser surface, and its `parser_surface_equals_table` test asserts it matches the
