@@ -1,7 +1,7 @@
 //! Linked checkouts: a path's git facts and the registered project whose `[checkout]`
-//! names its repository (ops docs/specs/2026-10-01-linked-checkouts-design.md §4.1), and
+//! names its repository (docs/project-operations.md), and
 //! the detached project whose registered root is that repository's main checkout
-//! (records-detached spec §3.2).
+//! (docs/project-operations.md).
 
 use crate::error::{Error, Result};
 use crate::registry::Registry;
@@ -325,7 +325,7 @@ fn obstruction(marker: &Path, metadata: &std::fs::Metadata) -> String {
     }
 }
 
-/// Spec §3.2 step 2: the project registered at `tree`'s main checkout (compared
+/// docs/task-model.md step 2: the project registered at `tree`'s main checkout (compared
 /// canonically), when `[records]` pairs it, opened from its records directory with
 /// `worktree` set to `tree`'s top level. A registered root that holds a config is an
 /// in-tree project reached from a worktree without the file, `Ok(None)` as before; one
@@ -352,7 +352,7 @@ pub fn paired_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
     Ok(None)
 }
 
-/// Spec §3.2: a registered root that holds no config while `[records]` pairs the prefix
+/// Current contract (docs/task-model.md): a registered root that holds no config while `[records]` pairs the prefix
 /// with nothing (the second host between the sync and its own `init --records`). Never
 /// opened as anything; the remedy that pairs it comes first, then the one for a root that
 /// truly keeps no records anywhere.
@@ -384,7 +384,7 @@ pub fn records_moved(prefix: &str, dir: &Path) -> Error {
     ))
 }
 
-/// Spec §3.3: an in-tree config whose prefix `[records]` pairs with another directory is
+/// Current contract (docs/task-model.md): an in-tree config whose prefix `[records]` pairs with another directory is
 /// a branch that predates the detach. Its `tasks/` is history, never written.
 pub fn refuse_moved(registry: &Registry, project: &Project) -> Result<()> {
     if project.kind != Kind::InTree {
@@ -426,7 +426,7 @@ pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
     }
 }
 
-/// Linked-checkouts decision 5 and §8.1: the repository holding `tree` keeps our records
+/// Linked-checkouts decision 5 and : the repository holding `tree` keeps our records
 /// when a registered project's config directory (`scope::config_dir`: a detached
 /// project's records directory, else its root) is in it (the same common git directory),
 /// or its top level holds a `tasks/.config.toml` tracked in `HEAD` as a regular file. Only
@@ -457,7 +457,7 @@ pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
 /// `blob` of mode `100644` or `100755`. A tree at that path (which `git cat-file -e`
 /// accepts) or a symlink (`120000`) is not a config. A genuinely unborn branch tracks
 /// nothing; every other failure to read `HEAD` (a malformed loose ref, a corrupt
-/// `packed-refs`) is an `io` error, never "no records" (plan review round 2).
+/// `packed-refs`) is an `io` error, never "no records".
 fn tracked_config(top: &Path) -> Result<bool> {
     let git = |args: &[&str]| {
         let mut command = crate::git::at(top);
@@ -494,7 +494,7 @@ fn tracked_config(top: &Path) -> Result<bool> {
 
 const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
 
-/// `tasks/.config.toml` is in the index at `top` (records-detached spec §5.1): `git
+/// `tasks/.config.toml` is in the index at `top` (docs/project-operations.md): `git
 /// ls-files --cached` names it. A staged deletion takes it out, whatever `HEAD` tracks. A
 /// failing git run is an `io` error, never "absent". Keep the invoking hook's index:
 /// this checks the code commit being made, not the records repository.

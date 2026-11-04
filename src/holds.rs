@@ -1,4 +1,4 @@
-//! Exclusive holds (lanes/needs design §4.4): which live claims, in the claim store of
+//! Exclusive holds (docs/user-guide.md): which live claims, in the claim store of
 //! every registered project, hold which exclusive needs. Read without any project's lock;
 //! an acquire that would record a hold reads it under the host-wide holds lock.
 
@@ -21,7 +21,7 @@ pub struct Holder {
     pub prefix: String,
 }
 
-/// The live holding claims that are the caller's own (§4.4 "Blocks other sessions
+/// The live holding claims that are the caller's own ("Blocks other sessions
 /// only"), by store prefix and task. Built by `HoldSnapshot::mine` with the claim
 /// ownership rule (`commands::ownership`), never by comparing session strings. The
 /// default owns nothing: with no resolved identity and no proof, every hold is another
@@ -39,7 +39,7 @@ impl Mine {
 }
 
 /// Every live hold on the host, by need name. Exclusive need names are one namespace
-/// across projects (§4.1), so a hold recorded in any project counts in every project that
+/// across projects , so a hold recorded in any project counts in every project that
 /// declares the same name exclusive.
 #[derive(Debug, Default)]
 pub struct HoldSnapshot {
@@ -54,7 +54,7 @@ fn unknown(prefix: &str, error: &crate::error::Error) -> String {
 }
 
 impl HoldSnapshot {
-    /// Reads the store of every registered prefix (§4.4 "Which stores are read"), not
+    /// Reads the store of every registered prefix ("Which stores are read"), not
     /// only those in scope: the same set `tasks claims` reads. Stores of unregistered or
     /// renamed prefixes are never read. Unlike `ClaimSnapshot`, a store that cannot be
     /// read is a warning, not a failure, and contributes no holds.
@@ -97,7 +97,7 @@ impl HoldSnapshot {
                 }
             };
             for (key, claim) in store.iter() {
-                // Held unless stale (§4.4; claim PID-view design §4): a dead claim, a park,
+                // Held unless stale (; docs/ownership.md): a dead claim, a park,
                 // or a doing status alone holds nothing; a pidless claim holds for its TTL,
                 // and a claim this command cannot judge keeps holding.
                 if claim.holds.is_empty()
@@ -150,7 +150,7 @@ impl HoldSnapshot {
 
     /// The first live claim holding `need` that is neither on `task` itself (a takeover is
     /// never a hold) nor the caller's own (the holding session may take more work needing
-    /// it). `Mine::default()` means the caller owns nothing, and every hold counts as
+    /// it). `Mine::default` means the caller owns nothing, and every hold counts as
     /// another session's.
     pub fn holder(&self, need: &str, task: &TaskId, mine: &Mine) -> Option<&Holder> {
         self.by_need
@@ -165,7 +165,7 @@ impl HoldSnapshot {
     }
 }
 
-/// §4.4 "Blocks other sessions only": `task` is held back when its own project declares a
+///  "Blocks other sessions only": `task` is held back when its own project declares a
 /// need exclusive and another session's live claim on another task holds a need of that
 /// name. The first such need, in name order, with its holder.
 pub fn held_back(
@@ -184,7 +184,7 @@ pub fn held_back(
         })
 }
 
-/// The views' one warning per need and holder (§4.5), however many tasks wait on it.
+/// The views' one warning per need and holder , however many tasks wait on it.
 #[derive(Debug, Default)]
 pub struct HeldWarnings {
     counts: BTreeMap<(String, String, String), usize>,
@@ -212,7 +212,7 @@ impl HeldWarnings {
     }
 }
 
-/// `claims/.holds.lock`: one host-wide lock beside the per-prefix stores (§4.4 "Atomic
+/// `claims/.holds.lock`: one host-wide lock beside the per-prefix stores ("Atomic
 /// across projects"). A prefix cannot start with `.`, so no project's `<prefix>.lock` is
 /// this file, including the lock of a project whose prefix is `holds`.
 pub fn lock_path_with(get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {

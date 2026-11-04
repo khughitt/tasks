@@ -1,4 +1,4 @@
-//! `tasks retire` / `tasks unretire` (ops lifecycle spec §3–§4). Lock order: this
+//! `tasks retire` / `tasks unretire` (docs/project-operations.md). Lock order: this
 //! project's MutationLock only; the registry is read, never locked, because every command
 //! that changes this prefix's root (`init --force`, `rename`) takes this lock first.
 

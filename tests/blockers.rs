@@ -1,5 +1,5 @@
 //! `tasks blockers`: the ranked downstream-impact read
-//! (docs/specs/2026-10-25-blocker-ranking-design.md). Every fixture runs under TestEnv's
+//! (docs/task-model.md). Every fixture runs under TestEnv's
 //! isolated environment; git runs only through `common::git_fixture`.
 
 mod common;

@@ -52,7 +52,7 @@ pub(super) fn read_record(
         Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
         result => result?,
     }
-    // Spec §4.5: a pending migration freezes its whole source and successor.
+    // Current contract (docs/user-guide.md): a pending migration freezes its whole source and successor.
     for journal in crate::migrating::journal::MigrationJournal::pending()? {
         let warning = journal.pending_error().to_string();
         if journal.names_prefix(&id.prefix) && !ctx.warnings.contains(&warning) {
@@ -62,7 +62,7 @@ pub(super) fn read_record(
     Ok(found)
 }
 
-/// Record-home spec §6.1: a record this checkout lacks is read from the checkout named by
+/// Current contract (docs/project-operations.md): a record this checkout lacks is read from the checkout named by
 /// its live claim, or else by its park. A record present here is always read here.
 pub(super) fn recorded_elsewhere<'a>(
     id: &crate::model::TaskId,

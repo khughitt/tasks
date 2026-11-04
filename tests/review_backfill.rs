@@ -206,7 +206,7 @@ fn apply_needs_the_operator_s_confirmation_and_no_live_claim() {
     let (code, report) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
     assert_eq!(code, 1, "{report}");
     assert_eq!(updated(&env, &f.dir, &f.briefed), stamp);
-    // Once the claim is released, the next pass sets the untouched candidate (spec §8 case 14).
+    // Once the claim is released, the next pass sets the untouched candidate (docs/user-guide.md).
     env.json(&f.dir, &["park", &f.untouched, "later"]);
     let (code, report) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
     assert_eq!(code, 0, "{report}");
@@ -345,7 +345,7 @@ fn a_deferred_commit_is_reported_and_not_rewritten() {
     std::fs::write(&config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
     git(&f.dir, &["add", "-A"]);
     git(&f.dir, &["commit", "-q", "-m", "init"]);
-    // A staged change elsewhere defers every record commit (record-commit design §3.3).
+    // A staged change elsewhere defers every record commit (docs/project-operations.md).
     std::fs::write(f.dir.join("other.txt"), "x").unwrap();
     git(&f.dir, &["add", "other.txt"]);
     let state = tempfile::tempdir().unwrap();

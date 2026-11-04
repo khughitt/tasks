@@ -8,12 +8,12 @@ use crate::model::{Task, TaskId};
 use crate::output::Output;
 use std::path::Path;
 
-/// The refusal hint for a held claim that reads `Unverifiable` (spec §6).
+/// The refusal hint for a held claim that reads `Unverifiable` (docs/task-model.md).
 pub fn hint(id: &str, session: &str) -> String {
     format!("; if session {session} is gone, run `tasks release {id} \"<why>\"`")
 }
 
-/// The same, for a claim adoption finds in the old prefix's store (spec §6).
+/// The same, for a claim adoption finds in the old prefix's store (docs/task-model.md).
 pub fn adopting_hint(renamed: &str, session: &str, old: &str) -> String {
     format!(
         "; if session {session} is gone, run `tasks release {renamed} \"<why>\" --adopting {old}`"
@@ -28,7 +28,7 @@ pub struct Adopting {
 }
 
 /// The write context. Under `--adopting`, both prefixes' locks in sorted order, as
-/// `rename --adopt` takes them, and only for a predecessor adoption would accept (§1).
+/// `rename --adopt` takes them, and only for a predecessor adoption would accept.
 pub fn open(
     dir: Option<&Path>,
     id: &str,
@@ -85,7 +85,7 @@ pub fn open(
     ))
 }
 
-/// Spec §1: `old` is a predecessor adoption would take for this checkout.
+/// Current contract (docs/task-model.md): `old` is a predecessor adoption would take for this checkout.
 fn eligible(ctx: &Ctx, old: &str) -> Result<()> {
     match crate::rename::adopt::accepts(&ctx.registry, &ctx.project, old)? {
         None => Ok(()),
@@ -97,7 +97,7 @@ fn eligible(ctx: &Ctx, old: &str) -> Result<()> {
     }
 }
 
-/// Spec §1: the reason is the one thing the record keeps that the tool cannot know.
+/// Current contract (docs/task-model.md): the reason is the one thing the record keeps that the tool cannot know.
 fn require_reason(why: &str) -> Result<()> {
     if why.trim().is_empty() {
         return Err(Error::Validation(
@@ -145,7 +145,7 @@ pub fn run(mut ctx: Ctx, adopting: Option<Adopting>, id: String, why: String) ->
     }
 }
 
-/// Spec §2: refuse an own or live claim; return the verdict that permits the release.
+/// Current contract (docs/task-model.md): refuse an own or live claim; return the verdict that permits the release.
 /// `adopting` is `(old, routed id)` under `--adopting`, whose refusals name adoption,
 /// never the routed id's `park`, `done` or `start --force`, which act on the other store,
 /// and never promise that the holder's end clears the claim.
@@ -193,7 +193,7 @@ fn judge(
     }
 }
 
-/// Spec §3–§5: load the record past the stale-copy check that skips this session's
+/// Current contract (docs/task-model.md): load the record past the stale-copy check that skips this session's
 /// claims, append the stamped note, and write the record without touching the store.
 fn write_note(
     ctx: &mut Ctx,

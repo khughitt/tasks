@@ -1,5 +1,5 @@
-//! Commits the files a tasks command wrote (docs/specs/2026-10-10-record-commit-design.md
-//! §3.3 and §3.7): a plain commit over an index holding nothing else, under a lock every
+//! Commits the files a tasks command wrote (docs/project-operations.md
+//!  and): a plain commit over an index holding nothing else, under a lock every
 //! tasks writer in the repository shares, unstaging only its own paths when it fails and
 //! reporting whatever it could not put back.
 use crate::claims::MutationLock;
@@ -487,7 +487,7 @@ fn commit_under_lock(
 }
 
 /// The top level of the working tree `dir` lies in, canonical; `None` outside git or
-/// without a git executable. Record commits group roots by it (spec §3.7).
+/// without a git executable. Record commits group roots by it (docs/project-operations.md).
 pub fn working_tree(dir: &Path) -> Result<Option<PathBuf>, String> {
     Ok(discover(dir, git)?.map(|repo| repo.toplevel))
 }
@@ -572,7 +572,7 @@ struct Tree {
 
 /// Drains the journal and commits it: the opted-in roots grouped by git working tree, one
 /// commit per working tree, so a move between two projects in one repository is one
-/// commit (spec §3.2, §3.7). Called by a write command's finishing point while its locks
+/// commit (docs/project-operations.md). Called by a write command's finishing point while its locks
 /// are still held. Returns the absolute paths it committed.
 pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
     commit_written_result(warnings).1

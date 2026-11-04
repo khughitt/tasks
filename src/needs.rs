@@ -1,11 +1,11 @@
 //! Shared resources a task's work uses, drawn from the vocabulary its project declares in
-//! `[needs]` (docs/specs/2026-10-03-lanes-needs-groups-design.md §4).
+//! `[needs]` (docs/user-guide.md).
 
 use crate::error::{Error, Result};
 use crate::model::Task;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-/// The tag grammar the spec gives need names (§4.1): lowercase ASCII letters, digits, and
+/// The need-name grammar (docs/configuration.md): lowercase ASCII letters, digits, and
 /// `-`, never starting with `-`, so a name cannot read as a flag. Shared with the
 /// vocabulary keys, the record field, and the `--need` flags.
 pub fn validate_name(name: &str) -> Result<()> {
@@ -23,7 +23,7 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
 }
 
-/// One `[needs.<name>]` table (spec §4.1). `meaning` is one required line; `exclusive`
+/// One `[needs.<name>]` table (docs/user-guide.md). `meaning` is one required line; `exclusive`
 /// says the resource serves one session at a time.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -47,7 +47,7 @@ fn declared_list(vocab: &Vocabulary) -> String {
     }
 }
 
-/// Every name must be declared (spec §4.2, on write). The first that is not fails
+/// Every name must be declared (docs/user-guide.md on write). The first that is not fails
 /// `unknown_need`, naming what the project does declare.
 pub fn require_declared(vocab: &Vocabulary, names: &[String]) -> Result<()> {
     match names.iter().find(|name| !vocab.contains_key(*name)) {
@@ -60,7 +60,7 @@ pub fn require_declared(vocab: &Vocabulary, names: &[String]) -> Result<()> {
     }
 }
 
-/// The needs a claim holds (spec §4.4): those its own project declares exclusive. An
+/// The needs a claim holds (docs/user-guide.md): those its own project declares exclusive. An
 /// undeclared name is ignored. Sorted and deduped.
 pub fn exclusive_of(vocab: &Vocabulary, needs: &[String]) -> Vec<String> {
     needs
@@ -72,7 +72,7 @@ pub fn exclusive_of(vocab: &Vocabulary, needs: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The variable a session sets for the needs it cannot meet (spec §4.3).
+/// The variable a session sets for the needs it cannot meet (docs/user-guide.md).
 pub const WITHOUT_ENV: &str = "TASKS_WITHOUT";
 
 /// Each in-scope project's vocabulary, by prefix. A task's needs mean what its own
@@ -150,7 +150,7 @@ impl Without {
     }
 
     /// `vocab` is the vocabulary of `task`'s own project. A name that project does not
-    /// declare hides nothing there (spec §4.3), even when another project in scope
+    /// declare hides nothing there (docs/user-guide.md), even when another project in scope
     /// declares it.
     pub fn hides(&self, task: &Task, vocab: &Vocabulary) -> bool {
         task.needs

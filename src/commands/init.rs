@@ -54,7 +54,7 @@ pub fn run(
             None
         }
     };
-    // Spec §5.1: re-pairing with another records directory is a repoint, so it needs
+    // Current contract (docs/task-model.md): re-pairing with another records directory is a repoint, so it needs
     // `--force`; a mistyped records root must not silently replace the pairing.
     let repaired = match (&records, registry.records_dir(&prefix)) {
         (Some(derived), Some(current)) if crate::rename::dir_identity(current)? != *derived => {
@@ -95,7 +95,7 @@ pub fn run(
     }
     let previous = displaced.map(|root| registry.displaced(&prefix, root));
     let (project_root, records) = match records {
-        // Relocation design §4.5: every refusal and computation first, then the config,
+        // Current contract (docs/project-operations.md): every refusal and computation first, then the config,
         // then the registry; a failed save puts the config back.
         Some(derived) => {
             let plan = Project::plan_detached(&derived, &prefix, &root, force)?;
@@ -232,7 +232,7 @@ fn reject_repointing_a_retired_project(
     Ok(())
 }
 
-/// No command writes into a linked checkout (ops linked-checkouts §4.1), `init` included:
+/// No command writes into a linked checkout (docs/project-operations.md), `init` included:
 /// a destination in a repository that a registered project declares as its checkout is
 /// refused, whichever of that repository's working trees it is in, because the
 /// repository's records already live in that project's root. A detached project's checkout
@@ -278,7 +278,7 @@ fn reject_linked_destination(root: &Path, registry: &Registry) -> Result<()> {
     )))
 }
 
-/// Linked-checkouts §4.1: the checkout must be the main checkout of a git repository that
+/// Linked checkout (docs/project-operations.md): the checkout must be the main checkout of a git repository that
 /// keeps no records, outside every registered project's tree, not containing this
 /// project, and declared by no other project.
 fn validate_checkout(
@@ -367,7 +367,7 @@ fn validate_checkout(
     Ok(checkout)
 }
 
-/// Records-detached spec §5.1: `root`, the checkout running `init --records`, must be the
+/// Current contract (docs/project-operations.md): `root`, the checkout running `init --records`, must be the
 /// main checkout of a git repository that keeps no records in its working tree or index,
 /// overlapping no other registered project, and declared by no other prefix; the records
 /// directory `<records_root>/<prefix>` must lie outside its repository. Returns that

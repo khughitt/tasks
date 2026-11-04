@@ -1,5 +1,5 @@
 //! The files under a project root this command wrote, which the record commit commits
-//! (docs/specs/2026-10-10-record-commit-design.md §3.2). Process-wide: the writes happen in
+//! (docs/project-operations.md). Process-wide: the writes happen in
 //! `Project`, `attachments` and `moving`, far below the command that finishes them, and a
 //! command is one process.
 use std::collections::{BTreeMap, BTreeSet};

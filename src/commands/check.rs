@@ -293,7 +293,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 ));
             }
         }
-        // A retired project holds no open work (ops lifecycle spec §4); one that reappears,
+        // A retired project holds no open work (docs/project-operations.md); one that reappears,
         // say from a sync conflict, is an error to close or a reason to unretire.
         if retired && task.status.is_open() {
             errors.push(finding(
@@ -328,7 +328,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 ));
             }
         }
-        // Lanes-needs spec §4.2: reads carry an undeclared need as-is; `check` refuses
+        // Current contract (docs/user-guide.md): reads carry an undeclared need as-is; `check` refuses
         // it on every record, open or closed, since a reopen or an acquire reads it again.
         for need in &task.needs {
             if let Err(error) =
@@ -516,7 +516,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 }
             }
         }
-        // Spec §6: the plan step is the unit of delegation, and rating it is the
+        // Current contract (docs/task-model.md): the plan step is the unit of delegation, and rating it is the
         // planner's duty. Elsewhere a missing rating is not a finding, like size.
         if task.status.is_open() && task.step.is_some() && task.complexity.is_none() {
             warnings.push(finding(
@@ -587,7 +587,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 };
                 errors.push(finding(Some(task), file.clone(), "deferred_goal", detail));
             }
-            // spec §3.2: the status rule lives here and in the writers, not in parsing.
+            // Current contract (docs/task-model.md): the status rule lives here and in the writers, not in parsing.
             if task.status != Status::Moved && !crate::defer::can_carry(task.status) {
                 errors.push(finding(
                     Some(task),
@@ -600,7 +600,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 ));
             }
         }
-        // Review-state spec §3.2: the writers refuse it, so only a hand edit lands here.
+        // Current contract (docs/user-guide.md): the writers refuse it, so only a hand edit lands here.
         if task.reviewed && task.status != Status::Idea {
             errors.push(finding(
                 Some(task),
@@ -612,7 +612,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 ),
             ));
         }
-        // Wait-aware spec §3.4: the writers refuse these, so only a hand edit lands here.
+        // Current contract (docs/user-guide.md): the writers refuse these, so only a hand edit lands here.
         if task.awaiting_user && !task.reviewed {
             errors.push(finding(
                 Some(task),
@@ -671,7 +671,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 ),
             ));
         }
-        // Spec §7: link drift is held against open work only. A closed record's links are
+        // Current contract (docs/task-model.md): link drift is held against open work only. A closed record's links are
         // history, and a later plan revision that merges its heading away is not an error.
         if task.status.is_open() {
             for entry in &task.refs {

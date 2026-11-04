@@ -595,7 +595,7 @@ fn rows(v: &serde_json::Value) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// One of each kind spec §4 distinguishes, returned as (marked ids, unmarked ids).
+/// One of docs/user-guide.md distinguishes, returned as (marked ids, unmarked ids).
 fn mixed_project(env: &mut TestEnv) -> (std::path::PathBuf, Vec<String>, Vec<String>) {
     let dir = env.init("sci");
     let new_idea = id_of(env.json(&dir, &["add", "New", "--status", "idea"]));

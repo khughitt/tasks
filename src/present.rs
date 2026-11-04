@@ -1,4 +1,4 @@
-//! The look of each task field, decided once (show layout spec §4). Views ask this module
+//! The look of each task field, decided once (docs/user-guide.md). Views ask this module
 //! for a field's text and role, then pad and paint the result; none of them names a
 //! field's role itself, so a field reads the same in every view.
 
@@ -158,7 +158,7 @@ pub fn count(status: Status, value: usize) -> Span {
     Span::styled(value.to_string(), style)
 }
 
-/// `── name ` in the heading role, then a dim rule out to `width` (show layout §3.2).
+/// `── name ` in the heading role, then a dim rule out to `width` (show layout).
 pub fn rule(name: &str, painter: &Painter, width: usize) -> String {
     let head = format!("── {name} ");
     let fill = width.saturating_sub(head.chars().count());
@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(id("ab", None).left(4).text, "ab  ");
     }
 
-    /// Spec §4.1: the views ask this module, so a field cannot look different in two
+    /// Current contract (docs/task-model.md): the views ask this module, so a field cannot look different in two
     /// of them. Test code is exempt.
     #[test]
     fn field_roles_are_built_only_here() {

@@ -114,7 +114,7 @@ mod tests {
             due(&anchored(Status::Done)),
             Some(at("2026-10-09T11:00:00Z"))
         );
-        // An anchored record that is open or dropped has no pending recurrence (spec §4.1);
+        // An anchored record that is open or dropped has no pending recurrence (docs/user-guide.md);
         // this is the None the JSON contract renders as null.
         assert_eq!(due(&anchored(Status::Todo)), None);
         assert_eq!(due(&anchored(Status::Doing)), None);
@@ -176,7 +176,7 @@ use std::fmt;
 use time::{Duration, OffsetDateTime};
 
 /// The largest interval accepted, in days. A product limit, not a representability
-/// argument (spec §3.1): a century is a typo, and a stated number beats a platform
+/// argument (docs/user-guide.md): a century is a typo, and a stated number beats a platform
 /// quirk. Representability is `add`'s job, and it is checked separately.
 pub const MAX_DAYS: u32 = 36500;
 
@@ -202,7 +202,7 @@ impl Unit {
     }
 }
 
-/// A recurrence interval: a positive whole number of days or weeks (spec §3.1). The unit
+/// A recurrence interval: a positive whole number of days or weeks (docs/user-guide.md). The unit
 /// is kept so `2w` round-trips as `2w` rather than `14d`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interval {
@@ -274,7 +274,7 @@ pub fn add(anchor: OffsetDateTime, every: Interval) -> Option<OffsetDateTime> {
 }
 
 /// The date this recurrence next falls due, or `None` for an open or dropped record, for
-/// one with no cadence, and for one that has never been completed (spec §4.1). The status
+/// one with no cadence, and for one that has never been completed (docs/user-guide.md). The status
 /// gate lives here so eligibility, ordering, JSON, and pretty output share one value.
 pub fn due(task: &Task) -> Option<OffsetDateTime> {
     if task.status != Status::Done {
@@ -286,7 +286,7 @@ pub fn due(task: &Task) -> Option<OffsetDateTime> {
     Some(add(anchor, every).expect("validate_task checked this sum"))
 }
 
-/// Whether a closed recurrence has come back around (spec §4.1).
+/// Whether a closed recurrence has come back around (docs/user-guide.md).
 pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
     task.every.is_some()
         && task.status == Status::Done
@@ -294,7 +294,7 @@ pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
 }
 
 /// Whole calendar days from `now` to `due`: the figure the `prime` line prints beside the
-/// due date (spec §5.3). Calendar days, not elapsed 24-hour periods, so the number always
+/// due date (docs/user-guide.md). Calendar days, not elapsed 24-hour periods, so the number always
 /// agrees with the date next to it -- a cadence stamped a second ago reads `in 7d`, where
 /// truncating the remaining duration would say 6. A record due later today reads 0.
 pub fn days_until(due: OffsetDateTime, now: OffsetDateTime) -> i64 {

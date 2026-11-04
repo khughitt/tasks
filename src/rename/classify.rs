@@ -641,7 +641,7 @@ mod tests {
         assert_eq!(verdict(classify(&duplicate_baseline)), Verdict::Refuse);
     }
 
-    // Independent transcription of §5.3: accumulate excluded states, then look up
+    // Independent transcription of : accumulate excluded states, then look up
     // the exact table row. This does not call any production recovery predicates.
     fn expected(snap: &Snapshot) -> Verdict {
         let invocation = &snap.invocation;

@@ -1106,7 +1106,7 @@ fn rename_resumes_between_the_file_write_and_the_directory_move() {
     let mut env = TestEnv::new();
     let (dir, with, without) = committed_project(&mut env);
     // Entries are processed sorted by hex; find `with`'s index so `file:<index>`
-    // stops right after its destination .md is written.
+    // stops right after its destination.md is written.
     let index = if hex(&with) < hex(&without) { 0 } else { 1 };
     stop_after(&env, &dir, &format!("file:{index}"));
     assert!(

@@ -11,7 +11,7 @@ pub fn enabled() -> Result<bool> {
     Ok(HostConfig::load()?.relay_identity)
 }
 
-/// Stage 3 of spec §7, asking what the host offers rather than what the target triple
+/// Stage 3 docs/task-model.md asking what the host offers rather than what the target triple
 /// says: a Linux build without a mounted `/proc` cannot establish scope either. The
 /// refusal belongs to the relay level, not to startup, so a session with `TASKS_SESSION`
 /// set never reaches it and it can never take away the recovery path.
@@ -27,7 +27,7 @@ pub fn stage_platform(enabled: bool, proc_available: bool) -> Result<()> {
     Ok(())
 }
 
-/// Stages 2, 3 and 4 of spec §7, in order. `Ok(None)` means relay is off or the caller is
+/// Stages 2, 3 and 4 docs/task-model.md in order. `Ok(None)` means relay is off or the caller is
 /// out of scope; either way the native ladder applies unchanged.
 pub fn level() -> Result<Option<resolve::Resolved>> {
     // Stage 2: configuration. Nothing below runs when relay is not enabled.

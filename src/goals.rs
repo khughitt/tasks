@@ -1,5 +1,5 @@
 //! `tasks goals`: which goals the user asked for, their progress, recent activity and the
-//! work in them that needs attention (records spec 2026-11-01-goals-view-design §5). Pure
+//! work in them that needs attention (records spec docs/user-guide.md). Pure
 //! over one registry scan and this host's claim snapshot.
 
 use crate::claims::{ClaimSnapshot, Reason, WaitingOn};
@@ -13,16 +13,16 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 use time::OffsetDateTime;
 
-/// A `doing` record untouched this long is stalled (§5.4). Fixed: no option changes it.
+/// A `doing` record untouched this long is stalled. Fixed: no option changes it.
 pub const STALL_AFTER: time::Duration = time::Duration::days(3);
-/// A done goal stays listed, in the closed section, this long after it closed (§5.1).
+/// A done goal stays listed, in the closed section, this long after it closed.
 pub const CLOSED_WINDOW: time::Duration = time::Duration::days(14);
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-/// A goal's progress over its descendants (§5.2).
+/// A goal's progress over its descendants.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Pieces {
     pub done: usize,
@@ -31,7 +31,7 @@ pub struct Pieces {
     pub ideas: usize,
 }
 
-/// A goal's dependencies outside its own subtree (§5.2a): prerequisites, reported apart
+/// A goal's dependencies outside its own subtree : prerequisites, reported apart
 /// from progress so a goal whose pieces are all done but whose prerequisites are not never
 /// reads as finished. `total` counts distinct targets, `open` those not yet satisfied, and
 /// `unresolved` those no record answers (never satisfied, never open).
@@ -51,7 +51,7 @@ pub struct Flag {
     pub since: String,
 }
 
-/// What in a goal needs a look (§5.4). Only nonzero flags are present.
+/// What in a goal needs a look. Only nonzero flags are present.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Attention {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,7 +81,7 @@ pub struct GoalRow {
     pub priority: u8,
     pub lane: bool,
     /// The project's identity color, filled by `Output::paint_projects`; serialized as
-    /// `color` (§5.5), unlike task rows.
+    /// `color` , unlike task rows.
     #[serde(rename = "color", skip_serializing_if = "Option::is_none")]
     pub project_color: Option<Rgb>,
     pub last_activity: String,
@@ -112,7 +112,7 @@ pub fn pieces(descendants: &[&Task]) -> Pieces {
     out
 }
 
-/// The distinct dependency targets of the goal record and of its counted pieces (§5.2's
+/// The distinct dependency targets of the goal record and of its counted pieces ('s
 /// `total`), followed through moves, that lie outside the goal's subtree; None when there
 /// are none. `lookup` reads one record by canonical id, so a target in a project outside
 /// the scanned scope is judged the same as one inside it.
@@ -158,7 +158,7 @@ pub fn dependencies(
 }
 
 /// The newest `updated` stamp among the goal and all its descendants, whatever their
-/// status (§5.3), compared as parsed instants.
+/// status , compared as parsed instants.
 pub fn last_activity(goal: &Task, descendants: &[&Task]) -> Result<String> {
     let mut newest = (crate::time::parse(&goal.updated)?, goal.updated.as_str());
     for task in descendants {
@@ -178,7 +178,7 @@ pub fn closed_at(goal: &Task) -> &str {
         .unwrap_or(&goal.updated)
 }
 
-/// A record's effective timestamp (§5.4): its park's `at` when parked on this host; for an
+/// A record's effective timestamp : its park's `at` when parked on this host; for an
 /// idea awaiting the user, `reviewed_at`, else `updated`; otherwise `updated`.
 pub fn effective_at<'a>(task: &'a Task, claims: &'a ClaimSnapshot) -> &'a str {
     if let Some(park) = claims.park(&task.id) {
@@ -220,7 +220,7 @@ fn flag(hits: Vec<Hit>) -> Option<Flag> {
 }
 
 /// Parked on this host waiting on the user, or on a dependency or a quiet host: the wait
-/// names who or what moves it next, so it is not stalled (§5.4).
+/// names who or what moves it next, so it is not stalled.
 fn waits_on_named(task: &Task, claims: &ClaimSnapshot) -> bool {
     claims.park(&task.id).is_some_and(|park| {
         park.waiting_on == WaitingOn::User
@@ -271,7 +271,7 @@ fn stalled_since<'a>(
     Ok((now - hit.at >= STALL_AFTER).then_some(hit))
 }
 
-/// The goal's attention flags over its own record and its active descendants (§5.4), or
+/// The goal's attention flags over its own record and its active descendants , or
 /// None when it raises none.
 pub fn attention(
     goal: &Task,
@@ -317,7 +317,7 @@ pub fn attention(
 
 /// The selected rows, open ones first by subtree activity, then total, then id; closed
 /// ones after, newest close first, then id. Open dependencies change neither order nor
-/// flags (§5.2a). `lookup` reads one record by canonical id for [`dependencies`].
+/// flags. `lookup` reads one record by canonical id for [`dependencies`].
 pub fn goal_rows(
     all: &[Task],
     claims: &ClaimSnapshot,

@@ -1,4 +1,4 @@
-//! A write from a copy that is behind another checkout's refuses (record-home spec §3).
+//! A write from a copy that is behind another checkout's refuses (docs/project-operations.md).
 
 use crate::model::TaskId;
 use crate::repo::{Project, SiblingCopy};
@@ -9,13 +9,13 @@ pub struct Newer {
     pub root: PathBuf,
     /// Its `updated` stamp.
     pub theirs: String,
-    /// The stamps are equal but the bytes differ: a same-second fork (§3.1).
+    /// The stamps are equal but the bytes differ: a same-second fork.
     pub same_stamp: bool,
     /// Every other sibling that also refuses, named after `root`.
     pub others: Vec<PathBuf>,
 }
 
-/// What a refusal tells the caller to do (§3.2). The caller chooses it, because only the
+/// What a refusal tells the caller to do. The caller chooses it, because only the
 /// caller can read the claim store and its own identity.
 pub enum Remedy<'a> {
     /// Rule 1: another session works in the newer checkout, as `(task id, session)` pairs.
@@ -98,7 +98,7 @@ pub fn compare(
     (found, warnings)
 }
 
-/// The `stale_copy` detail (§3.2).
+/// The `stale_copy` detail.
 pub fn refusal(
     id: &TaskId,
     newer: &Newer,
@@ -132,7 +132,7 @@ pub fn refusal(
     format!("{head}{also}; nothing was written. {next}")
 }
 
-/// Recovery shared by stale copies and records found only in a recorded checkout (§3.2).
+/// Recovery shared by stale copies and records found only in a recorded checkout.
 pub fn remedy(
     id: &TaskId,
     root: &Path,

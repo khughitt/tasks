@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::model::{Complexity, Status};
 use crate::output::Output;
 
-/// Set a task down (spec §3). Validate everything, refuse a foreign live claim, then let
+/// Set a task down (docs/ownership.md). Validate everything, refuse a foreign live claim, then let
 /// `save` write the note and the entry in that order.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -50,7 +50,7 @@ pub fn run(
         None => resolution.require()?,
     };
 
-    // The claim rules of §3.1, as a guard: a live foreign claim refuses (no --force), a
+    // The claim rules of , as a guard: a live foreign claim refuses (no --force), a
     // stale one is taken over with the warning `start` gives, our own is simply replaced.
     let takeover = {
         let store = ctx.claims_mut()?;
@@ -72,7 +72,7 @@ pub fn run(
         ctx.warnings.push(warning);
     }
 
-    // Spec §5: --complexity belongs to --reason capability alone; the level never falls
+    // Current contract (docs/ownership.md): --complexity belongs to --reason capability alone; the level never falls
     // below the effective rating; waiting on the agent it is required and must clear the
     // variable's cutoff, and an escalation is recorded; waiting on the user nothing is.
     let escalation = match (reason, complexity) {

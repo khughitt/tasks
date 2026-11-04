@@ -1375,7 +1375,7 @@ mod tests {
 
     #[test]
     fn parsing_accepts_reviewed_on_any_status() {
-        // The idea-only rule is the writers' (review-state spec §3.2): a hand-edited record
+        // The idea-only rule is the writers' (docs/user-guide.md): a hand-edited record
         // must still parse so `check` can report it and the editor can transition it.
         let text = "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nreviewed: true\n\
                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\

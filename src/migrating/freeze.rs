@@ -1,6 +1,6 @@
 //! The freeze while a migration is pending on this host, the restoring writes it admits,
 //! and the resume's revalidation of the preflight inputs outside the journaled records
-//! (spec §4.5 "Resume revalidation", "Restoring writes", "Freeze"; §4.6 "Other hosts").
+//! (docs/project-operations.md "Resume revalidation", "Restoring writes", "Freeze"; "Other hosts").
 //!
 //! Restoring writes are judged per item, before the project-wide refusal, so a repair
 //! inside the frozen successor is admitted. Two kinds of item exist:
@@ -107,7 +107,7 @@ fn edges(registry: &Registry, journal: &MigrationJournal, task: Option<&Task>) -
     out
 }
 
-/// The freeze every record write passes (spec §4.5). With no pending migration on this
+/// The freeze every record write passes (docs/project-operations.md). With no pending migration on this
 /// host it reads nothing. For each pending run: a restoring write is admitted; otherwise a
 /// write to a record of its source or successor refuses, and in any other project a write
 /// that changes an edge to an id the run names refuses.
@@ -433,7 +433,7 @@ fn refusal(id: &str, rule: &str, settle: String) -> RefusalOut {
     }
 }
 
-/// Spec §4.5 resume revalidation: the preflight checks whose inputs lie outside the
+/// docs/project-operations.md resume revalidation: the preflight checks whose inputs lie outside the
 /// journaled records, each difference with the one command that restores it. Parent
 /// targets are judged while the destination records are still to be written (resuming at
 /// or before `destination`), releases while the closures are (at or before `closures`):

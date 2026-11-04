@@ -1,7 +1,7 @@
 //! `tasks claims`: every claim in every registered prefix's claim store, with its
 //! liveness. It opens no checkout, so a claim on a task that exists only in a worktree is
 //! listed and an unreachable checkout changes nothing. A store that cannot be read fails
-//! the command: there is no partial answer (ai docs/specs/2026-09-24-turn-boundary-gate-design.md §3.1).
+//! the command: there is no partial answer (docs/ownership.md).
 
 use crate::claims::ClaimSnapshot;
 use crate::error::Result;

@@ -30,7 +30,7 @@ pub struct Snapshot {
 }
 
 const HARNESSES: [&str; 4] = ["claude-code", "codex", "opencode", "agy"];
-/// relay's `integer()` is `Number.isSafeInteger(v) && v >= 0`, so its numeric fields stop
+/// relay's `integer` is `Number.isSafeInteger(v) && v >= 0`, so its numeric fields stop
 /// at 2^53 - 1. `start` is exempt: it travels as decimal *text* through `parseStart` and
 /// uses the full u64 range.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;

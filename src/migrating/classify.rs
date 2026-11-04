@@ -1,4 +1,4 @@
-//! Recovery classification (spec §4.5 "Classification"), pure and closed as `move`'s, with
+//! Recovery classification (docs/project-operations.md "Classification"), pure and closed as `move`'s, with
 //! two entry paths: `classify_with_journal` decides `Resume` or `Refuse` from a pending
 //! run's journal; `classify_without_journal` decides `Fresh`, `Complete` or `Refuse` from
 //! the records, the cleanup state and the commits alone (its snapshot is read by
@@ -137,7 +137,7 @@ pub struct CompletionSnapshot {
     pub uncommitted: Vec<PathBuf>,
 }
 
-/// ` list: sha256:<hex>`, the suffix of every migration note of this list (spec §4.4).
+/// ` list: sha256:<hex>`, the suffix of every migration note of this list (docs/project-operations.md).
 pub fn note_suffix(list: &LoadedList) -> String {
     format!(" list: sha256:{}", list.sha256)
 }
@@ -204,7 +204,7 @@ pub fn closing_note(
     })
 }
 
-/// Spec §4.5, without a journal: `Complete` only when every listed record shows its
+/// docs/project-operations.md without a journal: `Complete` only when every listed record shows its
 /// decision's end state with this list's sha256, every carried attachment the tombstone
 /// moved out is gone from the source while every note-archive segment it names is present
 /// with its descriptor's digest, no listed id has a park or escalation in the source store,

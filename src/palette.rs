@@ -1,7 +1,7 @@
 //! The terminal theme's colors: RGB values, OKLab mixing, and where they come from
 //! (`TASKS_PALETTE`, or a query to the terminal). Design:
-//! docs/specs/2026-09-25-date-recency-color-design.md and
-//! docs/specs/2026-09-25-priority-color-design.md.
+//! docs/configuration.md and
+//! docs/configuration.md
 
 use crate::error::Error;
 use std::fmt;
@@ -109,7 +109,7 @@ fn from_oklab([l, a, b]: [f64; 3]) -> Rgb {
 }
 
 /// Where the pretty scales' colors come from, chosen by `TASKS_THEME`
-/// (docs/specs/2026-09-25-color-source-design.md).
+/// (docs/configuration.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeSource {
     /// The terminal theme: `TASKS_PALETTE` if set, else the OSC query.
@@ -146,7 +146,7 @@ pub struct Palette {
 impl Palette {
     /// The palette tasks ships for `TASKS_THEME=default`: the representative palette of
     /// the color designs and tests. Fixed colors intended for dark backgrounds; a fixed
-    /// palette cannot guarantee contrast against an arbitrary background (spec §2.1),
+    /// palette cannot guarantee contrast against an arbitrary background (docs/configuration.md),
     /// so the look is confirmed visually, not by the suite.
     pub const BUILTIN: Palette = Palette {
         fg: Rgb {
@@ -238,7 +238,7 @@ const QUERY: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;5;?\x1b\\\x1b]4;6;?\
 /// Why the terminal's colors are unavailable. `Display` is the reason the warning names.
 #[derive(Debug)]
 pub enum QueryError {
-    /// stdout is redirected, so the terminal is not asked (spec §3.2).
+    /// stdout is redirected, so the terminal is not asked (docs/configuration.md).
     NotAsked,
     NoTerminal,
     /// Keys typed ahead were waiting; querying would consume them (see `query`).

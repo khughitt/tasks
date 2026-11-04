@@ -1,5 +1,5 @@
 //! Files a task carries under `tasks/files/<id>/`, and the ledger notes that say which
-//! record owns each one. See docs/specs/2026-09-28-task-attachments-design.md.
+//! record owns each one. See docs/attachments.md
 
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};

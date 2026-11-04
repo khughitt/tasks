@@ -220,7 +220,7 @@ pub struct FilterArgs {
     pub needs_review: bool,
 }
 
-/// The needs this session cannot meet, shared by the pickers (lanes-needs spec §4.3).
+/// The needs this session cannot meet, shared by the pickers (docs/user-guide.md).
 #[derive(Args, Debug, Default, Clone)]
 pub struct WithoutArgs {
     /// Hide tasks that need this (repeatable), in the projects that declare it; adds to
@@ -1197,7 +1197,7 @@ pub enum RetainedAction {
 
 impl Command {
     /// The verb a record commit names for this command, or `None` for a command that never
-    /// writes a record (record-commit spec §3.2). `init`, `rename`, `retire`, `unretire` and
+    /// writes a record (docs/project-operations.md). `init`, `rename`, `retire`, `unretire` and
     /// `unregister` keep their own procedures and commit nothing.
     pub fn commit_verb(&self) -> Option<&'static str> {
         Some(match self {

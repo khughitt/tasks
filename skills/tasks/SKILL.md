@@ -26,7 +26,7 @@ mean those documents were verified.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    Read picker warnings for omitted work; see `tasks ready --help` and the
-   [selection contract](../../README.md#session-selection) for hiding and filter rules.
+   [selection contract](../../docs/user-guide.md#select-work-without-losing-context) for hiding and filter rules.
    A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
    `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`.
    Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
@@ -107,13 +107,13 @@ mean those documents were verified.
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
    Before asking the user about a task's intent, read its origin by the
-   [reading rule](../../README.md#origin-whose-ask-a-task-is): a set `origin` field is
+   [reading rule](../../docs/task-model.md#origin-and-provenance): a set `origin` field is
    the record's origin, superseding every occurrence label; an absent one is unknown, though an occurrence note labelled
    `user` or `mixed` means it carries some of the user's words. `user` means the user
    holds the intent. For `agent`, `mixed` or unknown, first follow the record to its
    originating ask with the scope skill's procedure (§2, "Find the originating ask"),
    and ask only what that evidence leaves to the user.
-   `ready` and `next` omit live claims; see the [claim and checkout contract](../../README.md#claims-and-checkouts)
+   `ready` and `next` omit live claims; see the [claim and checkout contract](../../docs/ownership.md#acquire-refresh-and-release)
    and `tasks start --help` / `tasks release --help` for ownership and recovery.
    `tasks start --force <id>` deliberately takes over another session's claim and records it;
    do not treat it as an ordinary retry. Treat `unverifiable` claims as held; use
@@ -142,7 +142,7 @@ mean those documents were verified.
    when concrete native identity is unavailable and several agents share one terminal or
    harness process. Distinct Codex threads already supply separate native identities;
    unnecessary explicit overrides bypass native root association.
-   For relay identity setup and recovery, see [Relay identity](../../README.md#relay-identity-opt-in).
+   For relay identity setup and recovery, see [Relay identity](../../docs/ownership.md#identity-and-liveness).
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
    For several notes on one task, `tasks note <id> --stdin < notes.txt` appends one
    per line in order with one save (and one record commit when enabled). It conflicts
@@ -215,7 +215,7 @@ mean those documents were verified.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
-   For creation and completion stamps, see the [stamp contract](../../README.md#agent-and-completion-stamps)
+   For creation and completion stamps, see the [stamp contract](../../docs/task-model.md#origin-and-provenance)
    and `tasks add --help` / `tasks edit --help`. When `TASKS_AGENT` is unset, pass
    `--agent` on `add` only with the harness/model you know (`<harness>/<model>`, or
    the harness alone); when unsure, pass nothing — never guess. `feedback` has no
@@ -241,7 +241,7 @@ only trailing-space/tab cleanup in existing notes.
 For a multi-line body, read stdin with `tasks edit <id> --body - < body.md`
 instead of passing the body inline.
 Prefer a defined tag (`tasks tags`); add a dictionary entry when a new tag is worth
-keeping. See the [tag dictionary](../../README.md#adopting-in-an-existing-project).
+keeping. See the [tag dictionary](../../docs/configuration.md#project-settings).
 
 A step that uses a shared resource records it with `--need <name>` (repeatable), drawn
 from the project's `[needs]` vocabulary in `tasks/.config.toml`:
@@ -277,7 +277,7 @@ written, so refiling a batch from one origin never duplicates. The other flags o
 call are ignored, not merged — `tasks edit` that id if the record should change.
 
 Id-taking commands route by prefix, retaining the current checkout for a matching prefix;
-see [Project routing](../../README.md#project-routing).
+see [Project routing](../../docs/user-guide.md#route-across-projects).
 
 ID-valued read filters route the same way: list/search/ready `--parent` and
 `--under`, and next `--under`, select the named project inside or outside another
@@ -587,7 +587,7 @@ A successful write still exits 0 when its commit is skipped or fails; read its w
 
 ### Lifecycle provenance
 
-Lifecycle notes carry native harness provenance; see the [lifecycle contract](../../README.md#lifecycle-provenance)
+Lifecycle notes carry native harness provenance; see the [lifecycle contract](../../docs/task-model.md#references-and-notes)
 for fields, source selection, and marker limits. Every host reading stamped records
 needs a current `tasks`. Do not set `TASKS_SESSION` merely for obs.
 Use `tasks note <id> "<text>" --stamp` for gate notes.
@@ -652,7 +652,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `--origin-session <key>` (`claude-code:<id>` or `codex:<id>`) to say where to look; it does not
   claim that the user asked. Correct a record later with `tasks edit <id> --origin
   <value>` (or `--no-origin`) plus `tasks note <id> "<evidence>" --stamp`; see
-  [Origin](../../README.md#origin-whose-ask-a-task-is).
+  [Origin](../../docs/task-model.md#origin-and-provenance).
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or
@@ -679,7 +679,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   not power loss; the journal and carried park are host-local. Update every host's
   binary before moving synced records: older binaries cannot parse the new fields.
   For counterpart findings or manual undo, see the
-  [recovery limits](../../docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
+  [recovery limits](../../docs/project-operations.md#move-manual-undo).
 - A growing task record: `tasks check --growth` reports active bytes and complete
   logical-history counts. `tasks archive-notes <id>` is a read-only lossless
   note-archive preview. Operational guidance is preview-only pending the reader,
@@ -821,7 +821,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 ## Prefix renames and recovery
 
 `tasks rename <old> <new>` renames a prefix; retired names resolve while registered.
-Read [rename and recovery](../../README.md#prefix-renames-and-recovery) and `tasks rename --help`
+Read [rename and recovery](../../docs/project-operations.md#prefix-rename-and-adoption) and `tasks rename --help`
 before using it. Never rewrite a dependency's prefix with `--on` then `--rm`:
 the names identify the same task, so that removes the dependency.
 
@@ -841,7 +841,7 @@ the directory rename is left for you to commit in the records repository.
 On the second host, `--adopt` pairs the directory already renamed by sync.
 Rehearsals must isolate both `XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
-not an undo; follow the [manual rollback procedure](../../docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
+not an undo; follow the [manual rollback procedure](../../docs/project-operations.md#prefix-rollback).
 
 ## Retiring a project
 
@@ -857,7 +857,7 @@ after any interruption: while pending, both projects are frozen except the exact
 commands a refusal names, and the run is forward-only (no rollback). The freeze holds only
 on the host running it, so keep other hosts from writing to either project until the run
 completes and its records have synced. If the journal is lost mid-run, the refusal names
-what is unfinished and the manual finish is §4.6 of the successor-migration design spec (2026-11-02, in the tasks project's records directory under docs/specs; `tasks where` names the directory).
+what is unfinished; follow [journal-less successor recovery](../../docs/project-operations.md#journal-less-successor-recovery).
 A journal lost right after attachments were copied, before any record was written, reruns
 as fresh; `tasks check` then reports the first run's copies as `attachment_orphan`: detach
 or remove them. Without a successor, settle each task (close or drop it, or move one with
@@ -956,7 +956,7 @@ fetch. A read that must never run a provider command passes `--no-fetch` to
 `doc` fails an external link as `doc_not_found`; local documents still read. `check` prioritizes stepped open plans within a shared five-second budget
 and reports unfinished references once as `doc_unchecked`. Local missing files
 and steps remain errors; malformed host configuration remains fatal. See the
-[README's external document contract](../../README.md#external-documents) for
+[external document contract](../../docs/documents.md#external-providers) for
 fetch configuration, limits and binary-before-config rollout order.
 
 ## With superpowers

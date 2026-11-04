@@ -1,6 +1,6 @@
 //! Deferred tasks: a one-shot calendar date that keeps an open record out of the pickers
 //! until it arrives. Dueness is derived at read time from the field and the clock, as
-//! periodic dueness is. See docs/specs/2026-09-15-defer-design.md.
+//! periodic dueness is. See docs/user-guide.md
 
 use crate::error::{Error, Result};
 use crate::model::{Status, Task};
@@ -11,7 +11,7 @@ fn bad(value: &str, detail: &str) -> Error {
     Error::Validation(format!("bad defer date {value:?}: {detail}"))
 }
 
-/// A calendar day, `YYYY-MM-DD` (spec §2.1). A day and not an instant: the record is due
+/// A calendar day, `YYYY-MM-DD` (docs/user-guide.md). A day and not an instant: the record is due
 /// from the start of that day in UTC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Defer(Date);
@@ -129,17 +129,17 @@ pub fn validate(task: &Task) -> Result<()> {
     Ok(())
 }
 
-/// The deferral has been spent by the clock but not yet by attention (spec §4).
+/// The deferral has been spent by the clock but not yet by attention (docs/user-guide.md).
 pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
     task.defer.is_some_and(|defer| now.date() >= defer.0)
 }
 
-/// Whole calendar days from `now` to `date`, the figure `prime` prints (spec §5.3).
+/// Whole calendar days from `now` to `date`, the figure `prime` prints (docs/user-guide.md).
 pub fn days_until(date: Date, now: OffsetDateTime) -> i64 {
     (date - now.date()).whole_days()
 }
 
-/// Hidden from the pickers: the date is still ahead of the UTC calendar day (spec §4).
+/// Hidden from the pickers: the date is still ahead of the UTC calendar day (docs/user-guide.md).
 pub fn is_deferred(task: &Task, now: OffsetDateTime) -> bool {
     task.defer.is_some_and(|defer| now.date() < defer.0)
 }

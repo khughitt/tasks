@@ -653,7 +653,7 @@ fn ordinary_tombstone_retry_keeps_feedback_and_flag_words_as_payload() {
 
 #[test]
 fn cycle_through_a_tombstone_is_refused_and_reported() {
-    // Spec §6 case 8.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -806,7 +806,7 @@ fn half_a_move_is_incomplete_but_an_unreachable_counterpart_only_warns() {
     let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
     let b = id_of(env.json(&dots, &["add", "B", "-p", "2", "--depends", &a]));
     let n = moved_pair_by_hand(&env, &dots, &a, &wali);
-    // Unregistering the destination: a warning, never move_incomplete (spec §4.4, case 7).
+    // Unregistering the destination: a warning, never move_incomplete (docs/task-model.md).
     env.json(&dots, &["unregister", "wali"]);
     let ready = env.json(&dots, &["ready"]);
     assert!(
@@ -1171,7 +1171,7 @@ fn a_pending_journal_freezes_both_ids_in_every_writer() {
 
 #[test]
 fn a_pending_journal_freezes_both_projects_lifecycle() {
-    // Spec §6 case 9, with the journal written by hand.
+    // docs/task-model.md , with the journal written by hand.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -1421,7 +1421,7 @@ fn store(env: &TestEnv, prefix: &str) -> toml::Value {
 
 #[test]
 fn moving_a_task_with_an_inbound_dependency_and_an_attachment() {
-    // Spec §6 case 1.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -1514,7 +1514,7 @@ fn moving_a_task_with_an_inbound_dependency_and_an_attachment() {
 
 #[test]
 fn parented_and_parent_tasks_refuse_before_any_write() {
-    // Spec §6 case 2.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     env.init("wali");
@@ -1536,7 +1536,7 @@ fn parented_and_parent_tasks_refuse_before_any_write() {
 
 #[test]
 fn live_claims_refuse_and_a_park_travels_to_the_destination_checkout() {
-    // Spec §6 case 3.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -1648,7 +1648,7 @@ fn a_foreign_claim_refuses_move_with_its_sessions_remedy() {
 
 #[test]
 fn an_earlier_refile_in_the_destination_refuses() {
-    // Spec §6 case 4.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -1869,7 +1869,7 @@ fn a_journal_naming_an_outside_path_is_never_acted_on() {
 
 #[test]
 fn an_interrupted_move_resumes_with_the_same_id() {
-    // Spec §6 case 5.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -1956,7 +1956,7 @@ fn a_hand_edit_mid_move_makes_the_rerun_refuse() {
 
 #[test]
 fn undo_from_the_journal_restores_the_original_park() {
-    // Spec §6 case 10: the §4.4 manual undo, performed by the test from the journal.
+    // Current contract (docs/task-model.md): the manual undo, performed by the test from the journal.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");
@@ -2021,7 +2021,7 @@ fn undo_from_the_journal_restores_the_original_park() {
 
 #[test]
 fn lost_attachment_bytes_block_recovery_until_restored() {
-    // Spec §6 case 11.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let dots = env.init("dots");
     let wali = env.init("wali");

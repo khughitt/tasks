@@ -90,7 +90,7 @@ impl Kind {
 #[derive(Debug, Clone)]
 pub struct Project {
     /// The `[git] commit` switch: commit each record write as it lands. See
-    /// docs/specs/2026-10-10-record-commit-design.md §3.1.
+    /// docs/project-operations.md
     pub commit_records: bool,
     /// The registered root, what `tasks root` prints.
     pub root: PathBuf,
@@ -105,14 +105,14 @@ pub struct Project {
     pub plan_dirs: Vec<String>,
     /// The tag dictionary: tag -> one-line meaning, from the config's `[tags]` table.
     /// `None` when the project keeps no dictionary; then `check` says nothing about
-    /// tags. See docs/specs/2026-09-11-tag-dictionary-design.md.
+    /// tags. See docs/task-model.md
     pub tags: Option<BTreeMap<String, String>>,
     /// The `[feedback]` table's scope: `Some` means the project accepts feedback, and the
     /// line says what it owns. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
     pub feedback: Option<String>,
     /// The need vocabulary from the config's `[needs]` tables: name -> meaning and
     /// exclusivity. Empty when the project declares none. See
-    /// docs/specs/2026-10-03-lanes-needs-groups-design.md §4.1.
+    /// docs/user-guide.md
     pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
@@ -123,11 +123,11 @@ pub struct Project {
     /// The code checkout sessions run in: the config's `[checkout] path`, absolute and
     /// normalized, for a linked or detached project; the root for an in-tree one. It need
     /// not exist: `check` reports a missing one, and a missing one never matches (ops
-    /// linked-checkouts §4.1).
+    /// linked-checkouts).
     pub checkout: PathBuf,
     /// The code working tree this command runs in, when `locate` found the project through
     /// its `[checkout]` link; `None` otherwise. Claims and parks record it (ops
-    /// linked-checkouts §4.1, "record location and resume location are separate").
+    /// linked-checkouts , "record location and resume location are separate").
     pub worktree: Option<PathBuf>,
 }
 
@@ -142,7 +142,7 @@ struct WorktreeRecord {
 #[derive(Debug)]
 pub enum SiblingCopy {
     /// The project root the copy was found in, the `updated` stamp it carries there, and
-    /// its bytes, which a same-stamp comparison needs (record-home spec §3.1).
+    /// its bytes, which a same-stamp comparison needs (docs/project-operations.md).
     Found {
         root: PathBuf,
         updated: String,
@@ -188,7 +188,7 @@ struct RetiredConfig {
     reason: String,
 }
 
-/// A project's own retirement declaration, the `[retired]` table (ops lifecycle spec §3).
+/// A project's own retirement declaration, the `[retired]` table (docs/project-operations.md).
 /// Named apart from the rename feature's retired *prefixes* (registry aliases).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Retirement {
@@ -251,7 +251,7 @@ fn doc_layout(config: &Config) -> Result<(Vec<String>, Vec<String>, bool)> {
 }
 
 /// A detached pairing's config write, computed before anything is written
-/// (relocation design §4.5): `init` writes it after every refusal and computation,
+/// (docs/project-operations.md): `init` writes it after every refusal and computation,
 /// saves the registry, and restores it when that save fails.
 pub struct DetachedPlan {
     /// `<records>/tasks/.config.toml`.
@@ -304,7 +304,7 @@ impl DetachedPlan {
     }
 }
 
-/// A detached config re-pointed to a moved checkout (relocation design §4.1): the
+/// A detached config re-pointed to a moved checkout (docs/project-operations.md): the
 /// `[checkout] path` value replaced in place, keeping the key's decor and every comment,
 /// then `detach_config`'s `[git] commit` rule.
 fn relocate_config(text: &str, path: &str) -> Result<String> {
@@ -330,7 +330,7 @@ fn relocate_config(text: &str, path: &str) -> Result<String> {
 /// An existing config made detached, as a `toml_edit` edit so its comments and unrelated
 /// tables survive (as `retire` edits `[retired]`): `[checkout]` with `path` and
 /// `kind = "detached"` when the table is absent, and `[git] commit = true` when the table
-/// or the key is absent or the value is `false` (records-detached spec §3.4). The caller
+/// or the key is absent or the value is `false` (docs/project-operations.md). The caller
 /// has opened the config, so a present `[checkout]` already names this checkout.
 fn detach_config(text: &str, path: &str) -> Result<String> {
     let mut doc: toml_edit::DocumentMut = text
@@ -698,7 +698,7 @@ impl Project {
     }
 
     /// The config a detached project's pairing writes, computed without writing anything
-    /// (records-detached spec §5.1, relocation design §4.5). `records` is the records
+    /// (docs/project-operations.md docs/project-operations.md). `records` is the records
     /// directory, canonical or under the canonical records root when it does not exist
     /// yet; `checkout` is the validated code checkout. A new config gets `prefix`,
     /// `[git] commit = true` and `[checkout]` with the path relative to `records` and
@@ -745,7 +745,7 @@ impl Project {
                     existing.checkout.display()
                 )));
             }
-            // Relocation design §4.1: a detached config naming another checkout is
+            // Current contract (docs/project-operations.md): a detached config naming another checkout is
             // re-pointed here only when that checkout is gone from this host and the
             // caller asserts the move with `--force`.
             if existing.kind == Kind::Detached && existing.checkout != checkout {
@@ -882,12 +882,12 @@ impl Project {
         Ok(())
     }
 
-    /// The project a command run in `start` opens (records-detached spec §3.2). 1. The
+    /// The project a command run in `start` opens (docs/project-operations.md). 1. The
     /// nearest `tasks/.config.toml` at or above it, as always; the registry is read on
     /// every hit, since an in-tree config whose prefix `[records]` pairs elsewhere is
-    /// `records_moved` (§3.3). 2. On a miss inside a git repository, the detached project
+    /// `records_moved`. 2. On a miss inside a git repository, the detached project
     /// registered at its main checkout. 3. Else the registered project whose `[checkout]`
-    /// is that main checkout (linked-checkouts §4.1). A miss outside git stays
+    /// is that main checkout (docs/project-operations.md). A miss outside git stays
     /// `no_project` whatever state the registry is in; a missing registry is empty and a
     /// malformed one is an error.
     pub fn locate(start: &Path) -> Result<Project> {

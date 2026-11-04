@@ -1,4 +1,4 @@
-//! The apply phases G2-G10 (spec §4.5). Each phase is idempotent as the protocol table
+//! The apply phases G2-G10 (docs/project-operations.md). Each phase is idempotent as the protocol table
 //! says, so a resume from the phase the classifier names writes the same bytes. Nothing is
 //! committed before G9, which commits every path the run owns (one commit per git working
 //! tree) and checks that each is clean; G10 removes the journal only after that.
@@ -153,7 +153,7 @@ fn read_record(project: &Project, id: &TaskId) -> Result<RecordRead> {
     Ok(RecordRead::Present(Box::new(physical.assemble(inline))))
 }
 
-/// The paths a run of this list owns, derived without its journal (spec §4.5 "Commits"):
+/// The paths a run of this list owns, derived without its journal (docs/project-operations.md "Commits"):
 /// every listed record, and for each carried tombstone its new record and, on both sides,
 /// each attachment file it moved out or retains. Same layout as
 /// `MigrationJournal::owned_paths`.
@@ -194,7 +194,7 @@ fn completion_paths(
     owned
 }
 
-/// What `classify_without_journal` reads (spec §4.5, without a journal): each listed
+/// What `classify_without_journal` reads (docs/project-operations.md without a journal): each listed
 /// record and the successor record its tombstone names, the source state of every
 /// attachment the tombstone moved out or retains, this host's source store entries, the
 /// successor records that carry the list's sha256, and, once any record carries it, the
@@ -288,7 +288,7 @@ pub fn completion_snapshot(ctx: &MigrateCtx, list: &LoadedList) -> Result<Comple
     })
 }
 
-/// The report of a run the journal-less classification found `complete` (spec §4.7),
+/// The report of a run the journal-less classification found `complete` (docs/project-operations.md),
 /// rebuilt from the records: new ids from the tombstones, parents and rewrites from the new
 /// records, reasons from the list, released and still-open ids from the drop and close
 /// notes. `park` says whether the successor's store holds a park for the new id now; the
@@ -398,7 +398,7 @@ fn shown_paths(owned: BTreeMap<PathBuf, BTreeSet<PathBuf>>) -> BTreeMap<String, 
         .collect()
 }
 
-/// The run's report (spec §4.7), from the journal alone, so a fresh run, a resume and an
+/// The run's report (docs/project-operations.md), from the journal alone, so a fresh run, a resume and an
 /// `--explain` of a pending run report the same rows.
 pub fn output(ctx: &MigrateCtx, journal: &MigrationJournal, recovery: &str) -> Result<MigrateOut> {
     let mut carried = Vec::new();
@@ -508,7 +508,7 @@ pub fn run(ctx: &mut MigrateCtx, journal: MigrationJournal, from: Phase) -> Resu
     let recovery = if from == Phase::Journal {
         "fresh"
     } else {
-        // Spec §4.5: before any resumed phase, the inputs outside the journal.
+        // Current contract (docs/project-operations.md): before any resumed phase, the inputs outside the journal.
         let refusals = super::freeze::revalidate(ctx, &journal, from)?;
         if !refusals.is_empty() {
             return Err(super::freeze::refusal_error(&journal, &refusals, false));
