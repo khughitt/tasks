@@ -348,10 +348,13 @@ is not a lock; propagate a CLI race failure. There is no per-member approval che
 
 ## 7. Summarize and rerun
 
-Report the cluster and why, then one line per selected member with its verdict or skip
-reason (a re-scoped member also names what is now established), followed by handoff
-paths. Then include only nonempty groups for drops (id and supporting commit/id),
-questions (id and text), and shelves (id, full condition, checkpoint and wake targets).
+Lead with the cluster outcome and what remains in the queue, linking any handoff
+document once in the lead, then one line per selected member with a bold verdict or skip
+reason (`- <id> — **<verdict>**: <short reason>`; a re-scoped member names what is now
+established, and a shelved member names the short revisit trigger and checkpoint date).
+Then include only nonempty groups that need user action: drops (id and supporting
+commit/id) and questions (id and text). Full shelf conditions, wake targets, rule UUIDs,
+and origin provenance stay in the task records.
 
 When later research completes, its completion must add a finding note with `--no-reviewed` to every waiting
 idea named by `Ideas it wakes`, before this result's branch merges, so default selection
