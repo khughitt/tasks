@@ -1,11 +1,10 @@
-//! The caller's PID view: the PID namespace its `/proc` numbers pids in (claim PID-view
-//! design §1). A pid means something only together with the view it was read through.
+//! The caller's PID view: the PID namespace its `/proc` numbers pids in (docs/ownership.md). A pid means something only together with the view it was read through.
 
 use std::sync::OnceLock;
 
 /// nsfs inode of the initial PID namespace, a fixed kernel constant (`PROC_PID_INIT_INO`
 /// in include/linux/proc_ns.h). A kernel that changed it would make every view read as
-/// non-initial, which only withholds views (spec §2), never misjudges a claim.
+/// non-initial, which only withholds views (docs/ownership.md), never misjudges a claim.
 pub const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +29,7 @@ impl std::fmt::Display for PidView {
 /// following the link. `NSpid` lists the caller's pid from the procfs's namespace down to
 /// its own, so exactly one entry means the procfs numbers in the caller's namespace. Any
 /// other count, an entry that is not a positive pid, or any failed read, is unknown
-/// (spec §1).
+/// (docs/ownership.md).
 pub fn from_parts(status: Option<&str>, ns: Option<(u64, u64)>) -> Option<PidView> {
     let nspid = status?
         .lines()

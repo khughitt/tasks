@@ -1,5 +1,5 @@
 //! `tasks docs`: the working documents under each project's records, with the tasks that
-//! link them (records-home design §5.5).
+//! link them (docs/project-operations.md).
 //!
 //! A project's working documents are the Markdown files directly under its spec and plan
 //! directories and `docs/notes`, read from its records directory: the project root for an

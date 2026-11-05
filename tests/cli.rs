@@ -1608,7 +1608,7 @@ fn check_holds_feedback_tags_defined_on_feedback_records_in_an_accepting_project
     let clean = env.check(&ai);
     assert!(clean["warnings"].as_array().unwrap().is_empty(), "{clean}");
 
-    // Any other tag on a feedback record is still held to the dictionary ...
+    // Any other tag on a feedback record is still held to the dictionary...
     env.json(
         &ai,
         &[
@@ -1622,7 +1622,7 @@ fn check_holds_feedback_tags_defined_on_feedback_records_in_an_accepting_project
             "perf",
         ],
     );
-    // ... and so is the feedback vocabulary on a record that is not feedback.
+    //... and so is the feedback vocabulary on a record that is not feedback.
     env.json(
         &ai,
         &["add", "Plain", "--tag", "friction", "--tag", "from:ai"],
@@ -1828,7 +1828,7 @@ fn a_checkout_still_using_a_retired_prefix_refuses() {
 }
 
 /// The view an exported pid establishes from this test process: its own, only when that
-/// is the initial PID namespace (claim PID-view design §2).
+/// is the initial PID namespace (docs/ownership.md).
 fn exported_pid_view() -> Option<String> {
     own_pid_view().filter(|view| view.ends_with(":4026531836"))
 }
@@ -3341,7 +3341,7 @@ fn check_reports_deferred_goals_and_deferrals_on_the_wrong_status() {
     let sci = env.init("sci");
     let goal = id_of(env.json(&sci, &["add", "Goal", "--defer", "2099-01-02"]));
     let kid = id_of(env.json(&sci, &["add", "Kid"]));
-    // Reachable only by hand: both writers refuse the pair (§3.3).
+    // Reachable only by hand: both writers refuse the pair.
     let path = sci.join(format!("tasks/{kid}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
@@ -4345,7 +4345,7 @@ fn project_scope_reports_an_unusable_prefix_as_config() {
     std::fs::write(fam.join("tasks/.config.toml"), "prefix = \"nope\"\n").unwrap();
     assert_eq!(env.fail(&sci, &["list", "--project", "fam"]), "config");
 
-    // An existing root with no config and no records pairing (records-detached §3.2).
+    // An existing root with no config and no records pairing (records-detached).
     std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
     assert_eq!(
         env.fail(&sci, &["list", "--project", "fam"]),
@@ -12344,7 +12344,7 @@ fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
 /// Every *final* wait goes through this too, not just the ones being measured. Releasing a
 /// handshake or dropping the test's lock only removes the blocker the test knows about; a
 /// command that deadlocks for some other reason — an editor path that kept the lock and then
-/// tries to reacquire it, say — would still park a bare `wait()` forever and hang the suite
+/// tries to reacquire it, say — would still park a bare `wait` forever and hang the suite
 /// with the failure invisible.
 fn reap(mut child: std::process::Child, limit: Duration) -> Option<std::process::Output> {
     if wait_bounded(&mut child, limit) {
@@ -14782,7 +14782,7 @@ fn completion_is_silent_when_anything_is_wrong() {
     std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
     assert!(out.is_empty(), "{out:?}");
     // a malformed registry: `locate` reads the registry on every walk hit (an in-tree
-    // config may be a pre-detach branch, records-detached spec §3.2), so the local
+    // config may be a pre-detach branch, docs/project-operations.md), so the local
     // project does not open and completion stays silent rather than failing
     std::fs::write(
         env.home.path().join(".config/tasks/projects.toml"),
@@ -15551,7 +15551,7 @@ fn tree_routes_a_bare_id_by_its_prefix_like_show() {
     let goal = id_of(env.json(&fam, &["add", "Goal", "-p", "2"]));
     let kid = id_of(env.json(&fam, &["add", "Kid", "-p", "2", "--parent", &goal]));
 
-    // The subtree of an id is read from that id's own project (multi-project design §4),
+    // The subtree of an id is read from that id's own project (docs/project-operations.md),
     // the way `show` and every write command already route it.
     let v = env.json(&sci, &["tree", &goal]);
     assert_eq!(v["nodes"][0]["id"], goal, "{v}");
@@ -15928,7 +15928,7 @@ fn an_add_waiting_through_a_rename_never_writes_the_old_prefix() {
         .unwrap();
     // The kernel listing the child as a waiter on this lock proves it constructed its
     // old-prefix context and reached lock acquisition. A sleep alone could leave it not
-    // yet started. Its descriptor table cannot prove it: spawn() can return while the
+    // yet started. Its descriptor table cannot prove it: spawn can return while the
     // child is still inside execve, before our own close-on-exec lock descriptor leaves it.
     let inode = std::os::unix::fs::MetadataExt::ino(&held.metadata().unwrap()).to_string();
     let pid = adder.id().to_string();
@@ -18724,7 +18724,7 @@ fn a_recurrence_reopens_straight_to_doing_and_parks_only_once_open() {
         "the anchor moved forward: {after}"
     );
 
-    // A closed recurrence cannot be parked; reopen first (spec §4.8).
+    // A closed recurrence cannot be parked; reopen first (docs/task-model.md).
     assert_eq!(
         env.fail(&sci, &["park", &id, "ask the user"]),
         "invalid_transition"
@@ -18750,7 +18750,7 @@ fn a_due_recurrence_is_ready_and_an_anchored_one_is_not() {
     env.json(&sci, &["start", &anchored]);
     env.json(&sci, &["done", &anchored]);
 
-    // due: closed with no anchor, then given a cadence (spec §3.2)
+    // due: closed with no anchor, then given a cadence (docs/task-model.md)
     let due = id_of(env.json(&sci, &["add", "Overdue sweep", "-p", "0"]));
     env.json(&sci, &["done", &due]);
     env.json(&sci, &["edit", &due, "--every", "30d"]);
@@ -18766,7 +18766,7 @@ fn a_due_recurrence_is_ready_and_an_anchored_one_is_not() {
     assert_eq!(ready["tasks"][0]["status"], "done", "the record is closed");
     assert_eq!(env.json(&sci, &["next"])["next"]["task"]["id"], due);
 
-    // A due record satisfies a dependent, because it is closed (spec §4.5).
+    // A due record satisfies a dependent, because it is closed (docs/task-model.md).
     let dependent = id_of(env.json(&sci, &["add", "Follows", "-p", "2", "--depends", &due]));
     let ids: Vec<String> = env.json(&sci, &["ready"])["tasks"]
         .as_array()
@@ -18776,7 +18776,7 @@ fn a_due_recurrence_is_ready_and_an_anchored_one_is_not() {
         .collect();
     assert!(ids.contains(&dependent), "{ids:?}");
 
-    // Once started it is open, and holds the dependent (spec §4.5).
+    // Once started it is open, and holds the dependent (docs/task-model.md).
     env.json(&sci, &["start", &due]);
     let ids: Vec<String> = env.json(&sci, &["ready"])["tasks"]
         .as_array()
@@ -18832,7 +18832,7 @@ fn the_periodic_object_is_the_json_contract() {
     // close it so it cannot compete for the head of `ready` below
     env.json(&sci, &["done", &plain]);
 
-    // open with a cadence: present, but no pending recurrence (spec §4.1)
+    // open with a cadence: present, but no pending recurrence (docs/task-model.md)
     let open = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
     let v = env.json(&sci, &["show", &open]);
     assert_eq!(v["periodic"]["every"], "30d");
@@ -18849,7 +18849,7 @@ fn the_periodic_object_is_the_json_contract() {
     assert_eq!(v["periodic"]["due_now"], false);
 
     // Closed and unanchored: due now, with no computable date -- an absent `due`
-    // alone cannot express (spec §5.4)
+    // alone cannot express (docs/task-model.md)
     let due = id_of(env.json(&sci, &["add", "Overdue"]));
     env.json(&sci, &["done", &due]);
     env.json(&sci, &["edit", &due, "--every", "30d"]);
@@ -18897,7 +18897,7 @@ fn deferred_object_rides_show_list_next_and_parked_rows() {
     assert_eq!(row["deferred"]["until"], "2099-01-02");
     assert_eq!(row["deferred"]["due"], false);
 
-    // A due record, through the editor (§8).
+    // A due record, through the editor.
     let due = id_of(env.json(&sci, &["add", "Due", "--status", "idea"]));
     let editor = editor_script(
         &sci,
@@ -19093,7 +19093,7 @@ fn a_goal_is_never_periodic_in_either_direction() {
     let child = id_of(env.json(&sci, &["add", "Piece", "--parent", &goal]));
 
     // A task that already has children cannot be given a cadence: `is_ready` excludes
-    // goals, so it could never fire (spec §4.7).
+    // goals, so it could never fire (docs/task-model.md).
     assert_eq!(
         env.fail(&sci, &["edit", &goal, "--every", "30d"]),
         "validation"
@@ -19162,7 +19162,7 @@ fn check_reports_what_parsing_cannot_see_about_cadences() {
     let sci = env.init("sci");
 
     // A periodic child reopened under a goal that has since closed is intentional, and
-    // must not be warned about (spec §6).
+    // must not be warned about (docs/task-model.md).
     let goal = id_of(env.json(&sci, &["add", "Goal"]));
     let sweep = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d", "--parent", &goal]));
     env.json(&sci, &["start", &sweep]);
@@ -19221,7 +19221,7 @@ fn check_reports_what_parsing_cannot_see_about_cadences() {
     assert!(kinds.contains(&"periodic_goal"), "{v}");
 
     // An anchor with no cadence does not load at all, so it arrives as a parse finding
-    // rather than one of its own (spec §6).
+    // rather than one of its own (docs/task-model.md).
     let bare = id_of(env.json(&sci, &["add", "Bare anchor"]));
     let bare_path = sci.join(format!("tasks/{bare}.md"));
     let bare_text = std::fs::read_to_string(&bare_path).unwrap();
@@ -19385,7 +19385,7 @@ fn ready_and_next_hide_above_cutoff_and_unassessed_with_counts() {
     assert_eq!(warnings, vec!["max-complexity high: 1 unassessed hidden"]);
 
     // The selection runs before the cutoff, so the cutoff's counts cover only selected
-    // tasks (docs/specs/2026-09-30-task-filters-design.md, amending complexity §4.1):
+    // tasks (docs/user-guide.md, amending complexity):
     // only Low is size s, and Low is within the cutoff.
     env.json(&sci, &["edit", &low, "--size", "s", "--parallel"]);
     env.json(&sci, &["edit", &mid, "--size", "m"]);
@@ -22737,7 +22737,7 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
     // ordinary stale takeover and the test would pass with proof-based continuity broken.
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    // Lanes/needs §4.4: both tasks need the exclusive `quiet`. The first claim's hold is
+    // Lanes/needs : both tasks need the exclusive `quiet`. The first claim's hold is
     // this session's only by proof once relay re-keys its identity, so the second start
     // passes the hold gate only if the gate uses the ownership rule, not session strings.
     hold_vocab(&dir);
@@ -25933,7 +25933,7 @@ fn needs_without_hides_only_where_the_owning_project_declares_the_name() {
     }
 }
 
-// ---- Exclusive holds (lanes/needs design §4.4–§4.5) ----
+// ---- Exclusive holds (docs/user-guide.md) ----
 
 /// The vocabulary every holds test uses: `quiet` is exclusive, `owner` is not.
 fn hold_vocab(dir: &std::path::Path) {
@@ -26732,7 +26732,7 @@ fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
 
 #[test]
 fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
-    // Spec §4.4: when a read view cannot resolve "this session", every hold counts as
+    // Current contract (docs/task-model.md): when a read view cannot resolve "this session", every hold counts as
     // another session's, even one this process could prove by pid. Claim natively with
     // proof, enable relay, then remove the relay registry so identity cannot resolve.
     let mut env = TestEnv::new();

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// A rename keeps two paths apart: `root` is the project's identity, the registered root
 /// `[projects]` holds (the code checkout of a detached project), and `records` is where
-/// `tasks/` and the config are now, which a detached rename moves (§5.4).
+/// `tasks/` and the config are now, which a detached rename moves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
     pub source: String,

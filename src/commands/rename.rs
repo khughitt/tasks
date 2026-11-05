@@ -178,7 +178,7 @@ fn reject_adopting_a_retired_project(project: &crate::repo::Project) -> Result<(
     Ok(())
 }
 
-/// A retired project is not renamed (ops lifecycle spec §4). Read without the prefix
+/// A retired project is not renamed (docs/project-operations.md). Read without the prefix
 /// check, so a pending rename whose config already carries the new prefix still resumes;
 /// a config that does not parse fails here as it would in the rename itself.
 fn reject_renaming_a_retired_project(registry: &Registry, source: &str) -> Result<()> {

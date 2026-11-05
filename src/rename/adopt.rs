@@ -300,7 +300,7 @@ fn classify_registry(
 /// Whether adoption would take `old` as this checkout's predecessor: `None` when it would
 /// (the stage in which it checks the old store's claims), else why not. `release
 /// --adopting` asks this, so it never reaches a store adoption would not
-/// (claim-release spec §1).
+/// (docs/ownership.md).
 pub(crate) fn accepts(registry: &Registry, project: &Project, old: &str) -> Result<Option<String>> {
     Ok(
         match classify_registry(registry, project, old, &project.prefix)? {

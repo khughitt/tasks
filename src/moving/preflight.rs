@@ -22,6 +22,11 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         commands::Writer::Command,
     )?;
     commands::guard_write(&ctx.registry, &ctx.source.shorthand, &source)?;
+    crate::retained::publish::permission(
+        &ctx.source.project,
+        &source,
+        crate::retained::publish::WriteAction::Identity,
+    )?;
     let id = &source.id;
     if !source.status.is_open() {
         return Err(Error::Validation(format!(
@@ -107,7 +112,7 @@ pub(crate) struct RenderedPair {
     archives: Vec<(ArchiveDescriptor, Vec<u8>)>,
 }
 
-/// The construction half of a move (spec §3.2): the new record with `moved_from` and its
+/// The construction half of a move (docs/project-operations.md): the new record with `moved_from` and its
 /// note, the tombstone with `moved_to`, its note and the `detached:` notes, the attachment
 /// list, and the park and escalation re-keyed to the destination's resume root. It checks
 /// nothing about the destination and does not ask whether `source` is open: the caller

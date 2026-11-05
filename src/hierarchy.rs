@@ -315,7 +315,7 @@ pub fn lane_of(all: &[Task], task: &Task, registry: &Registry) -> Option<TaskId>
     enclosing_lane(all, task, registry).map(|lane| lane.id.clone())
 }
 
-/// Lanes design §3.4: the paused lane above `task`, if any. A `blocked` lane pauses its
+/// Current contract (docs/user-guide.md): the paused lane above `task`, if any. A `blocked` lane pauses its
 /// descendants; the one place an ancestor's status gates a descendant, and only for
 /// lanes. The task itself is never its own pause: a lane is a goal and never ready.
 pub fn paused_lane<'a>(all: &'a [Task], task: &Task, registry: &Registry) -> Option<&'a Task> {
@@ -335,7 +335,7 @@ enum Visibility {
     UnderShownParent,
 }
 
-/// spec §4.7: `readiness` excludes a goal, so a cadence on one could never fire. Refuse it
+/// Current contract (docs/task-model.md): `readiness` excludes a goal, so a cadence on one could never fire. Refuse it
 /// at the write rather than leave a silent dead end.
 pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     if task.every.is_none() {

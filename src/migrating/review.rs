@@ -1,4 +1,4 @@
-//! What the user reads before approving a list (spec §4.8). This part: the body diff.
+//! What the user reads before approving a list (docs/project-operations.md). This part: the body diff.
 
 /// A line diff from `old` to `new` by longest common subsequence: every line of both
 /// appears once, in order, prefixed `" "` (in both), `"-"` (only in `old`) or `"+"` (only

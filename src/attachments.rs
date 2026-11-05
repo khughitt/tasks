@@ -1,5 +1,5 @@
 //! Files a task carries under `tasks/files/<id>/`, and the ledger notes that say which
-//! record owns each one. See docs/specs/2026-09-28-task-attachments-design.md.
+//! record owns each one. See docs/attachments.md
 
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
@@ -32,6 +32,54 @@ pub fn validate_name(name: &str) -> Result<()> {
             "attachment name {name:?} must be 1-{MAX_NAME_BYTES} bytes of [A-Za-z0-9._-], not starting with '.'"
         )))
     }
+}
+
+pub fn refuse_reserved(
+    project: &crate::repo::Project,
+    task: &crate::model::Task,
+    name: &str,
+) -> Result<()> {
+    use crate::multipart::{self, audit::DeclState};
+
+    let reserved = multipart::audit::reserved_names(task);
+    for (logical, state) in multipart::audit::declarations(task) {
+        match state {
+            DeclState::Live(_)
+                if logical == name || multipart::audit::is_member(name, &logical) =>
+            {
+                if logical == name {
+                    return Err(Error::AttachmentExists(format!(
+                        "{} already has multipart attachment {name}; run tasks commit, then tasks export {} {name} --at HEAD --verify",
+                        task.id, task.id
+                    )));
+                }
+                return Err(Error::MultipartMember(format!(
+                    "{name} is a member of multipart attachment {logical}; use its logical name"
+                )));
+            }
+            DeclState::Closed(decl)
+                if reserved.get(name) == Some(&logical)
+                    || (multipart::audit::is_member(name, &logical)
+                        && multipart::audit::recovery_bounds(&decl).is_err()) =>
+            {
+                match multipart::audit::removal_state(project, task, &decl) {
+                    Ok(multipart::audit::RemovalState::Complete { .. }) => {}
+                    result => {
+                        let detail = match result {
+                            Err(error) => format!("{error}; "),
+                            _ => String::new(),
+                        };
+                        return Err(Error::MultipartRemovalUnpublished(format!(
+                            "{name} is reserved by unpublished removal of {logical}; {detail}{}",
+                            multipart::audit::removal_next(project, task, &decl)
+                        )));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 pub fn files_root(project: &Project) -> PathBuf {
@@ -141,7 +189,7 @@ pub fn read_capped(reader: impl Read, max: u64, what: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Writes `bytes` to `path` through a `create_new` temp beside it, fsynced, then renamed.
+/// Publishes fsynced bytes through an exclusive hard link; an existing name is never replaced.
 pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let name = path
         .file_name()
@@ -154,7 +202,10 @@ pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .open(&temp)?;
     let written = file.write_all(bytes).and_then(|()| file.sync_all());
     drop(file);
-    if let Err(error) = written.and_then(|()| std::fs::rename(&temp, path)) {
+    if let Err(error) = written
+        .and_then(|()| std::fs::hard_link(&temp, path))
+        .and_then(|()| std::fs::remove_file(&temp))
+    {
         let _ = std::fs::remove_file(&temp);
         return Err(error.into());
     }
@@ -370,7 +421,7 @@ fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Ve
                         Severity::Error,
                         "attachment_unnoted",
                         shown,
-                        format!("{name} is not attached in {}'s notes; attach it again with the same bytes, or detach it", task.id),
+                        format!("{name} is not attached in {}'s notes; rerun tasks attach {} <source> --name {name} with the same bytes, or detach it", task.id, task.id),
                     ));
                 }
                 files.push(Attachment {
@@ -391,6 +442,7 @@ fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Ve
             ));
         }
     }
+    problems.extend(crate::multipart::audit::audit(project, task)?);
     Ok((files, problems))
 }
 

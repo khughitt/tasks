@@ -1,5 +1,5 @@
 //! `tasks goals`: the goals the user asked for, across projects, with progress, recent
-//! activity and attention flags (records spec 2026-11-01-goals-view-design). Every fixture
+//! activity and attention flags (records spec docs/user-guide.md). Every fixture
 //! runs under TestEnv's isolated environment.
 
 mod common;
@@ -191,7 +191,7 @@ fn moved_piece_leaves_goal_progress() {
     assert_eq!(row(&out, &g)["pieces"]["total"], 1);
 }
 
-// Open dependencies (§5.2a): reported apart from progress, never counted as pieces.
+// Open dependencies : reported apart from progress, never counted as pieces.
 
 #[test]
 fn dependencies_count_targets_outside_the_subtree_once() {
@@ -476,7 +476,7 @@ fn json_carries_project_color() {
     assert_eq!(row(&goals(&env, &aa, &[]), &g)["color"], "#7aa2f7");
 }
 
-// Attention flags (§5.4).
+// Attention flags.
 
 /// Makes `id` doing, then drops every claim the CLI's short-lived process wrote, so no
 /// claim can suppress a stall.
@@ -721,7 +721,7 @@ fn dependency_wait_is_not_flagged() {
     assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
 }
 
-// Pretty output (§5.5).
+// Pretty output.
 
 fn pretty(env: &TestEnv, dir: &Path) -> String {
     env.pretty(dir, &["goals", "--color", "never"])
@@ -852,7 +852,7 @@ fn pretty_empty_says_why() {
     );
 }
 
-// Final review round 1.
+// Final.
 
 #[test]
 fn doing_goal_waiting_on_user_park_is_not_stalled() {

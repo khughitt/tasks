@@ -5,6 +5,9 @@ mod claims;
 mod cli;
 mod clipboard;
 mod commands;
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod common;
 mod complete;
 mod complexity;
 mod config;
@@ -29,6 +32,7 @@ mod locations;
 mod migrating;
 mod model;
 mod moving;
+mod multipart;
 mod native;
 mod needs;
 mod output;
@@ -47,6 +51,7 @@ mod relay;
 mod rename;
 mod repo;
 mod resolve;
+mod retained;
 mod review;
 mod scope;
 mod shorthand;
@@ -70,8 +75,8 @@ use std::io::{IsTerminal, Write};
 /// The flush is explicit: a piped stdout is block-buffered, so for output smaller than the
 /// pipe buffer the write lands in the buffer and the failure surfaces only at the flush --
 /// which, left implicit at process exit, is performed and its error discarded.
-fn write_to(mut stream: impl Write, text: &str) -> std::io::Result<()> {
-    stream.write_all(text.as_bytes())?;
+fn write_to(mut stream: impl Write, text: impl AsRef<[u8]>) -> std::io::Result<()> {
+    stream.write_all(text.as_ref())?;
     stream.flush()
 }
 
@@ -230,6 +235,8 @@ fn main() {
     // Read commands can report their warnings before a width error. Reject it before
     // writers run, so a presentation error cannot follow a successful mutation.
     if let Err(error) = &width
+        && !matches!(&cli.command, cli::Command::Export { output: Some(path), .. }
+            if path == std::path::Path::new("-"))
         && !matches!(
             &cli.command,
             cli::Command::Projects { .. }
@@ -263,9 +270,14 @@ fn main() {
     }
     match commands::run(cli) {
         Ok(out) => {
-            if let output::Output::Doc(doc) = &out {
-                let warnings = output::pretty_warnings(&doc.warnings, &stderr_painter, None);
-                if let Err(error) = write_to(std::io::stdout().lock(), &doc.body)
+            let raw = match &out {
+                output::Output::Doc(doc) => Some((doc.body.as_bytes(), &doc.warnings)),
+                output::Output::Raw(raw) => Some((raw.bytes.as_slice(), &raw.warnings)),
+                _ => None,
+            };
+            if let Some((bytes, warnings)) = raw {
+                let warnings = output::pretty_warnings(warnings, &stderr_painter, None);
+                if let Err(error) = write_to(std::io::stdout().lock(), bytes)
                     && error.kind() != std::io::ErrorKind::BrokenPipe
                 {
                     to_stderr(&warnings);
@@ -289,7 +301,7 @@ fn main() {
             let mut theme_warning = None;
             let stdout_painter = if stdout_painter.enabled() && output::needs_theme(&out) {
                 // Redirected stdout is never queried: a pager may be reading the same
-                // terminal (date spec §3.2).
+                // terminal (docs/user-guide.md).
                 let resolved = match palette {
                     Some(palette) => Ok(palette),
                     None => match theme {
@@ -358,7 +370,7 @@ fn main() {
             let written = if silent {
                 Ok(())
             } else {
-                write_to(std::io::stdout().lock(), &format!("{rendered}\n"))
+                write_to(std::io::stdout().lock(), format!("{rendered}\n"))
             };
             match written {
                 Ok(()) => {}

@@ -11,7 +11,7 @@ use crate::similarity::Match;
 
 pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 
-/// The reporter of feedback filed outside every project (ops linked-checkouts spec §4.2).
+/// The reporter of feedback filed outside every project (docs/project-operations.md).
 /// Longer than any prefix may be, so it never names a project.
 pub const UNREGISTERED: &str = "unregistered";
 
@@ -223,7 +223,7 @@ pub fn run(
                 &reporter,
                 attribution,
             )?;
-            // Record-home spec §4: a holder's recurrence follows the owner's registered
+            // Current contract (docs/project-operations.md): a holder's recurrence follows the owner's registered
             // root, where it landed. `recur_into` saved its own pruned store first.
             super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
             (task, "recurred", at)
@@ -316,7 +316,7 @@ fn recur_into(
                 .into(),
         ));
     }
-    // Record-home spec §3.1: under the target's lock, before anything is appended.
+    // Current contract (docs/project-operations.md): under the target's lock, before anything is appended.
     let (loaded, raw) = ctx.project.read_task_with_raw(id)?;
     super::refuse_stale_copy(ctx, &loaded, &raw, super::Writer::Feedback)?;
     // The match was made against a snapshot. Every guarded read re-checks that the task
@@ -392,7 +392,7 @@ fn recur_into(
 }
 
 /// The record's origin after a recurrence labelled `occurrence`, and whether to warn that
-/// an unknown origin was left unknown (design §4.3). An absent label changes nothing, a
+/// an unknown origin was left unknown (docs/task-model.md). An absent label changes nothing, a
 /// known field combines, and an absent field is never set from a label.
 pub fn recur_origin(field: Option<Asker>, occurrence: Option<Asker>) -> (Option<Asker>, bool) {
     match (field, occurrence) {

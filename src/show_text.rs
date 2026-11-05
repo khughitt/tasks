@@ -1,4 +1,4 @@
-//! The pretty `show` layout (docs/specs/2026-10-03-show-layout-design.md): ruled
+//! The pretty `show` layout (docs/user-guide.md): ruled
 //! sections, aligned overview rows, and prose wrapped at a capped measure. `next`
 //! prints its task through the same renderer.
 
@@ -115,7 +115,7 @@ fn fill_hard_split(
     line.extend_from_slice(word);
 }
 
-/// Prose never runs wider than this, however wide the terminal (spec §3.6).
+/// Prose never runs wider than this, however wide the terminal (docs/user-guide.md).
 pub const MEASURE: usize = 100;
 
 pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
@@ -221,7 +221,7 @@ fn color(o: &ShowFields, id: &str) -> Option<Rgb> {
     crate::output::color_of(&o.project_colors, id)
 }
 
-/// Spec §3.3: one row per field with a value, in this order. `depends` and `parent` are
+/// Current contract (docs/user-guide.md): one row per field with a value, in this order. `depends` and `parent` are
 /// listed under `related` instead.
 fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     let t = &o.task;
@@ -414,7 +414,7 @@ fn escalated(escalation: &Escalation, painter: &Painter, width: Option<usize>) -
     rendered
 }
 
-/// Spec §3.5: each body line wraps on its own; list items hang; fenced and indented
+/// Current contract (docs/user-guide.md): each body line wraps on its own; list items hang; fenced and indented
 /// lines, and blank ones, print verbatim; `#` lines are headings.
 fn description(body: &str, painter: &Painter, width: Option<usize>) -> String {
     let mut rendered = present::rule("description", painter, width.unwrap_or(MEASURE));
@@ -454,7 +454,7 @@ fn hang(line: &str) -> usize {
     }
 }
 
-/// Spec §3.4: `<label>  <id>  <status>  <title>`, columns aligned, titles hanging.
+/// Current contract (docs/user-guide.md): `<label>  <id>  <status>  <title>`, columns aligned, titles hanging.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
     // The last field is the row's project colour; an unresolved dependency has none.
     let mut rows: Vec<(&str, &str, Span, &str, Option<Rgb>)> = Vec::new();
@@ -584,7 +584,7 @@ fn files(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     rendered
 }
 
-/// Spec §3.5: a header (date, time, owner, marker, session), then the text indented 4.
+/// Note structure (docs/task-model.md): a header (date, time, owner, marker, session), then the text indented 4.
 fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
     let mut rendered = present::rule(
         &format!("notes ({})", notes.len()),
@@ -650,7 +650,7 @@ fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
     rendered
 }
 
-/// Splits a generated lifecycle marker from its text (spec §3.5). Only the complete
+/// Splits a generated lifecycle marker from its text (docs/task-model.md). Only the complete
 /// forms the writers generate count: `started` is all marker, `completed; next due
 /// <date>` too, `parked (waiting on <stop>): <next>` is a marker and the next step, and
 /// anything else, however it begins, is authored text.
@@ -785,6 +785,7 @@ mod tests {
             periodic: None,
             deferred: None,
             files: vec![],
+            multipart: vec![],
             inventory: vec![],
         }
     }
@@ -802,7 +803,7 @@ mod tests {
         }
     }
 
-    /// The §3.1 example's task, trimmed.
+    /// A minimal task example.
     fn example() -> ShowFields {
         let mut o = fields();
         let t = &mut o.task;

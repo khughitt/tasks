@@ -119,7 +119,7 @@ fn explain_pending(
             loaded,
         ))
     })();
-    // A resumable run still refuses when its preflight inputs changed (spec §4.5).
+    // A resumable run still refuses when its preflight inputs changed (docs/task-model.md).
     let mut changed = Vec::new();
     let reason = match verdict {
         Ok(MigrationRecovery::Resume(phase)) => {
@@ -134,7 +134,7 @@ fn explain_pending(
     let refuse = reason.is_some() || !changed.is_empty();
     let mut out = apply::output(ctx, journal, if refuse { "refuse" } else { "resume" })?;
     if refuse {
-        // Spec §4.7: new ids are shown only for a `resume` verdict.
+        // Current contract (docs/task-model.md): new ids are shown only for a `resume` verdict.
         for row in &mut out.carried {
             row.id = None;
         }

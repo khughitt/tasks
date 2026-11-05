@@ -91,7 +91,7 @@ Name genuinely unavailable context as an unknown; never invent the missing findi
 ### Find the originating ask
 
 Follow each member back to the ask that led to it, and record the outcome. Read its
-origin by the README's [reading rule](../../README.md#origin-whose-ask-a-task-is) first.
+origin by the README's [reading rule](../../docs/task-model.md#origin-and-provenance) first.
 Retrieval has two stages: the filing event always comes first, and an older request,
 when the record names one, is found only from the filing event's evidence, never
 searched for directly by the record's id or time.

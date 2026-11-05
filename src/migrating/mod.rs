@@ -1,5 +1,5 @@
 //! Successor migration: carry, drop or close every open task of a project from a reviewed
-//! decision list. See docs/specs/2026-11-02-successor-migration-design.md (records).
+//! decision list. See docs/project-operations.md (records).
 
 pub mod apply;
 pub mod classify;

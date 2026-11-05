@@ -1,7 +1,7 @@
 //! Downstream impact of unmet prerequisites over one captured scan: the graph, the counts,
 //! the rank and an honest account of what the scan could not see. Pure: no I/O beyond the
 //! caller's lookup and no host-local evidence. See
-//! docs/specs/2026-10-25-blocker-ranking-design.md (graph and counts, honest coverage).
+//! docs/task-model.md (graph and counts, honest coverage).
 
 use crate::dependency::{Verdict, verdict};
 use crate::error::Result;

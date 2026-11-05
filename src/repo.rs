@@ -90,7 +90,7 @@ impl Kind {
 #[derive(Debug, Clone)]
 pub struct Project {
     /// The `[git] commit` switch: commit each record write as it lands. See
-    /// docs/specs/2026-10-10-record-commit-design.md §3.1.
+    /// docs/project-operations.md
     pub commit_records: bool,
     /// The registered root, what `tasks root` prints.
     pub root: PathBuf,
@@ -105,28 +105,29 @@ pub struct Project {
     pub plan_dirs: Vec<String>,
     /// The tag dictionary: tag -> one-line meaning, from the config's `[tags]` table.
     /// `None` when the project keeps no dictionary; then `check` says nothing about
-    /// tags. See docs/specs/2026-09-11-tag-dictionary-design.md.
+    /// tags. See docs/task-model.md
     pub tags: Option<BTreeMap<String, String>>,
     /// The `[feedback]` table's scope: `Some` means the project accepts feedback, and the
     /// line says what it owns. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
     pub feedback: Option<String>,
     /// The need vocabulary from the config's `[needs]` tables: name -> meaning and
     /// exclusivity. Empty when the project declares none. See
-    /// docs/specs/2026-10-03-lanes-needs-groups-design.md §4.1.
+    /// docs/user-guide.md
     pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
+    pub multipart: crate::multipart::MultipartConfig,
     pub growth_warn_bytes: Option<u64>,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.
     pub retired: Option<Retirement>,
     /// The code checkout sessions run in: the config's `[checkout] path`, absolute and
     /// normalized, for a linked or detached project; the root for an in-tree one. It need
     /// not exist: `check` reports a missing one, and a missing one never matches (ops
-    /// linked-checkouts §4.1).
+    /// linked-checkouts).
     pub checkout: PathBuf,
     /// The code working tree this command runs in, when `locate` found the project through
     /// its `[checkout]` link; `None` otherwise. Claims and parks record it (ops
-    /// linked-checkouts §4.1, "record location and resume location are separate").
+    /// linked-checkouts , "record location and resume location are separate").
     pub worktree: Option<PathBuf>,
 }
 
@@ -141,7 +142,7 @@ struct WorktreeRecord {
 #[derive(Debug)]
 pub enum SiblingCopy {
     /// The project root the copy was found in, the `updated` stamp it carries there, and
-    /// its bytes, which a same-stamp comparison needs (record-home spec §3.1).
+    /// its bytes, which a same-stamp comparison needs (docs/project-operations.md).
     Found {
         root: PathBuf,
         updated: String,
@@ -187,7 +188,7 @@ struct RetiredConfig {
     reason: String,
 }
 
-/// A project's own retirement declaration, the `[retired]` table (ops lifecycle spec §3).
+/// A project's own retirement declaration, the `[retired]` table (docs/project-operations.md).
 /// Named apart from the rename feature's retired *prefixes* (registry aliases).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Retirement {
@@ -250,7 +251,7 @@ fn doc_layout(config: &Config) -> Result<(Vec<String>, Vec<String>, bool)> {
 }
 
 /// A detached pairing's config write, computed before anything is written
-/// (relocation design §4.5): `init` writes it after every refusal and computation,
+/// (docs/project-operations.md): `init` writes it after every refusal and computation,
 /// saves the registry, and restores it when that save fails.
 pub struct DetachedPlan {
     /// `<records>/tasks/.config.toml`.
@@ -303,7 +304,7 @@ impl DetachedPlan {
     }
 }
 
-/// A detached config re-pointed to a moved checkout (relocation design §4.1): the
+/// A detached config re-pointed to a moved checkout (docs/project-operations.md): the
 /// `[checkout] path` value replaced in place, keeping the key's decor and every comment,
 /// then `detach_config`'s `[git] commit` rule.
 fn relocate_config(text: &str, path: &str) -> Result<String> {
@@ -329,7 +330,7 @@ fn relocate_config(text: &str, path: &str) -> Result<String> {
 /// An existing config made detached, as a `toml_edit` edit so its comments and unrelated
 /// tables survive (as `retire` edits `[retired]`): `[checkout]` with `path` and
 /// `kind = "detached"` when the table is absent, and `[git] commit = true` when the table
-/// or the key is absent or the value is `false` (records-detached spec §3.4). The caller
+/// or the key is absent or the value is `false` (docs/project-operations.md). The caller
 /// has opened the config, so a present `[checkout]` already names this checkout.
 fn detach_config(text: &str, path: &str) -> Result<String> {
     let mut doc: toml_edit::DocumentMut = text
@@ -373,6 +374,12 @@ struct FeedbackConfig {
 struct AttachmentsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    multipart_max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    multipart_max_parts: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    multipart_validators: Option<Vec<crate::multipart::ValidatorSpec>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -392,6 +399,32 @@ fn attachments_max_bytes(raw: Option<AttachmentsConfig>) -> Result<u64> {
         ))),
         Some(bytes) => Ok(bytes),
     }
+}
+
+fn multipart_config(raw: Option<&AttachmentsConfig>) -> Result<crate::multipart::MultipartConfig> {
+    use crate::multipart::{MultipartConfig, RECOVERY_MAX_BYTES, RECOVERY_MAX_PARTS};
+
+    let max_bytes = raw
+        .and_then(|table| table.multipart_max_bytes)
+        .unwrap_or(16_777_216);
+    let max_parts = raw
+        .and_then(|table| table.multipart_max_parts)
+        .unwrap_or(16);
+    if max_bytes > RECOVERY_MAX_BYTES {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [attachments] multipart_max_bytes must not exceed {RECOVERY_MAX_BYTES}"
+        )));
+    }
+    if max_parts > RECOVERY_MAX_PARTS {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [attachments] multipart_max_parts must not exceed {RECOVERY_MAX_PARTS}"
+        )));
+    }
+    Ok(MultipartConfig {
+        max_bytes,
+        max_parts,
+        validators: raw.and_then(|table| table.multipart_validators.clone()),
+    })
 }
 
 /// A dictionary entry is a valid tag with a one-line, non-empty meaning; anything else
@@ -665,7 +698,7 @@ impl Project {
     }
 
     /// The config a detached project's pairing writes, computed without writing anything
-    /// (records-detached spec §5.1, relocation design §4.5). `records` is the records
+    /// (docs/project-operations.md docs/project-operations.md). `records` is the records
     /// directory, canonical or under the canonical records root when it does not exist
     /// yet; `checkout` is the validated code checkout. A new config gets `prefix`,
     /// `[git] commit = true` and `[checkout]` with the path relative to `records` and
@@ -712,7 +745,7 @@ impl Project {
                     existing.checkout.display()
                 )));
             }
-            // Relocation design §4.1: a detached config naming another checkout is
+            // Current contract (docs/project-operations.md): a detached config naming another checkout is
             // re-pointed here only when that checkout is gone from this host and the
             // caller asserts the move with `--force`.
             if existing.kind == Kind::Detached && existing.checkout != checkout {
@@ -823,6 +856,7 @@ impl Project {
             tags: tag_dictionary(config.tags)?,
             feedback: feedback_scope(config.feedback)?,
             needs: need_vocabulary(config.needs)?,
+            multipart: multipart_config(config.attachments.as_ref())?,
             attachments_max_bytes: attachments_max_bytes(config.attachments)?,
             growth_warn_bytes: match config.growth.and_then(|growth| growth.warn_bytes) {
                 Some(0) => {
@@ -848,12 +882,12 @@ impl Project {
         Ok(())
     }
 
-    /// The project a command run in `start` opens (records-detached spec §3.2). 1. The
+    /// The project a command run in `start` opens (docs/project-operations.md). 1. The
     /// nearest `tasks/.config.toml` at or above it, as always; the registry is read on
     /// every hit, since an in-tree config whose prefix `[records]` pairs elsewhere is
-    /// `records_moved` (§3.3). 2. On a miss inside a git repository, the detached project
+    /// `records_moved`. 2. On a miss inside a git repository, the detached project
     /// registered at its main checkout. 3. Else the registered project whose `[checkout]`
-    /// is that main checkout (linked-checkouts §4.1). A miss outside git stays
+    /// is that main checkout (docs/project-operations.md). A miss outside git stays
     /// `no_project` whatever state the registry is in; a missing registry is empty and a
     /// malformed one is an error.
     pub fn locate(start: &Path) -> Result<Project> {
@@ -911,7 +945,10 @@ impl Project {
         if !path.is_file() {
             return Err(Error::TaskNotFound(id.to_string()));
         }
-        Ok(std::fs::read_to_string(path)?)
+        let raw = std::fs::read(path)?;
+        crate::history::record_metadata_read(raw.len());
+        String::from_utf8(raw)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e).into())
     }
 
     pub fn read_archive(
@@ -1052,6 +1089,25 @@ impl Project {
         task: &Task,
         before_write: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
+        self.write_task_permitted(
+            registry,
+            task,
+            before_write,
+            crate::retained::publish::WritePermission::Ordinary,
+        )
+    }
+    pub(crate) fn write_task_permitted(
+        &self,
+        registry: &Registry,
+        task: &Task,
+        before_write: impl FnOnce() -> Result<()>,
+        permission: crate::retained::publish::WritePermission,
+    ) -> Result<()> {
+        if self.task_path(&task.id).exists() {
+            let old = self.read_task(&task.id)?;
+            crate::retained::publish::check_write(self, &old, task, permission)?;
+        }
+
         crate::review::validate(task)?;
         crate::defer::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
@@ -1510,6 +1566,42 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multipart_config_defaults() {
+        for text in ["prefix = \"tst\"\n", "prefix = \"tst\"\n[attachments]\n"] {
+            let (_dir, project) = project_with_config(text);
+            let config = project.unwrap().multipart;
+            assert_eq!(config.max_bytes, 16_777_216);
+            assert_eq!(config.max_parts, 16);
+            assert!(config.validators.is_none());
+        }
+    }
+
+    #[test]
+    fn multipart_config_reads_limits_and_validators() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"tst\"\n[attachments]\nmax_bytes = 123\nmultipart_max_bytes = 268435456\nmultipart_max_parts = 256\nmultipart_validators = [{ match = \"*.md\", command = [\"checker\", \"{name}\"] }]\n",
+        );
+        let project = project.unwrap();
+        assert_eq!(project.attachments_max_bytes, 123);
+        assert_eq!(project.multipart.max_bytes, 268_435_456);
+        assert_eq!(project.multipart.max_parts, 256);
+        let validators = project.multipart.validators.unwrap();
+        assert_eq!(validators.len(), 1);
+        assert_eq!(validators[0].glob, "*.md");
+        assert_eq!(validators[0].command, ["checker", "{name}"]);
+    }
+
+    #[test]
+    fn multipart_config_preserves_explicit_zero_and_empty_validators() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"tst\"\n[attachments]\nmultipart_max_bytes = 0\nmultipart_validators = []\n",
+        );
+        let config = project.unwrap().multipart;
+        assert_eq!(config.max_bytes, 0);
+        assert!(config.validators.unwrap().is_empty());
+    }
 
     #[test]
     fn external_doc_roots_reserve_first_segment_colons() {

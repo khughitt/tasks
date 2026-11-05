@@ -2,6 +2,24 @@ mod common;
 use common::TestEnv;
 use sha2::{Digest, Sha256};
 
+#[test]
+fn migrate_carries_a_multipart_artifact() {
+    let mut env = TestEnv::new();
+    let source = env.init("forge");
+    let destination = env.init("forge2");
+    let id = id_of(env.json(&source, &["add", "Evidence"]));
+    let bytes = common::multipart::seed(&env, &source, &id, "evidence.txt");
+    let list = uniform_list(&env, &source, &[&id], "carry");
+    let migrated = env.json(&source, &["migrate", list.to_str().unwrap()]);
+    let moved = new_id(&migrated, &id);
+    common::multipart::assert_intact(&env, &destination, &moved, "evidence.txt", &bytes);
+    assert_eq!(
+        env.check(&source),
+        serde_json::json!({"errors": [], "warnings": []})
+    );
+    assert!(!source.join("tasks/files").join(&id).exists());
+}
+
 fn id_of(v: serde_json::Value) -> String {
     v["id"].as_str().unwrap().to_string()
 }
@@ -866,7 +884,7 @@ fn rewrites_of(out: &serde_json::Value, from: &str) -> Vec<String> {
 
 #[test]
 fn carried_child_of_a_dropped_goal_needs_a_parent() {
-    // Spec §5 case 1, validation half.
+    // docs/task-model.md , validation half.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
@@ -922,7 +940,7 @@ fn carried_child_of_a_dropped_goal_needs_a_parent() {
 
 #[test]
 fn carried_subtree_keeps_its_shape() {
-    // Spec §5 case 2: validation runs after the rewrites, so A and B are valid under G'.
+    // Current contract (docs/task-model.md): validation runs after the rewrites, so A and B are valid under G'.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -977,7 +995,7 @@ fn carried_parent_override_must_name_carried_or_open_successor_work() {
 
 #[test]
 fn dependency_on_dropped_work_needs_rm_depends() {
-    // Spec §5 case 3.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -1029,7 +1047,7 @@ fn dependency_on_dropped_work_needs_rm_depends() {
 
 #[test]
 fn unresolved_plan_link_needs_links_drop() {
-    // Spec §5 case 6: valid only because validation runs on the rewritten record.
+    // Current contract (docs/task-model.md): valid only because validation runs on the rewritten record.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -1088,7 +1106,7 @@ fn unresolved_plan_link_needs_links_drop() {
 
 #[test]
 fn cited_reference_needs_a_replacement_body() {
-    // Spec §5 case 7.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -1186,7 +1204,7 @@ fn replacement_body_round_trips_exactly() {
 
 #[test]
 fn parent_override_cycle_refuses() {
-    // Spec §5 case 14.
+    // docs/task-model.md.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
@@ -1231,7 +1249,7 @@ fn parent_override_cycle_refuses() {
 
 #[test]
 fn done_recurrence_carries_with_its_anchor() {
-    // Spec §5 case 9, recurrence half: a recurrence whose occurrence is done carries
+    // docs/task-model.md , recurrence half: a recurrence whose occurrence is done carries
     // (move's open-status rule does not apply to it).
     let mut env = TestEnv::new();
     let forge = env.init("forge");
@@ -1308,7 +1326,7 @@ fn row<'a>(out: &'a serde_json::Value, key: &str, id: &str) -> &'a serde_json::V
 
 #[test]
 fn drop_with_an_outside_dependent_needs_release() {
-    // Spec §5 case 4: an open dependent in another project must be released by name.
+    // Current contract (docs/task-model.md): an open dependent in another project must be released by name.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -1363,7 +1381,7 @@ fn drop_with_an_outside_dependent_needs_release() {
 
 #[test]
 fn close_releases_carried_dependents_by_v1_id() {
-    // Spec §4.3: a closed task's carried dependents keep the edge, now satisfied, and are
+    // Current contract (docs/task-model.md): a closed task's carried dependents keep the edge, now satisfied, and are
     // released by their v1 ids; its open dependencies do not block the close.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
@@ -1397,7 +1415,7 @@ fn close_releases_carried_dependents_by_v1_id() {
 
 #[test]
 fn dropped_reviewed_idea_and_shelf_are_clean() {
-    // Spec §5 case 8, projection half: each record renders as `drop` would write it and
+    // docs/task-model.md , projection half: each record renders as `drop` would write it and
     // passes the write validation (the rendered text is pinned by the unit tests).
     let mut env = TestEnv::new();
     let forge = env.init("forge");
@@ -1481,7 +1499,7 @@ fn close_with_a_missing_declared_output_refuses() {
 
 #[test]
 fn done_recurrence_drop_ends_the_cadence() {
-    // Spec §5 case 9, drop half (the record itself is pinned by the unit tests).
+    // docs/task-model.md , drop half (the record itself is pinned by the unit tests).
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -1557,7 +1575,7 @@ fn inbound_lists_dependents_of_carried_tasks_outside_the_carried_set() {
 
 #[test]
 fn explain_joins_list_and_projection_refusals() {
-    // Ruling R6: list checks and projections report together; a header mismatch skips the
+    // list checks and projections report together; a header mismatch skips the
     // projection.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
@@ -1602,7 +1620,7 @@ fn explain_joins_list_and_projection_refusals() {
 
 #[test]
 fn refusals_name_unassigned_ids_by_their_v1_id() {
-    // Ruling R8: a fresh run assigns no ids, so no refusal names a random new id.
+    // a fresh run assigns no ids, so no refusal names a random new id.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
@@ -1691,7 +1709,7 @@ struct Mixed {
     list: std::path::PathBuf,
 }
 
-/// Spec §5 case 1, plus a done recurrence R carried and a task D carried with a
+/// docs/task-model.md , plus a done recurrence R carried and a task D carried with a
 /// replacement body: G dropped, A carried with no parent, B carried under successor goal
 /// S, C closed; A depends on B.
 fn mixed(env: &mut TestEnv) -> Mixed {
@@ -1735,7 +1753,7 @@ fn mixed(env: &mut TestEnv) -> Mixed {
 
 #[test]
 fn mixed_list_applies_end_to_end_and_retire_follows() {
-    // Spec §5 case 1, end to end.
+    // docs/task-model.md , end to end.
     let mut env = TestEnv::new();
     let m = mixed(&mut env);
     let sha = list_sha(&m.list);
@@ -1821,7 +1839,7 @@ fn mixed_list_applies_end_to_end_and_retire_follows() {
 
 #[test]
 fn parks_travel_or_go() {
-    // Spec §5 case 10, park half.
+    // docs/task-model.md , park half.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
@@ -1895,7 +1913,7 @@ fn phased_in(env: &mut TestEnv, forge: std::path::PathBuf, forge2: std::path::Pa
 
 #[test]
 fn every_phase_resumes_to_the_same_ids() {
-    // Spec §5 case 11, journal path.
+    // docs/task-model.md , journal path.
     for phase in PHASES {
         let mut env = TestEnv::new();
         let p = phased(&mut env);
@@ -2240,7 +2258,7 @@ fn a_pending_move_refuses_the_apply() {
 
 #[test]
 fn explain_of_a_refused_pending_run_assigns_no_ids() {
-    // Spec §4.7: new ids are filled only when the verdict is `resume`.
+    // Current contract (docs/task-model.md): new ids are filled only when the verdict is `resume`.
     let mut env = TestEnv::new();
     let p = phased(&mut env);
     let l = p.list.to_str().unwrap();
@@ -2259,7 +2277,7 @@ fn explain_of_a_refused_pending_run_assigns_no_ids() {
     assert_eq!(env.json(&p.forge, &["migrate", l])["recovery"], "resumed");
 }
 
-// ---- Completion without a journal (plan Task 6, spec §4.5, §4.6, §5 case 13) ----
+// ---- Completion without a journal (plan Task 6, docs/task-model.md) ----
 
 fn store_of(env: &TestEnv, prefix: &str) -> toml::Value {
     let path = env.claim_store(prefix);
@@ -2364,7 +2382,7 @@ fn uniform_list(
 
 #[test]
 fn reruns_after_success_report_complete() {
-    // Spec §5 case 13, first sentences; and case 11's "another rerun reports complete".
+    // docs/task-model.md , first sentences; and case 11's "another rerun reports complete".
     let mut env = TestEnv::new();
     let m = mixed(&mut env);
     let digests_before = std::fs::read_to_string(&m.list).unwrap();
@@ -2461,7 +2479,7 @@ fn commit_all(dir: &std::path::Path) {
 
 #[test]
 fn journal_lost_after_tombstones_refuses_until_finished_by_hand() {
-    // Spec §5 case 13 with the manual finish of §4.6.
+    // docs/task-model.md  with the manual finish of
     let mut env = TestEnv::new();
     let c = carry_one(&mut env);
     apply_until(&env, &c.forge, &c.list, "tombstones");
@@ -2780,7 +2798,7 @@ fn an_unreadable_successor_record_carrying_the_sha_is_never_fresh() {
     assert_eq!(explain(&env, &p.forge, &p.list)["recovery"], "refuse");
 }
 
-// ---- The freeze, restoring writes and resume revalidation (plan Task 7, spec §4.5) ----
+// ---- The freeze, restoring writes and resume revalidation (plan Task 7, docs/task-model.md) ----
 
 const PENDING: &str = "a migration of forge to forge2 is pending on this host";
 
@@ -2871,7 +2889,7 @@ fn frozen_list(env: &mut TestEnv) -> Frozen {
 
 #[test]
 fn every_write_in_either_project_refuses_while_pending() {
-    // Spec §5 case 11 (write refusals) and §4.5 freeze: the whole source and successor.
+    // docs/task-model.md  (write refusals) and freeze: the whole source and successor.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     let forge2 = env.init("forge2");
@@ -2908,7 +2926,7 @@ fn every_write_in_either_project_refuses_while_pending() {
 
 #[test]
 fn edges_to_listed_ids_are_frozen_elsewhere() {
-    // Spec §4.5 freeze, third projects: edges to listed ids move in neither direction.
+    // docs/task-model.md freeze, third projects: edges to listed ids move in neither direction.
     let mut env = TestEnv::new();
     let forge = env.init("forge");
     env.init("forge2");
@@ -2947,7 +2965,7 @@ fn edges_to_listed_ids_are_frozen_elsewhere() {
 
 #[test]
 fn hand_edits_are_repaired_one_command_at_a_time() {
-    // Spec §5 case 12: other hosts' synced edits are caught by resume revalidation, and
+    // Current contract (docs/task-model.md): other hosts' synced edits are caught by resume revalidation, and
     // each restoring command is admitted by the freeze, in either order.
     let mut env = TestEnv::new();
     let f = frozen(&mut env);
@@ -3004,7 +3022,7 @@ fn hand_edits_are_repaired_one_command_at_a_time() {
 
 #[test]
 fn a_write_between_preflight_and_the_journal_refuses_the_fresh_run() {
-    // Spec §4.5: a third project's write takes no lock the run holds, so an edge added
+    // Current contract (docs/task-model.md): a third project's write takes no lock the run holds, so an edge added
     // after preflight's wide read, or another host's synced write to a parent target,
     // is caught before any phase after the journal writes; the journal stays, so the
     // named commands are admitted as restoring writes and the rerun resumes.
@@ -3109,7 +3127,7 @@ fn a_successor_dependent_is_repaired_inside_the_frozen_successor() {
 
 #[test]
 fn a_parent_target_made_recurring_is_repaired() {
-    // Spec §5 case 12, parent target half.
+    // docs/task-model.md , parent target half.
     let mut env = TestEnv::new();
     let f = frozen(&mut env);
     let l = f.list.to_str().unwrap();
@@ -3239,7 +3257,7 @@ fn pretty_review(env: &TestEnv, dir: &std::path::Path, list: &std::path::Path) -
 
 #[test]
 fn pretty_review_shows_sections_in_order() {
-    // Spec §4.8: refusals, the successor tree, drops, closes, removed edges and dropped
+    // Current contract (docs/task-model.md): refusals, the successor tree, drops, closes, removed edges and dropped
     // links, then body diffs; woken shelves and outside dependents of carried tasks sit
     // between the closes and the removed edges.
     let mut env = TestEnv::new();
@@ -3403,7 +3421,7 @@ fn pending_and_complete_reviews_name_their_tasks() {
 
 #[test]
 fn forge_shaped_fixture_migrates_in_one_list() {
-    // Spec §5 case 16: a three-level tree, dependencies to a forge2 task, fleet-rollout
+    // Current contract (docs/task-model.md): a three-level tree, dependencies to a forge2 task, fleet-rollout
     // dependents in ops, a mix of carry, drop and close.
     let mut env = TestEnv::new();
     let forge = env.init("forge");

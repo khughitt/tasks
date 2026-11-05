@@ -1,5 +1,5 @@
 //! `tasks commit`: every uncommitted file under tasks/ in one commit, through the record
-//! commit's procedure (record-commit spec §3.5). An explicit request, so it ignores the
+//! commit's procedure (docs/project-operations.md). An explicit request, so it ignores the
 //! `[git] commit` switch and fails loudly when it cannot commit.
 use super::Ctx;
 use crate::error::{Error, Result};

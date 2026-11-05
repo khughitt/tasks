@@ -220,7 +220,7 @@ pub struct FilterArgs {
     pub needs_review: bool,
 }
 
-/// The needs this session cannot meet, shared by the pickers (lanes-needs spec §4.3).
+/// The needs this session cannot meet, shared by the pickers (docs/user-guide.md).
 #[derive(Args, Debug, Default, Clone)]
 pub struct WithoutArgs {
     /// Hide tasks that need this (repeatable), in the projects that declare it; adds to
@@ -442,6 +442,11 @@ pub struct EditArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Query retained state and execute verified lifecycle operations.
+    Retained {
+        #[command(subcommand)]
+        action: RetainedAction,
+    },
     /// Initialize tasks/ in this repository and register it.
     Init {
         #[arg(long)]
@@ -612,6 +617,19 @@ pub enum Command {
         #[arg(long)]
         no_fetch: bool,
     },
+    /// Export or verify a task attachment, optionally at a Git revision.
+    #[command(group(clap::ArgGroup::new("export_target").args(["output", "verify"]).required(true)))]
+    Export {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        name: String,
+        #[arg(long, value_name = "REF")]
+        at: Option<String>,
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        verify: bool,
+    },
     /// Working documents under each project's records, with the tasks that link them.
     #[command(
         after_help = "Lists the Markdown files directly under the project's spec and plan directories and\ndocs/notes. Kind comes from the directory, then the filename: *-brief.md, *-handoff.md,\nelse note. A task links a document through its spec, its plan, or a --ref entry.\n\nExamples:\n  tasks docs --kind plan\n  tasks docs --all-projects --search \"records root\""
@@ -751,20 +769,23 @@ pub enum Command {
         #[arg(long, conflicts_with = "no_reviewed")]
         awaiting_user: bool,
     },
-    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
+    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note; --multipart accepts exactly one source and conflicts with --clipboard
     #[command(
         after_help = "Examples:\n  tasks attach sci-4f2a9c ~/Pictures/before.png --caption \"the stale row\"\n  grim - | tasks attach sci-4f2a9c - --name after.png\n  tasks attach sci-4f2a9c --clipboard"
     )]
     Attach {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        /// The file to copy, or `-` for stdin (which needs --name).
+        /// The files to copy, or a single `-` for stdin (which needs --name).
         #[arg(required_unless_present = "clipboard", conflicts_with = "clipboard")]
-        source: Option<String>,
+        source: Vec<String>,
         /// Read an image from the Wayland clipboard through wl-paste.
         #[arg(long)]
         clipboard: bool,
-        /// The stored name: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
+        /// Store one UTF-8 text source as bounded parts and a catalog.
+        #[arg(long, conflicts_with = "clipboard")]
+        multipart: bool,
+        /// Single source only: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
         #[arg(long)]
         name: Option<String>,
         /// One line saying what the file shows, kept in the ledger note.
@@ -1141,12 +1162,52 @@ pub enum GroupAction {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum RetainedAction {
+    /// Read retained intent and observations at an immutable records revision.
+    State {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        #[arg(long, value_name = "COMMIT")]
+        at: Option<String>,
+        #[arg(long)]
+        host: Option<String>,
+    },
+    /// Verify and publish a resumable retained host checkpoint.
+    Checkpoint {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        #[arg(long, value_name = "PATH")]
+        request: PathBuf,
+    },
+    /// Transfer retained custody after durable receiver publication.
+    Transfer {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        from: String,
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        to: String,
+        #[arg(long, value_name = "PATH")]
+        request: PathBuf,
+    },
+    /// Reconcile pending lifecycle operations while preserving custody.
+    Reconcile {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        coordinator: String,
+        #[arg(long, value_name = "PATH")]
+        request: PathBuf,
+    },
+}
+
 impl Command {
     /// The verb a record commit names for this command, or `None` for a command that never
-    /// writes a record (record-commit spec §3.2). `init`, `rename`, `retire`, `unretire` and
+    /// writes a record (docs/project-operations.md). `init`, `rename`, `retire`, `unretire` and
     /// `unregister` keep their own procedures and commit nothing.
     pub fn commit_verb(&self) -> Option<&'static str> {
         Some(match self {
+            Command::Retained {
+                action: RetainedAction::State { .. },
+            } => return None,
+            Command::Retained { .. } => "retained",
             Command::Add { .. } => "add",
             Command::Edit { .. } => "edit",
             Command::Note { .. } => "note",

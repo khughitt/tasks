@@ -80,7 +80,8 @@ retained reference document may resolve in the code tree instead.
      are stored apart from the body and survive the rewrite.
    - `--spec`, `--plan <topic> --step "<heading>"`, `--parent`: fix when the linked
      thing exists and the link is missing or wrong. The document may live under
-     `records`; keep paths such as `docs/specs/<name>.md` and `docs/plans/<name>.md`
+     `records` (see [document resolution](../../docs/documents.md#working-documents-and-resolution));
+     keep paths such as `docs/specs/<name>.md` and `docs/plans/<name>.md`
      relative to that directory. A missing dependency is added with
      `--depends`; a wrong one is replaced with `tasks dep <id> --on <right> --rm <wrong>`.
    - `--ref` with `--body`: promote an existing prose path to a reference entry and

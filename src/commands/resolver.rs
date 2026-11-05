@@ -1,4 +1,4 @@
-//! `tasks resolve` (docs/specs/2026-10-06-project-resolution-design.md §3, §4).
+//! `tasks resolve` (docs/project-operations.md).
 use crate::error::Result;
 use crate::locations::{Answer, Index, normalize};
 use crate::model::{TaskId, is_valid_prefix};
@@ -26,7 +26,7 @@ pub fn run(inputs: Vec<String>, stdin: bool, dir: Option<&Path>) -> Result<Outpu
     Ok(Output::Resolve(ResolveOut { results, warnings }))
 }
 
-/// §3.1: path, then id, then prefix; never the bare-hex shorthand.
+/// : path, then id, then prefix; never the bare-hex shorthand.
 fn row(
     registry: &Registry,
     index: &Index,

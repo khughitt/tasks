@@ -1,0 +1,2405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Basis": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "layout": {
+          "type": "string",
+          "minLength": 1
+        },
+        "records_subdir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retained_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "project",
+        "layout",
+        "records_subdir",
+        "commit",
+        "task_path",
+        "retained_ref"
+      ],
+      "additionalProperties": false
+    },
+    "Identity": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "host",
+        "kind",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "OperationKey": {
+      "type": "object",
+      "properties": {
+        "coordinator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "coordinator",
+        "operation_id"
+      ],
+      "additionalProperties": false
+    },
+    "Source": {
+      "type": "object",
+      "properties": {
+        "basis": {
+          "$ref": "#/$defs/Basis"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "basis",
+        "ordinal"
+      ],
+      "additionalProperties": false
+    },
+    "Input": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "basis": {
+          "$ref": "#/$defs/Basis"
+        }
+      },
+      "required": [
+        "task",
+        "basis"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactLocator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "git"
+            },
+            "basis": {
+              "$ref": "#/$defs/Basis"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "type",
+            "basis",
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "attachment"
+            },
+            "task": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "basis": {
+              "$ref": "#/$defs/Basis"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "type",
+            "task",
+            "name",
+            "sha256"
+          ],
+          "additionalProperties": false,
+          "description": "An omitted basis is resolved only from the same owning task note publication; foreign references require an explicit basis."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "directory"
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "manifest": {
+              "$ref": "#/$defs/ArtifactLocator"
+            }
+          },
+          "required": [
+            "type",
+            "host",
+            "path",
+            "manifest"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Declaration": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cleanup_trigger": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "purpose",
+        "cleanup_trigger"
+      ],
+      "additionalProperties": false
+    },
+    "Preservation": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/Identity"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactLocator"
+        }
+      },
+      "required": [
+        "identity",
+        "artifact"
+      ],
+      "additionalProperties": false
+    },
+    "Resolution": {
+      "type": "object",
+      "properties": {
+        "bad": {
+          "$ref": "#/$defs/Source"
+        },
+        "declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Declaration"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "bad",
+        "declarations",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "ResolutionRelation": {
+      "type": "object",
+      "properties": {
+        "bad": {
+          "$ref": "#/$defs/Source"
+        },
+        "successors": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "bad",
+        "successors",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "Mapping": {
+      "type": "object",
+      "properties": {
+        "sender": {
+          "$ref": "#/$defs/Identity"
+        },
+        "receiver": {
+          "$ref": "#/$defs/Identity"
+        }
+      },
+      "required": [
+        "sender",
+        "receiver"
+      ],
+      "additionalProperties": false
+    },
+    "Publication": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "basis": {
+          "$ref": "#/$defs/Basis"
+        }
+      },
+      "required": [
+        "task",
+        "phase",
+        "basis"
+      ],
+      "additionalProperties": false
+    },
+    "Diagnostic": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "enum": [
+            "task",
+            "host",
+            "identity"
+          ]
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolved_by": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "code",
+        "scope",
+        "host",
+        "identity",
+        "source",
+        "detail",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "CheckpointRequest": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Input"
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Declaration"
+          }
+        },
+        "preserved_previous": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Preservation"
+          }
+        },
+        "resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Resolution"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "operation_id",
+        "host",
+        "inputs"
+      ],
+      "additionalProperties": false
+    },
+    "TransferRequest": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Input"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identity"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cleanup_trigger": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "version",
+        "operation_id",
+        "host",
+        "inputs",
+        "items",
+        "purpose",
+        "cleanup_trigger"
+      ],
+      "additionalProperties": false
+    },
+    "ReconcileRequest": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation": {
+          "$ref": "#/$defs/OperationKey"
+        },
+        "reconciliation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Input"
+          },
+          "minItems": 1,
+          "maxItems": 2
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "version",
+        "operation",
+        "reconciliation_id",
+        "inputs",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "OperationNote": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "intent"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "items_published"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ArtifactLocator"
+                  }
+                },
+                "resolutions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ResolutionRelation"
+                  }
+                }
+              },
+              "required": [
+                "items",
+                "artifacts",
+                "resolutions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "receiver_published"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ArtifactLocator"
+                  }
+                },
+                "mapping": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Mapping"
+                  }
+                }
+              },
+              "required": [
+                "items",
+                "artifacts",
+                "mapping"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "sender_released"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "receiver_basis": {
+                  "$ref": "#/$defs/Basis"
+                },
+                "mapping": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Mapping"
+                  }
+                }
+              },
+              "required": [
+                "items",
+                "receiver_basis",
+                "mapping"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "completed"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "enum": [
+                    "verified",
+                    "accounted_unknown",
+                    "no_local_items",
+                    "transferred"
+                  ]
+                },
+                "publications": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Publication"
+                  }
+                },
+                "checkpoint": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "outcome",
+                "publications",
+                "checkpoint"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "incomplete"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "previous_phase": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "checkpoint": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "attempt",
+                "previous_phase",
+                "checkpoint",
+                "action"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "reconcile_intent"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "directive": {
+                  "$ref": "#/$defs/ArtifactLocator"
+                },
+                "reconciliation_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "directive",
+                "reconciliation_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "reconcile_ready"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "directive": {
+                  "$ref": "#/$defs/ArtifactLocator"
+                },
+                "reconciliation_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "unresolved": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "directive",
+                "reconciliation_id",
+                "items",
+                "unresolved"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "key": {
+              "$ref": "#/$defs/OperationKey"
+            },
+            "request": {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            "input_bases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Input"
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "phase": {
+              "const": "reconciled"
+            },
+            "outputs": {
+              "type": "object",
+              "properties": {
+                "directive": {
+                  "$ref": "#/$defs/ArtifactLocator"
+                },
+                "reconciliation_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ready_bases": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Publication"
+                  }
+                },
+                "unresolved": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "directive",
+                "reconciliation_id",
+                "ready_bases",
+                "unresolved"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "key",
+            "request",
+            "input_bases",
+            "host",
+            "at",
+            "observer",
+            "diagnostics",
+            "phase",
+            "outputs"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Counts": {
+      "type": "object",
+      "properties": {
+        "kept_verified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kept_unknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "kept_verified",
+        "kept_unknown",
+        "released"
+      ],
+      "additionalProperties": false
+    },
+    "CheckpointScope": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "all_known_kept_on_host"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "other_hosts": {
+          "const": "outside_observation"
+        }
+      },
+      "required": [
+        "mode",
+        "host",
+        "other_hosts"
+      ],
+      "additionalProperties": false
+    },
+    "CheckpointNote": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation": {
+          "$ref": "#/$defs/OperationKey"
+        },
+        "observed_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "basis": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Basis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/CheckpointScope"
+        },
+        "counts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Counts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "operation",
+        "observed_at",
+        "host",
+        "observer",
+        "basis",
+        "scope",
+        "counts",
+        "changed",
+        "actions",
+        "complete"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "basis": {
+                "$ref": "#/$defs/Basis"
+              },
+              "counts": {
+                "$ref": "#/$defs/Counts"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Record": {
+      "anyOf": [
+        {
+          "$ref": "../tests/fixtures/retention/record.schema.json"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "worktree"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/owner"
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "handoff"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "worktree"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "enum": [
+                    "user"
+                  ]
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "handoff": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "sha256"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "evidence"
+                  ]
+                },
+                "path": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/owner"
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "sha256": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/digest"
+                },
+                "manifest": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "sha256",
+                "handoff"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "evidence"
+                  ]
+                },
+                "path": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "enum": [
+                    "user"
+                  ]
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "sha256": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/digest"
+                },
+                "manifest": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "handoff": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "sha256",
+                "manifest"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "scratch"
+                  ]
+                },
+                "path": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/owner"
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "sha256": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/digest"
+                },
+                "manifest": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "sha256",
+                "manifest",
+                "handoff"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "scratch"
+                  ]
+                },
+                "path": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "enum": [
+                    "user"
+                  ]
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "sha256": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/digest"
+                },
+                "manifest": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "handoff": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "verification_action"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "worktree"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "unknown"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/owner"
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "verification_action": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "verification_action",
+                "handoff"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "worktree"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "unknown"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "enum": [
+                    "user"
+                  ]
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "verification_action": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "handoff": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "verification_action",
+                "sha256"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "scratch",
+                    "evidence"
+                  ]
+                },
+                "path": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "unknown"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/owner"
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "verification_action": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "sha256": {
+                  "type": "null"
+                },
+                "manifest": {
+                  "anyOf": [
+                    {
+                      "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger",
+                "verification_action",
+                "sha256",
+                "handoff"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "scratch",
+                    "evidence"
+                  ]
+                },
+                "path": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                },
+                "state": {
+                  "enum": [
+                    "kept"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "unknown"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "enum": [
+                    "user"
+                  ]
+                },
+                "cleanup_trigger": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/trigger"
+                },
+                "verification_action": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "sha256": {
+                  "type": "null"
+                },
+                "manifest": {
+                  "anyOf": [
+                    {
+                      "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/location"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "handoff": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "host",
+                "kind",
+                "path",
+                "state",
+                "verification",
+                "purpose",
+                "next_owner",
+                "cleanup_trigger"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "kind": {
+                  "enum": [
+                    "worktree",
+                    "scratch",
+                    "evidence"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^(?:(?:\\.worktrees/|/|\\$WORK_ROOT/)[^\\x00\\r\\n]+)(?![\\s\\S])"
+                },
+                "state": {
+                  "enum": [
+                    "released"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "verified"
+                  ]
+                },
+                "purpose": {
+                  "$ref": "../tests/fixtures/retention/record.schema.json#/$defs/text"
+                },
+                "next_owner": {
+                  "enum": [
+                    "none"
+                  ]
+                },
+                "cleanup_trigger": {
+                  "enum": [
+                    "none"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "Item": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/Identity"
+        },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Record"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage": {
+          "enum": [
+            "recorded",
+            "changed",
+            "unknown",
+            "blocked"
+          ]
+        }
+      },
+      "required": [
+        "identity",
+        "record",
+        "source",
+        "observed_at",
+        "checkpoint",
+        "coverage"
+      ],
+      "additionalProperties": false
+    },
+    "CheckpointEntry": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointNote"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "note",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "OperationEntry": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "note": {
+          "$ref": "#/$defs/OperationNote"
+        }
+      },
+      "required": [
+        "source",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "State": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "contract": {
+          "const": "retention-1"
+        },
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "basis": {
+          "$ref": "#/$defs/Basis"
+        },
+        "host_filter": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Item"
+          }
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckpointEntry"
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperationEntry"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "version",
+        "contract",
+        "task",
+        "basis",
+        "host_filter",
+        "complete",
+        "items",
+        "checkpoints",
+        "operations",
+        "diagnostics",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "Metrics": {
+      "type": "object",
+      "properties": {
+        "wall_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hash_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_hashed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "history_bytes_read": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "wall_ns",
+        "hash_ns",
+        "bytes_hashed",
+        "history_bytes_read"
+      ],
+      "additionalProperties": false
+    },
+    "Result": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation": {
+          "$ref": "#/$defs/OperationKey"
+        },
+        "outcome": {
+          "enum": [
+            "verified",
+            "accounted_unknown",
+            "no_local_items",
+            "transferred",
+            "reconciled"
+          ]
+        },
+        "publications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Publication"
+          }
+        },
+        "counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "metrics": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "version",
+        "operation",
+        "outcome",
+        "publications",
+        "counts",
+        "actions",
+        "metrics",
+        "warnings"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/OperationNote"
+}

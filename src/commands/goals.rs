@@ -1,5 +1,5 @@
 //! `tasks goals`: the goals the user asked for, across projects (records spec
-//! 2026-11-01-goals-view-design).
+//! docs/user-guide.md).
 
 use super::ReadCtx;
 use crate::error::Result;

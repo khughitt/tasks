@@ -1,5 +1,5 @@
 //! Pretty tables: columns and rows of painted cells, laid out by comfy-table
-//! (docs/specs/2026-10-06-comfy-tables-design.md §3). Views paint; this module places.
+//! (docs/user-guide.md). Views paint; this module places.
 
 use crate::style::{Painter, Style};
 use comfy_table::{ColumnConstraint, ContentArrangement, Table, Width, presets::NOTHING};
@@ -249,7 +249,7 @@ pub fn render(
         }
         // Constraint widths include the padding (comfy-table's absolute_width_with_padding).
         // A fixed column always carries a constraint: without one, Dynamic arrangement may
-        // wrap it (plan review round 1).
+        // wrap it.
         let constraint = match (columns[index].fit, mode) {
             (Fit::Fixed, _) => Some(match shared(index) {
                 Some(_) => {
@@ -534,7 +534,7 @@ mod tests {
     fn a_long_fixed_cell_stays_whole_beside_wrapping_columns_and_details() {
         // fixed 40 + gaps 4 + wrap mins 20 + 30 = 94 <= 100: a table, not the stacked
         // fallback, so an unconstrained fixed column would be squeezed and wrapped here
-        // (plan review round 2: with the old constraints this panics in row_blocks).
+        // (with the old constraints this panics in row_blocks).
         let long = "a-fixed-cell-that-is-forty-columns-wide!";
         assert_eq!(long.len(), 40);
         let columns = [

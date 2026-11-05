@@ -26,7 +26,7 @@ mean those documents were verified.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    Read picker warnings for omitted work; see `tasks ready --help` and the
-   [selection contract](../../README.md#session-selection) for hiding and filter rules.
+   [selection contract](../../docs/user-guide.md#select-work-without-losing-context) for hiding and filter rules.
    A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
    `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`.
    Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
@@ -108,13 +108,13 @@ mean those documents were verified.
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
    Before asking the user about a task's intent, read its origin by the
-   [reading rule](../../README.md#origin-whose-ask-a-task-is): a set `origin` field is
+   [reading rule](../../docs/task-model.md#origin-and-provenance): a set `origin` field is
    the record's origin, superseding every occurrence label; an absent one is unknown, though an occurrence note labelled
    `user` or `mixed` means it carries some of the user's words. `user` means the user
    holds the intent. For `agent`, `mixed` or unknown, first follow the record to its
    originating ask with the scope skill's procedure (§2, "Find the originating ask"),
    and ask only what that evidence leaves to the user.
-   `ready` and `next` omit live claims; see the [claim and checkout contract](../../README.md#claims-and-checkouts)
+   `ready` and `next` omit live claims; see the [claim and checkout contract](../../docs/ownership.md#acquire-refresh-and-release)
    and `tasks start --help` / `tasks release --help` for ownership and recovery.
    `tasks start --force <id>` deliberately takes over another session's claim and records it;
    do not treat it as an ordinary retry. Treat `unverifiable` claims as held; use
@@ -143,7 +143,7 @@ mean those documents were verified.
    when concrete native identity is unavailable and several agents share one terminal or
    harness process. Distinct Codex threads already supply separate native identities;
    unnecessary explicit overrides bypass native root association.
-   For relay identity setup and recovery, see [Relay identity](../../README.md#relay-identity-opt-in).
+   For relay identity setup and recovery, see [Relay identity](../../docs/ownership.md#identity-and-liveness).
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
    For several notes on one task, `tasks note <id> --stdin < notes.txt` appends one
    per line in order with one save (and one record commit when enabled). It conflicts
@@ -216,7 +216,7 @@ mean those documents were verified.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
-   For creation and completion stamps, see the [stamp contract](../../README.md#agent-and-completion-stamps)
+   For creation and completion stamps, see the [stamp contract](../../docs/task-model.md#origin-and-provenance)
    and `tasks add --help` / `tasks edit --help`. When `TASKS_AGENT` is unset, pass
    `--agent` on `add` only with the harness/model you know (`<harness>/<model>`, or
    the harness alone); when unsure, pass nothing — never guess. `feedback` has no
@@ -242,7 +242,7 @@ only trailing-space/tab cleanup in existing notes.
 For a multi-line body, read stdin with `tasks edit <id> --body - < body.md`
 instead of passing the body inline.
 Prefer a defined tag (`tasks tags`); add a dictionary entry when a new tag is worth
-keeping. See the [tag dictionary](../../README.md#adopting-in-an-existing-project).
+keeping. See the [tag dictionary](../../docs/configuration.md#project-settings).
 
 A step that uses a shared resource records it with `--need <name>` (repeatable), drawn
 from the project's `[needs]` vocabulary in `tasks/.config.toml`:
@@ -278,7 +278,7 @@ written, so refiling a batch from one origin never duplicates. The other flags o
 call are ignored, not merged — `tasks edit` that id if the record should change.
 
 Id-taking commands route by prefix, retaining the current checkout for a matching prefix;
-see [Project routing](../../README.md#project-routing).
+see [Project routing](../../docs/user-guide.md#route-across-projects).
 
 ID-valued read filters route the same way: list/search/ready `--parent` and
 `--under`, and next `--under`, select the named project inside or outside another
@@ -526,6 +526,54 @@ contract is unavailable, resolve that missing input before asserting a checkpoin
 Follow its fresh inspection and immutable-basis procedure even when every item is
 unchanged. A recorded observation is not proof of current filesystem state.
 
+### Retained-state queries
+
+Use `tasks retained state <id> [--at <revision>] [--host <host>]` to inspect
+Git-pinned logical retention history. JSON reports the immutable basis, effective
+items and their source ordinals, checkpoint coverage, operation phases and scoped
+diagnostics. `complete: false` or a null item record means unresolved uncertainty;
+never substitute its predecessor. Default reads refuse dirty required records;
+explicit historical reads use only pinned task/archive blobs. Missing or
+conflicting evidence fails explicitly. This query does not inspect current bytes.
+Lifecycle mutations require one coordinated writer host for every participating
+task. Prevent other-host writes until completion or reconciliation has committed
+and records have synchronized; claims and locks are host-local.
+`tasks retained checkpoint <id> --request <path>` performs fresh whole-host
+accounting after an owned start, with Git-backed auto-commit records and the exact
+current input basis. It includes every known local kept identity even when omitted
+from declarations. Keep request/manifest metadata outside the inventoried container.
+Retry the same operation id with the same parsed request; preserve prior changed
+payloads through explicit immutable locators. `accounted_unknown` is successful
+accounting, not verification. A completed retry returns historical publication
+references and explicitly leaves current bytes unchecked. Errors keep the durable
+reservation; they do not park or close the task. See README's retained checkpoint
+request and resolution contract.
+
+`tasks retained transfer <from> <to> --request <path>` moves selected custody after
+both owned starts and exact current input bases. Its strict request lists the
+sender identities and common receiving purpose/trigger. It leaves physical bytes
+and unselected independent identities in place. Receiver kept records commit
+before sender release, with full verification again at the release boundary.
+Receiver collisions refuse even with equal hashes. Retry the original immutable
+request after interruption; committed release needs only missing final receipts.
+A completed retry returns dated historical results, not current verification.
+`tasks retained reconcile <coordinator> --request <path>` explicitly ends an
+irrecoverable pending operation using a stable directive and fresh participant
+bases. It keeps custody, records unknown observations, verifies all ready commits,
+and only then ends reservations through the coordinator terminal. It never releases
+bytes or completes the requested transfer/checkpoint; committed sender release
+requires finishing the original operation. Malformed history remains blocked and
+needs explicit repair. Keep original named retained refs available. Use fresh
+checkpoint inputs for later repair; retain the installed manual procedure until
+full delivery and consumer acceptance.
+
+Pending retained operations reserve task/evidence mutation while permitting reads,
+unrelated appended notes, start/claim refresh and park. Complete or reconcile them
+before closure or archival. Terminal archival keeps logical note ordinals; ID-changing
+move/migrate/rename refuse protected retention locators. Never detach protected
+retained request, manifest or checkpoint artifacts, or forge machine operation/checkpoint
+notes through `tasks note`.
+
 ### Record commits
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
@@ -540,7 +588,7 @@ A successful write still exits 0 when its commit is skipped or fails; read its w
 
 ### Lifecycle provenance
 
-Lifecycle notes carry native harness provenance; see the [lifecycle contract](../../README.md#lifecycle-provenance)
+Lifecycle notes carry native harness provenance; see the [lifecycle contract](../../docs/task-model.md#references-and-notes)
 for fields, source selection, and marker limits. Every host reading stamped records
 needs a current `tasks`. Do not set `TASKS_SESSION` merely for obs.
 Use `tasks note <id> "<text>" --stamp` for gate notes.
@@ -605,7 +653,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `--origin-session <key>` (`claude-code:<id>` or `codex:<id>`) to say where to look; it does not
   claim that the user asked. Correct a record later with `tasks edit <id> --origin
   <value>` (or `--no-origin`) plus `tasks note <id> "<evidence>" --stamp`; see
-  [Origin](../../README.md#origin-whose-ask-a-task-is).
+  [Origin](../../docs/task-model.md#origin-and-provenance).
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or
@@ -632,7 +680,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   not power loss; the journal and carried park are host-local. Update every host's
   binary before moving synced records: older binaries cannot parse the new fields.
   For counterpart findings or manual undo, see the
-  [recovery limits](../../docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
+  [recovery limits](../../docs/project-operations.md#move-manual-undo).
 - A growing task record: `tasks check --growth` reports active bytes and complete
   logical-history counts. `tasks archive-notes <id>` is a read-only lossless
   note-archive preview. Operational guidance is preview-only pending the reader,
@@ -647,18 +695,63 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   sanitize required history. Preserve exact body bytes before shortening a large
   body. Archival reduces active rewrite cost, not total evidence or full-read cost;
   existing cap/layout limits remain in force.
-- A screenshot or file for a task: `tasks attach <id> <path>` (or `-` with `--name`, or
-  `--clipboard`), with `--caption "<what it shows>"`. `tasks show <id>` prints each
+- Screenshots or files for a task: `tasks attach <id> <path> <path>...`, with
+  `--caption "<what they show>"` applied to each file. The batch validates all names,
+  per-file caps, collisions and storage safety before writing, then records one
+  `attached:` note per file in one save/commit. A write/save failure removes all
+  files that call wrote. `--name`, `-` (stdin) and `--clipboard` require one source.
+  JSON returns `files: [{name, path, bytes}, ...]` even for one source, replacing
+  the old `file` object. `tasks show <id>` prints each
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
   After interrupted attachment publication, retry the same name and bytes through
   `tasks attach`, then verify both the live ledger and the payload at the intended
-  Git basis. Same-bytes adoption can repair the audit while leaving the file
-  untracked (tasks-b2bb36). Inspect the pending `tasks/` sweep, resolve unrelated
-  writes, run `tasks commit` when publication is missing, then verify exact bytes
+  Git basis. The retry publishes adopted payloads with the ledger record. With
+  older builds that leave an adopted file untracked, inspect the pending `tasks/`
+  sweep, resolve unrelated writes and run `tasks commit` when publication is
+  missing, then verify exact bytes
   with `git show <basis>:<attachment-path>` in the records repository. A successful
   audit or exit 0 alone does not establish committed evidence.
+- Oversized text evidence: `tasks attach <id> <path> --multipart`, or pipe the
+  whole document into `tasks attach <id> - --name <name> --multipart`. This accepts
+  one UTF-8 source, preserves exact bytes and validates `.json` syntax; clipboard,
+  binary content and compression are excluded. The logical name is at most 115
+  bytes. Parts `<name>.part-0001` … and `<name>.catalog.json` each obey the ordinary
+  per-file cap. Defaults admit one logical artifact up to 16 MiB and 16 parts;
+  `[attachments] multipart_max_bytes = 0` stops admissions. Limits bound one
+  artifact, not cumulative history. Absent `multipart_validators` refuses
+  admission; `[]` explicitly declares no extra whole-document gates. Domain/schema
+  validation requires configured `{ match = "<glob>", command = [...] }` gates.
+  They receive the whole document on stdin at the records Git top level (records
+  directory outside Git), substitute only `{name}`, and run with a temporary
+  HOME and only PATH, HOME, LANG and TASKS_ATTACHMENT_NAME, a 120-second timeout
+  and bounded captured output. Validator containment covers owned descendants,
+  not service-manager or IPC launches outside that tree. Uncertain cleanup stops
+  subsequent validators as unavailable. Executable selection is fixed before
+  launch: a broken earlier PATH entry requires fixing/removing it or configuring
+  an explicit valid path, never falling through to a later executable.
+  Read `publication.state`: `published` binds successful reconstruction and current
+  validation to `publication.commit`; `local` carries `cause` and `next` even on
+  exit 0. Resolve that cause, commit as needed, and verify the exact resulting
+  commit before relying on portable evidence. `show`/`next` expose logical
+  `multipart` entries and member files marked `member_of`. Use `files:<name>` to
+  reference the whole artifact and export it to read it; a member is not a valid
+  task document reference and no whole-file storage path exists.
+  `tasks export <id> <name> --at <commit> -o <dest>` recovers exact bytes from one
+  commit, including archived ledger notes; omit `--at` for the working tree or use
+  `-o -` for byte-exact stdout. Recovery ignores current validators and admission
+  limits but enforces integrity and fixed ceilings of 256 MiB / 256 parts.
+  `--verify` writes no file and reports `current_runtime` validation with config
+  and program identity, not historical schema validation; inspect the verdict.
+  Detach the logical name to remove the whole set; individual members refuse.
+  After interruption, retry that logical detach and follow `publication.next`.
+  Names stay reserved until committed removal and local cleanup succeed.
+  `published` with `reuse: "blocked"` proves the removal commit but still requires
+  local recovery, for example when a hook recreated old-owned members. Later
+  legitimate ordinary ownership is preserved. Rollout order: upgrade every reader
+  binary, commit reviewed multipart config keys, then attach; older parsers reject
+  the keys. Install the merged CLI before activating its shared skill/config.
 - A checker needing an exact local attachment verdict uses
   `tasks -C <project> attachments tasks/files/<id>/<name>...` (1–128 unique paths).
   This read-only query uses only the explicit project's local configuration,
@@ -729,7 +822,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 ## Prefix renames and recovery
 
 `tasks rename <old> <new>` renames a prefix; retired names resolve while registered.
-Read [rename and recovery](../../README.md#prefix-renames-and-recovery) and `tasks rename --help`
+Read [rename and recovery](../../docs/project-operations.md#prefix-rename-and-adoption) and `tasks rename --help`
 before using it. Never rewrite a dependency's prefix with `--on` then `--rm`:
 the names identify the same task, so that removes the dependency.
 
@@ -749,7 +842,7 @@ the directory rename is left for you to commit in the records repository.
 On the second host, `--adopt` pairs the directory already renamed by sync.
 Rehearsals must isolate both `XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
-not an undo; follow the [manual rollback procedure](../../docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
+not an undo; follow the [manual rollback procedure](../../docs/project-operations.md#prefix-rollback).
 
 ## Retiring a project
 
@@ -765,7 +858,7 @@ after any interruption: while pending, both projects are frozen except the exact
 commands a refusal names, and the run is forward-only (no rollback). The freeze holds only
 on the host running it, so keep other hosts from writing to either project until the run
 completes and its records have synced. If the journal is lost mid-run, the refusal names
-what is unfinished and the manual finish is §4.6 of the successor-migration design spec (2026-11-02, in the tasks project's records directory under docs/specs; `tasks where` names the directory).
+what is unfinished; follow [journal-less successor recovery](../../docs/project-operations.md#journal-less-successor-recovery).
 A journal lost right after attachments were copied, before any record was written, reruns
 as fresh; `tasks check` then reports the first run's copies as `attachment_orphan`: detach
 or remove them. Without a successor, settle each task (close or drop it, or move one with
@@ -864,7 +957,7 @@ fetch. A read that must never run a provider command passes `--no-fetch` to
 `doc` fails an external link as `doc_not_found`; local documents still read. `check` prioritizes stepped open plans within a shared five-second budget
 and reports unfinished references once as `doc_unchecked`. Local missing files
 and steps remain errors; malformed host configuration remains fatal. See the
-[README's external document contract](../../README.md#external-documents) for
+[external document contract](../../docs/documents.md#external-providers) for
 fetch configuration, limits and binary-before-config rollout order.
 
 ## With superpowers

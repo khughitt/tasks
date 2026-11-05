@@ -1,10 +1,10 @@
 //! Per-host location history and path resolution
-//! (docs/specs/2026-10-06-project-resolution-design.md §2, §4).
+//! (docs/project-operations.md).
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// One registered project that declares a `[checkout]` (linked-checkouts §4.1): a linked
+/// One registered project that declares a `[checkout]` (docs/project-operations.md): a linked
 /// or a detached one, as `kind` says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Linked {
@@ -26,7 +26,7 @@ pub struct CheckoutScan {
 }
 
 impl CheckoutScan {
-    /// The linked projects, or the first failure, naming its project (§4.1a: errors stay
+    /// The linked projects, or the first failure, naming its project (: errors stay
     /// errors for every caller that opens a project).
     pub fn strict(self) -> crate::error::Result<Vec<Linked>> {
         match self.failed.into_iter().next() {
@@ -42,7 +42,7 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
     scan_with(registry, None)
 }
 
-/// `scan_checkouts` for `init --records` (relocation design §4.3): `except`, the prefix
+/// `scan_checkouts` for `init --records` (docs/project-operations.md): `except`, the prefix
 /// being initialised, is skipped, since `init` validates its config itself; and another
 /// prefix whose registry root disagrees with its detached config's checkout is read
 /// through that config, the synced declaration, so a pending relocation of one project
@@ -95,7 +95,7 @@ fn scan_with(registry: &crate::registry::Registry, declared_except: Option<&str>
 }
 
 /// One project's history on this host. `storage` is the record of where the current
-/// root's `.worktrees` resolved when a command last wrote this project's entry (§2).
+/// root's `.worktrees` resolved when a command last wrote this project's entry.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Locations {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,7 +105,7 @@ pub struct Locations {
 }
 
 /// A root a command moved the project off, with the storage record kept for it: the
-/// fallback when the root is gone and its link cannot be read (§2.1).
+/// fallback when the root is gone and its link cannot be read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Displaced {
     pub root: PathBuf,
@@ -145,7 +145,7 @@ impl Locations {
             .sort_by(|a, b| (&a.until, &a.root).cmp(&(&b.until, &b.root)));
     }
 
-    /// The adoption merge (§2.2): the union of both `former` lists. The storage record
+    /// The adoption merge : the union of both `former` lists. The storage record
     /// starts empty: neither table's record describes the checkout's root, and
     /// `Registry::note_root_change` refreshes it from the live link. The displaced
     /// table's record travels separately, in `Displaced`.
@@ -157,7 +157,7 @@ impl Locations {
         self
     }
 
-    /// What load validation refuses (§2), or `None`.
+    /// What load validation refuses , or `None`.
     pub fn problem(&self) -> Option<String> {
         let absolute = |what: &str, path: &std::path::Path| {
             (!path.is_absolute())
@@ -198,7 +198,7 @@ impl Locations {
     }
 }
 
-/// What a root's `.worktrees` is on this host right now (§2.1, §4.2).
+/// What a root's `.worktrees` is on this host right now.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageState {
     /// A symlink that resolves: the storage path, canonical.
@@ -236,7 +236,7 @@ pub fn storage_state(root: &std::path::Path) -> std::io::Result<StorageState> {
 }
 
 /// Absolute, with the longest existing ancestor canonicalized and the rest appended
-/// lexically (§4.1). `..` after a missing component cannot be resolved and is refused.
+/// lexically. `..` after a missing component cannot be resolved and is refused.
 pub fn normalize(path: &Path, base: &Path) -> std::result::Result<PathBuf, String> {
     use std::path::Component;
     let absolute = if path.is_absolute() {
@@ -335,7 +335,7 @@ pub enum Answer {
     Unregistered,
 }
 
-/// Every registered project's locations on this host (§4.2), built once per call.
+/// Every registered project's locations on this host , built once per call.
 pub struct Index {
     locations: Vec<Location>,
     colors: BTreeMap<String, crate::palette::Rgb>,
@@ -432,7 +432,7 @@ impl Index {
         self.colors.get(prefix).copied()
     }
 
-    /// The project `path` (already normalized) belongs to (§4.3).
+    /// The project `path` (already normalized) belongs to.
     pub fn resolve(&self, path: &Path, warnings: &mut Vec<String>) -> Answer {
         match self.pick(path) {
             Answer::Unregistered if path.exists() => self
@@ -501,7 +501,7 @@ impl Index {
         })
     }
 
-    /// §4.3 step 5: map an existing path into its main checkout, keeping its offset in
+    ///  step 5: map an existing path into its main checkout, keeping its offset in
     /// the worktree, and match again.
     fn through_git(&self, path: &Path, warnings: &mut Vec<String>) -> Option<Answer> {
         let dir = if path.is_dir() { path } else { path.parent()? };

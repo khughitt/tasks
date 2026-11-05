@@ -74,7 +74,7 @@ fn read_self_stat() -> Option<String> {
     std::fs::read_to_string("/proc/self/stat").ok()
 }
 
-/// Whether this host exposes the process tree at all. Stage 3 of spec §7 asks this, not
+/// Whether this host exposes the process tree at all. Stage 3 docs/task-model.md asks this, not
 /// what the target triple says: a Linux build without a mounted `/proc` cannot establish
 /// scope either.
 pub fn proc_available() -> bool {
@@ -293,7 +293,7 @@ mod tests {
     const CORPUS: &str = include_str!("../../tests/fixtures/relay/ancestry.json");
 
     /// relay's `session: null` does not say which of tasks' outcomes applies, so each such
-    /// chain names its expectation here (spec §5). An unlisted one fails the corpus test.
+    /// chain names its expectation here (docs/task-model.md). An unlisted one fails the corpus test.
     const NULL_SESSION_EXPECTED: [(&str, &str); 3] = [
         ("daemon-nearest", "hosting 300 daemon"),
         ("pty-host-nearest", "hosting 400 bg-pty-host"),

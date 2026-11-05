@@ -1,4 +1,4 @@
-//! `tasks retire` / `tasks unretire` (ops lifecycle spec §3–§4). Lock order: this
+//! `tasks retire` / `tasks unretire` (docs/project-operations.md). Lock order: this
 //! project's MutationLock only; the registry is read, never locked, because every command
 //! that changes this prefix's root (`init --force`, `rename`) takes this lock first.
 
@@ -14,6 +14,7 @@ pub fn retire(here: Project, successor: Option<String>, reason: String) -> Resul
     let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
+    crate::retained::publish::project_permission(&project, false)?;
     if let Some(existing) = &project.retired {
         return Err(Error::RetiredProject(format!(
             "{} is already retired (since {}: {}); run `tasks unretire` first to declare it again",

@@ -61,10 +61,10 @@ pub enum Style {
     Emphasis,
     Error,
     Ok,
-    /// A date, painted by its distance from today (docs/specs/2026-09-25-date-recency-color-design.md).
+    /// A date, painted by its distance from today (docs/configuration.md).
     Date(When),
     /// A priority, painted on the magenta scale when the painter has one
-    /// (docs/specs/2026-09-25-priority-color-design.md), else bold at P0 and P1.
+    /// (docs/configuration.md), else bold at P0 and P1.
     Priority(u8),
     /// A section or title, bold and optionally in its project color.
     Heading(Option<Rgb>),
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn with_this_fixture_the_steps_fall_in_lightness() {
         // A fixture property, not a guarantee: a theme whose magenta equals the old end
-        // collapses the scale (spec §2.3).
+        // collapses the scale (docs/task-model.md).
         let scale = PriorityScale::new(magenta(), &palette());
         let lightness: Vec<f64> = (1..=4).map(|p| scale.color(p).lightness()).collect();
         assert!(

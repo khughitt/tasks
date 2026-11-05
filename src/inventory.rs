@@ -154,6 +154,15 @@ fn entry_row(
     row.relation = Some(entry.relation);
     row.kind.clone_from(&entry.kind);
     row.description.clone_from(&entry.description);
+    if let Location::Attachment(name) = refs::location(&entry.reference)?
+        && let Some(crate::multipart::audit::DeclState::Live(declaration)) =
+            crate::multipart::audit::declarations(task).remove(name)
+    {
+        row.multipart = Some(crate::output::MultipartRefOut {
+            name: declaration.name,
+            parts: declaration.parts,
+        });
+    }
     if location != RowLocation::External {
         let (status, path) = match refs::present(resolver, project, task, entry)? {
             Presence::Here(path) => (RowStatus::Present, path),
@@ -162,7 +171,7 @@ fn entry_row(
                 (RowStatus::Present, path)
             }
             Presence::Absent(path) => (
-                if entry.relation == Relation::Output {
+                if entry.relation == Relation::Output && row.multipart.is_none() {
                     RowStatus::Pending
                 } else {
                     RowStatus::Missing

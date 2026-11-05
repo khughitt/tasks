@@ -1,6 +1,6 @@
 //! Review state: the stored `reviewed` flag on ideas and the derived `needs_review` mark
-//! with its `review_reason`. See docs/specs/2026-10-11-review-state-design.md and
-//! docs/specs/2026-10-17-wait-aware-review-design.md.
+//! with its `review_reason`. See docs/user-guide.md and
+//! docs/user-guide.md
 
 use crate::dependency::Verdict;
 use crate::error::{Error, Result};
@@ -9,7 +9,7 @@ use crate::model::{Status, Task};
 use std::collections::HashMap;
 use time::OffsetDateTime;
 
-/// Why a row needs a look (wait-aware spec §4.2). Absent when it does not.
+/// Why a row needs a look (docs/user-guide.md). Absent when it does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReviewReason {
@@ -19,7 +19,7 @@ pub enum ReviewReason {
     Unassessed,
 }
 
-/// What one dependency edge says once resolved (spec §4.1). An edge that cannot be
+/// What one dependency edge says once resolved (docs/user-guide.md). An edge that cannot be
 /// resolved is `Unresolved`: ideas wait on it, shelves need repair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepState {
@@ -28,7 +28,7 @@ pub enum DepState {
     Closed { closed: Option<String> },
 }
 
-/// The wait and wake edges in one scan, resolved against that scan (spec §4.3).
+/// The wait and wake edges in one scan, resolved against that scan (docs/user-guide.md).
 /// Built once per scan and never shared: a parked row read from its recorded checkout is
 /// judged with that checkout's view, so one id can be open in one view and done in
 /// another.
@@ -101,7 +101,7 @@ impl Deps {
     }
 }
 
-/// The derived review state (wait-aware spec §4.2; todos keep review-state spec §4).
+/// The derived review state (docs/user-guide.md ; todos docs/user-guide.md).
 pub fn state(
     task: &Task,
     child_count: usize,
@@ -141,7 +141,7 @@ pub fn state(
     }
 }
 
-/// Spec §4.1: a recorded wait.
+/// Current contract (docs/user-guide.md): a recorded wait.
 fn waits(task: &Task, deps: &Deps, now: OffsetDateTime) -> bool {
     task.awaiting_user
         || crate::defer::is_deferred(task, now)
@@ -154,7 +154,7 @@ fn waits(task: &Task, deps: &Deps, now: OffsetDateTime) -> bool {
         })
 }
 
-/// Spec §4.2: new evidence since the review. Called only when nothing waits, so a
+/// Current contract (docs/user-guide.md): new evidence since the review. Called only when nothing waits, so a
 /// deferral here has come due. Equal stamps count as woken; the deferral test is strict.
 fn woken(task: &Task, deps: &Deps) -> bool {
     let Some(reviewed_at) = task.reviewed_at.as_deref().map(stamp) else {
@@ -174,7 +174,7 @@ fn stamp(text: &str) -> OffsetDateTime {
     crate::time::parse(text).expect("record stamps are validated at parse")
 }
 
-/// The refusal for `reviewed` on anything but an idea (spec §3.2).
+/// The refusal for `reviewed` on anything but an idea (docs/user-guide.md).
 pub fn not_an_idea(task: &Task) -> Error {
     Error::Validation(format!(
         "{} is {}; only an idea carries reviewed",
@@ -183,7 +183,7 @@ pub fn not_an_idea(task: &Task) -> Error {
     ))
 }
 
-/// The refusal for `awaiting_user` without `reviewed` (wait-aware spec §3.1).
+/// The refusal for `awaiting_user` without `reviewed` (docs/user-guide.md).
 pub fn not_reviewed(task: &Task) -> Error {
     Error::Validation(format!(
         "{} is not reviewed; only a reviewed idea carries awaiting_user",
@@ -191,7 +191,7 @@ pub fn not_reviewed(task: &Task) -> Error {
     ))
 }
 
-/// The write-time rule (review-state spec §3.2, wait-aware spec §3.1–3.2). Never called
+/// The write-time rule (docs/user-guide.md docs/user-guide.md). Never called
 /// from parsing: `parse_physical` must accept a hand-edited record so `check` can report it
 /// and an editor save can transition it.
 pub fn validate(task: &Task) -> Result<()> {
@@ -217,7 +217,7 @@ pub fn validate(task: &Task) -> Result<()> {
     Ok(())
 }
 
-/// What a write does to the `reviewed` flag (spec §3.3).
+/// What a write does to the `reviewed` flag (docs/user-guide.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Review {
     Keep,
@@ -236,7 +236,7 @@ impl Review {
     }
 }
 
-/// What a write does to the `awaiting_user` marker (wait-aware spec §3.1).
+/// What a write does to the `awaiting_user` marker (docs/user-guide.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Awaiting {
     Keep,
@@ -308,7 +308,7 @@ pub fn apply(
     Ok(())
 }
 
-/// The editor's half of wait-aware spec §3.2: `reviewed_at` follows a save's change to
+/// The editor's half docs/user-guide.md: `reviewed_at` follows a save's change to
 /// `reviewed`. `check_invariants` has already refused a direct change to the stamp.
 pub fn stamp_edited(original: &Task, edited: &mut Task) {
     match (original.reviewed, edited.reviewed) {
@@ -442,7 +442,7 @@ mod tests {
         );
         let marked = format!("{REVIEWED}awaiting_user: true\n");
         assert_eq!(state(&idea(&marked, ""), 0, &none, now), None);
-        // Todos keep review-state §4.
+        // Todos keep review-state.
         let todo = |extra: &str| {
             crate::history::fixture(
                 &format!(

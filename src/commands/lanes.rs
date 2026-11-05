@@ -1,4 +1,4 @@
-//! `tasks lanes`, and the `lanes` rows `prime` shares with it (lanes design §5). The
+//! `tasks lanes`, and the `lanes` rows `prime` shares with it (docs/user-guide.md). The
 //! builder is `crate::lanes`; this module gathers what it reads.
 
 use super::ReadCtx;
@@ -39,10 +39,10 @@ pub fn run(
 }
 
 /// Every open, unshelved lane in scope as a `LaneRow`. Dependencies are resolved only for
-/// `dependency_readers`, as `ready_tasks` resolves only its candidates' (lanes design §5.1
+/// `dependency_readers`, as `ready_tasks` resolves only its candidates' (docs/user-guide.md
 /// step 1), so a dependency that only closed, shelved, or paused work names can never
-/// fail the view or `prime`. Holds are read as `ready` reads them (§4.5). `deps` is
-/// `all`'s dependency view (wait-aware spec §4.3).
+/// fail the view or `prime`. Holds are read as `ready` reads them. `deps` is
+/// `all`'s dependency view (docs/user-guide.md).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn rows(
     ctx: &mut ReadCtx,

@@ -1,0 +1,208 @@
+{
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "location": {"type": "string", "pattern": "^(?:(?:/|\\$WORK_ROOT/)[^\\x00\\r\\n]+)(?![\\s\\S])"},
+    "digest": {"type": "string", "pattern": "^(?:[0-9a-f]{64})(?![\\s\\S])"},
+    "owner": {"type": "string", "pattern": "^(?:(?:task:[a-z][a-z0-9]*-[0-9a-f]{6}|session:[^\\s]+))(?![\\s\\S])"},
+    "trigger": {"type": "string", "pattern": "^(?:(?!none$)[^\\x00\\r\\n]+)(?![\\s\\S])"}
+  },
+  "anyOf": [
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["worktree"]},
+        "path": {"type": "string", "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"$ref": "#/$defs/owner"},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "handoff"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["worktree"]},
+        "path": {"type": "string", "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"enum": ["user"]},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "handoff": {"$ref": "#/$defs/text"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["evidence"]},
+        "path": {"$ref": "#/$defs/location"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"$ref": "#/$defs/owner"},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "manifest": {"$ref": "#/$defs/location"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "sha256", "handoff"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["evidence"]},
+        "path": {"$ref": "#/$defs/location"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"enum": ["user"]},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "manifest": {"$ref": "#/$defs/location"},
+        "handoff": {"$ref": "#/$defs/text"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "sha256", "manifest"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["scratch"]},
+        "path": {"$ref": "#/$defs/location"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"$ref": "#/$defs/owner"},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "manifest": {"$ref": "#/$defs/location"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "sha256", "manifest", "handoff"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["scratch"]},
+        "path": {"$ref": "#/$defs/location"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"enum": ["user"]},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "manifest": {"$ref": "#/$defs/location"},
+        "handoff": {"$ref": "#/$defs/text"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "verification_action"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["worktree"]},
+        "path": {"type": "string", "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["unknown"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"$ref": "#/$defs/owner"},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "verification_action": {"$ref": "#/$defs/text"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "verification_action", "handoff"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["worktree"]},
+        "path": {"type": "string", "pattern": "^(?:(?:\\.worktrees/|/)[^\\x00\\r\\n]+)(?![\\s\\S])"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["unknown"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"enum": ["user"]},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "verification_action": {"$ref": "#/$defs/text"},
+        "handoff": {"$ref": "#/$defs/text"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "verification_action", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["scratch", "evidence"]},
+        "path": {"$ref": "#/$defs/location"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["unknown"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"$ref": "#/$defs/owner"},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "verification_action": {"$ref": "#/$defs/text"},
+        "sha256": {"type": "null"},
+        "manifest": {"anyOf": [{"$ref": "#/$defs/location"}, {"type": "null"}]}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger", "verification_action", "sha256", "handoff"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["scratch", "evidence"]},
+        "path": {"$ref": "#/$defs/location"},
+        "state": {"enum": ["kept"]},
+        "verification": {"enum": ["unknown"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"enum": ["user"]},
+        "cleanup_trigger": {"$ref": "#/$defs/trigger"},
+        "verification_action": {"$ref": "#/$defs/text"},
+        "sha256": {"type": "null"},
+        "manifest": {"anyOf": [{"$ref": "#/$defs/location"}, {"type": "null"}]},
+        "handoff": {"$ref": "#/$defs/text"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["version", "host", "kind", "path", "state", "verification", "purpose", "next_owner", "cleanup_trigger"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "integer", "enum": [1]},
+        "host": {"$ref": "#/$defs/text"},
+        "kind": {"enum": ["worktree", "scratch", "evidence"]},
+        "path": {"type": "string", "pattern": "^(?:(?:\\.worktrees/|/|\\$WORK_ROOT/)[^\\x00\\r\\n]+)(?![\\s\\S])"},
+        "state": {"enum": ["released"]},
+        "verification": {"enum": ["verified"]},
+        "purpose": {"$ref": "#/$defs/text"},
+        "next_owner": {"enum": ["none"]},
+        "cleanup_trigger": {"enum": ["none"]}
+      }
+    }
+  ]
+}

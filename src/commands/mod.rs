@@ -10,6 +10,7 @@ pub mod dep;
 pub mod doc;
 pub mod docs;
 pub mod edit;
+pub mod export;
 pub mod feedback;
 pub mod goals;
 pub mod graph;
@@ -26,6 +27,7 @@ pub mod quiet;
 pub mod release;
 pub mod rename;
 mod resolver;
+pub mod retained;
 pub mod retire;
 pub mod root;
 pub mod sample;
@@ -78,7 +80,7 @@ pub struct Ctx {
     pub lock: Option<MutationLock>,
     /// The host-wide holds lock, taken after `lock` by every acquire that records holds
     /// and every claim replacement that changes them. Held until the command ends: past
-    /// `save`'s publish, record write, and rollback (lanes/needs design §4.4).
+    /// `save`'s publish, record write, and rollback (docs/user-guide.md).
     holds_lock: Option<MutationLock>,
     routing: Routing,
     claims: Option<ClaimStore>,
@@ -95,7 +97,7 @@ pub struct Ctx {
     /// store, which never reach git.
     pub takeover: Option<String>,
     /// `start --reason` / `edit --reason`: what lets `--force` past a held need (lanes/needs
-    /// design §4.5). Set by the command before the hold guard runs.
+    /// docs/task-model.md). Set by the command before the hold guard runs.
     need_reason: Option<String>,
     /// The held needs this command acquires past, with their holders: recorded by the hold
     /// guard, turned into the acquired task's notes by `record_need_overrides` before
@@ -201,7 +203,7 @@ impl Ctx {
         )
     }
 
-    /// Resolve identity, keeping a relay-level failure carryable so §6.2.2 can defer it. A
+    /// Resolve identity, keeping a relay-level failure carryable so  can defer it. A
     /// failure with relay off is raised here, exactly where `identity` raised it before,
     /// which is what holds the relay-off guarantee at every call site rather than at some.
     pub(crate) fn resolve_for_guard(&mut self) -> Result<crate::claims::Resolution> {
@@ -238,7 +240,7 @@ impl Ctx {
         Ok(())
     }
 
-    /// Lanes/needs design §4.4: a save that changes `needs` under the caller's own live
+    /// Current contract (docs/user-guide.md): a save that changes `needs` under the caller's own live
     /// claim recomputes the claim's `holds` in the same save. A removed need drops out. An
     /// added exclusive need is an acquire: refused with `need_held` while another session's
     /// live claim on another task holds it, unless `force` and `need_reason` override. Only
@@ -321,7 +323,7 @@ impl Ctx {
     }
 
     /// `edit --complexity` / `--no-complexity`: the explicit rating is the new truth, so the
-    /// shared escalation goes (spec §5.1). Records only, with no warning yet -- whether the
+    /// shared escalation goes (docs/task-model.md). Records only, with no warning yet -- whether the
     /// clear actually reached disk is `save`'s to know, and only `save` can report it, so it
     /// pushes the warning itself once it has saved. `given` is what was passed (`None` for
     /// `--no-complexity`), needed only if the store save fails and the retry has to be
@@ -341,7 +343,7 @@ impl Ctx {
         Ok(())
     }
 
-    /// Lanes/needs design §4.4 "Atomic across projects": the host-wide holds lock, after
+    /// docs/user-guide.md "Atomic across projects": the host-wide holds lock, after
     /// the project lock and never before. Kept on `Ctx` until the command ends, so it
     /// spans the hold check, `save`'s publish of the claim, the record write, and the
     /// restore of the previous claim when that write fails.
@@ -357,7 +359,7 @@ impl Ctx {
         Ok(())
     }
 
-    /// Lanes/needs design §4.4–§4.5: every acquire records the task's needs that this
+    /// Current contract (docs/user-guide.md): every acquire records the task's needs that this
     /// project declares exclusive (undeclared names ignored) as the claim's `holds`, and is
     /// refused with `need_held` while another session's live claim on another task holds
     /// one of them. Status and needs never change in one operation, so this always reads
@@ -469,7 +471,7 @@ impl Ctx {
         let mine = ownership != Ownership::Foreign;
 
         // The identity to record, decided *before* any refusal. A held resolution error
-        // must be raised as itself the moment ownership fails (§6.2.2); letting a
+        // must be raised as itself the moment ownership fails ; letting a
         // `Claimed` refusal return first would hide why identity could not resolve.
         let me = match (&existing, ownership) {
             // Ownership by identity means resolution succeeded, so `require` cannot fail.
@@ -586,7 +588,7 @@ impl Ctx {
     }
 }
 
-/// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
+/// docs/task-model.md steps 2 and 3. Which of the two established the caller's right to act
 /// matters: only proof-only ownership records the claim's own identity, because only
 /// then is there no resolved identity that already agrees.
 pub(crate) fn ownership(
@@ -600,7 +602,7 @@ pub(crate) fn ownership(
     }
     // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
     // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
-    // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
+    // explicit mismatch is foreign however the ancestry looks. Spec constraint.
     let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
     if explicit || !crate::relay::enabled()? {
         return Ok(Ownership::Foreign);
@@ -619,7 +621,7 @@ pub(crate) fn ownership(
     })
 }
 
-/// Lanes/needs design §4.4 "Blocks other sessions only": the live holding claims in
+/// docs/user-guide.md "Blocks other sessions only": the live holding claims in
 /// `snapshot` that are the caller's own, by the rule every claim check uses (`ownership`:
 /// the resolved identity, else the claim's process proof). A session that moved from
 /// native to relay identity therefore keeps its holds as it keeps its claims.
@@ -630,7 +632,7 @@ pub(crate) fn own_holds(
     snapshot.mine(|claim| Ok(ownership(claim, me)? != Ownership::Foreign))
 }
 
-/// Which holds a read view counts as the caller's own (lanes design §4.4). A read view
+/// Which holds a read view counts as the caller's own (docs/user-guide.md). A read view
 /// whose identity cannot resolve owns nothing: every hold counts as another session's,
 /// even one this process could prove by pid. A resolved identity follows `own_holds`,
 /// including process proof across a native-to-relay change. Write paths call
@@ -688,6 +690,10 @@ fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     let mut ctx = open_id_ctx_unwarned(dir, id)?;
     ctx.warnings.extend(retired_warning(&ctx.project));
     Ok(ctx)
+}
+
+pub fn open_id_unlocked_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    open_id_ctx(dir, id)
 }
 
 fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
@@ -760,7 +766,7 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
     ))
 }
 
-/// A retired project takes no writes (ops lifecycle spec §4). The registered copy (its
+/// A retired project takes no writes (docs/project-operations.md). The registered copy (its
 /// `scope::config_dir`: a detached project's records directory, else its root) is the
 /// authority, but a worktree made before the retirement has no `[retired]` of its own
 /// until a merge, so either declaring it is enough. `reject_stale_local` only compares the
@@ -982,7 +988,7 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
 /// Read commands: the local project, one named registered project, or with
 /// `all_projects` every reachable one, or with `group` the reachable members of that
 /// group. All three flags skip the local lookup entirely
-/// (spec §3.2), so either works from a directory inside no project at all. A named
+/// (docs/task-model.md), so either works from a directory inside no project at all. A named
 /// project is a `Local` scope like any other, so every command's output is what it
 /// would be run inside that project's registered root — a worktree sharing the prefix
 /// does not displace it, matching `add --project`.
@@ -1128,7 +1134,7 @@ pub fn apply_fields(
         }
     }
     // Additive like `--tag`. Only the names being added are checked: grammar, then the
-    // project's vocabulary (lanes-needs spec §4.2), so `edit --rm-need` can still clear
+    // project's vocabulary (docs/user-guide.md), so `edit --rm-need` can still clear
     // a need the vocabulary has since dropped.
     for need in &fields.needs {
         crate::needs::validate_name(need)?;
@@ -1208,7 +1214,7 @@ pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result
 }
 
 /// Reads `id` for a write and refuses when another checkout's copy must not be left behind
-/// (record-home spec §3.1). Every write command loads through this or `load_with_raw`, under the mutation lock
+/// (docs/project-operations.md). Every write command loads through this or `load_with_raw`, under the mutation lock
 /// and before it reads any other input, so a refusal consumes nothing and creates nothing.
 pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
     let id = parse_id(&ctx.registry, &ctx.shorthand, id)?;
@@ -1257,7 +1263,7 @@ fn missing_record(ctx: &mut Ctx, id: &TaskId) -> Result<Error> {
     })
 }
 
-/// The guard every record write passes before it mutates (task-move spec §3.4).
+/// The guard every record write passes before it mutates (docs/project-operations.md).
 /// `load` calls it; so does each writer that reads a record by other means.
 pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Task) -> Result<()> {
     crate::moving::journal::refuse_pending_id(&registry.canonical_id(&task.id))?;
@@ -1272,18 +1278,18 @@ pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Tas
     )
 }
 
-/// Who is writing, which decides whether a `-C` retry can be offered (spec §3.2).
+/// Who is writing, which decides whether a `-C` retry can be offered (docs/task-model.md).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Writer<'a> {
     Command,
     /// A feedback recurrence: `-C` would change the reporting project.
     Feedback,
     /// `release` of this session's claim: its non-live claims occupy no worktree, since the
-    /// caller asserts the session is gone (claim-release spec §5).
+    /// caller asserts the session is gone (docs/ownership.md).
     Release(&'a str),
 }
 
-/// The record-home §3 check for `task` as loaded (`raw` is the bytes it was read from).
+/// The record-home  check for `task` as loaded (`raw` is the bytes it was read from).
 /// Its warnings are added once, however many times one command checks.
 pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer<'_>) -> Result<()> {
     let (newer, warnings) = crate::stale::compare(&ctx.project, &task.id, &task.updated, raw);
@@ -1332,7 +1338,7 @@ struct Occupants {
     unknown: Option<Error>,
 }
 
-/// Spec §3.2 rule 1: every task that a session other than the caller holds live in `root`,
+/// docs/task-model.md rule 1: every task that a session other than the caller holds live in `root`,
 /// or parked there. Claims are compared by `ownership`, parks by their tagged session.
 /// An unresolvable identity makes every park someone else's. `gone` is the session a
 /// `release` asserts has ended: its claims that do not read `Live` occupy nothing.
@@ -1364,7 +1370,7 @@ fn occupants(ctx: &mut Ctx, root: &Path, gone: Option<&str>) -> Result<Occupants
     Ok(Occupants { work, unknown })
 }
 
-/// Record-home spec §4: a write by the holder of a live claim moves the claim to this
+/// Current contract (docs/project-operations.md): a write by the holder of a live claim moves the claim to this
 /// checkout and refreshes its heartbeat. Holder means `ownership` is not `Foreign`,
 /// by identity or by proof. It runs after the record is saved and never fails the command.
 /// `me` is the caller's identity when the command already resolved it; otherwise it is
@@ -1401,7 +1407,7 @@ pub(crate) fn follow_holder(
     };
     let identity = match ownership(&claim, me) {
         Ok(Ownership::Foreign) => return,
-        // Proof-only ownership records the claim's own identity (spec §6.4 of the relay
+        // Proof-only ownership records the claim's own identity (docs/task-model.md of the relay
         // design), whose pid this write did not supply, so its evidence is kept.
         Ok(Ownership::ByProof) => crate::claims::continuation_identity(&claim),
         Ok(Ownership::ByIdentity) => me
@@ -1416,7 +1422,7 @@ pub(crate) fn follow_holder(
             return;
         }
     };
-    // Claim PID-view design §2: a heartbeat applies the evidence rules too.
+    // Current contract (docs/ownership.md): a heartbeat applies the evidence rules too.
     let evidence = crate::claims::evidence(
         &identity,
         Some(&claim),
@@ -1447,10 +1453,14 @@ pub(crate) fn follow_holder(
 }
 
 /// Commits what this write command wrote, while its locks are still held (record-commit
-/// spec §3.2, §3.7), and returns the absolute paths committed. Idempotent: the journal is
+/// docs/task-model.md), and returns the absolute paths committed. Idempotent: the journal is
 /// drained, so a second call commits nothing.
 pub fn finish(ctx: &mut Ctx) -> std::collections::BTreeSet<std::path::PathBuf> {
     crate::record_commit::commit_written(&mut ctx.warnings)
+}
+
+pub fn finish_report(ctx: &mut Ctx) -> Vec<crate::record_commit::Committed> {
+    crate::record_commit::commit_written_report(&mut ctx.warnings)
 }
 
 pub fn id_out(mut ctx: Ctx, task: &Task) -> Output {
@@ -1566,7 +1576,7 @@ pub(crate) struct HolderNotes {
     notes: Vec<(TaskId, String, String)>,
 }
 
-/// Lanes/needs design §4.5: the notes a need override leaves. The acquired task gets one
+/// Current contract (docs/user-guide.md): the notes a need override leaves. The acquired task gets one
 /// per held need now, so they land with its own save or not at all. A holder gets a
 /// matching one only when it is in this project, the only one whose lock this command
 /// holds. Those are returned, not written: the caller passes them to `note_need_holders`
@@ -1704,7 +1714,7 @@ fn next_due(now: &str, every: crate::periodic::Interval) -> Result<time::OffsetD
 
 /// The field effects of a status change to `to` stamped at `now`, with no checks and no
 /// notes: `transition` runs its checks first, and `migrate` renders a drop or close
-/// through this (successor-migration spec §4.4). `model` is recorded on a completion.
+/// through this (docs/project-operations.md). `model` is recorded on a completion.
 pub(crate) fn apply_status_effects(
     task: &mut Task,
     to: Status,
@@ -1722,7 +1732,7 @@ pub(crate) fn apply_status_effects(
     } else if task.status == Status::Done && to != Status::Done {
         task.completed = None;
     }
-    // Wait-aware spec §3.3: every close stamps `closed`; a reopen clears it. `move` never
+    // Current contract (docs/user-guide.md): every close stamps `closed`; a reopen clears it. `move` never
     // passes through here, so a tombstone carries none.
     if closing {
         task.closed = Some(now.to_string());
@@ -1730,12 +1740,12 @@ pub(crate) fn apply_status_effects(
         task.closed = None;
     }
     if task.status != to {
-        // spec §2.2: a deferral is spent by a status change.
+        // Current contract (docs/task-model.md): a deferral is spent by a status change.
         task.defer = None;
         if task.status == Status::Shelved {
             task.wake_on.clear();
         }
-        // Review-state spec §3.2: a status change spends a review; a return to idea
+        // Current contract (docs/user-guide.md): a status change spends a review; a return to idea
         // arrives unreviewed.
         task.reviewed = false;
         task.reviewed_at = None;
@@ -1830,7 +1840,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     }
     let first_start = task.started.is_none();
     // One instant for everything this transition stamps, so a recurring completion's
-    // `completed` and `last_done` agree to the second (spec §3).
+    // `completed` and `last_done` agree to the second (docs/task-model.md).
     let now = crate::time::now();
     let model = if completing {
         completion_model()?
@@ -1891,7 +1901,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
 
     match ctx.pending_claim.take() {
         Some((id, ClaimIntent::Acquire(claim))) => {
-            // Lanes/needs design §4.4: a claim whose holds differ from the one it replaces
+            // Current contract (docs/user-guide.md): a claim whose holds differ from the one it replaces
             // is published, and on a failed record write rolled back, only under the holds
             // lock. A path that changed holds without taking it is a bug, refused here
             // before anything is written.
@@ -1922,7 +1932,12 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // clearing it is reported; the command fails with the store error itself.
             store.save()?;
 
-            let error = match ctx.project.write_task(&ctx.registry, task) {
+            let error = match ctx.project.write_task_permitted(
+                &ctx.registry,
+                task,
+                || Ok(()),
+                crate::retained::publish::WritePermission::Claim,
+            ) {
                 Ok(()) => {
                     if let Some(escalation) = &previous_escalation {
                         ctx.warnings.push(format!(
@@ -2021,7 +2036,12 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
         Some((id, ClaimIntent::Park { park, escalation })) => {
             // Record first, then store: a note with no entry is a trail that says what was
             // intended, while an entry with no note would be state the record never saw.
-            ctx.project.write_task(&ctx.registry, task)?;
+            ctx.project.write_task_permitted(
+                &ctx.registry,
+                task,
+                || Ok(()),
+                crate::retained::publish::WritePermission::Park,
+            )?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.insert_park(&id, park);
@@ -2029,9 +2049,9 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 store.insert_escalation(&id, escalation.clone());
             }
             // A failed store save is the command's failure, never a warning beside exit 0
-            // (claim-release spec §4): the store's own error, naming what landed and the
+            // (docs/ownership.md): the store's own error, naming what landed and the
             // rerun. For an escalation the raised rating stays, and equal-to-current lets
-            // the rerun pass (spec §5.2).
+            // the rerun pass (docs/task-model.md).
             store.save().map_err(|error| {
                 let landed = match &escalation {
                     Some(escalation) => format!(
@@ -2123,6 +2143,7 @@ fn fetch(no_fetch: bool) -> crate::resolve::Fetch {
 fn dispatch(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
+        Command::Retained { action } => retained::dispatch(dir, action),
         Command::Attachments { paths } => attachments::run(dir, paths),
         Command::Init {
             prefix,
@@ -2217,6 +2238,23 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 None => doc::DocTarget::Spec,
             },
             fetch(no_fetch),
+        ),
+        Command::Export {
+            id,
+            name,
+            at,
+            output,
+            verify: _,
+        } => export::run(
+            open_id_ctx(dir, &id)?,
+            id,
+            name,
+            at,
+            match output {
+                Some(path) if path == Path::new("-") => export::ExportTarget::Stdout,
+                Some(path) => export::ExportTarget::Path(path),
+                None => export::ExportTarget::Verify,
+            },
         ),
         Command::Docs {
             kinds,
@@ -2343,12 +2381,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             id,
             source,
             clipboard,
+            multipart,
             name,
             caption,
         } => attach::attach(
             open_id_write_ctx(dir, &id)?,
             id,
             attach::Source::from_args(source, clipboard)?,
+            multipart,
             name,
             caption,
         ),
@@ -2491,6 +2531,8 @@ fn dispatch(cli: Cli) -> Result<Output> {
 }
 
 pub fn run(cli: Cli) -> Result<Output> {
+    crate::history::begin_metrics();
+    let started = std::time::Instant::now();
     crate::written::begin(cli.command.commit_verb());
     let result = dispatch(cli);
     // A command that failed after writing leaves its files uncommitted; `prime` lists
@@ -2504,5 +2546,70 @@ pub fn run(cli: Cli) -> Result<Output> {
             left.roots
         );
     }
+    if std::env::var("TASKS_RETAINED_TEST_METRICS").as_deref() == Ok("1") {
+        let mut metrics = crate::retained::verify::Metrics::default().finish();
+        metrics.wall_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+        eprintln!(
+            "retained test command metrics: {}",
+            serde_json::to_string(&metrics).expect("metrics serialize")
+        );
+    }
     result
+}
+
+pub fn revalidate_retained_ctx(ctx: &mut Ctx) -> Result<()> {
+    let registry = Registry::load()?;
+    reject_pending_rename(&ctx.project)?;
+    let project = match &ctx.routing {
+        Routing::Local => Project {
+            worktree: ctx.project.worktree.clone(),
+            ..Project::open(&ctx.project.records)?
+        },
+        Routing::Registered(prefix) => crate::scope::open_registered(
+            &registry,
+            registry.canonical_prefix(prefix),
+            Origin::Prefix,
+        )?,
+    };
+    if project.prefix != ctx.project.prefix || project.records != ctx.project.records {
+        return Err(Error::RetainedStaleBasis(
+            "Project pairing changed while locking; retry from the exact current pairing".into(),
+        ));
+    }
+    reject_stale_local(&registry, &project)?;
+    reject_retired(&registry, &project)?;
+    reject_pending_operations(Some(&project.root), &project.prefix)?;
+    ctx.project = project;
+    ctx.registry = registry;
+    Ok(())
+}
+pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
+    ctx.claims = Some(ClaimStore::load(&ctx.project.prefix)?);
+    let me = ctx.resolve_for_guard()?;
+    let claim = ctx.claims_mut()?.get(id).cloned().ok_or_else(|| {
+        Error::RetainedInput(format!(
+            "Run tasks start {id} to establish ownership before retained publication"
+        ))
+    })?;
+    if crate::claims::liveness(&claim).is_stale() {
+        return Err(Error::RetainedInput(format!(
+            "Run tasks start {id} to re-establish the stale claim before retry"
+        )));
+    }
+    if ownership(&claim, &me)? == Ownership::Foreign {
+        return Err(Error::Claimed(
+            id.to_string(),
+            Ctx::describe_claim(&claim, &crate::claims::liveness(&claim)),
+        ));
+    }
+    follow_holder(ctx, id, Some(&me), "retained ownership was checked");
+    if ctx.claims_mut()?.get(id).is_none() {
+        return Err(Error::RetainedInput(format!(
+            "Claim on {id} expired before retained publication; run tasks start first"
+        )));
+    }
+    if !ctx.warnings.is_empty() {
+        return Err(Error::RetainedHistoryBlocked(ctx.warnings.join("; ")));
+    }
+    Ok(())
 }

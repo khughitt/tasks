@@ -181,6 +181,37 @@ tier = "typed"
 default_output = "json"
 env = "TASKS"
 
+[[cli.tasks.commands]]
+path = ["retained"]
+summary = "Query retained state and execute verified lifecycle operations"
+
+[[cli.tasks.commands]]
+path = ["retained", "state"]
+summary = "Read retained intent and observations at an immutable records revision"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--at"], value = "string" },
+  { names = ["--host"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["retained", "checkpoint"]
+summary = "Verify and publish a resumable retained host checkpoint"
+args = [{ name = "id", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retained", "transfer"]
+summary = "Transfer retained custody after durable receiver publication"
+args = [{ name = "from", value = "ref", required = true }, { name = "to", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retained", "reconcile"]
+summary = "Reconcile pending lifecycle operations while preserving custody"
+args = [{ name = "coordinator", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
 [cli.mindful]
 project = "mind6"
 tier = "typed"
@@ -441,7 +472,7 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/user-guide.md (Select work without losing context)" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
@@ -473,7 +504,7 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/user-guide.md (Select work without losing context)" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
@@ -503,7 +534,7 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/user-guide.md (Select work without losing context)" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
@@ -617,12 +648,25 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["attach"]
-summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note"
-args = [{ name = "id", value = "ref", required = true }, { name = "source", value = "string", required = false }]
+summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note; --multipart accepts exactly one source and conflicts with --clipboard"
+args = [{ name = "id", value = "ref", required = true }, { name = "source", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--caption"], value = "string" },
   { names = ["--clipboard"], value = "none" },
   { names = ["--name"], value = "string" },
+  { names = ["--multipart"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["export"]
+summary = "Export or verify a task attachment, optionally at a Git revision"
+protocol = "Exactly one of --output or --verify is required; they conflict. --output - writes raw attachment bytes to stdout"
+exception = "attachment export to stdout is raw even under JSON/pretty flags"
+args = [{ name = "id", value = "ref", required = true }, { name = "name", value = "string", required = true }]
+options = [
+  { names = ["--at"], value = "ref" },
+  { names = ["-o", "--output"], value = "path" },
+  { names = ["--verify"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -824,6 +868,7 @@ options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
+  { names = ["--closed"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -1024,8 +1069,8 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings or profile"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "profile"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings, long_doing or profile"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },

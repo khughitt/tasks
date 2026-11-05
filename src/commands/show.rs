@@ -52,7 +52,7 @@ pub(super) fn read_record(
         Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
         result => result?,
     }
-    // Spec §4.5: a pending migration freezes its whole source and successor.
+    // Current contract (docs/user-guide.md): a pending migration freezes its whole source and successor.
     for journal in crate::migrating::journal::MigrationJournal::pending()? {
         let warning = journal.pending_error().to_string();
         if journal.names_prefix(&id.prefix) && !ctx.warnings.contains(&warning) {
@@ -62,7 +62,7 @@ pub(super) fn read_record(
     Ok(found)
 }
 
-/// Record-home spec §6.1: a record this checkout lacks is read from the checkout named by
+/// Current contract (docs/project-operations.md): a record this checkout lacks is read from the checkout named by
 /// its live claim, or else by its park. A record present here is always read here.
 pub(super) fn recorded_elsewhere<'a>(
     id: &crate::model::TaskId,
@@ -251,9 +251,26 @@ pub fn describe(
     let inventory =
         crate::inventory::build(&resolver, project, &task, step_found, fetch, warnings)?;
     warnings.extend(resolver.take_warnings());
+    let declarations = crate::multipart::audit::declarations(&task);
+    let multipart = declarations
+        .values()
+        .filter_map(|state| match state {
+            crate::multipart::audit::DeclState::Live(declaration) => {
+                Some(crate::output::MultipartOut::from(declaration))
+            }
+            crate::multipart::audit::DeclState::Closed(_) => None,
+        })
+        .collect();
     let files = attached
         .into_iter()
         .map(|file| crate::output::FileInfo {
+            member_of: declarations
+                .keys()
+                .find(|logical| {
+                    crate::multipart::audit::is_member(&file.name, logical)
+                        && !crate::multipart::audit::later_owned(&task, logical, &file.name)
+                })
+                .cloned(),
             name: file.name,
             path: file.path.display().to_string(),
             bytes: file.bytes,
@@ -306,6 +323,7 @@ pub fn describe(
         periodic: crate::output::PeriodicInfo::of(&task, now),
         deferred: crate::output::DeferredInfo::of(&task, now),
         files,
+        multipart,
         inventory,
         task,
     })

@@ -1,4 +1,4 @@
-//! Projecting a decision list (spec §4.3, §4.4). Carried entries are rendered as `move`
+//! Projecting a decision list (docs/project-operations.md). Carried entries are rendered as `move`
 //! renders them, then rewritten (parent, dependencies within the carried set, `wake_on`,
 //! dropped links, a replacement body), and only then validated in the destination, over the
 //! whole projected set at once. Dropped and closed entries are rendered through the
@@ -191,7 +191,7 @@ fn rewrite(
 }
 
 /// Renders every carried entry of a list that passed `check_list`, applies the rewrites
-/// spec §4.3 allows, and validates the projected destination. Returns the carried records
+/// docs/project-operations.md allows, and validates the projected destination. Returns the carried records
 /// in list order, the map from each carried id to its new id, and every refusal. Writes
 /// nothing.
 pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Result<Projected> {
@@ -757,7 +757,7 @@ fn rendered_bytes(ctx: &MigrateCtx, task: &Task) -> Result<String> {
     Ok(text)
 }
 
-/// A dropped or closed entry, rendered (spec §4.4 "Dropped and closed tasks").
+/// A dropped or closed entry, rendered (docs/project-operations.md "Dropped and closed tasks").
 pub struct Closed {
     pub id: TaskId,
     pub decision: Decision,
@@ -893,9 +893,9 @@ fn list_ids(ids: &[TaskId]) -> String {
 }
 
 /// Renders every dropped and closed entry of a list that passed `check_list`, with the
-/// refusals spec §4.3 names: `release_mismatch`, `close_status`, `close_outputs`, and
+/// docs/project-operations.md names: `release_mismatch`, `close_status`, `close_outputs`, and
 /// `closed_invalid` for a record `drop`/`done` would not write. `done`'s refusals over open
-/// descendants and open dependencies are not applied (spec §4.4). Writes nothing.
+/// descendants and open dependencies are not applied (docs/project-operations.md). Writes nothing.
 // The joined `explain` reads the dependents once for both projections; this is the
 // standalone entry point.
 #[allow(dead_code)]
@@ -979,7 +979,7 @@ fn project_closed_in(
         };
 
         // Status: `done`'s rule for a close; a drop of a recurrence whose occurrence is done
-        // is the spec's one exception (§4.3 coverage), which ends the cadence.
+        // is the explicit coverage exception, which ends the cadence (docs/project-operations.md).
         let to = if decision == Decision::Drop {
             Status::Dropped
         } else {
@@ -1188,7 +1188,7 @@ fn projectable(ctx: &MigrateCtx, list: &LoadedList) -> Result<LoadedList> {
     })
 }
 
-/// The list checks and both projections, every refusal together (spec §4.3: `--explain`
+/// The list checks and both projections, every refusal together (docs/project-operations.md: `--explain`
 /// reports all failures). A header mismatch says the list is for another run, so nothing
 /// is projected. The projection is `None` only then; refusal `settle` texts name unassigned
 /// ids as `new:<v1 id>`.

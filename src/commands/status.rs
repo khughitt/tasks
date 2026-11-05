@@ -56,7 +56,7 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
             "{id} is stopped by halt {ids}; override with `tasks start {id} --force --reason \"...\"`"
         )));
     }
-    // Lanes/needs design §4.5: the same reason lets --force past a held need.
+    // Current contract (docs/user-guide.md): the same reason lets --force past a held need.
     ctx.need_reason = reason.clone();
     transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;
@@ -276,7 +276,7 @@ pub fn note(
             task.id, claim.session
         ));
     }
-    // Refresh only our live claim, and move it to this checkout (record-home spec §4).
+    // Refresh only our live claim, and move it to this checkout (docs/project-operations.md).
     follow_holder(&mut ctx, &task.id, Some(&me), "the note landed");
     Ok(id_out(ctx, &task))
 }

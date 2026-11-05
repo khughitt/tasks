@@ -1,4 +1,4 @@
-//! The lanes view (docs/specs/2026-10-03-lanes-needs-groups-design.md §5): one row per
+//! The lanes view (docs/user-guide.md): one row per
 //! open, unshelved lane, with its guidance, the step it could take now, and why the rest
 //! of its live work cannot. `tasks lanes` and `prime` share it; `commands::lanes` gathers
 //! what it reads.
@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
-/// §5.2.
+///.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LaneState {
@@ -51,7 +51,7 @@ pub struct HeldStep {
 }
 
 /// Every live descendant that is neither the pick nor an unpicked step, under its first
-/// cause in §5.1's table order. Serialized sparse, in that order.
+/// cause in the declared order. Serialized sparse, in that order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Causes {
     #[serde(skip_serializing_if = "is_zero")]
@@ -144,7 +144,7 @@ enum Cause {
     Other,
 }
 
-/// §5.3's `LaneRow`.
+/// 's `LaneRow`.
 #[derive(Clone, Serialize)]
 pub struct LaneRow {
     pub lane: TaskSummary,
@@ -167,7 +167,7 @@ pub struct Inputs<'a> {
     pub all: &'a [Task],
     pub claims: &'a ClaimSnapshot,
     pub registry: &'a Registry,
-    /// `all`'s dependency view, for the rows' review state (wait-aware spec §4.3).
+    /// `all`'s dependency view, for the rows' review state (docs/user-guide.md).
     pub deps: &'a crate::review::Deps,
     /// `Some(closed?)` for a reachable dependency, `None` for an unreachable one. Only
     /// the dependencies of `dependency_readers` are ever asked for.
@@ -180,12 +180,12 @@ pub struct Inputs<'a> {
     /// Each scanned project's need vocabulary, by prefix.
     pub vocabularies: &'a Vocabularies<'a>,
     /// The caller's own live holds (`commands::read_holds`), for the hold gate;
-    /// `Mine::default()` counts every hold as another session's.
+    /// `Mine::default` counts every hold as another session's.
     pub mine: &'a Mine,
     pub now: OffsetDateTime,
 }
 
-/// §5.1: every open, unshelved lane in scope, in ready order (§3.7). Earlier lanes win
+/// : every open, unshelved lane in scope, in ready order. Earlier lanes win
 /// contested exclusive needs, because lane order is the person's ranking.
 pub fn build(inputs: &Inputs) -> Vec<LaneRow> {
     let mut lanes: Vec<&Task> = inputs
@@ -201,7 +201,7 @@ pub fn build(inputs: &Inputs) -> Vec<LaneRow> {
         .collect()
 }
 
-/// §3.5: the first paragraph of the body, after leading blank and heading lines, up to
+/// : the first paragraph of the body, after leading blank and heading lines, up to
 /// the next blank line. Its lines join with a space, so the guidance is one line.
 pub fn guidance(body: &str) -> Option<String> {
     let paragraph: Vec<&str> = body
@@ -224,7 +224,7 @@ fn is_heading(line: &str) -> bool {
             .is_none_or(char::is_whitespace)
 }
 
-/// §5.1 step 4: open and unshelved, or a `done` recurrence between occurrences, which
+///  step 4: open and unshelved, or a `done` recurrence between occurrences, which
 /// `ready` offers again once due. A dropped record keeps its cadence but never returns.
 fn is_live(task: &Task) -> bool {
     crate::hierarchy::is_active(task) || (task.status == Status::Done && task.every.is_some())
@@ -271,7 +271,7 @@ enum Class<'a> {
     Ready,
 }
 
-/// The gates `next` applies before holds, in §5.1's table order, so a descendant that
+/// The gates `next` applies before holds, in the declared order, so a descendant that
 /// several would stop counts under the first.
 fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
     let claims = inputs.claims;
@@ -373,7 +373,7 @@ fn row(inputs: &Inputs, lane: &Task, picked: &mut BTreeMap<String, TaskId>) -> L
         held: Vec::new(),
         causes: Causes::default(),
     };
-    // §5.1: a paused lane lists its active work and nothing else.
+    // : a paused lane lists its active work and nothing else.
     if lane.status == Status::Blocked {
         return out;
     }
@@ -419,8 +419,8 @@ fn row(inputs: &Inputs, lane: &Task, picked: &mut BTreeMap<String, TaskId>) -> L
     out
 }
 
-/// §5.1 step 3: the first exclusive need of `step` held by another session's live claim,
-/// else by an earlier lane's pick. Exclusive names are matched host-wide (§4.1).
+///  step 3: the first exclusive need of `step` held by another session's live claim,
+/// else by an earlier lane's pick. Exclusive names are matched host-wide.
 fn held_by(inputs: &Inputs, step: &Task, picked: &BTreeMap<String, TaskId>) -> Option<HeldStep> {
     let vocabulary = inputs.vocabularies.get(step.id.prefix.as_str())?;
     if let Some((need, holder)) =
