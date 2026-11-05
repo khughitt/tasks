@@ -120,7 +120,10 @@ mean those documents were verified.
    do not treat it as an ordinary retry. Treat `unverifiable` claims as held; use
    `tasks release <id> "<why>"` only when you know the holder is gone.
    Follow `stale_copy` and `task_not_found` recovery guidance for the recorded checkout;
-   `stale_copy` has no override. Leave records held by another live session to that session.
+   `stale_copy` has no override. Leave records held by another live session to that session,
+   except when `tasks note` offers its explicit `tasks -C <wt> note ...` remedy to append a
+   note to the newer copy in place. A parked checkout with no live or unverifiable foreign
+   claim is not occupied and offers the `-C` retry.
    An open task tagged `halt` in the registered checkout stops new lower-priority starts
    in that project, including from older worktrees. `prime`, `ready`, and `next` name
    the halt and show eligible work; an already doing task may resume. To override a

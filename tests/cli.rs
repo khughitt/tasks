@@ -13587,18 +13587,63 @@ fn another_sessions_work_in_the_newer_checkout_withholds_the_retry() {
     stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
     stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
 
-    // Someone else's claim, on a different task, names the newer checkout.
-    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    // Someone else's claim, on a different task, names the newer checkout and withholds
+    // the retry for non-note writes, while offering an in-place retry for `note`.
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["edit", id.as_str(), "--title", "Changed"],
+        vec!["done", id.as_str(), "finished"],
+    ] {
+        let detail = stale_detail(&env, &main, &args);
+        assert!(
+            detail.contains(&other) && detail.contains("agent-b"),
+            "{detail}"
+        );
+        assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+        assert!(!detail.contains("tasks -C"), "{detail}");
+    }
+    let detail = stale_detail(&env, &main, &["note", &id, "cross-task breadcrumb"]);
     assert!(
         detail.contains(&other) && detail.contains("agent-b"),
         "{detail}"
     );
     assert!(detail.contains("Wait for that branch to merge"), "{detail}");
-    assert!(!detail.contains("tasks -C"), "{detail}");
+    assert!(
+        detail.contains("Or, to note that copy in place: tasks -C"),
+        "{detail}"
+    );
+    let retry = retry_words(&detail);
+    assert_eq!(
+        retry,
+        [
+            "-C",
+            side.to_str().unwrap(),
+            "note",
+            &id,
+            "cross-task breadcrumb"
+        ]
+    );
+    as_agent(&env, &main, "agent-c")
+        .args(&retry)
+        .assert()
+        .success();
+    assert_eq!(
+        claim_worktree(&env, &side, &other),
+        side.display().to_string()
+    );
+    // When both copies share a stamp with different bytes, even `note` omits `-C`.
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    let forked = stale_detail(&env, &main, &["note", &id, "forked"]);
+    assert!(
+        forked.contains(&other) && forked.contains("agent-b") && !forked.contains("tasks -C"),
+        "{forked}"
+    );
+    // Restore the side stamp after the note so the remaining checks see the same fixture.
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
 
     // The claim's own holder, whose shell reset to main, keeps the retry.
     let out = as_agent(&env, &main, "agent-b")
-        .args(["note", &id, "x"])
+        .args(["edit", &id, "--title", "Mine"])
         .output()
         .unwrap();
     let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
@@ -13610,21 +13655,28 @@ fn another_sessions_work_in_the_newer_checkout_withholds_the_retry() {
         "{error}"
     );
 
-    // A park by another session withholds it too.
+    // A foreign park with no live claim is not an active occupant: it offers the retry.
     as_agent(&env, &side, "agent-b")
         .args(["park", &other, "later"])
         .assert()
         .success();
-    let out = as_agent(&env, &main, "agent-c")
-        .args(["note", &id, "x"])
-        .output()
-        .unwrap();
-    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    let detail = error["error"]["detail"].as_str().unwrap();
-    assert!(
-        detail.contains(&other) && !detail.contains("tasks -C"),
-        "{detail}"
-    );
+    for args in [
+        vec!["note", id.as_str(), "x"],
+        vec!["edit", id.as_str(), "--title", "Changed"],
+    ] {
+        let out = as_agent(&env, &main, "agent-c")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        let detail = error["error"]["detail"].as_str().unwrap();
+        assert!(
+            !detail.contains("is where another session works") && !detail.contains(&other),
+            "{detail}"
+        );
+        assert!(detail.contains("Run it there: tasks -C"), "{detail}");
+    }
 }
 
 #[test]
@@ -24233,15 +24285,29 @@ fn a_restart_in_the_new_worktree_makes_a_later_write_in_main_refuse() {
         .assert()
         .success();
     assert_eq!(claim_worktree(&env, &side, &id), side.display().to_string());
-    // Another session writing from main is told who works there, with no retry.
+    // Another session writing from main is told who works there: edit gets no retry,
+    // while note also gets the explicit in-place `-C` retry.
+    let edit_detail = stale_detail(&env, &main, &["edit", &id, "--title", "from main"]);
+    assert!(
+        edit_detail.starts_with(&format!("tasks/{id}.md in {} is newer", side.display())),
+        "{edit_detail}"
+    );
+    assert!(
+        edit_detail.contains("agent-a") && !edit_detail.contains("tasks -C"),
+        "{edit_detail}"
+    );
     let detail = stale_detail(&env, &main, &["note", &id, "from main"]);
     assert!(
         detail.starts_with(&format!("tasks/{id}.md in {} is newer", side.display())),
         "{detail}"
     );
     assert!(
-        detail.contains("agent-a") && !detail.contains("tasks -C"),
+        detail.contains("agent-a") && detail.contains("Or, to note that copy in place: tasks -C"),
         "{detail}"
+    );
+    assert_eq!(
+        retry_words(&detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "from main"]
     );
 }
 
@@ -24334,8 +24400,8 @@ fn a_claim_held_by_proof_moves_with_its_holder() {
 }
 
 #[test]
-fn writes_missing_worktree_task_offer_retry_for_own_claim_or_park() {
-    for parked in [false, true] {
+fn writes_missing_worktree_task_offer_retry_for_own_claim_or_any_park() {
+    for (parked, caller) in [(false, "agent-a"), (true, "agent-a"), (true, "agent-b")] {
         let mut env = TestEnv::new();
         let (main, side, _) = repo_with_worktree(&mut env);
         let id = id_of(env.json(&side, &["add", "Only there"]));
@@ -24358,7 +24424,7 @@ fn writes_missing_worktree_task_offer_retry_for_own_claim_or_park() {
             vec!["edit", &id, "--title", "Changed there"],
             vec!["edit", &id, "--editor"],
         ] {
-            let out = as_agent(&env, &main, "agent-a")
+            let out = as_agent(&env, &main, caller)
                 .env("EDITOR", "touch editor-opened")
                 .args(&args)
                 .output()
@@ -24379,7 +24445,7 @@ fn writes_missing_worktree_task_offer_retry_for_own_claim_or_park() {
             assert!(!main.join("editor-opened").exists());
         }
         for retry in retries {
-            as_agent(&env, &main, "agent-a")
+            as_agent(&env, &main, caller)
                 .env("EDITOR", "true")
                 .args(retry)
                 .assert()
@@ -24399,7 +24465,7 @@ fn writes_missing_worktree_task_offer_retry_for_own_claim_or_park() {
 
 #[test]
 fn writes_missing_worktree_task_do_not_retry_in_occupied_checkout() {
-    for occupied in ["claim", "park", "other task"] {
+    for occupied in ["claim", "other task"] {
         let mut env = TestEnv::new();
         let (main, side, _) = repo_with_worktree(&mut env);
         let id = id_of(env.json(&side, &["add", "Only there"]));

@@ -111,10 +111,15 @@ worker-specific completion before forced controller takeover.
 ## Failure and recovery
 
 `stale_copy` means another checkout has a newer record or conflicting bytes at
-the same stamp. Follow its remedy: hand work to the occupying session, rerun in
-the named checkout, or merge conflicting history. Do not overwrite the newer
-record or change the claim file to bypass the guard. The comparison is local
-across known checkouts, not proof that every host has synced.
+the same stamp. A parked worktree with no live or unverifiable foreign claim
+offers the `-C` retry. When another session actively works in the newer
+checkout, non-note writes withhold `-C` while `tasks note` (excluding feedback
+recurrence and same-second forks) still names the occupant and appends an
+in-place `tasks -C <wt> note ...` alternative. Follow the remedy: wait or merge
+conflicting history, or rerun in the named checkout when offered. Do not
+overwrite the newer record or change the claim file to bypass the guard. The
+comparison is local across known checkouts, not proof that every host has
+synced.
 
 `claimed`, `need_held`, halt and identity errors retain the held state. Recheck
 the named task/session and supply an evidence-based override only when warranted.

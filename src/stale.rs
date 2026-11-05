@@ -20,6 +20,9 @@ pub struct Newer {
 pub enum Remedy<'a> {
     /// Rule 1: another session works in the newer checkout, as `(task id, session)` pairs.
     Occupied(Vec<(String, String)>),
+    /// Rule 1 for `note` when the copies are not a same-second fork: names the occupying
+    /// work and appends the explicit `-C` note alternative.
+    OccupiedNote(Vec<(String, String)>, &'a [String]),
     /// Rule 2: the same stamp with different bytes.
     Merge,
     /// Rule 3: a linked worktree behind the main checkout; the arguments for the alternative.
@@ -141,17 +144,13 @@ pub fn remedy(
 ) -> String {
     let display = root.display();
     let next = match remedy {
-        Remedy::Occupied(work) => {
-            let work: Vec<String> = work
-                .iter()
-                .map(|(task, session)| format!("{task} (session {session})"))
-                .collect();
-            format!(
-                "{display} is where another session works: {}. Wait for that branch to merge, \
-                 or merge its copy of tasks/{id}.md into this checkout, then rerun here",
-                work.join(", ")
-            )
-        }
+        Remedy::Occupied(work) => occupied_text(&display, id, &work),
+        Remedy::OccupiedNote(work, args) => format!(
+            "{}. Or, to note that copy in place: {}{}",
+            occupied_text(&display, id, &work),
+            rerun_line(root, args),
+            stdin_hint(args)
+        ),
         Remedy::Merge => {
             format!("Merge that copy of tasks/{id}.md into this checkout, then rerun here")
         }
@@ -174,6 +173,22 @@ pub fn remedy(
         None => String::new(),
     };
     format!("{unknown}{next}")
+}
+
+fn occupied_text(
+    display: &std::path::Display<'_>,
+    id: &TaskId,
+    work: &[(String, String)],
+) -> String {
+    let work: Vec<String> = work
+        .iter()
+        .map(|(task, session)| format!("{task} (session {session})"))
+        .collect();
+    format!(
+        "{display} is where another session works: {}. Wait for that branch to merge, \
+         or merge its copy of tasks/{id}.md into this checkout, then rerun here",
+        work.join(", ")
+    )
 }
 
 /// `-` is how every command here names stdin, which a printed line cannot carry.
@@ -342,6 +357,27 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("tasks -C"), "{text}");
+    }
+
+    #[test]
+    fn the_occupied_note_remedy_names_the_work_and_appends_the_in_place_retry() {
+        let given = args(&["note", "sci-1a2b3c", "cross-task note"]);
+        let text = refusal(
+            &id(),
+            &newer(false, &[]),
+            "2026-09-05T09:00:00Z",
+            Remedy::OccupiedNote(vec![("sci-999999".into(), "agent-b".into())], &given),
+            None,
+        );
+        assert!(
+            text.ends_with(
+                "nothing was written. /wt is where another session works: sci-999999 \
+                 (session agent-b). Wait for that branch to merge, or merge its copy of \
+                 tasks/sci-1a2b3c.md into this checkout, then rerun here. Or, to note that \
+                 copy in place: tasks -C /wt note sci-1a2b3c 'cross-task note'"
+            ),
+            "{text}"
+        );
     }
 
     #[test]

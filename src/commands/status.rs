@@ -218,7 +218,7 @@ pub fn note(
     review: crate::review::Review,
     awaiting: crate::review::Awaiting,
 ) -> Result<Output> {
-    let mut task = load(&mut ctx, &id)?;
+    let mut task = super::load_for_writer(&mut ctx, &id, super::Writer::Note)?;
     crate::review::apply(&mut task, review, awaiting, &mut ctx.warnings)?;
     let owner = owner_name(&ctx.project)?;
     let at = crate::time::now();

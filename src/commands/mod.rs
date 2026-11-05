@@ -1217,12 +1217,20 @@ pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result
 /// (docs/project-operations.md). Every write command loads through this or `load_with_raw`, under the mutation lock
 /// and before it reads any other input, so a refusal consumes nothing and creates nothing.
 pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
+    load_for_writer(ctx, id, Writer::Command)
+}
+
+pub fn load_for_writer(ctx: &mut Ctx, id: &str, writer: Writer<'_>) -> Result<Task> {
     let id = parse_id(&ctx.registry, &ctx.shorthand, id)?;
-    load_with_raw(ctx, &id).map(|(task, _)| task)
+    load_with_raw_for(ctx, &id, writer).map(|(task, _)| task)
 }
 
 /// The editor also needs the original bytes for its unlocked editing window.
 fn load_with_raw(ctx: &mut Ctx, id: &TaskId) -> Result<(Task, String)> {
+    load_with_raw_for(ctx, id, Writer::Command)
+}
+
+fn load_with_raw_for(ctx: &mut Ctx, id: &TaskId, writer: Writer<'_>) -> Result<(Task, String)> {
     let (task, raw) = match ctx.project.read_task_with_raw(id) {
         Ok(found) => found,
         Err(Error::TaskNotFound(_)) => {
@@ -1232,7 +1240,7 @@ fn load_with_raw(ctx: &mut Ctx, id: &TaskId) -> Result<(Task, String)> {
         }
         Err(error) => return Err(error),
     };
-    refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
+    refuse_stale_copy(ctx, &task, &raw, writer)?;
     guard_write(&ctx.registry, &ctx.shorthand, &task)?;
     Ok((task, raw))
 }
@@ -1282,6 +1290,8 @@ pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Tas
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Writer<'a> {
     Command,
+    /// `tasks note` (not a feedback recurrence): append-only and never moves a foreign claim.
+    Note,
     /// A feedback recurrence: `-C` would change the reporting project.
     Feedback,
     /// `release` of this session's claim: its non-live claims occupy no worktree, since the
@@ -1307,7 +1317,7 @@ pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer<'
         .collect();
     let gone = match writer {
         Writer::Release(session) => Some(session),
-        Writer::Command | Writer::Feedback => None,
+        Writer::Command | Writer::Note | Writer::Feedback => None,
     };
     let (work, unknown) = match occupants(ctx, &newer.root, gone) {
         Ok(Occupants { work, unknown }) => (work, unknown),
@@ -1317,7 +1327,11 @@ pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer<'
     // it happens, only the handoff ordering is lost; the retry it falls back to is valid.
     let main = ctx.project.main_checkout_root().ok().flatten();
     let remedy = if !work.is_empty() {
-        crate::stale::Remedy::Occupied(work)
+        if writer == Writer::Note && !newer.same_stamp {
+            crate::stale::Remedy::OccupiedNote(work, &args)
+        } else {
+            crate::stale::Remedy::Occupied(work)
+        }
     } else if newer.same_stamp {
         crate::stale::Remedy::Merge
     } else if writer == Writer::Feedback {
@@ -1338,15 +1352,14 @@ struct Occupants {
     unknown: Option<Error>,
 }
 
-/// docs/task-model.md rule 1: every task that a session other than the caller holds live in `root`,
-/// or parked there. Claims are compared by `ownership`, parks by their tagged session.
-/// An unresolvable identity makes every park someone else's. `gone` is the session a
-/// `release` asserts has ended: its claims that do not read `Live` occupy nothing.
+/// docs/task-model.md rule 1: every task that a session other than the caller holds
+/// non-stale (`Live` or `Unverifiable`) in `root`. Claims are compared by `ownership`.
+/// A parked record is not an active occupant. `gone` is the session a `release` asserts
+/// has ended: its claims that do not read `Live` occupy nothing.
 fn occupants(ctx: &mut Ctx, root: &Path, gone: Option<&str>) -> Result<Occupants> {
     let snapshot =
         crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let me = crate::claims::resolve_identity(&mut ctx.warnings);
-    let mine = me.identity().map(|identity| identity.tagged.clone());
     let mut work = Vec::new();
     for (task, (claim, liveness)) in snapshot.iter() {
         let released = gone == Some(claim.session.as_str()) && !matches!(liveness, Liveness::Live);
@@ -1356,11 +1369,6 @@ fn occupants(ctx: &mut Ctx, root: &Path, gone: Option<&str>) -> Result<Occupants
             && ownership(claim, &me)? == Ownership::Foreign
         {
             work.push((task.clone(), claim.session.clone()));
-        }
-    }
-    for (task, park) in snapshot.parks() {
-        if Path::new(&park.worktree) == root && mine.as_deref() != Some(park.session.as_str()) {
-            work.push((task.clone(), park.session.clone()));
         }
     }
     let unknown = match me {
