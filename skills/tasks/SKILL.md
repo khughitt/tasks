@@ -695,9 +695,10 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   record versus attachment paths before recursive parsing. Required segments are
   immutable and cannot be detached. On missing/hash/count errors restore exact
   segment bytes from a verified source at the matching Git basis; never skip or
-  sanitize required history. Preserve exact body bytes before shortening a large
-  body. Archival reduces active rewrite cost, not total evidence or full-read cost;
-  existing cap/layout limits remain in force.
+  sanitize required history. When the body dominates (at least half of active
+  record bytes), preserve exact body bytes before shortening it with `tasks edit
+  <id> --body`. Archival reduces active rewrite cost, not total evidence or
+  full-read cost; existing cap/layout limits remain in force.
 - Screenshots or files for a task: `tasks attach <id> <path> <path>...`, with
   `--caption "<what they show>"` applied to each file. The batch validates all names,
   per-file caps, collisions and storage safety before writing, then records one

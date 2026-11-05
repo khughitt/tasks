@@ -44,8 +44,9 @@ explicitly declares no extra project validators. Entries have `match` and
 for matching, execution, cap and failure contracts.
 
 Record-growth warnings report active record size, archived notes, attachments and
-logical history; they do not authorize truncation or raise attachment caps.
-`archive-notes` is a separate preview/apply protocol.
+logical history, and suggest shortening the body only when `body_bytes` is at
+least half of `record_bytes`; they do not authorize truncation or raise
+attachment caps. `archive-notes` is a separate preview/apply protocol.
 
 ## Registry and locations
 

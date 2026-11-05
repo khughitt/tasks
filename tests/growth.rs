@@ -69,7 +69,7 @@ fn growth_boundary_config_and_output() {
     assert!(detail.contains(&bytes.to_string()), "{detail}");
     assert!(detail.contains(&(bytes - 1).to_string()), "{detail}");
     assert!(detail.contains("attach"), "{detail}");
-    assert!(detail.contains("edit"), "{detail}");
+    assert!(!detail.contains("edit"), "{detail}");
     assert!(
         detail.contains("tasks archive-notes dot-a00001"),
         "{detail}"
@@ -219,7 +219,50 @@ fn growth_unique_and_invalid_records() {
     );
     assert_eq!(rows[1]["duplicate_note_text_bytes"], 0);
     assert_eq!(rows[1]["note_text_bytes"], 4000);
-    assert_eq!(growth_warnings(&report).len(), 4);
+    let warnings = growth_warnings(&report);
+    assert_eq!(warnings.len(), 4);
+    let body_dominated = warnings[0]["detail"].as_str().unwrap();
+    assert_eq!(warnings[0]["id"], "dot-a00002");
+    assert!(
+        body_dominated.contains("tasks attach")
+            && body_dominated.contains("tasks archive-notes dot-a00002")
+            && body_dominated.contains(
+                "preserve exact body bytes before using `tasks edit dot-a00002 --body` to shorten a large body"
+            ),
+        "{body_dominated}"
+    );
+    let note_dominated = warnings[1]["detail"].as_str().unwrap();
+    assert_eq!(warnings[1]["id"], "dot-a00001");
+    assert!(
+        note_dominated.contains("tasks attach")
+            && note_dominated.contains("tasks archive-notes dot-a00001")
+            && !note_dominated.contains("--body")
+            && !note_dominated.contains("shorten a large body"),
+        "{note_dominated}"
+    );
+    // Exact half-record boundary: body_bytes * 2 < record_bytes omits --body; >= includes it.
+    let base = record(&root, "a00003", "todo", "", &[]);
+    record(&root, "a00003", "todo", &"x".repeat(base - 1), &[]);
+    record(&root, "a00004", "todo", &"x".repeat(base), &[]);
+    let boundary = env.json(&root, &["check", "--growth"]);
+    let boundary_warnings = growth_warnings(&boundary);
+    let under_half = boundary_warnings
+        .iter()
+        .find(|w| w["id"] == "dot-a00003")
+        .unwrap()["detail"]
+        .as_str()
+        .unwrap();
+    let at_half = boundary_warnings
+        .iter()
+        .find(|w| w["id"] == "dot-a00004")
+        .unwrap()["detail"]
+        .as_str()
+        .unwrap();
+    assert!(!under_half.contains("--body"), "{under_half}");
+    assert!(
+        at_half.contains("tasks edit dot-a00004 --body"),
+        "{at_half}"
+    );
     std::fs::write(root.join("tasks/dot-a00005.md"), "broken record").unwrap();
     let out = env.cmd(&root).args(["check", "--growth"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));

@@ -159,9 +159,15 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     for row in &growth_rows {
         if row.record_bytes > threshold {
             warnings.push(Finding {
-                id: Some(row.id.clone()), file: format!("tasks/{}.md", row.id),
+                id: Some(row.id.clone()),
+                file: format!("tasks/{}.md", row.id),
                 kind: "record_growth".into(),
-                detail: format!("active record {} bytes exceeds threshold {threshold} bytes; place bulky evidence in attachments (`tasks attach`) or records documents and link it; preview lossless note archival with `tasks archive-notes {}`; preserve exact body bytes before using `tasks edit {} --body` to shorten a large body", row.record_bytes, row.id, row.id),
+                detail: crate::growth::warning_detail(
+                    &row.id,
+                    row.record_bytes,
+                    row.body_bytes,
+                    threshold,
+                ),
             });
         }
     }
