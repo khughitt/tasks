@@ -51,7 +51,7 @@ fn counts(ctx: &mut OperationCtx, host: &str) -> Result<Counts> {
             .ok_or_else(|| invalid("transfer completion publication missing"))?;
         let pinned = basis::read_exact(ctx.project(&id), &id, &publication.basis)?;
         ctx.metrics.history_bytes_read += pinned.history_bytes_read;
-        let view = state::replay(&pinned.task, &pinned.basis, Some(host))?;
+        let view = state::replay(ctx.project(&id), &pinned.task, &pinned.basis, Some(host))?;
         for item in view.items {
             if let Some(r) = item.record {
                 if r.state == "released" {
@@ -98,7 +98,7 @@ fn selected(
     owner: &TaskId,
 ) -> Result<Vec<RetentionRecord>> {
     let pinned = &ctx.tasks[id];
-    let view = state::replay(&pinned.task, &pinned.basis, None)?;
+    let view = state::replay(ctx.project(id), &pinned.task, &pinned.basis, None)?;
     identities
         .iter()
         .map(|identity| {
@@ -130,6 +130,7 @@ fn preflight(
 ) -> Result<()> {
     let originals = selected(ctx, from, &request.items, from)?;
     let source = state::replay(
+        ctx.project(from),
         &ctx.tasks[from].task,
         &ctx.tasks[from].basis,
         Some(&request.host),
@@ -151,7 +152,12 @@ fn preflight(
         ));
     }
     let pinned = &ctx.tasks[to];
-    let receiver = state::replay(&pinned.task, &pinned.basis, Some(&request.host))?;
+    let receiver = state::replay(
+        ctx.project(to),
+        &pinned.task,
+        &pinned.basis,
+        Some(&request.host),
+    )?;
     let already = phase(ctx, to, "receiver_published")?.is_some();
     if !already {
         if receiver.diagnostics.iter().any(|d| {

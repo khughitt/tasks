@@ -94,7 +94,14 @@ pub fn blob(
         .ok_or_else(|| invalid("history byte counter overflow"))?;
     Ok(bytes)
 }
-fn task_at(project: &Project, id: &TaskId, basis: &Basis, bytes_read: &mut u64) -> Result<Task> {
+pub(crate) fn task_at(
+    project: &Project,
+    _id: &TaskId,
+    basis: &Basis,
+    bytes_read: &mut u64,
+) -> Result<Task> {
+    let original = super::lineage::historical_id(basis)?;
+    let id = &original;
     let raw = string(blob(
         project,
         &basis.commit,
@@ -124,6 +131,9 @@ fn task_at(project: &Project, id: &TaskId, basis: &Basis, bytes_read: &mut u64) 
 }
 pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result<()> {
     basis.validate()?;
+    if !project.retention_lineage.is_empty() {
+        return super::lineage::validate_locator(project, id, basis);
+    }
     let root = root(project)?;
     let sub = project.records.strip_prefix(&root).map_err(invalid)?;
     let sub = if sub.as_os_str().is_empty() {
@@ -200,17 +210,21 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
     };
     let retained_ref=refs.lines().find(|r|*r==current_ref).or_else(||refs.lines().next()).ok_or_else(||Error::RetainedHistoryBlocked("No retained local branch reaches this basis; preserve the exact history on a named branch".into()))?.to_string();
     let sub = project.records.strip_prefix(&root).map_err(invalid)?;
-    let basis = Basis {
-        project: project.prefix.clone(),
-        layout: project.kind.as_str().into(),
-        records_subdir: if sub.as_os_str().is_empty() {
-            ".".into()
-        } else {
-            path_string(sub)?
-        },
-        commit,
-        task_path: path_string(project.task_path(id).strip_prefix(&root).map_err(invalid)?)?,
-        retained_ref,
+    let basis = if !project.retention_lineage.is_empty() {
+        super::lineage::epoch_at(project, id, &commit)?
+    } else {
+        Basis {
+            project: project.prefix.clone(),
+            layout: project.kind.as_str().into(),
+            records_subdir: if sub.as_os_str().is_empty() {
+                ".".into()
+            } else {
+                path_string(sub)?
+            },
+            commit,
+            task_path: path_string(project.task_path(id).strip_prefix(&root).map_err(invalid)?)?,
+            retained_ref,
+        }
     };
     let mut pinned = read_exact(project, id, &basis)?;
     if at.is_none() {
@@ -296,7 +310,7 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
                 {
                     return Err(Error::RetainedHistoryBlocked("Retention/evidence changed between checkpoint basis and publication; reconcile that checkpoint before use".into()));
                 }
-                let state = super::state::replay(&old_task, old, Some(&cp.host))?;
+                let state = super::state::replay(project, &old_task, old, Some(&cp.host))?;
                 let counts = Counts {
                     kept_verified: state
                         .items
@@ -362,7 +376,12 @@ pub fn publication_basis(
             "--first-parent",
             "--reverse",
             "--format=%H",
-            &context.retained_ref,
+            project
+                .retention_lineage
+                .iter()
+                .find(|e| e.from_prefix == context.project)
+                .map(|e| e.commit.as_str())
+                .unwrap_or(&context.retained_ref),
             "--",
             &context.task_path,
         ],

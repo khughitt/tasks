@@ -210,6 +210,7 @@ mod tests {
     #[test]
     fn every_open_halt_status_blocks_and_closed_statuses_do_not() {
         let project = Project {
+            retention_lineage: Vec::new(),
             root: PathBuf::new(),
             records: PathBuf::new(),
             kind: crate::repo::Kind::InTree,
@@ -246,6 +247,7 @@ mod tests {
     #[test]
     fn local_priority_parent_and_dependency_edits_make_work_eligible() {
         let project = Project {
+            retention_lineage: Vec::new(),
             root: PathBuf::new(),
             records: PathBuf::new(),
             kind: crate::repo::Kind::InTree,

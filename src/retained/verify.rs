@@ -319,7 +319,7 @@ fn artifact_location(
         } => &basis.project,
         _ => return Err(invalid("directory locator has no file payload")),
     };
-    let resolved = if declared == &project.prefix {
+    let resolved = if super::lineage::owns_prefix(project, declared) {
         project.clone()
     } else {
         crate::scope::open_registered(
@@ -363,7 +363,7 @@ fn artifact_location(
         }
     };
     b.validate()?;
-    if b.project != project.prefix {
+    if !super::lineage::owns_prefix(project, &b.project) {
         return Err(invalid("artifact requires its declared repository pairing"));
     }
     let id = crate::model::TaskId::parse(
@@ -722,15 +722,16 @@ fn references(
                                 invalid("receiver phase lacks its exact sender input")
                             })?;
                         let source_id = crate::model::TaskId::parse(&source.task)?;
-                        let source_project = if source.basis.project == project.prefix {
-                            project.clone()
-                        } else {
-                            crate::scope::open_registered(
-                                &crate::registry::Registry::load()?,
-                                &source.basis.project,
-                                crate::scope::Origin::Id(&source_id),
-                            )?
-                        };
+                        let source_project =
+                            if super::lineage::owns_prefix(project, &source.basis.project) {
+                                project.clone()
+                            } else {
+                                crate::scope::open_registered(
+                                    &crate::registry::Registry::load()?,
+                                    &source.basis.project,
+                                    crate::scope::Origin::Id(&source_id),
+                                )?
+                            };
                         let source = basis::read_exact(&source_project, &source_id, &source.basis)?;
                         metrics.history_bytes_read += source.history_bytes_read;
                         versions.extend(references(
@@ -782,7 +783,7 @@ pub fn inspect_history(
     provided: Option<&ArtifactLocator>,
     metrics: &mut Metrics,
 ) -> Result<Observation> {
-    let known = super::state::replay(&pinned.task, &pinned.basis, Some(&record.host))?
+    let known = super::state::replay(project, &pinned.task, &pinned.basis, Some(&record.host))?
         .items
         .iter()
         .any(|i| {

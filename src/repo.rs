@@ -98,6 +98,7 @@ pub struct Project {
     pub records: PathBuf,
     pub kind: Kind,
     pub prefix: String,
+    pub retention_lineage: Vec<crate::retained::lineage::RenameEdge>,
     pub color: Option<crate::palette::Rgb>,
     /// Roots a `spec` link may live under; also the search path for bare spec names.
     pub spec_dirs: Vec<String>,
@@ -155,6 +156,8 @@ pub enum SiblingCopy {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Config {
     prefix: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    retention_lineage: Vec<crate::retained::lineage::RenameEdge>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -660,6 +663,7 @@ impl Project {
         if !config.exists() {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
+                retention_lineage: Vec::new(),
                 color: None,
                 spec_dirs: None,
                 plan_dirs: None,
@@ -779,6 +783,7 @@ impl Project {
         } else {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
+                retention_lineage: Vec::new(),
                 color: None,
                 spec_dirs: None,
                 plan_dirs: None,
@@ -843,6 +848,7 @@ impl Project {
             worktree: None,
             commit_records,
             prefix: config.prefix,
+            retention_lineage: config.retention_lineage,
             color: config
                 .color
                 .map(|color| {

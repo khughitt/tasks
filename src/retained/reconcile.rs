@@ -105,7 +105,7 @@ fn load_original(ctx: &mut OperationCtx, from: &TaskId) -> Result<Binding> {
         let request: TransferRequest = decode_request(&bytes)?;
         let source = basis::read_exact(&project, from, &request.inputs[0].basis)?;
         ctx.metrics.history_bytes_read += source.history_bytes_read;
-        let state = state::replay(&source.task, &source.basis, None)?;
+        let state = state::replay(&project, &source.task, &source.basis, None)?;
         for identity in &request.items {
             if !state.items.iter().any(|i| {
                 i.identity == *identity
@@ -180,7 +180,11 @@ fn ready_proofs(
     terminal: &OperationNote,
     metrics: &mut verify::Metrics,
 ) -> Result<Vec<basis::PinnedTask>> {
-    if terminal.key.coordinator != coordinator.task.id.to_string() {
+    if !super::lineage::same(
+        project,
+        &terminal.key.coordinator,
+        &coordinator.task.id.to_string(),
+    )? {
         return Err(invalid(
             "reconciled terminal must be published on its coordinator",
         ));
@@ -205,17 +209,40 @@ fn ready_proofs(
             "terminal reconciliation lacks exact participant ready publications",
         ));
     }
+    let publication = if terminal.key.coordinator == coordinator.task.id.to_string() {
+        coordinator.basis.clone()
+    } else {
+        let input = super::lineage::participant(project, terminal, &coordinator.task.id)?;
+        let ordinal = coordinator
+            .task
+            .notes
+            .iter()
+            .position(|n| {
+                n.text
+                    .strip_prefix("retention operation: ")
+                    .and_then(|r| decode_operation(r).ok())
+                    .is_some_and(|n| n == *terminal)
+            })
+            .ok_or_else(|| invalid("terminal source missing"))?;
+        basis::publication_basis(
+            project,
+            &coordinator.task.id,
+            &input.basis,
+            &coordinator.task.notes[..=ordinal],
+            &mut metrics.history_bytes_read,
+        )?
+    };
     let expected_request = verify::artifact(
         project,
         &terminal
             .request
-            .pinned(&coordinator.task.id.to_string(), &coordinator.basis)?,
+            .pinned(&terminal.key.coordinator, &publication)?,
         metrics,
     )?;
     let expected_directive = verify::artifact(
         project,
         &out.directive
-            .pinned(&coordinator.task.id.to_string(), &coordinator.basis)?,
+            .pinned(&terminal.key.coordinator, &publication)?,
         metrics,
     )?;
     validate_original(&expected_request, terminal)?;
@@ -247,7 +274,7 @@ fn ready_proofs(
             return Err(invalid("terminal refers to a non-ready publication"));
         }
         let id = TaskId::parse(&publication.task)?;
-        let p = if id.prefix == project.prefix {
+        let p = if super::lineage::owns_prefix(project, &id.prefix) {
             project.clone()
         } else {
             crate::scope::open_registered(
@@ -314,7 +341,7 @@ fn ready_proofs(
                 "ready publication conflicts with terminal directive or original request",
             ));
         }
-        let state = state::replay(&pinned.task, &pinned.basis, None)?;
+        let state = state::replay(&p, &pinned.task, &pinned.basis, None)?;
         if !state.operations.iter().any(|o| o.note == note) {
             return Err(invalid(
                 "ready observations do not bind to exact retained sources",
@@ -349,12 +376,14 @@ pub fn reservation_ended(project: &Project, task: &Task, note: &OperationNote) -
         return Ok(false);
     }
     let from = TaskId::parse(&note.key.coordinator)?;
-    if note.phase == "reconciled" && task.id != from {
+    if note.phase == "reconciled"
+        && !super::lineage::same(project, &task.id.to_string(), &from.to_string())?
+    {
         return Err(invalid(
             "participant cannot assert a coordinator terminal receipt",
         ));
     }
-    let p = if from.prefix == project.prefix {
+    let p = if super::lineage::owns_prefix(project, &from.prefix) {
         project.clone()
     } else {
         crate::scope::open_registered(
@@ -383,7 +412,14 @@ pub fn reservation_ended(project: &Project, task: &Task, note: &OperationNote) -
     if note.phase == "reconciled" {
         return Ok(*note == terminal);
     }
-    let Some(own) = proofs.iter().find(|p| p.task.id == task.id) else {
+    let mut own = None;
+    for proof in &proofs {
+        if super::lineage::same(project, &proof.task.id.to_string(), &task.id.to_string())? {
+            own = Some(proof);
+            break;
+        }
+    }
+    let Some(own) = own else {
         return Err(invalid("participant absent from reconciliation proofs"));
     };
     Ok(phases(&own.task, &note.key)?
@@ -530,7 +566,12 @@ fn candidates(
     if binding.inputs.len() == 1 {
         let request: CheckpointRequest = decode_request(&binding.bytes)?;
         let pinned = &ctx.tasks[from];
-        let state = state::replay(&pinned.task, &pinned.basis, Some(&binding.host))?;
+        let state = state::replay(
+            ctx.project(from),
+            &pinned.task,
+            &pinned.basis,
+            Some(&binding.host),
+        )?;
         for item in state.items {
             if item.record.as_ref().is_none_or(|r| r.state == "kept") {
                 all.get_mut(from).unwrap().insert(item.identity, None);
@@ -582,7 +623,7 @@ fn ready(
     }
     let project = ctx.project(id).clone();
     let pinned = &ctx.tasks[id];
-    let before = state::replay(&pinned.task, &pinned.basis, Some(&binding.host))?;
+    let before = state::replay(&project, &pinned.task, &pinned.basis, Some(&binding.host))?;
     let mut unresolved = before
         .diagnostics
         .iter()
@@ -725,7 +766,14 @@ fn result(
         released: 0,
     };
     for pinned in proofs {
-        for item in state::replay(&pinned.task, &pinned.basis, Some(&terminal.host))?.items {
+        for item in state::replay(
+            &super::proof::project_for(ctx.project(from), &pinned.task.id.to_string())?,
+            &pinned.task,
+            &pinned.basis,
+            Some(&terminal.host),
+        )?
+        .items
+        {
             if let Some(r) = item.record {
                 if r.state == "released" {
                     counts.released += 1;

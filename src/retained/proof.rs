@@ -2,9 +2,9 @@ use super::{basis, model::*, publish, reconcile, state, verify};
 use crate::{error::Result, model::TaskId, repo::Project};
 use std::collections::{BTreeMap, BTreeSet};
 
-fn project_for(project: &Project, task: &str) -> Result<Project> {
+pub(super) fn project_for(project: &Project, task: &str) -> Result<Project> {
     let id = TaskId::parse(task)?;
-    if id.prefix == project.prefix {
+    if super::lineage::owns_prefix(project, &id.prefix) {
         Ok(project.clone())
     } else {
         crate::scope::open_registered(
@@ -45,11 +45,8 @@ pub fn validate_history(
             if host.is_some_and(|h| h != note.host) {
                 continue;
             }
-            let input = note
-                .input_bases
-                .iter()
-                .find(|i| i.task == pinned.task.id.to_string())
-                .ok_or_else(|| invalid("operation lacks its source participant"))?;
+            let input = super::lineage::participant(&project, &note, &pinned.task.id)?;
+            let original_id = TaskId::parse(&input.task)?;
             let publication = basis::publication_basis(
                 &project,
                 &pinned.task.id,
@@ -61,7 +58,7 @@ pub fn validate_history(
                 &project,
                 &note
                     .request
-                    .pinned(&pinned.task.id.to_string(), &publication)?,
+                    .pinned(&original_id.to_string(), &publication)?,
                 &mut metrics,
             )?;
             reconcile::validate_original(&request, &note)?;
@@ -78,7 +75,7 @@ pub fn validate_history(
                 .into_iter()
                 .skip(1)
             {
-                let artifact = artifact.pinned(&pinned.task.id.to_string(), &publication)?;
+                let artifact = artifact.pinned(&original_id.to_string(), &publication)?;
                 let file = match &artifact {
                     ArtifactLocator::Directory { manifest, .. } => manifest.as_ref(),
                     _ => &artifact,
@@ -89,7 +86,7 @@ pub fn validate_history(
                 let p = project_for(&project, &input.task)?;
                 let id = TaskId::parse(&input.task)?;
                 let original = basis::read_exact(&p, &id, &input.basis)?;
-                if input.task == pinned.task.id.to_string() {
+                if super::lineage::same(&project, &input.task, &pinned.task.id.to_string())? {
                     if !pinned.task.notes[..index].starts_with(&original.task.notes) {
                         return Err(invalid(
                             "operation does not preserve its exact input history",
@@ -128,7 +125,7 @@ pub fn validate_history(
                 let p = project_for(&project, &publication.task)?;
                 let id = TaskId::parse(&publication.task)?;
                 let target = basis::read_exact(&p, &id, &publication.basis)?;
-                let replay = state::replay(&target.task, &target.basis, host)?;
+                let replay = state::replay(&p, &target.task, &target.basis, host)?;
                 let source = replay
                     .operations
                     .iter()

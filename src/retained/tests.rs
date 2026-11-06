@@ -48,7 +48,7 @@ fn retained_same_second_replay() {
     let mut r = r;
     r["purpose"] = json!("Changed");
     crate::commands::append_note(&mut t, "t", &format!("retained: {r}")).unwrap();
-    let s = state::replay(&t, &basis(), None).unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
     assert!(s.complete);
     assert_eq!(s.items[0].source.as_ref().unwrap().ordinal, 2);
     assert_eq!(s.items[0].record.as_ref().unwrap().purpose, "Changed");
@@ -58,7 +58,7 @@ fn retained_malformed_scope() {
     let mut t = task();
     crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
     crate::commands::append_note(&mut t, "t", "retained: {\"version\":2}").unwrap();
-    let s = state::replay(&t, &basis(), None).unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
     assert!(!s.complete);
     assert!(s.items[0].record.is_none());
     assert_eq!(s.diagnostics[0].code, "unsupported_version");
@@ -75,7 +75,7 @@ fn retained_resolution_coverage() {
     let mut t = task();
     crate::commands::append_note(&mut t, "t", "retained: {\"host\":\"h\",\"path\":4}").unwrap();
     crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
-    let s = state::replay(&t, &basis(), Some("h")).unwrap();
+    let s = state::replay(&project(), &t, &basis(), Some("h")).unwrap();
     assert!(!s.complete);
     assert!(s.items[0].record.is_none());
 }
@@ -90,7 +90,7 @@ fn retained_duplicate_host_blocks_both_scopes() {
         r#"retained: {"host":"h","host":"other","version":2}"#,
     )
     .unwrap();
-    let s = state::replay(&t, &basis(), Some("h")).unwrap();
+    let s = state::replay(&project(), &t, &basis(), Some("h")).unwrap();
     assert!(!s.complete);
     assert!(s.items[0].record.is_none());
 }
@@ -143,7 +143,11 @@ fn retained_phase_history() {
     );
     let mut t = task();
     crate::commands::append_note(&mut t, "t", &format!("retention operation: {release}")).unwrap();
-    assert!(!state::replay(&t, &basis(), None).unwrap().complete);
+    assert!(
+        !state::replay(&project(), &t, &basis(), None)
+            .unwrap()
+            .complete
+    );
 }
 #[test]
 fn retained_explicit_identity_resolution() {
@@ -163,7 +167,7 @@ fn retained_explicit_identity_resolution() {
         json!({"items":[3],"artifacts":[],"resolutions":[{"bad":{"basis":basis(),"ordinal":1},"successors":[3],"reason":"Recovered exact history"}]}),
     );
     crate::commands::append_note(&mut t, "t", &format!("retention operation: {receipt}")).unwrap();
-    let s = state::replay(&t, &basis(), None).unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
     assert!(s.complete);
     assert_eq!(s.diagnostics.len(), 1);
     assert!(s.diagnostics[0].resolved_by.is_some());
@@ -288,8 +292,12 @@ fn retained_known_other_host_does_not_block_local_scope() {
     let mut t = task();
     crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
     crate::commands::append_note(&mut t, "t", r#"retained: {"host":"other","version":2}"#).unwrap();
-    assert!(!state::replay(&t, &basis(), None).unwrap().complete);
-    let local = state::replay(&t, &basis(), Some("h")).unwrap();
+    assert!(
+        !state::replay(&project(), &t, &basis(), None)
+            .unwrap()
+            .complete
+    );
+    let local = state::replay(&project(), &t, &basis(), Some("h")).unwrap();
     assert!(local.complete);
     assert!(local.items[0].record.is_some());
 }
@@ -321,7 +329,9 @@ fn retained_operation_item_role_and_mapping_binding() {
         )
         .unwrap();
         assert!(
-            !state::replay(&t, &basis(), None).unwrap().complete,
+            !state::replay(&project(), &t, &basis(), None)
+                .unwrap()
+                .complete,
             "{phase}"
         );
     }
@@ -343,7 +353,11 @@ fn retained_unknown_empty_host() {
     let mut t = task();
     crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
     crate::commands::append_note(&mut t, "t", r#"retained: {"host":""}"#).unwrap();
-    assert!(!state::replay(&t, &basis(), Some("h")).unwrap().complete);
+    assert!(
+        !state::replay(&project(), &t, &basis(), Some("h"))
+            .unwrap()
+            .complete
+    );
 }
 #[test]
 fn retained_complete_host_resolution() {
@@ -367,7 +381,11 @@ fn retained_complete_host_resolution() {
         ),
     )
     .unwrap();
-    assert!(state::replay(&t, &basis(), Some("h")).unwrap().complete);
+    assert!(
+        state::replay(&project(), &t, &basis(), Some("h"))
+            .unwrap()
+            .complete
+    );
 }
 #[test]
 fn retained_task_resolution_cannot_hide_other_hosts() {
@@ -395,7 +413,11 @@ fn retained_task_resolution_cannot_hide_other_hosts() {
         ),
     )
     .unwrap();
-    assert!(!state::replay(&t, &basis(), Some("h")).unwrap().complete);
+    assert!(
+        !state::replay(&project(), &t, &basis(), Some("h"))
+            .unwrap()
+            .complete
+    );
 }
 
 #[test]
@@ -411,10 +433,15 @@ fn retained_replay_rejects_missing_phase_items() {
     ] {
         crate::commands::append_note(&mut t, "t", &format!("retention operation: {note}")).unwrap();
     }
-    let state = state::replay(&t, &basis(), None).unwrap();
+    let state = state::replay(&project(), &t, &basis(), None).unwrap();
     assert!(
         !state.complete,
         "a phase cannot bind a missing retained source ordinal"
     );
     assert!(state.items[0].record.is_none());
+}
+
+fn project() -> crate::repo::Project {
+    crate::repo::Project::from_config(std::path::PathBuf::from("/fixture"), "prefix = 'sci'")
+        .unwrap()
 }

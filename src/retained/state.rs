@@ -40,7 +40,12 @@ pub struct RetainedState {
     pub warnings: Vec<String>,
 }
 
-pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<RetainedState> {
+pub fn replay(
+    project: &crate::repo::Project,
+    task: &Task,
+    basis: &Basis,
+    host: Option<&str>,
+) -> Result<RetainedState> {
     let mut s = RetainedState {
         version: 1,
         contract: "retention-1".into(),
@@ -83,8 +88,10 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
             }
         } else if let Some(raw) = note.text.strip_prefix("retention operation: ") {
             let decoded = decode_operation(raw).and_then(|n| {
-                n.request.pinned(&task.id.to_string(), basis)?;
-                let local = task.id.to_string();
+                let local = super::lineage::participant(project, &n, &task.id)?
+                    .task
+                    .clone();
+                n.request.pinned(&local, basis)?;
                 if n.input_bases
                     .first()
                     .is_none_or(|b| b.task != n.key.coordinator)
@@ -161,8 +168,12 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
                         for relation in &out.resolutions {
                             if relation.bad.ordinal == 0
                                 || relation.bad.ordinal >= source.ordinal
-                                || relation.bad.basis.task_path != basis.task_path
-                                || relation.bad.basis.project != basis.project
+                                || !super::lineage::same(
+                                    project,
+                                    &super::lineage::historical_id(&relation.bad.basis)?
+                                        .to_string(),
+                                    &task.id.to_string(),
+                                )?
                                 || relation.successors.is_empty()
                                 || relation
                                     .successors
@@ -227,14 +238,17 @@ pub fn replay(task: &Task, basis: &Basis, host: Option<&str>) -> Result<Retained
                         n.operation.operation_id.clone(),
                     );
                     if n.complete
-                        && (n.operation.coordinator != task.id.to_string()
-                            || !phases.get(&key).is_some_and(|p| {
-                                p.host == n.host
-                                    && matches!(
-                                        p.phase.as_str(),
-                                        "intent" | "items_published" | "incomplete"
-                                    )
-                            }))
+                        && (!super::lineage::same(
+                            project,
+                            &n.operation.coordinator,
+                            &task.id.to_string(),
+                        )? || !phases.get(&key).is_some_and(|p| {
+                            p.host == n.host
+                                && matches!(
+                                    p.phase.as_str(),
+                                    "intent" | "items_published" | "incomplete"
+                                )
+                        }))
                     {
                         return Err(invalid(
                             "checkpoint requires its matching unfinished operation intent",

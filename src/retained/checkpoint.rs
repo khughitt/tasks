@@ -39,7 +39,7 @@ fn view(ctx: &OperationCtx, id: &TaskId, host: &str) -> Result<state::RetainedSt
         .tasks
         .get(id)
         .ok_or_else(|| invalid("checkpoint task is not locked"))?;
-    state::replay(&pinned.task, &pinned.basis, Some(host))
+    state::replay(ctx.project(id), &pinned.task, &pinned.basis, Some(host))
 }
 struct Correction {
     bad: Source,
@@ -56,7 +56,7 @@ fn inventory(
     request: &CheckpointRequest,
 ) -> Result<Inventory> {
     let pinned = ctx.tasks.get(id).expect("checkpoint participant");
-    let full = state::replay(&pinned.task, &pinned.basis, None)?;
+    let full = state::replay(ctx.project(id), &pinned.task, &pinned.basis, None)?;
     let local = view(ctx, id, &request.host)?;
     let mut declarations = BTreeMap::<Identity, Declaration>::new();
     for d in &request.declarations {
@@ -274,7 +274,12 @@ fn replay(
             note.actions,
         )
     } else {
-        let state = state::replay(&original.task, &source, Some(&request.host))?;
+        let state = state::replay(
+            ctx.project(id),
+            &original.task,
+            &source,
+            Some(&request.host),
+        )?;
         (counts(&state)?, Vec::new())
     };
     Ok(Some(publish::result(

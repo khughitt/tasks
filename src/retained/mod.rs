@@ -14,3 +14,5 @@ pub mod checkpoint;
 pub mod reconcile;
 
 pub mod proof;
+
+pub mod lineage;
