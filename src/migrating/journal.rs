@@ -6,17 +6,20 @@
 use super::MigrateCtx;
 use super::list::{Decision, LoadedList};
 use super::project::Projection;
-use crate::attachments::validate_name;
 use crate::claims::{Escalation, Park};
 use crate::error::{Error, Result};
 use crate::model::{Status, TaskId};
 use crate::moving::journal::JournalAttachment;
-use crate::rename::inventory::digest;
-use crate::repo::atomic_write;
+use crate::state_store::{
+    StateRecord, StateStore, check_stem, digest, state_error, validate_carried_fields,
+    validate_digest, validate_source_digest,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+const STORE: StateStore<MigrationJournal> = StateStore::new("migrate");
 
 /// One carried task: the fields of `move`'s journal, per task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +44,39 @@ pub struct CarriedEntry {
     pub target_park: Option<Park>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_escalation: Option<Escalation>,
+}
+
+impl CarriedEntry {
+    pub(crate) fn validate(&self, path: &Path) -> Result<()> {
+        validate_carried_fields(
+            path,
+            Some(&self.source),
+            &self.source_text,
+            &self.source_digest,
+            &self.attachments,
+            self.source_park.as_ref(),
+            self.target_park.as_ref(),
+            self.source_escalation.as_ref(),
+            self.target_escalation.as_ref(),
+        )?;
+        let target = physical(path, &self.target_text, &self.target)?;
+        if target.status() == Status::Moved {
+            return Err(Error::Config(format!(
+                "{}: {} is written as a tombstone",
+                path.display(),
+                self.target
+            )));
+        }
+        let tombstone = physical(path, &self.tombstone_text, &self.source)?;
+        if tombstone.status() != Status::Moved {
+            return Err(Error::Config(format!(
+                "{}: {}'s tombstone is not moved",
+                path.display(),
+                self.source
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// One dropped or closed task.
@@ -121,17 +157,8 @@ impl MigrationJournal {
         prefix: &str,
         get: impl Fn(&str) -> Option<OsString>,
     ) -> Result<PathBuf> {
-        prefix_id(prefix).map_err(|error| journal_error(Path::new(prefix), error))?;
-        let base = if let Some(state) = get("XDG_STATE_HOME") {
-            PathBuf::from(state)
-        } else if let Some(home) = get("HOME") {
-            PathBuf::from(home).join(".local/state")
-        } else {
-            return Err(Error::Config(
-                "neither XDG_STATE_HOME nor HOME is set".into(),
-            ));
-        };
-        Ok(base.join(format!("tasks/migrate/{prefix}.toml")))
+        prefix_id(prefix).map_err(|error| state_error(Path::new(prefix), error))?;
+        STORE.path_with(prefix, get)
     }
 
     pub fn load(prefix: &str) -> Result<Option<Self>> {
@@ -139,15 +166,7 @@ impl MigrationJournal {
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Option<Self>> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
-        let journal: Self = toml::from_str(&text)
-            .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
-        journal.validate(path)?;
-        Ok(Some(journal))
+        STORE.load_from(path)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -155,56 +174,23 @@ impl MigrationJournal {
     }
 
     pub(crate) fn save_to(&self, path: &Path) -> Result<()> {
-        self.validate(path)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let text = toml::to_string(self)
-            .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
-        atomic_write(path, text.as_bytes())
+        STORE.save_to(self, path)
     }
 
     pub fn remove(&self) -> Result<()> {
         let path = Self::path(&self.source)?;
         self.validate(&path)?;
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        STORE.remove_from(&path)
     }
 
     /// Every migration journal on this host, sorted by source prefix.
     pub fn pending() -> Result<Vec<Self>> {
-        let directory = Self::path("aa")?
-            .parent()
-            .expect("journal path has a parent")
-            .to_path_buf();
-        Self::pending_in(&directory)
+        STORE.pending()
     }
 
+    #[cfg(test)]
     pub(crate) fn pending_in(directory: &Path) -> Result<Vec<Self>> {
-        let read_dir = match std::fs::read_dir(directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error.into()),
-        };
-        let mut paths = Vec::new();
-        for entry in read_dir {
-            let path = entry?.path();
-            if path.extension().and_then(|extension| extension.to_str()) == Some("toml") {
-                paths.push(path);
-            }
-        }
-        paths.sort();
-        paths
-            .into_iter()
-            .map(|path| {
-                Self::load_from(&path)?.ok_or_else(|| {
-                    Error::Config(format!("{} disappeared while being read", path.display()))
-                })
-            })
-            .collect()
+        STORE.pending_in(directory)
     }
 
     pub fn names_prefix(&self, prefix: &str) -> bool {
@@ -385,20 +371,15 @@ impl MigrationJournal {
 
     pub(crate) fn validate(&self, path: &Path) -> Result<()> {
         let bad = |what: String| Error::Config(format!("{}: {what}", path.display()));
-        prefix_id(&self.source).map_err(|error| journal_error(path, error))?;
-        prefix_id(&self.successor).map_err(|error| journal_error(path, error))?;
+        prefix_id(&self.source).map_err(|error| state_error(path, error))?;
+        prefix_id(&self.successor).map_err(|error| state_error(path, error))?;
         if self.source == self.successor {
             return Err(bad(format!(
                 "source and successor are both {:?}",
                 self.source
             )));
         }
-        if path.file_stem().and_then(|stem| stem.to_str()) != Some(&self.source) {
-            return Err(bad(format!(
-                "filename does not match source {:?}",
-                self.source
-            )));
-        }
+        check_stem(path, &self.source)?;
         for (name, dir) in [
             ("source_root", &self.source_root),
             ("target_root", &self.target_root),
@@ -416,7 +397,7 @@ impl MigrationJournal {
         }
         let mut seen = BTreeSet::new();
         let mut id_in = |text: &str, prefix: &str| -> Result<TaskId> {
-            let id = TaskId::parse(text).map_err(|error| journal_error(path, error))?;
+            let id = TaskId::parse(text).map_err(|error| state_error(path, error))?;
             if id.prefix != prefix {
                 return Err(bad(format!("{text} is not a {prefix} id")));
             }
@@ -428,52 +409,16 @@ impl MigrationJournal {
         for entry in &self.carried {
             id_in(&entry.source, &self.source)?;
             id_in(&entry.target, &self.successor)?;
-            validate_source(path, &entry.source_text, &entry.source_digest)?;
-            let target = physical(path, &entry.target_text, &entry.target)?;
-            if target.status() == Status::Moved {
-                return Err(bad(format!("{} is written as a tombstone", entry.target)));
-            }
-            let tombstone = physical(path, &entry.tombstone_text, &entry.source)?;
-            if tombstone.status() != Status::Moved {
-                return Err(bad(format!("{}'s tombstone is not moved", entry.source)));
-            }
-            let mut names = BTreeSet::new();
-            for attachment in &entry.attachments {
-                validate_name(&attachment.name).map_err(|error| journal_error(path, error))?;
-                if !names.insert(&attachment.name) {
-                    return Err(bad(format!(
-                        "duplicate attachment {:?} on {}",
-                        attachment.name, entry.source
-                    )));
-                }
-                validate_digest(path, "attachment sha256", &attachment.sha256)?;
-            }
-            if entry.source_park.is_some() != entry.target_park.is_some() {
-                return Err(bad(format!(
-                    "{}: source_park and target_park must both be present or absent",
-                    entry.source
-                )));
-            }
-            if entry.source_escalation != entry.target_escalation {
-                return Err(bad(format!(
-                    "{}: source_escalation and target_escalation must match",
-                    entry.source
-                )));
-            }
-            if let (Some(source), Some(target)) = (&entry.source_park, &entry.target_park) {
-                let mut original = target.clone();
-                original.worktree.clone_from(&source.worktree);
-                if &original != source {
-                    return Err(bad(format!(
-                        "{}: target_park must match source_park except for worktree",
-                        entry.source
-                    )));
-                }
-            }
+            entry.validate(path)?;
         }
         for entry in &self.closed {
             id_in(&entry.id, &self.source)?;
-            validate_source(path, &entry.source_text, &entry.source_digest)?;
+            validate_source_digest(
+                path,
+                &entry.source_text,
+                &entry.source_digest,
+                "a source_text does not digest to its source_digest",
+            )?;
             let want = match Decision::parse(&entry.decision) {
                 Some(Decision::Drop) => Status::Dropped,
                 Some(Decision::Close) => Status::Done,
@@ -504,6 +449,12 @@ impl MigrationJournal {
     }
 }
 
+impl StateRecord for MigrationJournal {
+    fn validate(&self, path: &Path) -> Result<()> {
+        MigrationJournal::validate(self, path)
+    }
+}
+
 /// The freeze over listed and new ids: a pending migration naming `id` refuses.
 pub fn refuse_pending_id(id: &TaskId) -> Result<()> {
     for journal in MigrationJournal::pending()? {
@@ -524,7 +475,7 @@ pub fn pending_naming(prefix: &str, except: Option<&str>) -> Result<Option<Migra
 
 fn physical(path: &Path, text: &str, id: &str) -> Result<crate::format::PhysicalTask> {
     let record = crate::format::parse_physical(text, &format!("{id}.md"))
-        .map_err(|error| journal_error(path, error))?;
+        .map_err(|error| state_error(path, error))?;
     if record.id().to_string() != id {
         return Err(Error::Config(format!(
             "{}: the text journaled for {id} is the record of {}",
@@ -533,36 +484,6 @@ fn physical(path: &Path, text: &str, id: &str) -> Result<crate::format::Physical
         )));
     }
     Ok(record)
-}
-
-fn validate_source(path: &Path, text: &str, sha: &str) -> Result<()> {
-    validate_digest(path, "source_digest", sha)?;
-    if digest(text.as_bytes()) != sha {
-        return Err(Error::Config(format!(
-            "{}: a source_text does not digest to its source_digest",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn validate_digest(path: &Path, field: &str, value: &str) -> Result<()> {
-    if value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        Ok(())
-    } else {
-        Err(Error::Config(format!(
-            "{}: {field} is not a lowercase SHA-256 digest",
-            path.display()
-        )))
-    }
-}
-
-fn journal_error(path: &Path, error: Error) -> Error {
-    Error::Config(format!("{}: {error}", path.display()))
 }
 
 #[cfg(test)]

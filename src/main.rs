@@ -58,6 +58,7 @@ mod shorthand;
 mod show_text;
 mod similarity;
 mod stale;
+mod state_store;
 mod style;
 #[cfg(test)]
 mod surface;

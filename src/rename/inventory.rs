@@ -1,11 +1,14 @@
 use crate::error::{Error, Result};
 use crate::model::{TaskId, is_valid_prefix};
-use crate::repo::{CONFIG_REL, Project, atomic_write};
+use crate::repo::{CONFIG_REL, Project};
+pub use crate::state_store::digest;
+use crate::state_store::{StateRecord, StateStore, check_stem, state_error, validate_digest};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+const STORE: StateStore<Inventory> = StateStore::new("rename");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventoryEntry {
@@ -42,10 +45,6 @@ pub struct Inventory {
     pub records_from: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub records_to: Option<PathBuf>,
-}
-
-pub fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }
 
 /// Rewrite the parsed config prefix using the same serialization P4 will write.
@@ -222,16 +221,7 @@ impl Inventory {
         get: impl Fn(&str) -> Option<OsString>,
     ) -> Result<PathBuf> {
         validate_prefix(source)?;
-        let base = if let Some(state) = get("XDG_STATE_HOME") {
-            PathBuf::from(state)
-        } else if let Some(home) = get("HOME") {
-            PathBuf::from(home).join(".local/state")
-        } else {
-            return Err(Error::Config(
-                "neither XDG_STATE_HOME nor HOME is set".into(),
-            ));
-        };
-        Ok(base.join(format!("tasks/rename/{source}.toml")))
+        STORE.path_with(source, get)
     }
 
     pub fn load(source: &str) -> Result<Option<Inventory>> {
@@ -239,22 +229,7 @@ impl Inventory {
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Option<Inventory>> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
-        let inventory: Inventory = toml::from_str(&text)
-            .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
-        inventory.validate(path)?;
-        if path.file_stem().and_then(|stem| stem.to_str()) != Some(&inventory.source) {
-            return Err(Error::Config(format!(
-                "{}: filename does not match source {:?}",
-                path.display(),
-                inventory.source
-            )));
-        }
-        Ok(Some(inventory))
+        STORE.load_from(path)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -262,16 +237,7 @@ impl Inventory {
     }
 
     pub(crate) fn save_to(&self, path: &Path) -> Result<()> {
-        self.validate(path)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        atomic_write(
-            path,
-            toml::to_string(self)
-                .expect("validated inventory serializes")
-                .as_bytes(),
-        )
+        STORE.save_to(self, path)
     }
 
     pub fn remove(&self) -> Result<()> {
@@ -279,48 +245,21 @@ impl Inventory {
     }
 
     pub(crate) fn remove_from(path: &Path) -> Result<()> {
-        match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        STORE.remove_from(path)
     }
 
     pub fn pending() -> Result<Vec<Inventory>> {
-        let directory = Self::path("aa")?
-            .parent()
-            .expect("inventory path has a parent")
-            .to_path_buf();
-        Self::pending_in(&directory)
+        STORE.pending()
     }
 
+    #[cfg(test)]
     pub(crate) fn pending_in(directory: &Path) -> Result<Vec<Inventory>> {
-        let read_dir = match std::fs::read_dir(directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error.into()),
-        };
-        let mut paths = Vec::new();
-        for entry in read_dir {
-            let path = entry?.path();
-            if path.extension().and_then(|extension| extension.to_str()) == Some("toml") {
-                paths.push(path);
-            }
-        }
-        paths.sort();
-        paths
-            .into_iter()
-            .map(|path| {
-                Self::load_from(&path)?.ok_or_else(|| {
-                    Error::Config(format!("{} disappeared while being read", path.display()))
-                })
-            })
-            .collect()
+        STORE.pending_in(directory)
     }
 
     pub(crate) fn validate(&self, path: &Path) -> Result<()> {
-        validate_prefix(&self.source).map_err(|error| inventory_error(path, error))?;
-        validate_prefix(&self.target).map_err(|error| inventory_error(path, error))?;
+        validate_prefix(&self.source).map_err(|error| state_error(path, error))?;
+        validate_prefix(&self.target).map_err(|error| state_error(path, error))?;
         if self.source == self.target {
             return Err(Error::Config(format!(
                 "{}: source and target prefixes are both {:?}",
@@ -408,7 +347,7 @@ impl Inventory {
         let mut seen = BTreeSet::new();
         for entry in &self.entries {
             TaskId::parse(&format!("{}-{}", self.source, entry.hex))
-                .map_err(|error| inventory_error(path, error))?;
+                .map_err(|error| state_error(path, error))?;
             if !seen.insert(&entry.hex) {
                 return Err(Error::Config(format!(
                     "{}: duplicate entry {:?}",
@@ -501,6 +440,17 @@ pub(crate) fn task_paths(directory: &Path) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+impl StateRecord for Inventory {
+    fn validate_loaded(&self, path: &Path) -> Result<()> {
+        self.validate(path)?;
+        check_stem(path, &self.source)
+    }
+
+    fn validate(&self, path: &Path) -> Result<()> {
+        Inventory::validate(self, path)
+    }
+}
+
 fn validate_prefix(prefix: &str) -> Result<()> {
     if is_valid_prefix(prefix) {
         Ok(())
@@ -509,25 +459,6 @@ fn validate_prefix(prefix: &str) -> Result<()> {
             "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
         )))
     }
-}
-
-fn validate_digest(path: &Path, field: &str, value: &str) -> Result<()> {
-    if value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        Ok(())
-    } else {
-        Err(Error::Config(format!(
-            "{}: {field} is not a lowercase SHA-256 digest",
-            path.display()
-        )))
-    }
-}
-
-fn inventory_error(path: &Path, error: Error) -> Error {
-    Error::Config(format!("{}: {error}", path.display()))
 }
 
 fn rewrite_config_lineage(
