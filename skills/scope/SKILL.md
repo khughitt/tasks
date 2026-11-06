@@ -101,7 +101,10 @@ Name genuinely unavailable context as an unknown; never invent the missing findi
 ### Find the originating ask
 
 Follow each member back to the ask that led to it, and record the outcome. Read its
-origin by the README's [reading rule](../../docs/task-model.md#origin-and-provenance) first.
+origin by the reading rule first: when the `origin` field is set, it is the record's
+origin and supersedes every occurrence label; when the field is absent, the origin is
+unknown, though any occurrence label `user` or `mixed` means the record carries some of
+the user's words.
 Retrieval has two stages: the filing event always comes first, and an older request,
 when the record names one, is found only from the filing event's evidence, never
 searched for directly by the record's id or time.
@@ -114,12 +117,21 @@ searched for directly by the record's id or time.
 2. Take that occurrence's filing session from its stamp (`harness_session`), and for a
    Codex worker also `root_session`. With no stamp, the outcome is unavailable.
 3. Locate that transcript with the `session-logs` skill: live stores, archived stores
-   (`archived_sessions`) and other harness homes on this host. Use hq-c411df's reader
-   once obs-d98663 ships.
-4. Bind the occurrence to its call. Candidates are the `tasks add` or `tasks feedback`
-   calls in that session whose arguments fit the occurrence (title or summary, flags)
-   and whose time fits the note's `at`. A `show` or any other mention of the id is not
-   a candidate. What a candidate's result shows decides how strongly it binds:
+   (`archived_sessions`) and other harness homes on this host. A Claude Code subagent
+   inherits its parent's `CLAUDE_CODE_SESSION_ID`, so when the parent transcript
+   `<session>.jsonl` dispatches an `Agent` instead of running the call directly, search
+   `<session>/subagents/agent-*.jsonl` alongside it (`hq-4d77cc`). Use `hq-c411df`'s
+   reader once `obs-d98663` ships.
+4. Bind the occurrence to its call. Deduplicate `api-request-blob` records (which repeat
+   earlier `tool_use`/`tool_result` blocks without timestamps) by `tool_use` id first.
+   Candidates are the `tasks add` or `tasks feedback` calls in that session whose
+   arguments fit the occurrence (title or summary, flags) and whose time fits the note's
+   `at`. A call refused by a hook before it ran (`PreToolUse` or hook error with no
+   tracker output) never executed and is excluded, not treated as an unreadable result.
+   A call whose invocation starts after the note's `at` second (or finishes before `at`)
+   does not fit `at` and is excluded on time, except under the id-only sourced `add`
+   rule below when stderr was not captured. A `show` or any other mention of the id is
+   not a candidate. What a candidate's result shows decides how strongly it binds:
    - **Full result:** JSON output naming the id and an action; `feedback --pretty`'s
      `<action> <id>` is full except for `at`. A `reused` action excludes the candidate;
      a matching action (`created` for a creation, `recurred` for a recurrence) keeps it.
@@ -128,8 +140,11 @@ searched for directly by the record's id or time.
      Settle the action from the rest of the call. The reuse warning is in the captured
      result: excluded as a reuse. The call has no `--source`: a creation, since only a
      sourced add can reuse. A sourced call without that warning, where the transcript
-     captured stderr: a creation. Otherwise it is unsettled: still a candidate, but
-     either a creation or a reuse.
+     captured stderr: a creation (Claude Code's Bash capture merges stderr into
+     `toolUseResult.stdout` and leaves `stderr` empty, so a normal Claude Code Bash
+     result captures stderr inside `stdout` unless the command redirected stderr away or
+     an excerpt stripped it). Otherwise it is unsettled: still a candidate, but either a
+     creation or a reuse.
    - **Unreadable result:** a candidate on arguments and time alone.
 
    The outcome:
@@ -143,10 +158,12 @@ searched for directly by the record's id or time.
    - **ambiguous:** more than one candidate remains, or the only one left has an
      unsettled action. An id-only sourced add without captured stderr is ambiguous
      between creation and reuse even when it is the session's only candidate; beside
-     another call with the same source and title, both are listed. So are two
-     recurrences in one session with equal summaries in the same second (in JSON too:
-     `at` has whole-second precision), or concurrent subagents under one Claude session.
-     List the candidates and any unsettled action; never pick one.
+     another call in the session with the same source and title (even one that started
+     after the note's `at`), both are listed so the unsettled creation-or-reuse pair is
+     visible. Two recurrences in one session with equal summaries in the same second (in
+     JSON too: `at` has whole-second precision), or concurrent subagents under one
+     Claude session, are also ambiguous. List the candidates and any unsettled action;
+     never pick one.
    - **unavailable:** no candidate remains although the transcript was read. Record what
      was searched.
 5. Read the request, the action, the tool result and any later correction around the
@@ -236,11 +253,11 @@ Every successfully processed member receives exactly one audit note. For `briefe
     tasks -C <root> note <id> --reviewed --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>][; brief: <path>][; proposal: <text>]"
 
 `question` adds `--awaiting-user` to that command. Write every scope and brief note with
-`--stamp`, so a later agent can find the session behind a requirement edit. For a woken or stranded idea, gather
-the closed follow-ups' outcomes as evidence (§2) before choosing; the new audit note
-re-stamps the review, so edges closed earlier stop counting as new. Whoever answers a
-question or declines a proposal records it with `tasks note <id> --no-reviewed
-"<answer>"`, which readmits the idea with the answer.
+`--stamp`, so a later agent can find the session behind a requirement edit. For a woken
+or stranded idea, gather the closed follow-ups' outcomes as evidence (§2) before
+choosing; the new audit note re-stamps the review, so edges closed earlier stop counting
+as new. Whoever answers a question or declines a proposal records it with
+`tasks note <id> --no-reviewed "<answer>"`, which readmits the idea with the answer.
 
 `scoped` and `shelved` change the status first, which clears the flag; their audit note
 is a `tasks note --stamp` without `--reviewed` (refused on a non-idea).

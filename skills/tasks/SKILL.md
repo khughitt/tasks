@@ -109,13 +109,15 @@ mean those documents were verified.
    and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
-   Before asking the user about a task's intent, read its origin by the
-   [reading rule](../../docs/task-model.md#origin-and-provenance): a set `origin` field is
-   the record's origin, superseding every occurrence label; an absent one is unknown, though an occurrence note labelled
-   `user` or `mixed` means it carries some of the user's words. `user` means the user
-   holds the intent. For `agent`, `mixed` or unknown, first follow the record to its
-   originating ask with the scope skill's procedure (§2, "Find the originating ask"),
-   and ask only what that evidence leaves to the user.
+   Before asking the user about a task's intent, read its origin by the reading rule: a
+   set `origin` field is the record's origin, superseding every occurrence label; an
+   absent one is unknown, though an occurrence note labelled `user` or `mixed` means the
+   record carries some of the user's words. `user` means the user holds the intent. For
+   `agent`, `mixed` or unknown, first follow the record to its originating ask with the
+   scope skill's procedure (§2, "Find the originating ask"), record the stage outcomes
+   (and any origin correction evidence) in a stamped note on the task
+   (`tasks note <id> "origin: <stage outcomes>[; <evidence>]" --stamp`), and ask only
+   what that evidence leaves to the user.
    `ready` and `next` omit live claims; see the [claim and checkout contract](../../docs/ownership.md#acquire-refresh-and-release)
    and `tasks start --help` / `tasks release --help` for ownership and recovery.
    `tasks start --force <id>` deliberately takes over another session's claim and records it;
