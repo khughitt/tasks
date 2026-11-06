@@ -782,10 +782,6 @@ pub struct Closed {
 pub struct Projection {
     /// Lowercase hex sha256 of the list, without `sha256:`.
     pub list_sha: String,
-    /// The one time every record of the run is stamped with.
-    // Kept for the journal-less recovery of the plan's Task 6.
-    #[allow(dead_code)]
-    pub now: String,
     pub carried: Vec<Carried>,
     pub closed: Vec<Closed>,
     /// Each carried v1 id to its new id.
@@ -899,20 +895,6 @@ fn list_ids(ids: &[TaskId]) -> String {
 /// docs/project-operations.md names: `release_mismatch`, `close_status`, `close_outputs`, and
 /// `closed_invalid` for a record `drop`/`done` would not write. `done`'s refusals over open
 /// descendants and open dependencies are not applied (docs/project-operations.md). Writes nothing.
-// The joined `explain` reads the dependents once for both projections; this is the
-// standalone entry point.
-#[allow(dead_code)]
-pub fn project_closed(
-    ctx: &mut MigrateCtx,
-    list: &LoadedList,
-    carried_ids: &BTreeMap<TaskId, TaskId>,
-    now: &str,
-) -> Result<(Vec<Closed>, Vec<RefusalOut>)> {
-    let wide = release::read(&ctx.registry, &ctx.source.project.root)?;
-    ctx.source.warnings.extend(wide.warnings.iter().cloned());
-    project_closed_in(ctx, list, carried_ids, now, &wide)
-}
-
 fn project_closed_in(
     ctx: &mut MigrateCtx,
     list: &LoadedList,
@@ -1256,7 +1238,6 @@ pub fn explain(
     Ok((
         Some(Projection {
             list_sha: list.sha256.clone(),
-            now,
             carried,
             closed,
             id_map,

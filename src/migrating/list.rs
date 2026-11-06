@@ -34,8 +34,6 @@ pub struct Entry {
     pub body: Option<String>,
 }
 
-// Read by the preflight and apply of the plan's later tasks.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
     Carry,
@@ -43,7 +41,6 @@ pub enum Decision {
     Close,
 }
 
-#[allow(dead_code)]
 impl Decision {
     /// `None` for anything but the three decisions, `""` (undecided) included; the caller
     /// tells those apart because only `""` is the draft's own value.
@@ -57,8 +54,6 @@ impl Decision {
     }
 }
 
-// Read by the preflight and apply of the plan's later tasks.
-#[allow(dead_code)]
 pub struct LoadedList {
     pub list: DecisionList,
     /// The file exactly as read.
