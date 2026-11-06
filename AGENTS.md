@@ -60,8 +60,10 @@ Pushes outside that coverage warn; policy still controls local broad execution.
 `just test-one` and mandatory hygiene always run; `TT_FORCE=1` explicitly forces
 broad checks, including nested recipes. A hosted would-be skip without force fails.
 
-Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
-`cargo install --locked --path .`
+Rebuild and reinstall from the main checkout after CLI changes join `main` (or set
+`CARGO_INSTALL_ROOT` and `CARGO_TARGET_DIR` inside a worktree for an isolated install)
+so the tracker on `PATH` is not repointed at a worktree:
+`just install`
 
 ## Layout
 

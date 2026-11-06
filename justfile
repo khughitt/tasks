@@ -83,6 +83,12 @@ gate: check test
 docs:
     {{tt}} docs -- python3 tools/ops-docs write
 
+# Build and install the tasks CLI from this checkout; run from the main checkout (or
+# set CARGO_INSTALL_ROOT and CARGO_TARGET_DIR inside a worktree) so PATH is not
+# repointed at a worktree.
+install:
+    {{tt}} install -- cargo install --locked --path .
+
 # Link every skills/* directory into ~/.claude/skills and ~/.agents/skills. Idempotent;
 # re-run after a pull adds a skill.
 install-skills:

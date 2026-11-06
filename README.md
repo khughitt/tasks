@@ -29,11 +29,11 @@ With a Rust toolchain and just:
 git clone https://github.com/khughitt/tasks ~/.local/src/tasks
 cd ~/.local/src/tasks
 just setup
-cargo install --locked --path .
+just install
 just install-skills
 ```
 
-The binary has no service dependency. `--locked` uses checked dependency versions.
+The binary has no service dependency. `just install` runs `cargo install --locked --path .` with checked dependency versions.
 `install-skills` links each shipped skill into `~/.claude/skills` and
 `~/.agents/skills`. A pinned per-project setup keeps a full checkout at the desired
 revision and links the selected skill from the project's .claude/skills/:
@@ -44,7 +44,7 @@ ln -s <absolute-pinned-checkout>/skills/tasks <project>/.claude/skills/tasks
 ```
 
 Keep that checkout and its documentation available: relative contract links resolve
-through the skill link into the checkout. Reinstall the binary after CLI changes.
+through the skill link into the checkout. Reinstall the binary with `just install` after CLI changes.
 
 ### 2. Initialize a project
 
