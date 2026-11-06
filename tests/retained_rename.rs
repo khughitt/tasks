@@ -837,6 +837,65 @@ fn retention_rename_command_pending_or_malformed_refuses() {
         );
     }
 }
+// Plain retained: item diagnostics survive a rename byte for byte, so they never block it;
+// a malformed checkpoint envelope still does.
+#[test]
+fn retention_rename_command_plain_item_diagnostics_do_not_block() {
+    for layout in ["in-tree", "detached", "linked"] {
+        let mut f = observed(layout);
+        f.seed_note(
+            r#"retained: {"schema":1,"id":"wt-x","kind":"worktree","state":"released","host":"host-a","path":"/abs/wt-x","created":"2026-11-05T16:38:00Z"}"#,
+        );
+        f.seed_note(
+            r#"retained: {"version":1,"host":"host-a","kind":"worktree","path":".worktrees/x","state":"released","verification":"verified","purpose":"merged","next_owner":"none","cleanup_trigger":"after merge"}"#,
+        );
+        let before = f.state();
+        assert_eq!(before["complete"], false, "{layout}: {before}");
+        assert_eq!(before["diagnostics"].as_array().unwrap().len(), 2);
+        renamed_live(&mut f, "new");
+        let check = f.cmd().args(["check"]).output().unwrap();
+        assert!(
+            check.status.success(),
+            "{layout}: {}",
+            String::from_utf8_lossy(&check.stdout)
+        );
+        commit_rename(&f, "sci");
+        let after = f.state();
+        assert_eq!(after["task"], f.id);
+        let summary = |v: &serde_json::Value| {
+            v["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| {
+                    (
+                        d["code"].clone(),
+                        d["source"]["ordinal"].clone(),
+                        d["detail"].clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(summary(&after), summary(&before), "{layout}");
+        assert_eq!(after["operations"].as_array().unwrap().len(), 3);
+        let check = f.cmd().args(["check"]).output().unwrap();
+        assert!(
+            check.status.success(),
+            "{layout}: {}",
+            String::from_utf8_lossy(&check.stdout)
+        );
+    }
+    let f = observed("in-tree");
+    f.seed_note(r#"retention checkpoint: {"version":1}"#);
+    let before = f.basis();
+    let out = f.cmd().args(["rename", "sci", "new"]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("incomplete retention history"),
+        "{out:?}"
+    );
+    assert_eq!(f.basis(), before);
+}
 #[test]
 fn retention_rename_command_bad_live_protected_bytes_refuse() {
     let f = observed("in-tree");

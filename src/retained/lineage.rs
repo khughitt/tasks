@@ -527,6 +527,24 @@ fn protected_bytes(project: &Project, pinned: &basis::PinnedTask) -> Result<()> 
     }
     Ok(())
 }
+/// Rename carries every note byte unchanged, so a plain `retained:` item diagnostic reads
+/// the same on both sides of it and does not block it. Operation and checkpoint envelopes
+/// bind the evidence rename must preserve: any unresolved diagnostic on one refuses. An
+/// operation citing a malformed `retained:` ordinal is itself such a diagnostic.
+fn envelopes_complete(project: &Project, pinned: &basis::PinnedTask) -> Result<bool> {
+    let state = super::state::replay(project, &pinned.task, &pinned.basis, None)?;
+    Ok(state
+        .diagnostics
+        .iter()
+        .filter(|d| d.resolved_by.is_none())
+        .all(|d| {
+            d.source
+                .as_ref()
+                .and_then(|s| usize::try_from(s.ordinal).ok()?.checked_sub(1))
+                .and_then(|i| pinned.task.notes.get(i))
+                .is_some_and(|n| n.text.starts_with("retained: "))
+        }))
+}
 pub fn prepare(project: &Project, target: &str) -> Result<Option<RenameEdge>> {
     let tasks = project.scan()?;
     for task in &tasks {
@@ -570,7 +588,7 @@ pub fn prepare(project: &Project, target: &str) -> Result<Option<RenameEdge>> {
         }
         super::proof::validate_history(project, &pinned, None)?;
         super::reconcile::validate_terminal_history(project, &pinned)?;
-        if !super::state::replay(project, &pinned.task, &pinned.basis, None)?.complete {
+        if !envelopes_complete(project, &pinned)? {
             return Err(invalid("incomplete retention history cannot be renamed"));
         }
         protected_bytes(project, &pinned)?;
@@ -613,7 +631,7 @@ pub fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
             }
             super::proof::validate_history(project, &pinned, None)?;
             super::reconcile::validate_terminal_history(project, &pinned)?;
-            if !super::state::replay(project, &pinned.task, &pinned.basis, None)?.complete {
+            if !envelopes_complete(project, &pinned)? {
                 return Err(invalid("rename source retention history is incomplete"));
             }
             protected_bytes(project, &pinned)?;

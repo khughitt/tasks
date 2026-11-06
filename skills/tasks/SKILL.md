@@ -848,7 +848,8 @@ On the second host, `--adopt` pairs the directory already renamed by sync.
 With retained history, upgrade every participating reader before creating lineage
 config and keep one coordinated writer through rename/commit/adoption. Source
 config, task histories and protected evidence must be committed/verified; pending
-or uncertain retention operations still block rename. Rerun an interrupted rename
+or uncertain retention operations and malformed operation/checkpoint envelopes
+still block rename, while plain `retained:` item diagnostics carry over unchanged. Rerun an interrupted rename
 using its frozen inventory; never rewrite old requests/checkpoints, detach protected
 artifacts or recreate an edge from today's HEAD. Hook-time check validates the
 source at its pinned commit and destination from the live configuration. Current
