@@ -1,7 +1,9 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
 
-/// Rewrite `id` and local `depends`/`parent` references while preserving the body bytes.
+/// Rewrite `id`, local `depends`/`parent`/`wake_on` references, and References entries
+/// pointing into a `tasks/files/<old>-<hex>` directory the rename moves, preserving every
+/// other byte: body prose and notes stay historical.
 pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
     let rest = text.strip_prefix("---\n").ok_or_else(|| Error::Parse {
         file: String::new(),
@@ -38,9 +40,56 @@ pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
         })
         .collect();
     Ok(format!(
-        "---\n{}---\n{after}",
-        frontmatter::serialize(&rewritten)
+        "---\n{}---\n{}",
+        frontmatter::serialize(&rewritten),
+        rewrite_references(after, old, new)
     ))
+}
+
+fn rewrite_references(after: &str, old: &str, new: &str) -> String {
+    let mut in_refs = false;
+    let mut out = String::with_capacity(after.len());
+    let mut read = 0;
+    for raw in after.split_inclusive('\n') {
+        read += raw.len();
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line == crate::format::REFS_DELIMITER {
+            in_refs = true;
+        } else if line == crate::format::NOTES_DELIMITER {
+            // Notes are history: copy them verbatim.
+            out.push_str(raw);
+            out.push_str(&after[read..]);
+            return out;
+        } else if in_refs && let Some(moved) = moved_reference(line, old, new) {
+            out.push_str(&moved);
+            out.push_str(&raw[line.len()..]);
+            continue;
+        }
+        out.push_str(raw);
+    }
+    out
+}
+
+/// The entry line with its reference moved to `<new>-<hex>`, when the reference is a local
+/// path at or under `tasks/files/<old>-<hex>`; None leaves the line untouched.
+fn moved_reference(line: &str, old: &str, new: &str) -> Option<String> {
+    let (head, rest) = line.strip_prefix("- ")?.split_once("): ")?;
+    let (quote, path) = match rest.strip_prefix('"') {
+        Some(path) => ("\"", path),
+        None => ("", rest),
+    };
+    let tail = path
+        .strip_prefix("tasks/files/")?
+        .strip_prefix(old)?
+        .strip_prefix('-')?;
+    let hex = tail.get(..6)?;
+    let after = &tail[6..];
+    crate::model::TaskId::parse(&format!("{old}-{hex}")).ok()?;
+    if !(after.is_empty() || after.starts_with(['/', '"', ' '])) {
+        return None;
+    }
+    Some(format!("- {head}): {quote}tasks/files/{new}-{hex}{after}"))
 }
 
 #[cfg(test)]
@@ -67,6 +116,38 @@ depends: [dot-b11111, ops-c22222]\ntags: []\n---\n\n\nBody   with  odd    spacin
             body(HAND_WRITTEN),
             "post-frontmatter bytes are untouched"
         );
+    }
+
+    #[test]
+    fn references_into_moved_attachment_directories_follow_them() {
+        let text = HAND_WRITTEN
+            .replacen(
+                "\n## Notes\n",
+                "\nProse keeps tasks/files/dot-b11111/a.png.\n\n## References\n\n\
+- a (input, required, kind=image): tasks/files/dot-b11111/a.png — tasks/files/dot-b11111\n\
+- b (context): \"tasks/files/dot-b11111\"\n\
+- c (context): tasks/files/dot-b111110/x.md\n\
+- d (context): tasks/files/ops-c22222/x.md\n\
+- e (context): docs/tasks/files/dot-b11111/x.md\n\
+- f (context): files:a.png\n\
+\n## Notes\n",
+                1,
+            )
+            .replace("two spaces after the colon", "tasks/files/dot-b11111/a.png");
+        let out = rewrite_prefix(&text, "dot", "dots").unwrap();
+        let body = |t: &str| t.split_once("\n---\n").unwrap().1.to_string();
+        let expected = body(&text)
+            .replacen(
+                "kind=image): tasks/files/dot-b11111/",
+                "kind=image): tasks/files/dots-b11111/",
+                1,
+            )
+            .replacen(
+                "\"tasks/files/dot-b11111\"",
+                "\"tasks/files/dots-b11111\"",
+                1,
+            );
+        assert_eq!(body(&out), expected);
     }
 
     #[test]

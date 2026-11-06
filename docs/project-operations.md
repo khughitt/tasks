@@ -132,7 +132,9 @@ copy. Neither direction can reconstruct bytes from a digest alone.
 
 `rename <old> <new> --explain` diagnoses without writes/locks/authorization checks.
 Apply requires clean tasks/, no live claims and at most one git worktree. It
-renames files/ids/local edges/config/registry and attachment directories; aliases
+renames files/ids/local edges/config/registry and attachment directories, and
+moves References paths at or under `tasks/files/<old>-<hex>` to the renamed
+directory; body prose and notes keep their old spellings. Aliases
 keep old spellings resolving while registered. A dependency's retired/live
 spellings mean one edge; remove/add cannot rewrite it in one call.
 

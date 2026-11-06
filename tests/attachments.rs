@@ -1081,6 +1081,66 @@ fn rename_moves_attachment_directories_with_their_records() {
     assert!(check_kinds(&env, &dir, "errors").is_empty());
 }
 
+/// A reference into another task's attachment directory follows the directory the rename
+/// moves, fresh and on resume; body prose and notes keep their historical bytes.
+#[test]
+fn rename_rewrites_references_into_moved_attachment_directories() {
+    for stop in [None, Some("file:0"), Some("file:1")] {
+        let mut env = TestEnv::new();
+        let dir = env.init("dot");
+        git(&dir, &["init", "-q", "-b", "main"]);
+        let with = id_of(env.json(&dir, &["add", "With", "-p", "2"]));
+        let source = write(&dir.join("scratch/a.png"), b"a");
+        env.json(&dir, &["attach", &with, source.to_str().unwrap()]);
+        std::fs::remove_dir_all(dir.join("scratch")).unwrap();
+        let file = format!("tasks/files/{with}/a.png");
+        let folder = format!("tasks/files/{with}");
+        let body = format!("See [ref:image] and [ref:folder]; prose cites {folder} as written.");
+        let citing = id_of(env.json(
+            &dir,
+            &[
+                "add",
+                "Citing",
+                "-p",
+                "2",
+                "--body",
+                &body,
+                "--ref",
+                &format!("image (input, required, kind=image): {file} — the image"),
+                "--ref",
+                &format!("folder (context): {folder}"),
+            ],
+        ));
+        env.json(&dir, &["note", &citing, &format!("reviewed {file}")]);
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "seed"]);
+        if let Some(boundary) = stop {
+            stop_after(&env, &dir, boundary);
+        }
+        env.json(&dir, &["rename", "dot", "dots"]);
+        let shown = env.json(&dir, &["show", &renamed(&citing)])["task"].clone();
+        let refs = shown["refs"].as_array().unwrap();
+        let new_folder = format!("tasks/files/{}", renamed(&with));
+        assert_eq!(
+            refs[0]["reference"],
+            format!("{new_folder}/a.png"),
+            "{stop:?}"
+        );
+        assert_eq!(refs[0]["description"], "the image");
+        assert_eq!(refs[1]["reference"], new_folder);
+        assert_eq!(shown["body"], body);
+        assert_eq!(
+            shown["notes"].as_array().unwrap().last().unwrap()["text"],
+            format!("reviewed {file}")
+        );
+        assert!(
+            check_kinds(&env, &dir, "errors").is_empty(),
+            "{stop:?}: {:?}",
+            check_kinds(&env, &dir, "errors")
+        );
+    }
+}
+
 #[test]
 fn rename_resumes_between_the_directory_move_and_the_source_removal() {
     let mut env = TestEnv::new();
