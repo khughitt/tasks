@@ -270,4 +270,27 @@ mod tests {
             assert!(error.contains(name));
         }
     }
+
+    #[test]
+    fn resolve_root_from_requires_a_distinct_codex_thread_and_session() {
+        let lookup = |vars: Vars<'_>| {
+            let get = |name: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| OsString::from(v))
+            };
+            let selected = resolve_from(get).unwrap();
+            resolve_root_from(selected.as_ref(), get)
+        };
+        assert_eq!(
+            lookup(&[("CODEX_THREAD_ID", "worker"), ("CODEX_SESSION_ID", "root")]),
+            Some("codex:root".into())
+        );
+        assert_eq!(
+            lookup(&[("CODEX_THREAD_ID", "same"), ("CODEX_SESSION_ID", "same")]),
+            None
+        );
+        assert_eq!(lookup(&[("CODEX_SESSION_ID", "root")]), None);
+        assert_eq!(lookup(&[]), None);
+    }
 }

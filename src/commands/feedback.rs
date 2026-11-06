@@ -410,8 +410,10 @@ mod tests {
         assert_eq!(recur_origin(None, None), (None, false));
         assert_eq!(recur_origin(None, Some(User)), (None, true));
         assert_eq!(recur_origin(Some(User), Some(User)), (Some(User), false));
+        assert_eq!(recur_origin(Some(Agent), Some(Agent)), (Some(Agent), false));
         assert_eq!(recur_origin(Some(User), Some(Agent)), (Some(Mixed), false));
         assert_eq!(recur_origin(Some(Mixed), Some(User)), (Some(Mixed), false));
+        assert_eq!(recur_origin(Some(Mixed), Some(Agent)), (Some(Mixed), false));
     }
 
     #[test]

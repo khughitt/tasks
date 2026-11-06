@@ -642,14 +642,23 @@ fn editor_saves_validate_added_entries() {
         let id = id_of(env.json(&dir, &["add", "T"]));
         if notes {
             env.json(&dir, &["note", &id, "A note"]);
+        } else {
+            // Exercise a legacy record without a `## Notes` section.
+            let path = dir.join(format!("tasks/{id}.md"));
+            let raw = std::fs::read_to_string(&path).unwrap();
+            let stripped = raw.split("\n## Notes\n").next().unwrap();
+            std::fs::write(&path, format!("{stripped}\n")).unwrap();
         }
         for (entry, expected) in [
             ("x (input): docs/none.md", Some("ref_not_found")),
             ("x (input): docs/b.md", None),
         ] {
             let section = format!("## References\\n\\n- {entry}\\n\\n");
-            // Every record carries a creation note, so the section goes before `## Notes`.
-            let body = format!("sed -i '/^## Notes/i {section}' \"$1\"");
+            let body = if notes {
+                format!("sed -i '/^## Notes/i {section}' \"$1\"")
+            } else {
+                format!("printf '\\n{section}' >> \"$1\"")
+            };
             let editor = common::editor_script(env.home.path(), &body);
             let out = env
                 .cmd(&dir)

@@ -1134,19 +1134,57 @@ mod tests {
 
     #[test]
     fn occurrence_keys_reject_bad_forms() {
-        for json in [
-            r#"{"origin":"maybe"}"#,
-            r#"{"origin_session":"slack:abc"}"#,
-            r#"{"origin_session":"codex:"}"#,
-            r#"{"root_session":"codex:r"}"#,
-            r#"{"harness_session":"claude-code:a","harness_session_source":"CLAUDE_CODE_SESSION_ID","root_session":"codex:r"}"#,
-            r#"{"harness_session":"codex:w","harness_session_source":"CODEX_THREAD_ID","root_session":"claude-code:r"}"#,
-            r#"{"harness_session":"codex:w"}"#,
-            r#"{"surprise":1}"#,
+        for (json, expected) in [
+            (r#"{"origin":"maybe"}"#, "unknown origin"),
+            (r#"{"origin_session":"slack:abc"}"#, "session key"),
+            (r#"{"origin_session":"codex:"}"#, "session key"),
+            (
+                r#"{"root_session":"codex:r"}"#,
+                "root_session is a codex: key and needs a harness pair whose source is CODEX_THREAD_ID",
+            ),
+            (
+                r#"{"harness_session":"claude-code:a","harness_session_source":"CLAUDE_CODE_SESSION_ID","root_session":"codex:r"}"#,
+                "root_session is a codex: key and needs a harness pair whose source is CODEX_THREAD_ID",
+            ),
+            (
+                r#"{"harness_session":"codex:w","harness_session_source":"CODEX_THREAD_ID","root_session":"claude-code:r"}"#,
+                "root_session is a codex: key and needs a harness pair whose source is CODEX_THREAD_ID",
+            ),
+            (
+                r#"{"harness_session":"codex:w"}"#,
+                "harness_session and harness_session_source go together",
+            ),
+            (r#"{"surprise":1}"#, "unknown field"),
         ] {
             let text =
                 format!("{FULL}- 2026-10-25T12:00:00Z (add): created\n  provenance: {json}\n");
-            assert!(crate::history::fixture(&text, "t").is_err(), "{json}");
+            let error = crate::history::fixture(&text, "t").unwrap_err().to_string();
+            assert!(error.contains(expected), "{json}: {error}");
+        }
+
+        let base = crate::history::fixture(FULL, "t").unwrap();
+        for (occurrence, expected) in [
+            (
+                NoteOccurrence {
+                    root_session: None,
+                    origin: None,
+                    origin_session: Some("slack:abc".into()),
+                },
+                "session key",
+            ),
+            (
+                NoteOccurrence {
+                    root_session: Some("codex:r".into()),
+                    origin: None,
+                    origin_session: None,
+                },
+                "root_session is a codex: key",
+            ),
+        ] {
+            let mut bad = base.clone();
+            bad.notes[0].occurrence = occurrence;
+            let error = validate_task(&bad).unwrap_err().to_string();
+            assert!(error.contains(expected), "{error}");
         }
     }
 
@@ -1165,6 +1203,16 @@ mod tests {
         let task = crate::history::fixture(&text, "x").unwrap();
         assert_eq!(task.origin, Some(Origin::User));
         assert_eq!(crate::history::fixture_text(&task), text);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(
+            json.contains(r#""agent":"codex/gpt-6","origin":"user""#),
+            "{json}"
+        );
+        let with_notes = crate::history::fixture(FULL, "x").unwrap();
+        let note_json = serde_json::to_string(&with_notes.notes[0]).unwrap();
+        for key in ["root_session", "origin", "origin_session"] {
+            assert!(!note_json.contains(key), "{note_json}");
+        }
         let bad = MINIMAL.replace("tags: []\n", "tags: []\norigin: someone\n");
         let error = crate::history::fixture(&bad, "x").unwrap_err().to_string();
         assert!(error.contains("unknown origin"), "{error}");

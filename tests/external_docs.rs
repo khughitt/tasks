@@ -733,7 +733,12 @@ fn external_doc_editor_skips_unchanged_links_and_canonicalizes_changes() {
     );
     let calls = docs.calls();
     docs.disconnect();
-    std::fs::write(&editor, "sed -i '/^## Notes/i Body edit\\n' \"$1\"\n").unwrap();
+    // Exercise a legacy record without a `## Notes` section.
+    let record = dir.join(format!("tasks/{id}.md"));
+    let raw = std::fs::read_to_string(&record).unwrap();
+    let stripped = raw.split("\n## Notes\n").next().unwrap();
+    std::fs::write(&record, format!("{stripped}\n")).unwrap();
+    std::fs::write(&editor, "printf '\\nBody edit\\n' >> \"$1\"\n").unwrap();
     let out = env
         .cmd(&dir)
         .env("EDITOR", &command)
@@ -742,7 +747,6 @@ fn external_doc_editor_skips_unchanged_links_and_canonicalizes_changes() {
         .unwrap();
     assert!(out.status.success(), "{out:?}");
     assert_eq!(docs.calls(), calls);
-    let record = dir.join(format!("tasks/{id}.md"));
     assert!(
         std::fs::read_to_string(&record)
             .unwrap()

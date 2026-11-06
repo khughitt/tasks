@@ -27438,8 +27438,13 @@ fn feedback_creation_and_recurrence_are_stamped_per_occurrence() {
     assert_eq!(notes[0]["at"], task["created"]);
 
     let mut outs = Vec::new();
-    for body in ["first detail", "second detail"] {
-        std::thread::sleep(std::time::Duration::from_millis(1100));
+    for (idx, body) in ["first detail", "second detail"].into_iter().enumerate() {
+        if idx > 0 {
+            let sec = time::OffsetDateTime::now_utc().second();
+            while time::OffsetDateTime::now_utc().second() == sec {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
         let out = file("B", &["--recur", &id, "-b", body]);
         assert_eq!(out["action"], "recurred");
         outs.push(out);
@@ -27496,6 +27501,13 @@ fn feedback_outside_projects_writes_creation_note() {
         ],
     );
     let task = env.json(&target, &["show", out["id"].as_str().unwrap()])["task"].clone();
+    assert!(
+        task["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("from:unregistered")),
+        "{task}"
+    );
     let notes = task["notes"].as_array().unwrap();
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0]["text"], "created");
@@ -27598,6 +27610,22 @@ fn bad_origin_inputs_are_refused_before_writing() {
         "validation"
     );
     assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "feedback",
+                "--project",
+                "sci",
+                "Bad origin session",
+                "--category",
+                "gap",
+                "--origin-session",
+                "slack:x"
+            ]
+        ),
+        "validation"
+    );
+    assert_eq!(
         std::fs::read_dir(dir.join("tasks"))
             .unwrap()
             .filter(|e| {
@@ -27610,6 +27638,27 @@ fn bad_origin_inputs_are_refused_before_writing() {
             .count(),
         0
     );
+
+    let id = id_of(env.json(&dir, &["add", "Valid"]));
+    for flag in ["--origin=user", "--no-origin"] {
+        let err = env.usage(&dir, &["edit", &id, "--editor", flag]);
+        assert!(err.contains("--editor"), "{err}");
+    }
+
+    let path = dir.join(format!("tasks/{id}.md"));
+    let original = std::fs::read_to_string(&path).unwrap();
+    for bad in [
+        original.replace("tags: []\n", "tags: []\norigin: maybe\n"),
+        format!("{original}  provenance: {{\"origin\":\"maybe\"}}\n"),
+        format!("{original}  provenance: {{\"origin_session\":\"slack:x\"}}\n"),
+    ] {
+        std::fs::write(&path, &bad).unwrap();
+        let out = env.cmd(&dir).args(["check"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{bad}");
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(report["errors"][0]["kind"], "parse", "{report}");
+    }
+    std::fs::write(&path, original).unwrap();
 }
 
 #[test]
@@ -27773,12 +27822,14 @@ fn pretty_show_prints_origin_after_agent() {
     let id = run_ok(
         &env,
         &dir,
-        &[],
+        &[("CODEX_THREAD_ID", "w"), ("CODEX_SESSION_ID", "r")],
         &[
             "add",
             "Shown",
             "--origin",
             "mixed",
+            "--origin-session",
+            "claude-code:old",
             "--agent",
             "codex/gpt-6",
         ],
@@ -27794,12 +27845,40 @@ fn pretty_show_prints_origin_after_agent() {
         .expect(&text);
     assert!(lines[agent + 1].starts_with("origin:"), "{text}");
     assert!(lines[agent + 1].ends_with("mixed"), "{text}");
+    for expected in [
+        "codex:w",
+        "root session codex:r",
+        "origin mixed",
+        "origin session claude-code:old",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
+    }
 }
 
 #[test]
 fn origin_survives_unknown_identity() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    let no_id = run_ok(
+        &env,
+        &dir,
+        &[],
+        &[
+            "add",
+            "No identity",
+            "--origin",
+            "user",
+            "--origin-session",
+            "codex:old",
+        ],
+    );
+    assert!(no_id["warnings"].as_array().unwrap().is_empty(), "{no_id}");
+    let task = shown_task(&env, &dir, no_id["id"].as_str().unwrap());
+    assert_eq!(task["origin"], "user");
+    assert_eq!(task["notes"][0]["origin"], "user");
+    assert_eq!(task["notes"][0]["origin_session"], "codex:old");
+    assert!(task["notes"][0].get("harness_session").is_none());
+
     let out = run_ok(
         &env,
         &dir,
