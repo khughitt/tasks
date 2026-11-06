@@ -836,6 +836,14 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         }
     }
 
+    if let Err(error) = crate::retained::lineage::check_live(&ctx.project, &tasks) {
+        errors.push(finding(
+            None,
+            crate::repo::CONFIG_REL.into(),
+            "retention_lineage",
+            error.to_string(),
+        ));
+    }
     for problem in crate::attachments::audit(&ctx.project, &tasks)? {
         let finding = Finding {
             id: problem.id.map(|id| id.to_string()),

@@ -136,6 +136,12 @@ renames files/ids/local edges/config/registry and attachment directories; aliase
 keep old spellings resolving while registered. A dependency's retired/live
 spellings mean one edge; remove/add cannot rewrite it in one call.
 
+Retained history adds a Git-backed source/lineage check: all operations must be
+completed or proved reconciled and tasks/.config.toml must match HEAD. The edge
+anchors the source commit/ref and old/new records subdirectories; historical
+notes and attachment contents remain unchanged. No general move/migrate exception
+is granted. See [retention](retention.md#project-rename-and-historical-locators).
+
 Pending inventory freezes writes; rerun the same rename to finish forward.
 Unexpected destination attachment directories (R9), missing on both sides (R10)
 or source attachments appearing after inventory (R11) refuse recovery. Inventory
@@ -154,6 +160,12 @@ and XDG_STATE_HOME, never against live host stores.
 Prerequisite: surviving inventory and recoverable pre-rename bytes. There is no
 single-command undo; git checkout alone leaves new untracked files and host state.
 Scope every action to inventory entries; never blanket git clean tasks/.
+
+For a retention rename, preserve the inventory's frozen config_payload together
+with its fingerprints. Source commits and retained refs must remain available on
+resume. Do not regenerate an edge from a later HEAD. Rollback restores the exact
+source config/lineage with the owned task paths; never replace unrelated registry
+or records changes. Do not delete protected attachments to get past a refusal.
 
 1. Restore each missing source and verify its `from` digest before deleting its
    destination, and delete only when destination digest equals `to`. On failure

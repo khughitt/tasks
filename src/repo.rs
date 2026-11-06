@@ -219,10 +219,7 @@ struct CheckoutConfig {
 /// A `[checkout] path`: relative to the records directory as `init --checkout` writes it, or
 /// absolute as written by hand. Normalized the way `resolve` normalizes paths, so a
 /// symlinked spelling and its real path compare equal when the target exists.
-fn checkout_path(records: &Path, raw: Option<CheckoutConfig>) -> Result<Option<(Kind, PathBuf)>> {
-    let Some(table) = raw else {
-        return Ok(None);
-    };
+fn checkout_kind(table: &CheckoutConfig) -> Result<Kind> {
     let kind = match table.kind.as_deref() {
         None => Kind::Linked,
         Some("detached") => Kind::Detached,
@@ -237,6 +234,13 @@ fn checkout_path(records: &Path, raw: Option<CheckoutConfig>) -> Result<Option<(
             "{CONFIG_REL}: [checkout] path must not be empty"
         )));
     }
+    Ok(kind)
+}
+fn checkout_path(records: &Path, raw: Option<CheckoutConfig>) -> Result<Option<(Kind, PathBuf)>> {
+    let Some(table) = raw else {
+        return Ok(None);
+    };
+    let kind = checkout_kind(&table)?;
     crate::locations::normalize(Path::new(&table.path), records)
         .map(|path| Some((kind, path)))
         .map_err(|problem| Error::Config(format!("{CONFIG_REL}: [checkout] path: {problem}")))
@@ -824,6 +828,27 @@ impl Project {
         Self::from_config(records, &text)
     }
 
+    /// Historical config metadata must not resolve a checkout path that may have moved.
+    pub(crate) fn retention_config(
+        text: &str,
+    ) -> Result<(String, Kind, Vec<crate::retained::lineage::RenameEdge>)> {
+        let config: Config =
+            toml::from_str(text).map_err(|e| Error::Config(format!("{CONFIG_REL}: {e}")))?;
+        if !is_valid_prefix(&config.prefix) {
+            return Err(Error::Config(format!(
+                "{CONFIG_REL}: invalid source prefix"
+            )));
+        }
+        let kind = config
+            .checkout
+            .as_ref()
+            .map(checkout_kind)
+            .transpose()?
+            .unwrap_or(Kind::InTree);
+        crate::retained::lineage::validate_shape(&config.prefix, kind, &config.retention_lineage)?;
+        Ok((config.prefix, kind, config.retention_lineage))
+    }
+
     /// Parse a configuration snapshot already read from a canonical records directory.
     pub(crate) fn from_config(records: PathBuf, text: &str) -> Result<Project> {
         let config: Config = toml::from_str(text)
@@ -840,6 +865,8 @@ impl Project {
             Some((Kind::Detached, code)) => (Kind::Detached, code.clone(), code),
             Some((kind, code)) => (kind, records.clone(), code),
         };
+        crate::retained::lineage::validate_shape(&config.prefix, kind, &config.retention_lineage)
+            .map_err(|e| Error::Config(format!("{CONFIG_REL}: {e}")))?;
         Ok(Project {
             root,
             records,

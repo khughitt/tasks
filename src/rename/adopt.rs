@@ -24,6 +24,9 @@ pub fn run(
     new: &str,
     explain: bool,
 ) -> Result<RenameOut> {
+    if !project.retention_lineage.is_empty() {
+        crate::retained::lineage::check_live(project, &project.scan()?)?;
+    }
     let source = ClaimStore::load(old)?;
     let target = ClaimStore::load(new)?;
     let old_path = ClaimStore::path_for(old)?;

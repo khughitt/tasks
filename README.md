@@ -125,6 +125,10 @@ Color is opt-in for pretty output; JSON remains unstyled.
 | Are attachment bytes intact and portable? | [Attachments](docs/attachments.md) |
 | How is retained custody observed or transferred? | [Retention](docs/retention.md) |
 
+Completed retained history survives project rename through verified Git-anchored
+lineage; pending operations still block it. See [retention](docs/retention.md#project-rename-and-historical-locators)
+for source-proof, historical-query and coordinated-reader rollout requirements.
+
 Public references describe current behavior. Historical designs, plans and notes
 are kept in private project records and are not required to use the public tool.
 This repository's local `tasks check` hygiene requires those private records.

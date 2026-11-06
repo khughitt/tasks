@@ -11,7 +11,7 @@ use crate::output::RenameOut;
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project, atomic_write};
 use classify::{Recovery, classify};
-use inventory::{Inventory, InventoryEntry, digest, rewrite_config_prefix};
+use inventory::{Inventory, InventoryEntry, digest};
 use snapshot::{Invocation, observe};
 
 /// Existing roots compare by filesystem identity. An absent root keeps its spelling so
@@ -173,7 +173,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         }
     }
     let inventory = if recovery == Recovery::Fresh {
-        crate::retained::publish::project_permission(&project, true)?;
+        crate::retained::publish::project_permission(&project, false)?;
         crate::commands::reject_pending_operations(Some(&project.root), &invocation.source)?;
         crate::commands::reject_pending_operations(None, &invocation.target)?;
         if registry.is_taken(&invocation.target) {
@@ -218,6 +218,27 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             .expect("mutating recovery has an inventory")
     };
 
+    if recovery != Recovery::Fresh
+        && let Some(payload) = &inventory.config_payload
+    {
+        let config: toml::Value =
+            toml::from_str(payload).map_err(|e| Error::Config(e.to_string()))?;
+        let edges: Vec<crate::retained::lineage::RenameEdge> = config
+            .get("retention_lineage")
+            .ok_or_else(|| Error::Config("missing frozen retention edge".into()))?
+            .clone()
+            .try_into()
+            .map_err(|e: toml::de::Error| Error::Config(e.to_string()))?;
+        let edge = edges
+            .last()
+            .ok_or_else(|| Error::Config("missing frozen retention edge".into()))?;
+        let ids = inventory
+            .entries
+            .iter()
+            .map(|e| crate::model::TaskId::parse(&format!("{}-{}", inventory.source, e.hex)))
+            .collect::<Result<Vec<_>>>()?;
+        crate::retained::lineage::check_staged(&project, edge, &ids)?;
+    }
     if matches!(recovery, Recovery::Fresh | Recovery::ResumeFiles) {
         for entry in &inventory.entries {
             let source = project
@@ -281,8 +302,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         }
         let config = project.records.join(CONFIG_REL);
         verify_bytes(&config, &inventory.config_from)?;
-        let rewritten =
-            rewrite_config_prefix(&std::fs::read_to_string(&config)?, &invocation.target)?;
+        let rewritten = inventory.target_config(&std::fs::read_to_string(&config)?)?;
         if digest(rewritten.as_bytes()) != inventory.config_to {
             return Err(Error::Validation(format!(
                 "{} transformation disagrees with inventory",

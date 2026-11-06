@@ -27,6 +27,8 @@ pub struct Inventory {
     pub root: PathBuf,
     pub config_from: String,
     pub config_to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_payload: Option<String>,
     pub entries: Vec<InventoryEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parks_store: Option<String>,
@@ -79,7 +81,15 @@ impl Inventory {
         let config_bytes = std::fs::read(project.records.join(CONFIG_REL))?;
         let config_text = std::str::from_utf8(&config_bytes)
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
-        let config_to = rewrite_config_prefix(config_text, target)?;
+        let edge = crate::retained::lineage::prepare(project, target)?;
+        let config_payload = edge
+            .as_ref()
+            .map(|e| rewrite_config_lineage(config_text, target, e))
+            .transpose()?;
+        let config_to = match &config_payload {
+            Some(payload) => payload.clone(),
+            None => rewrite_config_prefix(config_text, target)?,
+        };
         let mut entries = Vec::new();
         if let crate::attachments::DirState::Unsafe(detail) =
             crate::attachments::dir_state(&crate::attachments::files_root(project))?
@@ -183,6 +193,7 @@ impl Inventory {
             root: project.root.clone(),
             config_from: digest(&config_bytes),
             config_to: digest(config_to.as_bytes()),
+            config_payload,
             entries,
             parks_store,
             store_to,
@@ -191,6 +202,17 @@ impl Inventory {
         })
     }
 
+    pub fn target_config(&self, source: &str) -> Result<String> {
+        if digest(source.as_bytes()) != self.config_from {
+            return Err(Error::Validation(
+                "source config differs from rename inventory".into(),
+            ));
+        }
+        match &self.config_payload {
+            Some(payload) => Ok(payload.clone()),
+            None => rewrite_config_prefix(source, &self.target),
+        }
+    }
     pub fn path(source: &str) -> Result<PathBuf> {
         Self::path_with(source, |key| std::env::var_os(key))
     }
@@ -314,6 +336,75 @@ impl Inventory {
         }
         validate_digest(path, "config_from", &self.config_from)?;
         validate_digest(path, "config_to", &self.config_to)?;
+        if let Some(payload) = &self.config_payload {
+            if digest(payload.as_bytes()) != self.config_to {
+                return Err(Error::Config(
+                    "rename config payload digest mismatch".into(),
+                ));
+            }
+            let records = self
+                .records_from
+                .as_ref()
+                .filter(|p| p.is_dir())
+                .or_else(|| self.records_to.as_ref().filter(|p| p.is_dir()))
+                .unwrap_or(&self.root);
+            let project = Project::from_config(records.canonicalize()?, payload)?;
+            let edge = project
+                .retention_lineage
+                .last()
+                .ok_or_else(|| Error::Config("retention inventory lacks an edge".into()))?;
+            if project.prefix != self.target
+                || edge.from_prefix != self.source
+                || edge.to_prefix != self.target
+            {
+                return Err(Error::Config(
+                    "retention inventory edge disagrees with its endpoints".into(),
+                ));
+            }
+            let id = TaskId::parse(&format!("{}-000001", edge.from_prefix))?;
+            crate::retained::model::Basis {
+                project: edge.from_prefix.clone(),
+                layout: edge.layout.clone(),
+                records_subdir: edge.from_subdir.clone(),
+                commit: edge.commit.clone(),
+                task_path: crate::retained::lineage::task_path(&edge.from_subdir, &id),
+                retained_ref: edge.retained_ref.clone(),
+            }
+            .validate()?;
+            if edge.version != 1
+                || edge.layout != project.kind.as_str()
+                || !(edge.to_subdir == "." || crate::retained::model::member_path(&edge.to_subdir))
+            {
+                return Err(Error::Config("invalid frozen retention edge".into()));
+            }
+            crate::retained::basis::git(&project, &["show-ref", "--verify", &edge.retained_ref])?;
+            crate::retained::basis::git(
+                &project,
+                &[
+                    "merge-base",
+                    "--is-ancestor",
+                    &edge.commit,
+                    &edge.retained_ref,
+                ],
+            )?;
+            let source_path = format!("{}/tasks/.config.toml", edge.from_subdir)
+                .trim_start_matches("./")
+                .to_string();
+            let source =
+                crate::retained::basis::blob(&project, &edge.commit, &source_path, None, &mut 0)?;
+            if digest(&source) != self.config_from
+                || rewrite_config_lineage(
+                    std::str::from_utf8(&source).map_err(|e| Error::Config(e.to_string()))?,
+                    &self.target,
+                    edge,
+                )? != *payload
+            {
+                return Err(Error::Config(
+                    "retention payload differs from anchored source config".into(),
+                ));
+            }
+        }
+
         let mut seen = BTreeSet::new();
         for entry in &self.entries {
             TaskId::parse(&format!("{}-{}", self.source, entry.hex))
@@ -437,4 +528,22 @@ fn validate_digest(path: &Path, field: &str, value: &str) -> Result<()> {
 
 fn inventory_error(path: &Path, error: Error) -> Error {
     Error::Config(format!("{}: {error}", path.display()))
+}
+
+fn rewrite_config_lineage(
+    source: &str,
+    target: &str,
+    edge: &crate::retained::lineage::RenameEdge,
+) -> Result<String> {
+    let mut v: toml::Value = toml::from_str(&rewrite_config_prefix(source, target)?)
+        .map_err(|e| Error::Config(e.to_string()))?;
+    let lineage = v
+        .as_table_mut()
+        .expect("config table")
+        .entry("retention_lineage")
+        .or_insert(toml::Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| Error::Config("retention lineage must be an array".into()))?;
+    lineage.push(toml::Value::try_from(edge).map_err(|e| Error::Config(e.to_string()))?);
+    toml::to_string(&v).map_err(|e| Error::Config(e.to_string()))
 }

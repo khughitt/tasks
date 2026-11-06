@@ -137,13 +137,7 @@ impl RetainedEnv {
                 .unwrap()
                 .starts_with(self._root.path().canonicalize().unwrap())
         );
-        let binary = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("tasks");
+        let binary = PathBuf::from(self.cmd().get_program());
         let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
         let hook = dir.join("hooks/pre-commit");
         std::fs::write(
@@ -151,7 +145,7 @@ impl RetainedEnv {
             format!(
                 "#!/bin/sh\nexec {} -C {} check >/dev/null\n",
                 quote(binary.to_str().unwrap()),
-                quote(self.records.to_str().unwrap())
+                quote(self.dir.to_str().unwrap())
             ),
         )
         .unwrap();

@@ -16,6 +16,7 @@ The accepted top-level keys/tables are exactly those below.
 
 | Key/table | Contract and default |
 | --- | --- |
+| `[[retention_lineage]]` | Rename-managed, ordered Git-anchored edges; omitted when empty. Fields and validation below. |
 | `prefix` | Required `[a-z][a-z0-9]{1,7}` project id; agrees with registration and records. |
 | `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON. |
 | `spec_dirs` | Optional list; defaults to `docs/specs`, `docs/designs`, `docs/superpowers/specs`, `docs/superpowers/designs`. |
@@ -28,6 +29,16 @@ The accepted top-level keys/tables are exactly those below.
 | `[checkout]` | Required `path` when present; relative to records or absolute. Missing `kind` means linked; the other accepted kind is `detached`. Managed by init/relocation. |
 | `[retired]` | Required `date` (real `YYYY-MM-DD` from year 1) and `reason` (nonblank single line without control characters); optional `successor` (well-formed prefix). Lifecycle metadata managed by retire/migrate. |
 | `[git]` | Only `commit`, boolean default false; opt-in scoped automatic record commits. |
+
+A retention lineage edge has exactly `version` (integer 1), `from_prefix`,
+`to_prefix`, `layout`, `from_subdir`, `to_subdir`, `commit` and `retained_ref`
+(strings). Subdirectories are normalized relative to the same records Git root
+(`.` names its root); commit is a full lowercase 40-hex commit and retained_ref
+is a named `refs/heads/` branch reaching it. Edges preserve layout, chain without
+cycles or conflicting endpoints, and end at the live pairing. Each source config
+at its cutover commit must contain exactly its preceding edges. Retention reads,
+rename and check reject missing or inconsistent proof; an alias alone is not proof.
+Rename writes these fields; do not hand-edit them to repair missing history.
 
 `spec_dirs`/`plan_dirs` define allowed working-document roots, not a public
 reference index. Root lists must be nonempty and contain normalized relative

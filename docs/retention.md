@@ -232,9 +232,9 @@ and immediate publication; foreign staging, Git operations and dirty required
 evidence refuse. Only unrelated appended ordinary notes can commute. Pending
 intent permits queries, unrelated notes, normal claim refresh/start and park;
 closure, archival and competing task/evidence changes wait for finish/reconcile.
-Move/migrate/rename refuse operation history and protected retained-op requests,
-retained-manifests/checkpoints until locator migration exists. Protected evidence
-cannot be detached. No force bypass is provided.
+Move/migrate still refuse operation history and protected retained-op requests,
+retained-manifests/checkpoints. Project rename has the verified lineage route
+below. Protected evidence cannot be detached. No force bypass is provided.
 
 Metrics wall_ns measures held-lock duration; hash_ns/bytes_hashed count cumulative
 thread SHA256 work, including repeated verification/archive/recovery; history_bytes_read
@@ -242,3 +242,43 @@ counts repeated task/archive/metadata reads. Git private I/O is excluded and
 channels can overlap. Count CLI calls and actual UTF-8 stdout separately. No
 performance or distributed exactly-once guarantee follows. Missing/corrupt saved
 objects after reboot fail visibly; sync and ordinary storage failure limits remain.
+
+## Project rename and historical locators
+
+A project with retained history may be renamed after every operation has completed
+or its reconciliation has a verified terminal receipt. Rename requires a clean,
+Git-backed source, including tasks/.config.toml, and verifies immutable requests,
+checkpoints, manifests, archived notes and preserved logical prefixes before intent.
+It freezes a [retention lineage](configuration.md) edge and target config bytes
+in the existing rename inventory. It preserves old envelopes, ordinals, task
+suffixes, hashes, retained refs and original Git paths byte for byte.
+
+Current state queries return the current task ID/basis. An explicit historical
+`--at` returns the ID and exact basis from that revision, even when requested
+through the current ID. Nested historical envelopes remain unchanged. Readers
+verify every intervening edge and original blob at its declared path/ref; missing
+proof is a recovery error. Publication lookup remains in the original epoch.
+
+New operations require current canonical task IDs and current input bases.
+Custody matching accepts an old next_owner only through verified lineage. Rename
+alone does not rewrite item records or move payloads. A recorded generated manifest
+inside a renamed task attachment directory resolves to its moved attachment only
+with the original observation, ledger, lineage and exact digest verified. External
+manual manifest paths retain their literal resolution; arbitrary host-root
+relocations are not inferred. A detached rename that would relocate the records
+Git root itself refuses before intent and needs an explicit relocation route. A subsequent observation publishes any changed
+manifest locator through the ordinary checkpoint/transfer procedure.
+
+Replaying an unchanged completed pre-rename request with current CLI participants
+returns its original publication references/counts and the existing warning that
+current bytes were not inspected. It still needs current owned claims and locks;
+a changed request, absent terminal or unproved participant refuses. No new intent,
+observation or payload read is authorized by that replay.
+
+`tasks check` verifies historical sources at their anchored commits and compares
+the destination with live config/history, so pre-commit checks work before the
+rename commit exists. After committing, normal retained reads verify the committed
+current history as well. Adoption verifies synced lineage before host state changes.
+Upgrade all participating readers before a writer creates lineage config; keep
+one coordinated writer through rename, commit and secondary-host adoption. Preserve
+all named refs and cutover commits while their retention evidence is needed.

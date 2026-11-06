@@ -211,7 +211,9 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
     let retained_ref=refs.lines().find(|r|*r==current_ref).or_else(||refs.lines().next()).ok_or_else(||Error::RetainedHistoryBlocked("No retained local branch reaches this basis; preserve the exact history on a named branch".into()))?.to_string();
     let sub = project.records.strip_prefix(&root).map_err(invalid)?;
     let basis = if !project.retention_lineage.is_empty() {
-        super::lineage::epoch_at(project, id, &commit)?
+        let mut epoch = super::lineage::epoch_at(project, id, &commit)?;
+        epoch.retained_ref = retained_ref;
+        epoch
     } else {
         Basis {
             project: project.prefix.clone(),

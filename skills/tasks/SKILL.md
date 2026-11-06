@@ -573,7 +573,8 @@ full delivery and consumer acceptance.
 Pending retained operations reserve task/evidence mutation while permitting reads,
 unrelated appended notes, start/claim refresh and park. Complete or reconcile them
 before closure or archival. Terminal archival keeps logical note ordinals; ID-changing
-move/migrate/rename refuse protected retention locators. Never detach protected
+move/migrate refuse protected retention locators. Rename may preserve them through
+verified Git-anchored retention lineage after complete/reconciled terminal proof. Never detach protected
 retained request, manifest or checkpoint artifacts, or forge machine operation/checkpoint
 notes through `tasks note`.
 
@@ -844,6 +845,16 @@ before starting work there. For a detached project, rename moves
 `<records-root>/<old>` to `<records-root>/<new>` and updates the registry pairing;
 the directory rename is left for you to commit in the records repository.
 On the second host, `--adopt` pairs the directory already renamed by sync.
+With retained history, upgrade every participating reader before creating lineage
+config and keep one coordinated writer through rename/commit/adoption. Source
+config, task histories and protected evidence must be committed/verified; pending
+or uncertain retention operations still block rename. Rerun an interrupted rename
+using its frozen inventory; never rewrite old requests/checkpoints, detach protected
+artifacts or recreate an edge from today's HEAD. Hook-time check validates the
+source at its pinned commit and destination from the live configuration. Current
+operations use current IDs; unchanged old completed requests replay only dated
+results through verified lineage. Generated task-attachment manifests resolve at
+the moved attachment path; payload paths and external manual manifests stay literal.
 Rehearsals must isolate both `XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
 not an undo; follow the [manual rollback procedure](../../docs/project-operations.md#prefix-rollback).

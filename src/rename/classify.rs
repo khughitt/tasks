@@ -354,6 +354,7 @@ mod tests {
             root: "/project".into(),
             config_from: "config before".into(),
             config_to: "config after".into(),
+            config_payload: None,
             entries: (0..count)
                 .map(|index| InventoryEntry {
                     hex: format!("{index:06x}"),

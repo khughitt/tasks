@@ -1144,10 +1144,13 @@ pub(super) fn observation_artifacts(
             let record = decode_record(raw)?;
             if let (Some(path), Some(digest)) = (record.manifest.value(), record.sha256.value()) {
                 let path = std::path::Path::new(path);
-                if path.parent() == Some(crate::attachments::task_dir(project, &task.id).as_path())
-                {
+                let input = super::lineage::participant(project, note, &task.id)?;
+                let parent = super::basis::root(project)?
+                    .join(&input.basis.records_subdir)
+                    .join(format!("tasks/files/{}", input.task));
+                if path.parent() == Some(parent.as_path()) {
                     artifacts.push(ArtifactLocator::Attachment {
-                        task: task.id.to_string(),
+                        task: input.task.clone(),
                         name: path
                             .file_name()
                             .and_then(|n| n.to_str())
