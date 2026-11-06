@@ -1,5 +1,6 @@
 use super::{open_ctx, reject_retired};
 use crate::claims::MutationLock;
+use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::migrating::classify::{
     MigrationRecovery, Phase, classify_with_journal, classify_without_journal,
@@ -15,11 +16,12 @@ use crate::output::{
 use crate::registry::Registry;
 use crate::rename::root_identity;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The source is the checkout the command runs in, the successor a registered project:
 /// the checks `move` makes, then neither may be retired.
-pub fn open(dir: Option<&Path>, to: &str) -> Result<MigrateCtx> {
-    let source = open_ctx(dir)?;
+pub fn open(dir: Option<&Path>, to: &str, host: Arc<HostConfig>) -> Result<MigrateCtx> {
+    let source = open_ctx(dir, host.clone())?;
     let prefix = source
         .registry
         .canonical_prefix(&source.project.prefix)
@@ -50,19 +52,20 @@ pub fn run(
     to: Option<String>,
     draft_path: Option<PathBuf>,
     explain: bool,
+    host: Arc<HostConfig>,
 ) -> Result<Output> {
     if let Some(path) = draft_path {
         let to = to.ok_or_else(|| Error::Validation("--draft needs --to".into()))?;
-        let ctx = open(dir, &to)?;
+        let ctx = open(dir, &to, host.clone())?;
         return Ok(Output::MigrateDraft(draft::write(&ctx, &path)?));
     }
     let path =
         list_path.ok_or_else(|| Error::Validation("migrate needs a list or --draft".into()))?;
     let loaded = list::load(&path)?;
     if !explain {
-        return apply_list(dir, &path, &loaded);
+        return apply_list(dir, &path, &loaded, host.clone());
     }
-    let mut ctx = open(dir, &loaded.list.successor)?;
+    let mut ctx = open(dir, &loaded.list.successor, host.clone())?;
     if let Some(journal) = MigrationJournal::load(&ctx.source.project.prefix)? {
         return Ok(Output::Migrate(explain_pending(&ctx, &journal, &loaded)?));
     }
@@ -216,8 +219,13 @@ fn identity(ctx: &MigrateCtx) -> Result<(String, String, PathBuf, PathBuf)> {
 
 /// The apply: `move`'s locks (both prefixes in sorted order, then the registry), with the
 /// projects re-opened under them and the same bounded retry.
-fn apply_list(dir: Option<&Path>, path: &Path, loaded: &LoadedList) -> Result<Output> {
-    let mut requested = open(dir, &loaded.list.successor)?;
+fn apply_list(
+    dir: Option<&Path>,
+    path: &Path,
+    loaded: &LoadedList,
+    host: Arc<HostConfig>,
+) -> Result<Output> {
+    let mut requested = open(dir, &loaded.list.successor, host.clone())?;
     for _ in 0..4 {
         let mut prefixes = [
             requested.source.project.prefix.clone(),
@@ -227,7 +235,7 @@ fn apply_list(dir: Option<&Path>, path: &Path, loaded: &LoadedList) -> Result<Ou
         let _first = MutationLock::acquire(&prefixes[0])?;
         let _second = MutationLock::acquire(&prefixes[1])?;
         let _registry = Registry::lock()?;
-        let mut refreshed = open(dir, &loaded.list.successor)?;
+        let mut refreshed = open(dir, &loaded.list.successor, host.clone())?;
         if identity(&refreshed)? == identity(&requested)? {
             let mut out = decide(&mut refreshed, path, loaded)?;
             out.warnings

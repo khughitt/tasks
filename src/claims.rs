@@ -48,11 +48,11 @@ pub fn unix_session_id() -> Option<u32> {
     rest.split_whitespace().nth(3)?.parse().ok()
 }
 
-pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
+pub fn identity(host: &crate::config::HostConfig, warnings: &mut Vec<String>) -> Result<Identity> {
     identity_from(
         |key| std::env::var_os(key),
         unix_session_id(),
-        crate::relay::level,
+        || crate::relay::level(host),
         warnings,
     )
 }
@@ -1050,8 +1050,11 @@ impl Resolution {
     }
 }
 
-pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
-    match identity(warnings) {
+pub fn resolve_identity(
+    host: &crate::config::HostConfig,
+    warnings: &mut Vec<String>,
+) -> Resolution {
+    match identity(host, warnings) {
         Ok(identity) => Resolution::Resolved(identity),
         Err(error) => Resolution::Failed(error),
     }

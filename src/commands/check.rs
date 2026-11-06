@@ -216,7 +216,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         ));
     }
 
-    let mut resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let mut resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     resolver.set_fetch_budget(crate::doc_fetch::OPTIONAL_BUDGET);
     let unchecked = resolver.prefetch_external(&external_check_order(&tasks)?)?;
     if !unchecked.is_empty() {

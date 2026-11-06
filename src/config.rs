@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 /// The host-local configuration, `$XDG_CONFIG_HOME/tasks/config.toml` or
 /// `$HOME/.config/tasks/config.toml`. Relay identity and document commands belong to a
@@ -8,6 +9,7 @@ use std::path::PathBuf;
 /// between hosts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HostConfig {
+    pub headers: bool,
     pub relay_identity: bool,
     pub docs_schemes: BTreeMap<String, String>,
 }
@@ -28,7 +30,16 @@ struct FileDocs {
 
 #[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+struct FileOutput {
+    #[serde(default)]
+    headers: bool,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct FileShape {
+    #[serde(default)]
+    output: FileOutput,
     #[serde(default)]
     identity: FileIdentity,
     #[serde(default)]
@@ -37,27 +48,42 @@ struct FileShape {
 
 impl HostConfig {
     pub fn path() -> Result<PathBuf> {
-        if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-            return Ok(PathBuf::from(config_home).join("tasks/config.toml"));
+        Self::path_from(
+            std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+            std::env::var_os("HOME").as_deref(),
+        )
+    }
+
+    pub fn path_from(config_home: Option<&OsStr>, home: Option<&OsStr>) -> Result<PathBuf> {
+        if let Some(base) = config_home.filter(|base| Path::new(base).is_absolute()) {
+            return Ok(Path::new(base).join("tasks/config.toml"));
         }
-        if let Some(home) = std::env::var_os("HOME") {
-            return Ok(PathBuf::from(home).join(".config/tasks/config.toml"));
+        if let Some(base) = home.filter(|base| Path::new(base).is_absolute()) {
+            return Ok(Path::new(base).join(".config/tasks/config.toml"));
         }
         Err(Error::Config(
-            "neither XDG_CONFIG_HOME nor HOME is set".into(),
+            "host configuration needs an absolute XDG_CONFIG_HOME or HOME".into(),
         ))
     }
 
     /// An absent file is not an error: every field takes its default. A present but
     /// unreadable or invalid file is, because it was written on purpose.
     pub fn load() -> Result<HostConfig> {
-        let path = HostConfig::path()?;
+        Self::load_from(&Self::path()?)
+    }
+
+    pub fn load_from(path: &Path) -> Result<HostConfig> {
         let shown = path.display().to_string();
-        match std::fs::read_to_string(&path) {
-            Ok(text) => HostConfig::parse(&text, &shown),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(HostConfig::default()),
-            Err(error) => Err(Error::Io(format!("{shown}: {error}"))),
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => return Err(Error::Io(format!("{shown}: {error}"))),
         }
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| Error::Io(format!("{shown}: {error}")))?;
+        Self::parse(&text, &shown)
     }
 
     pub fn parse(text: &str, path: &str) -> Result<HostConfig> {
@@ -81,6 +107,7 @@ impl HostConfig {
             }
         }
         Ok(HostConfig {
+            headers: file.output.headers,
             relay_identity: file.identity.relay,
             docs_schemes: file.docs.schemes,
         })
@@ -90,6 +117,55 @@ impl HostConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_headers_defaults_and_preserves_existing_sections() {
+        assert!(!HostConfig::parse("", "c.toml").unwrap().headers);
+        let config = HostConfig::parse(
+            "[identity]\nrelay = true\n[docs.schemes]\nstub = 'provider'\n[output]\nheaders = true\n",
+            "c.toml",
+        ).unwrap();
+        assert!(config.headers);
+        assert!(config.relay_identity);
+        assert_eq!(config.docs_schemes["stub"], "provider");
+    }
+
+    #[test]
+    fn output_headers_rejects_unknown_and_nonboolean_values() {
+        for text in [
+            "[output]\nheaders = 'true'\n",
+            "[output]\nheaders = 1\n",
+            "[output]\nheader = true\n",
+            "[output]\nheaders = true\nunknown = false\n",
+            "[output]\n[output]\n",
+        ] {
+            assert!(HostConfig::parse(text, "c.toml").is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn host_path_requires_absolute_base() {
+        use std::ffi::OsStr;
+        let absolute = OsStr::new("/config");
+        let home = OsStr::new("/home/tester");
+        for xdg in [None, Some(OsStr::new("")), Some(OsStr::new("relative"))] {
+            assert_eq!(
+                HostConfig::path_from(xdg, Some(home)).unwrap(),
+                PathBuf::from("/home/tester/.config/tasks/config.toml")
+            );
+        }
+        assert_eq!(
+            HostConfig::path_from(Some(absolute), None).unwrap(),
+            PathBuf::from("/config/tasks/config.toml")
+        );
+        assert_eq!(
+            HostConfig::path_from(Some(absolute), Some(home)).unwrap(),
+            PathBuf::from("/config/tasks/config.toml")
+        );
+        for home in [None, Some(OsStr::new("")), Some(OsStr::new("relative"))] {
+            assert!(HostConfig::path_from(None, home).is_err());
+        }
+    }
 
     #[test]
     fn external_doc_config_keeps_identity_and_validates_commands() {

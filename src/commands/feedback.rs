@@ -1,4 +1,5 @@
 use super::{Attribution, Ctx, append_note};
+use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_line, validate_task};
 use crate::model::Origin as Asker;
@@ -8,6 +9,7 @@ use crate::registry::Registry;
 use crate::repo::Project;
 use crate::scope::Origin;
 use crate::similarity::Match;
+use std::sync::Arc;
 
 pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 
@@ -19,8 +21,12 @@ pub const UNREGISTERED: &str = "unregistered";
 /// outside every project, the target alone with the reporter [`UNREGISTERED`]. Only *no
 /// project* falls through; a checkout whose config cannot be read is still an error.
 /// Acceptance is left to `run`, which checks it once for either path.
-pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)> {
-    match super::open_ctx(dir) {
+pub fn open(
+    dir: Option<&std::path::Path>,
+    target: &str,
+    host: Arc<HostConfig>,
+) -> Result<(Ctx, String)> {
+    match super::open_ctx(dir, host.clone()) {
         Ok(ctx) => {
             let reporter = ctx.project.prefix.clone();
             Ok((ctx, reporter))
@@ -31,7 +37,7 @@ pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)
             let project = crate::scope::open_registered(&registry, target, Origin::Prefix)?;
             let routing = super::Routing::Registered(target.to_string());
             Ok((
-                Ctx::new(project, registry, routing, shorthand),
+                Ctx::new(project, registry, routing, shorthand, host.clone()),
                 UNREGISTERED.to_string(),
             ))
         }

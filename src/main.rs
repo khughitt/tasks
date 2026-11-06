@@ -177,6 +177,17 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let host = if matches!(&cli.command, cli::Command::Attachments { .. }) {
+        None
+    } else {
+        match config::HostConfig::load() {
+            Ok(host) => Some(std::sync::Arc::new(host)),
+            Err(error) => {
+                to_stderr(&format!("{}\n", output::render_error(&error)));
+                std::process::exit(1);
+            }
+        }
+    };
     let headers = cli.headers;
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
     let color_mode =
@@ -268,7 +279,7 @@ fn main() {
         to_stderr(&format!("{}\n", output::render_error(error)));
         std::process::exit(1);
     }
-    match commands::run(cli) {
+    match commands::run(cli, host) {
         Ok(out) => {
             let raw = match &out {
                 output::Output::Doc(doc) => Some((doc.body.as_bytes(), &doc.warnings)),

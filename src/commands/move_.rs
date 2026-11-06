@@ -1,5 +1,6 @@
 use super::{Ctx, open_id_ctx, parse_id};
 use crate::claims::MutationLock;
+use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::moving::classify::{self, Recovery};
@@ -11,9 +12,10 @@ use crate::rename::root_identity;
 use crate::scope::{self, Origin};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-fn open(dir: Option<&Path>, spelling: &str, to: &str) -> Result<MoveCtx> {
-    let source = open_id_ctx(dir, spelling)?;
+fn open(dir: Option<&Path>, spelling: &str, to: &str, host: Arc<HostConfig>) -> Result<MoveCtx> {
+    let source = open_id_ctx(dir, spelling, host.clone())?;
     let source_id = parse_id(&source.registry, &source.shorthand, spelling)?;
     open_source(source, source_id, to)
 }
@@ -97,11 +99,17 @@ fn identity(ctx: &MoveCtx) -> Result<(crate::model::TaskId, String, PathBuf, Pat
     ))
 }
 
-pub fn run(dir: Option<&Path>, id: &str, to: &str, explain: bool) -> Result<Output> {
+pub fn run(
+    dir: Option<&Path>,
+    id: &str,
+    to: &str,
+    explain: bool,
+    host: Arc<HostConfig>,
+) -> Result<Output> {
     if explain {
         let mut from = id.to_string();
         let result = (|| {
-            let source = open_id_ctx(dir, id)?;
+            let source = open_id_ctx(dir, id, host.clone())?;
             let source_id = parse_id(&source.registry, &source.shorthand, id)?;
             from = source_id.to_string();
             let mut requested = open_source(source, source_id, to)?;
@@ -112,14 +120,14 @@ pub fn run(dir: Option<&Path>, id: &str, to: &str, explain: bool) -> Result<Outp
             Err(error) => empty_output(from, "refuse", vec![error.to_string()]),
         }));
     }
-    let mut requested = open(dir, id, to)?;
+    let mut requested = open(dir, id, to, host.clone())?;
     for _ in 0..4 {
         let mut prefixes = [&requested.source_id.prefix, &requested.target.prefix];
         prefixes.sort();
         let _first = MutationLock::acquire(prefixes[0])?;
         let _second = MutationLock::acquire(prefixes[1])?;
         let _registry = Registry::lock()?;
-        let mut refreshed = open(dir, id, to)?;
+        let mut refreshed = open(dir, id, to, host.clone())?;
         if identity(&refreshed)? == identity(&requested)? {
             let mut out = decide(&mut refreshed, false)?;
             crate::record_commit::commit_written(&mut out.warnings);

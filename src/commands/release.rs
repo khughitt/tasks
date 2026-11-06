@@ -3,10 +3,12 @@
 
 use super::{ClaimIntent, Ctx, Ownership, Writer};
 use crate::claims::{Claim, ClaimStore, Liveness, MutationLock};
+use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::output::Output;
 use std::path::Path;
+use std::sync::Arc;
 
 /// The refusal hint for a held claim that reads `Unverifiable` (docs/task-model.md).
 pub fn hint(id: &str, session: &str) -> String {
@@ -33,9 +35,10 @@ pub fn open(
     dir: Option<&Path>,
     id: &str,
     adopting: Option<&str>,
+    host: Arc<HostConfig>,
 ) -> Result<(Ctx, Option<Adopting>)> {
     let Some(old) = adopting else {
-        return Ok((super::open_id_write_ctx(dir, id)?, None));
+        return Ok((super::open_id_write_ctx(dir, id, host.clone())?, None));
     };
     // Checked before any lock: `old` names a lock file, so a path-like value could name
     // another prefix's lock, and a second lock on one prefix would wait on itself.
@@ -44,7 +47,7 @@ pub fn open(
             "--adopting {old}: not a valid prefix (2-8 lowercase letters and digits, a letter first)"
         )));
     }
-    let mut ctx = super::open_id_ctx(dir, id)?;
+    let mut ctx = super::open_id_ctx(dir, id, host.clone())?;
     let prefix = ctx.project.prefix.clone();
     if old == prefix {
         return Err(Error::Validation(format!(
@@ -155,9 +158,9 @@ fn judge(
     key: &TaskId,
     adopting: Option<(&str, &TaskId)>,
 ) -> Result<Liveness> {
-    let me = crate::claims::resolve_identity(&mut ctx.warnings);
+    let me = crate::claims::resolve_identity(&ctx.host, &mut ctx.warnings);
     let live = crate::claims::liveness(claim);
-    let own = super::ownership(claim, &me)? != Ownership::Foreign;
+    let own = super::ownership(claim, &me, &ctx.host)? != Ownership::Foreign;
     match (own, matches!(live, Liveness::Live), adopting) {
         (true, _, None) => Err(Error::Validation(format!(
             "the claim on {key} is yours; `tasks park {key} \"<next step>\"` or `tasks done {key}` \
