@@ -71,7 +71,7 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
   `claims.rs` (out-of-git work claims: the per-prefix store, liveness, and mutation lock),
   `attachments.rs` (tasks/files/<id>/ storage, the attached:/detached: ledger, and the audit behind show and check),
   `clipboard.rs` (wl-paste input for attach),
-  `resolve.rs` (spec/plan links), `complete.rs` (shell completion candidates; best-effort, never errors), `query.rs`, `output.rs` / `format.rs` (JSON default, `--pretty`),
+  `resolve.rs` (spec/plan links), `complete.rs` (shell completion candidates; best-effort, never errors), `query.rs`, `src/output/` / `format.rs` (JSON default, `--pretty`),
   `hierarchy.rs` (parent validation, subtree walks, forest).
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
 - `tests/attachments.rs` — end-to-end tests for attach, detach, show, check, and rename of task files.

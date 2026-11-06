@@ -1,6 +1,9 @@
 //! Pretty tables: columns and rows of painted cells, laid out by comfy-table
 //! (docs/user-guide.md). Views paint; this module places.
 
+use std::io::IsTerminal;
+
+use crate::error::{Error, Result};
 use crate::style::{Painter, Style};
 use comfy_table::{ColumnConstraint, ContentArrangement, Table, Width, presets::NOTHING};
 use unicode_width::UnicodeWidthChar;
@@ -85,6 +88,55 @@ impl Row {
 pub struct Layout {
     pub width: Option<usize>,
     pub headers: bool,
+}
+
+/// The width pretty tables wrap at: `COLUMNS` overrides the terminal attached to stdout
+/// (TIOCGWINSZ). With neither, rows keep one line each, so piped output stays
+/// line-oriented; a default width of 80 would break line-oriented pipes.
+pub fn terminal_width() -> Result<Option<usize>> {
+    let columns = match std::env::var("COLUMNS") {
+        Ok(text) => Some(text),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(value)) => {
+            return Err(Error::Config(format!(
+                "COLUMNS must be valid UTF-8, got {value:?}"
+            )));
+        }
+    };
+    wrap_width(columns.as_deref(), terminal_attached_width())
+}
+
+/// `COLUMNS` wins over the attached terminal whenever it is set.
+fn wrap_width(columns: Option<&str>, attached: Option<usize>) -> Result<Option<usize>> {
+    match columns {
+        Some(text) => {
+            let width: usize = text.parse().map_err(|_| {
+                Error::Config(format!("COLUMNS must be a positive integer, got {text:?}"))
+            })?;
+            if width == 0 {
+                return Err(Error::Config(
+                    "COLUMNS must be a positive integer, got 0".into(),
+                ));
+            }
+            Ok(Some(width))
+        }
+        None => Ok(attached),
+    }
+}
+
+fn terminal_attached_width() -> Option<usize> {
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    // SAFETY: `ioctl` with TIOCGWINSZ only writes through the pointed-to `winsize`.
+    let mut size = unsafe { std::mem::zeroed::<libc::winsize>() };
+    if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) } == 0
+        && size.ws_col > 0
+    {
+        Some(size.ws_col as usize)
+    } else {
+        None
+    }
 }
 
 /// One width per column, `None` where a section sizes the column itself.
@@ -797,5 +849,14 @@ mod tests {
         for line in text.lines() {
             assert!(visible_width(line) <= 100, "{line:?}");
         }
+    }
+
+    #[test]
+    fn columns_overrides_the_terminal_and_validates_input() {
+        assert_eq!(wrap_width(Some("80"), Some(120)).unwrap(), Some(80));
+        assert_eq!(wrap_width(None, Some(120)).unwrap(), Some(120));
+        assert_eq!(wrap_width(None, None).unwrap(), None);
+        assert!(wrap_width(Some("wide"), None).is_err());
+        assert!(wrap_width(Some("0"), None).is_err());
     }
 }

@@ -224,7 +224,11 @@ mod tests {
     #[test]
     fn field_roles_are_built_only_here() {
         for (file, text) in [
-            ("output.rs", include_str!("output.rs")),
+            ("output/mod.rs", include_str!("output/mod.rs")),
+            ("output/contract.rs", include_str!("output/contract.rs")),
+            ("output/project.rs", include_str!("output/project.rs")),
+            ("output/tables.rs", include_str!("output/tables.rs")),
+            ("output/meta.rs", include_str!("output/meta.rs")),
             ("show_text.rs", include_str!("show_text.rs")),
         ] {
             let code = text.split("#[cfg(test)]").next().unwrap();

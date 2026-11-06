@@ -261,42 +261,14 @@ fn main() {
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
     let width = if format == Format::Pretty {
-        output::terminal_width()
+        table::terminal_width()
     } else {
         Ok(None)
     };
     // Read commands can report their warnings before a width error. Reject it before
     // writers run, so a presentation error cannot follow a successful mutation.
     if let Err(error) = &width
-        && !matches!(&cli.command, cli::Command::Export { output: Some(path), .. }
-            if path == std::path::Path::new("-"))
-        && !matches!(
-            &cli.command,
-            cli::Command::Projects { .. }
-                | cli::Command::Groups
-                | cli::Command::Root { .. }
-                | cli::Command::Where { .. }
-                | cli::Command::Resolve { .. }
-                | cli::Command::Show { .. }
-                | cli::Command::Doc { .. }
-                | cli::Command::Docs { .. }
-                | cli::Command::List { .. }
-                | cli::Command::Search { .. }
-                | cli::Command::Ready { .. }
-                | cli::Command::Next { .. }
-                | cli::Command::Sample { .. }
-                | cli::Command::Blockers(_)
-                | cli::Command::Graph { .. }
-                | cli::Command::Attachments { .. }
-                | cli::Command::Check { .. }
-                | cli::Command::Prime { .. }
-                | cli::Command::Lanes { .. }
-                | cli::Command::Tree { .. }
-                | cli::Command::Tags { .. }
-                | cli::Command::Quiet { .. }
-                | cli::Command::Goals { .. }
-                | cli::Command::Claims { .. }
-        )
+        && !output::defers_width_error(&cli.command)
     {
         to_stderr(&format!("{}\n", output::render_error(error)));
         std::process::exit(1);
@@ -331,8 +303,9 @@ fn main() {
             let silent = format == Format::Json
                 && matches!(&out, output::Output::Check(check)
                     if check.errors.is_empty() && check.warnings.is_empty() && check.growth.is_none());
+            let meta = out.meta();
             let mut theme_warning = None;
-            let stdout_painter = if stdout_painter.enabled() && output::needs_theme(&out) {
+            let stdout_painter = if stdout_painter.enabled() && meta.needs_theme {
                 // Redirected stdout is never queried: a pager may be reading the same
                 // terminal (docs/user-guide.md).
                 let resolved = match palette {
@@ -353,7 +326,7 @@ fn main() {
                             Some(magenta) => painter
                                 .with_priority_scale(style::PriorityScale::new(magenta, &palette)),
                             None => {
-                                if output::shows_priority(&out) {
+                                if meta.shows_priority {
                                     theme_warning = Some(
                                         "priority colors off: TASKS_PALETTE has no magenta; add magenta=#rrggbb"
                                             .to_string(),
@@ -376,7 +349,7 @@ fn main() {
             // Printed after the output, so a long list is not pushed down and the warnings
             // sit next to the prompt; an exit before the output still prints them.
             let warning_list = if format == Format::Pretty {
-                let mut warnings = output::warnings_of(&out);
+                let mut warnings = meta.warnings;
                 warnings.extend(theme_warning);
                 warnings
             } else {
