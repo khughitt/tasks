@@ -76,8 +76,7 @@ pub fn refuse_write(task: &Task, spells: impl Fn(&str) -> bool, registry: &Regis
             }
         }
         alternative = format!(
-            "; if {} does not accept feedback, append the report with `tasks note {to} -- {}`",
-            to.prefix,
+            "; if {to} is no longer open feedback, append the report with `tasks note {to} -- {}`",
             crate::stale::quote(&summary)
         );
     }

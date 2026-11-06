@@ -610,13 +610,13 @@ fn feedback_retry_offers_an_ordinary_note_when_destination_is_not_an_owner() {
         ],
     );
     assert_eq!(kind, "moved");
-    assert!(detail.contains("does not accept feedback"), "{detail}");
+    assert!(detail.contains("is no longer open feedback"), "{detail}");
     let words = retry_words(&dots, &detail, 0);
     let retry: Vec<_> = words.iter().map(String::as_str).collect();
     assert_eq!(
         fail_detail(&env, &dots, &retry).0,
         "validation",
-        "fixed-owner refusal remains"
+        "non-feedback destination refusal remains"
     );
     let words = retry_words(&dots, &detail, 1);
     assert_eq!(words, ["note", &n, "--", summary]);
@@ -647,7 +647,7 @@ fn ordinary_tombstone_retry_keeps_feedback_and_flag_words_as_payload() {
         assert_eq!(kind, "moved");
         let words = retry_words(&dots, &detail, 0);
         assert_eq!(words, ["note", &n, "--", text]);
-        assert!(!detail.contains("does not accept feedback"), "{detail}");
+        assert!(!detail.contains("is no longer open feedback"), "{detail}");
     }
 }
 
