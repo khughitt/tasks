@@ -371,6 +371,15 @@ order:
    `--origin <value>` or `--no-origin` correction planned in §2, in the same `edit` as
    its other field changes when it has them), then write its `--stamp` audit note last,
    whose `origin:` segment names the stage outcomes and the evidence for the correction.
+4. Commit the pass's writes in the project's records repository: under `[git] commit =
+   true`, the CLI commits each task write as it lands, so read any `commit_deferred:` or
+   `commit_failed:` warning and resolve it (`tasks commit` is the recovery path only,
+   since it sweeps every uncommitted file under `tasks/`), then commit any brief or draft
+   spec the pass wrote by pathspec; otherwise commit only the records and documents the
+   pass wrote, by pathspec (`git -C <root> commit -m "chore(tasks): scope pass" -- <paths>`,
+   using `.project.records` for a detached project), unless that project's profile or own
+   instructions decide commits differently, in which case leave them uncommitted and list
+   the uncommitted paths in the summary. Never push.
 
 Write task records only through the CLI and handoffs through explicit paths under
 `records`. On a rerun or after a partial failure, reuse the existing brief, goal, and
@@ -384,7 +393,9 @@ is not a lock; propagate a CLI race failure. There is no per-member approval che
 Lead with the cluster outcome and what remains in the queue, linking any handoff
 document once in the lead, then one line per selected member with a bold verdict or skip
 reason (`- <id> — **<verdict>**: <short reason>`; a re-scoped member names what is now
-established, and a shelved member names the short revisit trigger and checkpoint date).
+established, and a shelved member names the short revisit trigger and checkpoint date),
+and name the project's commit or why none was made (listing any uncommitted paths left by
+the project's profile or instructions).
 Then include only nonempty groups that need user action: drops (id and supporting
 commit/id), questions (id and text), and lane candidates among existing top-level goals
 touched by the pass (id and short reason, flagged without setting `--lane` or changing

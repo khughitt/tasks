@@ -110,6 +110,21 @@ retained reference document may resolve in the code tree instead.
    `decompose`. The note is the audit trail and moves the task out of the pool for the
    age window.
 
+## 4. Commit per touched project
+
+For each project whose records the pass edited:
+
+- Under `[git] commit = true`, the CLI commits each write as it lands; read every
+  `commit_deferred:` or `commit_failed:` warning and resolve it before finishing (`tasks
+  commit` is the recovery path only, since it sweeps every uncommitted file under
+  `tasks/`).
+- Otherwise, commit only the task records the pass wrote in that project's records
+  repository by pathspec (`git -C <root> commit -m "chore(tasks): curate pass" -- <paths>`,
+  using `.project.records` for a detached project), unless that project's profile or own
+  instructions decide commits differently, in which case leave them uncommitted and list
+  the uncommitted paths in the summary.
+- Never push.
+
 ## Pending proposals
 
 `sample` never draws a task whose most recent note is a `curate:` or `scope:` note carrying a
@@ -133,7 +148,9 @@ scope pass.
 ## Summary to the human
 
 One line per sampled task: id, verdict (or `skipped: <reason>`), one phrase of what
-changed; then one `pending: <proposal>` line per pending warning `sample` printed. Then the decisions that are the human's, grouped, omitting
+changed; then one `pending: <proposal>` line per pending warning `sample` printed; then
+each touched project's commit or why none was made (listing any uncommitted paths left by
+the project's profile or instructions). Then the decisions that are the human's, grouped, omitting
 empty groups:
 
 - **drops**: id, and the commit or the duplicate id;
