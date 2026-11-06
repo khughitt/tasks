@@ -1981,6 +1981,8 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
     let sci = env.init("sci");
     let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "2"]));
     let work = id_of(env.json(&sci, &["add", "Work", "-p", "2", "--depends", &dep]));
+    let dropped = id_of(env.json(&sci, &["add", "Dropped", "-p", "2", "--depends", &dep]));
+    env.json(&sci, &["drop", &dropped, "no longer needed"]);
     env.json(&sci, &["shelve", &dep, "--defer", "30d", "later"]);
 
     assert!(
@@ -1992,16 +1994,20 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
     );
 
     let check = env.check(&sci);
-    let warning = check["warnings"]
+    let warnings: Vec<_> = check["warnings"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|warning| warning["kind"] == "shelved_dep")
-        .unwrap_or_else(|| panic!("{check}"));
+        .filter(|warning| warning["kind"] == "shelved_dep")
+        .collect();
+    assert_eq!(warnings.len(), 1, "{check}");
+    let warning = warnings[0];
     assert_eq!(warning["id"], work);
     assert_eq!(
         warning["detail"],
-        format!("depends on shelved {dep}: unshelve it or drop the dependency")
+        format!(
+            "depends on shelved {dep}, keeping this task blocked: replace the shelf with a dependency (`tasks unshelve {dep}`, then `tasks dep {dep} --on <awaited>`), unshelve {dep} or drop the edge (`tasks dep {work} --rm {dep}`) if the wait is no longer intended, or keep both when the shelf records a wake condition no task can stand for"
+        )
     );
 
     env.json(&sci, &["shelve", &work, "--defer", "30d", "later"]);
@@ -2011,6 +2017,43 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
             .unwrap()
             .iter()
             .any(|warning| warning["kind"] == "shelved_dep")
+    );
+
+    // A goal deliberately depending on a shelved future stage remains blocked and retains
+    // the shelved_dep warning with the intentional-wait disposition (a note never suppresses it).
+    let prereq = id_of(env.json(&sci, &["add", "Earlier stage", "-p", "2"]));
+    let stage = id_of(env.json(&sci, &["add", "Future stage", "-p", "2"]));
+    let goal = id_of(env.json(
+        &sci,
+        &["add", "Overall goal", "-p", "1", "--depends", &stage],
+    ));
+    env.json(&sci, &["done", &prereq, "evidence collected"]);
+    env.json(
+        &sci,
+        &[
+            "shelve",
+            &stage,
+            "--defer",
+            "30d",
+            "--wake-on",
+            &prereq,
+            "wait for upstream release; retain goal dependency",
+        ],
+    );
+    assert_eq!(env.fail(&sci, &["done", &goal]), "open_dependencies");
+    let check = env.check(&sci);
+    let warning = check["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["kind"] == "shelved_dep")
+        .unwrap_or_else(|| panic!("{check}"));
+    assert_eq!(warning["id"], goal);
+    assert_eq!(
+        warning["detail"],
+        format!(
+            "depends on shelved {stage}, keeping this task blocked: replace the shelf with a dependency (`tasks unshelve {stage}`, then `tasks dep {stage} --on <awaited>`), unshelve {stage} or drop the edge (`tasks dep {goal} --rm {stage}`) if the wait is no longer intended, or keep both when the shelf records a wake condition no task can stand for"
+        )
     );
 }
 

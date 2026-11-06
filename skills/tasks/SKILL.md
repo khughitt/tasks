@@ -633,7 +633,12 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   The required future date is a review checkpoint; any named target currently done or
   dropped also admits the shelf to `list --needs-review`, even before the date and
   while unrelated execution dependencies remain open. `wake_on` is review evidence;
-  `depends` still controls execution. A dropped target prompts a decision, not proof of
+  `depends` still controls execution. A shelved prerequisite remains open and blocks
+  open dependents, triggering `check`'s `shelved_dep` warning: replace the shelf with a
+  dependency on the awaited task (`tasks unshelve <dep>`, then `tasks dep <dep> --on <awaited>`)
+  when one exists, unshelve or drop the edge (`tasks dep <id> --rm <dep>`) if the wait is
+  no longer intended, or retain the edge, shelf and warning when the recorded wake condition
+  is an intentional wait no task can stand for (notes never suppress the warning). A dropped target prompts a decision, not proof of
   delivery. For manual/external conditions use prose and a date, without inventing a target.
   Shelves remain open and discoverable in ordinary `list`/`search`; `ready`, `next`,
   `sample` and `prime`'s roadmap/ready sections exclude them. Parks remain visible for cleanup.

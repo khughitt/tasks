@@ -117,8 +117,12 @@ the review workflow rather than treating the mark as an execution decision.
 
 `shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` sets aside open
 work with a required future review checkpoint and optional wake targets. Shelves
-remain visible in ordinary list/search, while execution pickers and roadmap omit
-them. Any currently closed wake target or due date wakes review; missing targets
+remain open and visible in ordinary list/search, while execution pickers and roadmap omit
+them. A shelved dependency still blocks open dependents and triggers `check`'s
+`shelved_dep` warning: replace the shelf with a dependency on the awaited task when
+one exists, unshelve or drop the edge when the wait is no longer intended, or retain
+both the shelf and the warning when the recorded wake condition is an intentional
+wait no task can stand for (a note does not suppress the warning). Any currently closed wake target or due date wakes review; missing targets
 still warn. Without a valid checkpoint or with an unresolved target, a shelf is
 stranded unless due/closed evidence already wakes it. Reads never unshelve it;
 `unshelve` returns it to an unreviewed idea. Wake edges are independent of execution

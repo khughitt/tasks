@@ -381,7 +381,10 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                     Some(task),
                     file.clone(),
                     "shelved_dep",
-                    format!("depends on shelved {dependency}: unshelve it or drop the dependency"),
+                    format!(
+                        "depends on shelved {dependency}, keeping this task blocked: replace the shelf with a dependency (`tasks unshelve {dependency}`, then `tasks dep {dependency} --on <awaited>`), unshelve {dependency} or drop the edge (`tasks dep {} --rm {dependency}`) if the wait is no longer intended, or keep both when the shelf records a wake condition no task can stand for",
+                        task.id
+                    ),
                 ));
             }
             // Closed (`done`, `dropped`) and tombstone (`moved`) records' dependencies are
