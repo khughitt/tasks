@@ -280,7 +280,7 @@ fn deferred(dir: &Path, paths: &[PathBuf], cause: &str, cleanup: Option<String>)
 fn failed(dir: &Path, paths: &[PathBuf], cause: &str, cleanup: Option<String>) -> String {
     with_cleanup(
         format!(
-            "commit_failed: {}: {cause}; left uncommitted: {}; for a refusing hook see the record-commit routes in the tasks skill, then run `tasks commit` there",
+            "commit_failed: {}: {cause}; left uncommitted: {}; for a refusing hook see Record-commit recovery routes in the tasks skill, then run `tasks commit` there",
             dir.display(),
             listed(rel(paths))
         ),
@@ -1295,6 +1295,10 @@ mod tests {
         let warnings = commit(root, &[record], state.path());
         assert!(warnings[0].starts_with("commit_failed:"), "{warnings:?}");
         assert!(warnings[0].contains("refused"), "{warnings:?}");
+        assert!(
+            warnings[0].contains("see Record-commit recovery routes in the tasks skill"),
+            "{warnings:?}"
+        );
         assert!(
             warnings[0].contains("cleanup needs attention") && warnings[0].contains("other.txt"),
             "{warnings:?}"

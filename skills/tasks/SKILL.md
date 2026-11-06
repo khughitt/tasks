@@ -449,20 +449,6 @@ instructions; other projects must adopt the policy in their agent instructions b
 relying on direct to waive mandatory brainstorming. The CLI never launches skills or
 creates worktrees, and does not gate selection or `start` on process.
 
-A record-only commit still runs content checks, and those read the working tree and
-the host's tasks registry, not the commit, so it can be refused for content it does
-not contain. Never bypass the hook or carry the record by patch; name the check and
-paths and ask the user, parking `--waiting-on user --reason decision` until they answer:
-- Failure committed in HEAD: on an explicit work-in-place instruction, repair it in
-  place, commit the repair by pathspec (`git commit -m "…" -- <paths>`) so the staged
-  record stays out, then commit the record and create the worktree.
-- Unrelated uncommitted edits (someone's draft): with their consent, `git stash push --
-  <paths>`, commit the record, `git stash pop`; confirm the commit holds only the record,
-  since a hook may regenerate and stage a guide the stash left clean. Never edit or
-  commit their draft.
-- A cross-project reference whose project is unregistered or unreachable on this host:
-  register or sync that project, then commit.
-
 `add --process` and `edit --process` accept `direct` or `planned`;
 `edit --no-process` clears the choice. `check` warns `process_missing` only on
 doing records, including goals and plan steps. An unassessed todo is not a finding;
@@ -480,6 +466,22 @@ worker relay has not registered; Codex proof-only continuation needs
 a matching concrete thread even when process ancestry agrees. A legitimate owner
 missing that thread can recover with the exact held `TASKS_SESSION` from `show`;
 never fabricate a thread or use the command PID as a liveness handle.
+
+### Record-commit recovery routes
+
+A record-only commit still runs content checks, and those read the working tree and
+the host's tasks registry, not the commit, so it can be refused for content it does
+not contain. Never bypass the hook or carry the record by patch; name the check and
+paths and ask the user, parking `--waiting-on user --reason decision` until they answer:
+- Failure committed in HEAD: on an explicit work-in-place instruction, repair it in
+  place, commit the repair by pathspec (`git commit -m "…" -- <paths>`) so the staged
+  record stays out, then commit the record and create the worktree.
+- Unrelated uncommitted edits (someone's draft): with their consent, `git stash push --
+  <paths>`, commit the record, `git stash pop`; confirm the commit holds only the record,
+  since a hook may regenerate and stage a guide the stash left clean. Never edit or
+  commit their draft.
+- A cross-project reference whose project is unregistered or unreachable on this host:
+  register or sync that project, then commit.
 
 ## Worker handoff
 
@@ -589,7 +591,7 @@ Each write commits the records and attachments it wrote, plus whatever the repos
 Configuration changes (`init`, `rename`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` yourself or sweep it with `tasks commit`. `init --records` warns when it left such a config uncommitted.
 `commit_unavailable:` means git is missing or the root is outside git.
 `commit_deferred:` means staged changes, detached HEAD, or an in-progress git operation prevented the commit; clear the cause first.
-`commit_failed:` means a git operation or hook failed; resolve the cause, using the record-commit routes above for a refusing hook.
+`commit_failed:` means a git operation or hook failed; resolve the cause, using [Record-commit recovery routes](#record-commit-recovery-routes) above for a refusing hook.
 A successful write still exits 0 when its commit is skipped or fails; read its warnings.
 `cleanup needs attention:` means cleanup failed or the index could not be checked; inspect the named paths and index before retrying.
 `tasks commit [--project <p>]` recovers skipped commits or sweeps every uncommitted file under `tasks/` into one commit, regardless of the switch; it exits 1 when it cannot commit.
