@@ -4,8 +4,7 @@
 # member's guides. Until every member holds a copy, members take it by hand from ops's
 # HEAD (`git -C <ops> show HEAD:family.toml > tools/family.toml`), never through
 # `family publish`, and `bin/ops-docs family check` runs here by hand as the rollout's
-# progress report. Design: docs/specs/2026-10-31-family-boundaries-design.md §6;
-# mechanism: docs/specs/2026-10-09-family-guide-templates-design.md.
+# progress report. Contract and staged adoption: docs/project-guides.md.
 name = "guild"
 summary = """
 guild is the agent tooling behind every project here: the tracker, harness homes,
@@ -16,7 +15,7 @@ overview = "https://github.com/khughitt/ops#readme"
 
 # Members in nav order: hub and tracker, then the agent layer, then the working tools,
 # then companions, then views. `name` is the member's identity.toml name; `prefix` its
-# tasks prefix; `label` the hover text of its nav link. crew, transponder and forge v2
+# tasks prefix; `label` the hover text of its nav link. band, transponder and forge v2
 # have no repository yet: their URLs are the names their publication tasks create.
 [[members]]
 name = "ops"
@@ -61,9 +60,9 @@ url = "https://github.com/khughitt/obs"
 label = "Execution evidence and historical analysis"
 
 [[members]]
-name = "crew"
-prefix = "crew"
-url = "https://github.com/khughitt/crew"
+name = "band"
+prefix = "band"
+url = "https://github.com/khughitt/band"
 label = "Single- and multi-agent orchestration across harnesses"
 
 [[members]]
