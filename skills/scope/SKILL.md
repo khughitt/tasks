@@ -19,7 +19,8 @@ Explicit ids are the exact batch. Otherwise discover candidates with:
 
     tasks list --needs-review [--tag <tag>] [--project <prefix>]
 
-It returns the scope queue, the rows pretty tables mark `*`. Select the first tier
+It returns the scope queue: JSON rows with `needs_review: true` and a `review_reason`
+(what a person sees marked `*` in a `--pretty` table). Select the first tier
 with eligible unclaimed rows, retaining the coherent-cluster and bounded-batch rules
 within that tier:
 

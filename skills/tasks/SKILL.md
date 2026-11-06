@@ -7,7 +7,8 @@ description: Use when working in a project tracked by tasks, including detached 
 
 `tasks` is the repository's task tracker: one markdown file per task under `tasks/`,
 managed only through the CLI. Output is JSON unless `--pretty` is given (`check` prints
-nothing when it has nothing to report).
+nothing when it has nothing to report); agents read JSON and use `--pretty` to show the
+user a table.
 Task objects omit unset optional fields and empty collections; treat missing optional
 keys as unset and missing task arrays as empty. `false`, `0`, and empty strings remain.
 Response containers (`tasks`, `warnings`, etc.) remain present; `next: null` still means
@@ -47,14 +48,14 @@ mean those documents were verified.
    and `--parallel` is a switch. `--need` is all-of, like `--tag`. `--complexity` is a selection over the effective rating,
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
-   `--needs-review` keeps rows that still need a look, each with a `review_reason`:
+   `--needs-review` keeps the scope queue (`needs_review: true`), each row carrying a
+   `review_reason` that `/scope` with no ids draws from:
    `unreviewed` ideas, `woken` and `stranded` reviewed ideas (no recorded wait: open
    dependency, pending proposal, `awaiting_user`, or future deferral), and `unassessed`
    leaf todo or blocked tasks with no process, plus `woken` shelves (closed target/due
    checkpoint) and `stranded` shelves (missing checkpoint/unresolved target). Scope
    selects unreviewed/woken first, stranded ideas second, unassessed rows third, then
-   stranded shelves. Pretty tables mark those rows with a
-   leading `*`; together they are the scope queue, which `/scope` with no ids draws from.
+   stranded shelves. In `--pretty` tables for a person, those rows carry a leading `*`.
    `note --reviewed --awaiting-user` records that a reviewed idea waits on the user;
    `--no-reviewed` readmits it with the answer.
    `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
@@ -65,7 +66,7 @@ mean those documents were verified.
    A parent must be in the same project, so a goal whose pieces live in other projects
    holds them as `depends` and is a leaf to the tool: `ready` offers it once its pieces
    close, for the closeout. Rate it as that closeout (usually `--process direct`), which
-   also takes it out of the `*` queue.
+   also takes it out of the `needs_review` queue.
    A lane (`lane: true`) is a goal too, even before it has children, and every row names
    its lane in `in_lane` (the nearest lane at or above it). A session committed to one
    lane picks with `tasks next --under <lane>`; `--under` also narrows `list` and `ready`
@@ -207,11 +208,12 @@ mean those documents were verified.
    <id>`, or `tasks drop <id> "<why>"`), not a row. `ready` omits work waiting on
    the user; `list --parked` is the picker's feed. `list --parked --waiting-on user
    --all-projects` is the person's queue: everything parked on them, with each next step.
-   `--headers` labels the columns of any pretty table; `--no-headers` explicitly
-   hides them. Valid `TASKS_HEADERS=true|false` overrides `output.headers` in the
-   existing user `tasks/config.toml`; explicit flags win and missing values default
-   false. Invalid supplied config/env still fails. Upgrade readers before adding
-   new host keys; changing host preferences remains separately authorized.
+   For `--pretty` tables shown to the user, `--headers` labels the columns and
+   `--no-headers` explicitly hides them. Valid `TASKS_HEADERS=true|false` overrides
+   `output.headers` in the existing user `tasks/config.toml`; explicit flags win and
+   missing values default false. Invalid supplied config/env still fails. Upgrade
+   readers before adding new host keys; changing host preferences remains separately
+   authorized.
 6. `tasks done <id> "<what landed>"` on the task's branch before it merges (under `[git] commit`
    the CLI commits the record itself; otherwise commit it with the code). If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
