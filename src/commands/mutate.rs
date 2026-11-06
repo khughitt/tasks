@@ -283,14 +283,21 @@ pub fn occurrence_stamp(warnings: &mut Vec<String>) -> Stamp {
     let get = |name: &str| std::env::var_os(name);
     match crate::provenance::resolve_from(get) {
         Ok(provenance) => Stamp {
+            root_session: crate::provenance::resolve_root_from(provenance.as_ref(), get),
             provenance,
-            root_session: crate::provenance::resolve_root_from(get),
         },
         Err(diagnostic) => {
             warnings.push(diagnostic);
             Stamp::default()
         }
     }
+}
+
+/// Appends a plain note stamped with the native pair from an already-resolved [`Stamp`].
+pub fn append_note_with_stamp(task: &mut Task, by: &str, text: &str, stamp: &Stamp) -> Result<()> {
+    append_note(task, by, text)?;
+    task.notes.last_mut().expect("just appended").provenance = stamp.provenance.clone();
+    Ok(())
 }
 
 /// Appends an occurrence note: the stamp's native pair and `root_session`, plus the

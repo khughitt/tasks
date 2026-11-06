@@ -27666,7 +27666,7 @@ fn recurrence_combines_origin_per_rule() {
     ]);
     assert_eq!(origin_of(&bare), None);
     let expected = format!(
-        "origin unchanged: {bare} has no recorded origin and this occurrence says user; set it with `tasks edit {bare} --origin` once its occurrences are read"
+        "origin unchanged: {bare} has no recorded origin and this occurrence says user; the owner's scope pass can set it with `tasks edit {bare} --origin` once its occurrences are read"
     );
     let warnings: Vec<&str> = out["warnings"]
         .as_array()

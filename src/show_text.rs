@@ -624,6 +624,10 @@ fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
         }
         for label in [
             note.occurrence
+                .root_session
+                .as_ref()
+                .map(|session| format!("root session {session}")),
+            note.occurrence
                 .origin
                 .map(|origin| format!("origin {}", origin.as_str())),
             note.occurrence

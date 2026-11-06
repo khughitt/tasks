@@ -123,16 +123,21 @@ provenance proves a reported session source, not that a note is a lifecycle even
 
 `origin` is whose ask a record carries, not who typed it: user, agent or both.
 The filer supplies evidence-based origin; the tool does not infer it from stamps,
-source, tags, parent or session presence. Frontmatter is the current judgment.
+source, tags, parent or session presence. A decomposition child of a user-requested
+goal is `agent` unless the user asked for that piece; its parent link already leads
+to the user's ask. Frontmatter is the current judgment.
 Occurrence notes (creation and feedback recurrence) preserve their own origin and
 optional `origin_session` forever.
 
-When frontmatter origin is present it supersedes all occurrence labels. When
+When frontmatter origin is present it supersedes all occurrence labels (labels
+written before or after a correction are history; a later recurrence still updates
+the field by the combine rule). When
 absent, origin is unknown; an occurrence labelled user/mixed is partial evidence
 of user words. Recurrence with different known values combines them to mixed;
 an unknown current field stays unknown and warns when a known occurrence arrives.
-`edit --origin` corrects the current field; `--no-origin` withdraws it without
-rewriting notes. Add a stamped evidence note for a correction.
+`edit --origin` corrects the current field; `--no-origin` withdraws it so
+occurrence labels speak again without rewriting notes. Add a stamped evidence
+note for a correction.
 
 The optional native pair is `harness_session` plus `harness_session_source`:
 `claude-code:<id>` with `CLAUDE_CODE_SESSION_ID`, or `codex:<id>` with
@@ -163,3 +168,6 @@ successful results. Pretty output is presentation and may change.
 When adding a persisted field, update parser/serializer/validation and round-trip
 fixtures, all output projections, CLI and completion surface, shipped skills,
 current references, migration/read compatibility and the relevant tests together.
+Install the updated binary on every host that reads synced records before records
+carrying new keys sync; verify one host end to end, and the other hosts updated
+by the same install path are covered.

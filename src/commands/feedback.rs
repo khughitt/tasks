@@ -1,13 +1,11 @@
-use super::{Attribution, Ctx, append_note};
+use super::{Attribution, Ctx};
 use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_line, validate_task};
-use crate::model::Origin as Asker;
-use crate::model::{Status, Task, TaskId};
+use crate::model::{Origin, Status, Task, TaskId};
 use crate::output::{FeedbackOut, Output};
 use crate::registry::Registry;
 use crate::repo::Project;
-use crate::scope::Origin;
 use crate::similarity::Match;
 use std::sync::Arc;
 
@@ -34,7 +32,8 @@ pub fn open(
         Err(Error::NoProject(_)) => {
             let registry = Registry::load()?;
             let shorthand = crate::shorthand::Shorthand::new(super::start_dir(dir)?);
-            let project = crate::scope::open_registered(&registry, target, Origin::Prefix)?;
+            let project =
+                crate::scope::open_registered(&registry, target, crate::scope::Origin::Prefix)?;
             let routing = super::Routing::Registered(target.to_string());
             Ok((
                 Ctx::new(project, registry, routing, shorthand, host.clone()),
@@ -69,7 +68,7 @@ pub fn owners(registry: &Registry) -> Vec<(String, Option<String>)> {
 
 /// The owner a report goes to: a registered project.
 pub fn locate_target(registry: &Registry, prefix: &str) -> Result<Project> {
-    crate::scope::open_registered(registry, prefix, Origin::Prefix)
+    crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)
 }
 
 pub const NOTE_AUTHOR: &str = "feedback";
@@ -308,7 +307,7 @@ fn recur_into(
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     let mut occurrence_at = String::new();
     // Pushed after the update, once, so a `guarded_update` retry cannot repeat it.
-    let mut unchanged_for: Option<Asker> = None;
+    let mut unchanged_for: Option<Origin> = None;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the owner's public file. The reporting project is already in the note text.
     let task = guarded_update(&ctx.project, &ctx.registry, id, eligible, |task| {
@@ -327,8 +326,12 @@ fn recur_into(
         unchanged_for = attribution.origin.filter(|_| warn);
         occurrence_at = at;
         if !body.is_empty() {
-            append_note(task, NOTE_AUTHOR, &format!("detail from {prefix}: {body}"))?;
-            task.notes.last_mut().expect("just appended").provenance = stamp.provenance.clone();
+            super::append_note_with_stamp(
+                task,
+                NOTE_AUTHOR,
+                &format!("detail from {prefix}: {body}"),
+                &stamp,
+            )?;
         }
         for tag in [from, category] {
             if !task.tags.iter().any(|existing| existing == tag) {
@@ -339,7 +342,7 @@ fn recur_into(
     })?;
     if let Some(said) = unchanged_for {
         ctx.warnings.push(format!(
-            "origin unchanged: {id} has no recorded origin and this occurrence says {}; set it with `tasks edit {id} --origin` once its occurrences are read",
+            "origin unchanged: {id} has no recorded origin and this occurrence says {}; the owner's scope pass can set it with `tasks edit {id} --origin` once its occurrences are read",
             said.as_str()
         ));
     }
@@ -356,7 +359,7 @@ fn recur_into(
 /// The record's origin after a recurrence labelled `occurrence`, and whether to warn that
 /// an unknown origin was left unknown (docs/task-model.md). An absent label changes nothing, a
 /// known field combines, and an absent field is never set from a label.
-pub fn recur_origin(field: Option<Asker>, occurrence: Option<Asker>) -> (Option<Asker>, bool) {
+pub fn recur_origin(field: Option<Origin>, occurrence: Option<Origin>) -> (Option<Origin>, bool) {
     match (field, occurrence) {
         (field, None) => (field, false),
         (None, Some(_)) => (None, true),
@@ -402,7 +405,7 @@ mod tests {
 
     #[test]
     fn recur_origin_follows_the_table() {
-        use Asker::{Agent, Mixed, User};
+        use Origin::{Agent, Mixed, User};
         assert_eq!(recur_origin(Some(User), None), (Some(User), false));
         assert_eq!(recur_origin(None, None), (None, false));
         assert_eq!(recur_origin(None, Some(User)), (None, true));

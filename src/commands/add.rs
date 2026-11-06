@@ -79,11 +79,11 @@ pub fn run(
     title: String,
     status: String,
     origin_session: Option<String>,
-    fields: FieldArgs,
+    mut fields: FieldArgs,
 ) -> Result<Output> {
     // Validated before anything is read or written.
-    let attribution =
-        super::Attribution::parse(fields.origin.as_deref(), origin_session.as_deref())?;
+    let origin = fields.origin.take();
+    let attribution = super::Attribution::parse(origin.as_deref(), origin_session.as_deref())?;
     let status = Status::parse(&status)?;
     if !matches!(status, Status::Idea | Status::Todo) {
         return Err(Error::Validation(
@@ -121,6 +121,7 @@ pub fn run(
     }
     let agent = super::creation_agent(fields.agent.as_deref())?;
     let mut task = blank(&ctx.project, title, status, agent)?;
+    task.origin = attribution.origin;
     apply_fields(&mut ctx, &mut task, &fields, None)?;
     let stamp = super::occurrence_stamp(&mut ctx.warnings);
     let at = task.created.clone();

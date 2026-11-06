@@ -68,10 +68,13 @@ pub fn resolve_from(
     }))
 }
 
-/// The Codex root session of a worker: `codex:<CODEX_SESSION_ID>`, only when the selected
-/// pair comes from `CODEX_THREAD_ID` and a valid `CODEX_SESSION_ID` differs from it.
-pub fn resolve_root_from(get: impl Fn(&str) -> Option<OsString>) -> Option<String> {
-    let selected = resolve_from(&get).ok().flatten()?;
+/// The Codex root session of a worker: `codex:<CODEX_SESSION_ID>`, only when `selected`
+/// comes from `CODEX_THREAD_ID` and a valid `CODEX_SESSION_ID` differs from it.
+pub fn resolve_root_from(
+    selected: Option<&HarnessProvenance>,
+    get: impl Fn(&str) -> Option<OsString>,
+) -> Option<String> {
+    let selected = selected?;
     if selected.harness_session_source != "CODEX_THREAD_ID" {
         return None;
     }

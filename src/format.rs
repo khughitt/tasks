@@ -419,7 +419,7 @@ struct ContinuationKeys {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     root_session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    origin: Option<Origin>,
+    origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     origin_session: Option<String>,
 }
@@ -433,7 +433,7 @@ impl ContinuationKeys {
                 .as_ref()
                 .map(|p| p.harness_session_source.clone()),
             root_session: note.occurrence.root_session.clone(),
-            origin: note.occurrence.origin,
+            origin: note.occurrence.origin.map(|o| o.as_str().into()),
             origin_session: note.occurrence.origin_session.clone(),
         }
     }
@@ -447,9 +447,15 @@ impl ContinuationKeys {
             (None, None) => None,
             _ => return Err("harness_session and harness_session_source go together".into()),
         };
+        let origin = self
+            .origin
+            .as_deref()
+            .map(Origin::parse)
+            .transpose()
+            .map_err(|e| e.to_string())?;
         let occurrence = NoteOccurrence {
             root_session: self.root_session,
-            origin: self.origin,
+            origin,
             origin_session: self.origin_session,
         };
         if provenance.is_none() && occurrence.is_empty() {
