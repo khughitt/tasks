@@ -146,6 +146,14 @@ fn main() {
         to_stderr(&usage_error(&error));
         std::process::exit(2);
     }
+    if cli.headers && cli.no_headers {
+        let error = cli::Cli::command().error(
+            clap::error::ErrorKind::ArgumentConflict,
+            "the argument '--headers' cannot be used with '--no-headers'",
+        );
+        to_stderr(&usage_error(&error));
+        std::process::exit(2);
+    }
     let format = match Format::resolve(
         cli.json,
         cli.pretty,
@@ -188,7 +196,20 @@ fn main() {
             }
         }
     };
-    let headers = cli.headers;
+    let headers = match &host {
+        Some(host) => match host.resolve_headers(
+            cli.headers,
+            cli.no_headers,
+            std::env::var_os("TASKS_HEADERS").as_deref(),
+        ) {
+            Ok(headers) => headers,
+            Err(error) => {
+                to_stderr(&format!("{}\n", output::render_error(&error)));
+                std::process::exit(1);
+            }
+        },
+        None => false,
+    };
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
     let color_mode =
         match style::ColorMode::resolve(cli.color.as_deref(), tasks_color.as_deref(), no_color) {

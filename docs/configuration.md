@@ -89,7 +89,9 @@ not additional user settings. Do not synchronize or edit a claim to acquire work
 ## Host settings and document providers
 
 The optional host file is `$XDG_CONFIG_HOME/tasks/config.toml`, otherwise
-`$HOME/.config/tasks/config.toml`. It accepts only:
+`$HOME/.config/tasks/config.toml`. XDG must be nonempty and absolute; empty,
+unset or relative XDG uses absolute HOME. If neither base is usable, configuration
+resolution fails. The file accepts only the following sections and keys:
 
 ```toml
 [identity]
@@ -97,6 +99,9 @@ relay = false
 
 [docs.schemes]
 # scheme = "document-provider-command"
+
+[output]
+headers = false
 ```
 
 `identity.relay` defaults false. Enabling it changes claim identity resolution
@@ -110,11 +115,30 @@ argument, closed stdin, timeout, envelope validation and no-fetch behavior. No h
 means no external providers. A configured command is executable host policy,
 not a command copied automatically from a task record.
 
+`output.headers` defaults false and controls pretty table headers. Explicit
+`--headers` or `--no-headers` overrides valid `TASKS_HEADERS=true|false`, which
+overrides the file. The opposing global flags conflict, including across a
+subcommand. JSON and non-table output gain no header decoration.
+
+Ordinary invocations read and validate the complete host file once, sharing that
+observation across presentation, identity and document providers before command
+side effects. Invalid config or environment is an error even under a winning flag
+or JSON output. Unknown keys, wrong types, duplicate definitions and invalid
+TOML/UTF-8 fail; strings are not coerced to booleans. Only a missing optional file
+or parent supplies defaults. A directory, unreadable file or dangling file symlink
+fails; usable symlinks are allowed. Help, version, completion and the local-only
+`attachments` eligibility query keep their host-config-free behavior.
+
+Upgrade installed readers before writing new keys: older strict readers reject
+them. Existing project settings and the registry remain separate contracts. The
+cross-tool convention is in ops's `docs/user-preferences.md`.
+
 ## Environment and precedence
 
 | Variable | Meaning |
 | --- | --- |
 | `TASKS_FORMAT` | `json` (default) or `pretty`; explicit format flag overrides a valid value. Invalid set values still fail. `--json` and `--pretty` conflict. |
+| `TASKS_HEADERS` | Exactly `true` or `false`; explicit `--headers`/`--no-headers` overrides a valid value, then `output.headers`, then false. Empty, non-UTF-8 and other values fail on ordinary invocations even under a flag. |
 | `TASKS_OWNER` | Advisory owner override, then git branch, then USER. Chosen value must pass owner grammar. |
 | `TASKS_SESSION`, `TASKS_SESSION_PID` | Explicit claim identity and optional process identity; see ownership before using a PID across namespaces. |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CODEX_THREAD_ID`, `CODEX_SESSION_ID` | Native claim/provenance inputs; thread is the Codex worker identity and differing session the root. |

@@ -39,9 +39,13 @@ pub struct Cli {
         value_parser = ValueSet
     )]
     pub color: Option<String>,
-    /// Label each column of a pretty table with a header row. Never applies to JSON.
-    #[arg(long, global = true)]
+    /// Show pretty table headers, overriding TASKS_HEADERS and config output.headers (default: false).
+    /// TASKS_HEADERS accepts true or false. Never decorates JSON.
+    #[arg(long, global = true, conflicts_with = "no_headers")]
     pub headers: bool,
+    /// Hide pretty table headers, overriding TASKS_HEADERS and config output.headers.
+    #[arg(long, global = true)]
+    pub no_headers: bool,
     #[command(subcommand)]
     pub command: Command,
 }

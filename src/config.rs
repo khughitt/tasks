@@ -47,6 +47,24 @@ struct FileShape {
 }
 
 impl HostConfig {
+    pub fn resolve_headers(&self, on: bool, off: bool, env: Option<&OsStr>) -> Result<bool> {
+        let supplied = match env {
+            None => None,
+            Some(value) => Some(match value.to_str() {
+                Some("true") => true,
+                Some("false") => false,
+                _ => return Err(Error::Config("TASKS_HEADERS must be true or false".into())),
+            }),
+        };
+        Ok(if on {
+            true
+        } else if off {
+            false
+        } else {
+            supplied.unwrap_or(self.headers)
+        })
+    }
+
     pub fn path() -> Result<PathBuf> {
         Self::path_from(
             std::env::var_os("XDG_CONFIG_HOME").as_deref(),
@@ -117,6 +135,44 @@ impl HostConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_precedence_and_eager_environment_validation() {
+        for (config, on, off, env, want) in [
+            (false, false, false, None, false),
+            (true, false, false, None, true),
+            (true, false, false, Some("false"), false),
+            (false, false, false, Some("true"), true),
+            (false, true, false, Some("false"), true),
+            (true, false, true, Some("true"), false),
+        ] {
+            let host = HostConfig {
+                headers: config,
+                ..HostConfig::default()
+            };
+            assert_eq!(
+                host.resolve_headers(on, off, env.map(OsStr::new)).unwrap(),
+                want
+            );
+        }
+        let host = HostConfig::default();
+        for input in ["", "yes", "TRUE", "0"] {
+            for (on, off) in [(false, false), (true, false), (false, true)] {
+                assert!(
+                    host.resolve_headers(on, off, Some(OsStr::new(input)))
+                        .is_err()
+                );
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            assert!(
+                host.resolve_headers(true, false, Some(OsStr::from_bytes(b"\xff")))
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn output_headers_defaults_and_preserves_existing_sections() {

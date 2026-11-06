@@ -207,7 +207,11 @@ mean those documents were verified.
    <id>`, or `tasks drop <id> "<why>"`), not a row. `ready` omits work waiting on
    the user; `list --parked` is the picker's feed. `list --parked --waiting-on user
    --all-projects` is the person's queue: everything parked on them, with each next step.
-   `--headers` labels the columns of any pretty table.
+   `--headers` labels the columns of any pretty table; `--no-headers` explicitly
+   hides them. Valid `TASKS_HEADERS=true|false` overrides `output.headers` in the
+   existing user `tasks/config.toml`; explicit flags win and missing values default
+   false. Invalid supplied config/env still fails. Upgrade readers before adding
+   new host keys; changing host preferences remains separately authorized.
 6. `tasks done <id> "<what landed>"` on the task's branch before it merges (under `[git] commit`
    the CLI commits the record itself; otherwise commit it with the code). If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
