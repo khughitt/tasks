@@ -511,9 +511,13 @@ pub fn unknown(mut r: RetentionRecord, detail: impl std::fmt::Display) -> Observ
         preservations: Vec::new(),
     }
 }
-pub fn preflight(project: &Project, record: &RetentionRecord) -> Result<()> {
-    if let Some(name) = record.manifest.value()
-        && let Ok(bytes) = read_local(&current_path(project, name)?, project.attachments_max_bytes)
+pub fn preflight(
+    project: &Project,
+    _record: &RetentionRecord,
+    manifest: Option<&Path>,
+) -> Result<()> {
+    if let Some(path) = manifest
+        && let Ok(bytes) = read_local(path, project.attachments_max_bytes)
         && let Ok(v) = strict(&bytes)
         && v.get("version").and_then(|v| v.as_u64()) != Some(1)
     {
@@ -527,6 +531,7 @@ pub fn inspect(
     project: &Project,
     record: &RetentionRecord,
     preserved: Option<&ArtifactLocator>,
+    manifest: Option<&Path>,
     metrics: &mut Metrics,
 ) -> Result<Observation> {
     record.validate()?;
@@ -536,7 +541,7 @@ pub fn inspect(
     if record.state != "kept" {
         return Err(invalid("only kept identities can be inspected"));
     }
-    preflight(project, record)?;
+    preflight(project, record, manifest)?;
     let attempt = (|| -> Result<Observation> {
         let path = current_path(project, &record.path)?;
         let mut r = record.clone();
@@ -576,13 +581,10 @@ pub fn inspect(
         }
         let mut generated = None;
         let digest = if meta.is_dir() {
-            let m = manifest(&path, metrics)?;
+            let m = self::manifest(&path, metrics)?;
             let mut candidate = m;
-            if let Some(oldpath) = record.manifest.value() {
-                let old = read_local(
-                    &current_path(project, oldpath)?,
-                    project.attachments_max_bytes,
-                )?;
+            if let Some(oldpath) = manifest {
+                let old = read_local(oldpath, project.attachments_max_bytes)?;
                 let oldparsed = parsed(&old)?;
                 let old_hash = hash_bytes(&old, metrics);
                 if record.sha256.value() != Some(old_hash.as_str()) {
@@ -705,12 +707,13 @@ fn references(
                     .is_some_and(|r| r.identity() == *identity && r.state == "released")
             })
             .map_or(0, |i| i + 1);
-        for note in &pinned.task.notes[start..] {
+        for (offset, note) in pinned.task.notes[start..].iter().enumerate() {
             metrics.pulse()?;
             let Some(raw) = note.text.strip_prefix("retention operation: ") else {
                 continue;
             };
             let operation = decode_operation(raw)?;
+            let input = super::lineage::participant(project, &operation, &pinned.task.id)?.clone();
             match operation.outputs {
                 PhaseOutputs::Receiver(output) => {
                     for mapping in output.mapping.iter().filter(|m| m.receiver == *identity) {
@@ -747,9 +750,14 @@ fn references(
                     if output.artifacts.is_empty() {
                         continue;
                     }
-                    let loc = operation
-                        .request
-                        .pinned(&pinned.task.id.to_string(), &pinned.basis)?;
+                    let publication = basis::publication_basis(
+                        project,
+                        &pinned.task.id,
+                        &input.basis,
+                        &pinned.task.notes[..=start + offset],
+                        &mut metrics.history_bytes_read,
+                    )?;
+                    let loc = operation.request.pinned(&input.task, &publication)?;
                     let bytes = artifact(project, &loc, metrics)?;
                     let request: CheckpointRequest = decode_request(&bytes)?;
                     request.validate()?;
@@ -805,7 +813,12 @@ pub fn inspect_history(
     } else {
         std::collections::BTreeMap::new()
     };
-    let mut observation = inspect(project, &required, provided, metrics)?;
+    let manifest = required
+        .manifest
+        .value()
+        .map(|_| super::lineage::manifest_path(project, pinned, &required))
+        .transpose()?;
+    let mut observation = inspect(project, &required, provided, manifest.as_deref(), metrics)?;
     let mut proved = std::collections::BTreeSet::new();
     let mut used = Vec::new();
     if let Some(locator) = provided {
@@ -977,6 +990,10 @@ mod tests {
             &p,
             &record(t.path(), "worktree"),
             None,
+            (&record(t.path(), "worktree"))
+                .manifest
+                .value()
+                .map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1012,6 +1029,7 @@ mod tests {
             &p,
             &record(&path, "evidence"),
             None,
+            (&record(&path, "evidence")).manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1023,7 +1041,14 @@ mod tests {
         std::fs::write(&path, "new").unwrap();
         git(t.path(), &["add", "report"]);
         git(t.path(), &["commit", "-qm", "new"]);
-        let new = inspect(&p, &old.record, Some(&loc), &mut Metrics::default()).unwrap();
+        let new = inspect(
+            &p,
+            &old.record,
+            Some(&loc),
+            (&old.record).manifest.value().map(Path::new),
+            &mut Metrics::default(),
+        )
+        .unwrap();
         assert_eq!(new.record.verification, "verified");
         assert_ne!(new.record.sha256, old.record.sha256);
         assert_eq!(artifact(&p, &loc, &mut Metrics::default()).unwrap(), b"old");
@@ -1045,7 +1070,14 @@ mod tests {
         r.sha256 = FieldString::Text(sha(&bytes));
         r.manifest = FieldString::Text(mp.to_str().unwrap().into());
         let mut metrics = Metrics::default();
-        let o = inspect(&p, &r, None, &mut metrics).unwrap();
+        let o = inspect(
+            &p,
+            &r,
+            None,
+            (&r).manifest.value().map(Path::new),
+            &mut metrics,
+        )
+        .unwrap();
         assert_eq!(o.record.verification, "verified");
         assert_eq!(o.manifest.unwrap().bytes, bytes);
         assert!(metrics.hash_ns > 0);
@@ -1064,6 +1096,7 @@ mod tests {
                 &p,
                 &record(&fifo, "evidence"),
                 None,
+                (&record(&fifo, "evidence")).manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1081,6 +1114,7 @@ mod tests {
                 &p,
                 &record(&path, "evidence"),
                 None,
+                (&record(&path, "evidence")).manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1150,10 +1184,16 @@ mod tests {
         };
         std::fs::write(root.join("report"), "new").unwrap();
         assert_eq!(
-            inspect(&p, &r, None, &mut Metrics::default())
-                .unwrap()
-                .record
-                .verification,
+            inspect(
+                &p,
+                &r,
+                None,
+                (&r).manifest.value().map(Path::new),
+                &mut Metrics::default()
+            )
+            .unwrap()
+            .record
+            .verification,
             "unknown"
         );
         let bare = match &loc {
@@ -1161,27 +1201,55 @@ mod tests {
             _ => unreachable!(),
         };
         assert_eq!(
-            inspect(&p, &r, Some(bare), &mut Metrics::default())
-                .unwrap()
-                .record
-                .verification,
+            inspect(
+                &p,
+                &r,
+                Some(bare),
+                (&r).manifest.value().map(Path::new),
+                &mut Metrics::default()
+            )
+            .unwrap()
+            .record
+            .verification,
             "unknown",
             "manifest bytes alone do not preserve directory members"
         );
         std::fs::write(prior.join("additional-report"), "later version").unwrap();
-        let o = inspect(&p, &r, Some(&loc), &mut Metrics::default()).unwrap();
+        let o = inspect(
+            &p,
+            &r,
+            Some(&loc),
+            (&r).manifest.value().map(Path::new),
+            &mut Metrics::default(),
+        )
+        .unwrap();
         assert_eq!(o.record.verification, "verified");
         assert_ne!(o.manifest.unwrap().bytes, first.bytes);
         std::fs::remove_file(prior.join("report")).unwrap();
         assert_eq!(
-            inspect(&p, &r, Some(&loc), &mut Metrics::default())
-                .unwrap()
-                .record
-                .verification,
+            inspect(
+                &p,
+                &r,
+                Some(&loc),
+                (&r).manifest.value().map(Path::new),
+                &mut Metrics::default()
+            )
+            .unwrap()
+            .record
+            .verification,
             "unknown"
         );
         std::fs::write(&mp, b"{\"version\":2,\"entries\":[]}").unwrap();
-        assert!(inspect(&p, &r, None, &mut Metrics::default()).is_err());
+        assert!(
+            inspect(
+                &p,
+                &r,
+                None,
+                (&r).manifest.value().map(Path::new),
+                &mut Metrics::default()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn retained_verify_complete_manifest() {
@@ -1236,7 +1304,14 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let p = project(t.path());
         let r = record(&t.path().join("missing"), "evidence");
-        let o = inspect(&p, &r, None, &mut Metrics::default()).unwrap();
+        let o = inspect(
+            &p,
+            &r,
+            None,
+            (&r).manifest.value().map(Path::new),
+            &mut Metrics::default(),
+        )
+        .unwrap();
         assert_eq!(o.record.verification, "unknown");
         assert_eq!(o.record.sha256, FieldString::Null);
         std::fs::write(t.path().join("file"), "new").unwrap();
@@ -1244,6 +1319,10 @@ mod tests {
             &p,
             &record(&t.path().join("file"), "evidence"),
             None,
+            (&record(&t.path().join("file"), "evidence"))
+                .manifest
+                .value()
+                .map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1259,11 +1338,19 @@ mod tests {
             &p,
             &record(&path, "evidence"),
             None,
+            (&record(&path, "evidence")).manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
         std::fs::write(&path, "new").unwrap();
-        let next = inspect(&p, &old.record, None, &mut Metrics::default()).unwrap();
+        let next = inspect(
+            &p,
+            &old.record,
+            None,
+            (&old.record).manifest.value().map(Path::new),
+            &mut Metrics::default(),
+        )
+        .unwrap();
         assert_eq!(next.record.verification, "unknown");
         assert_ne!(old.record.sha256, FieldString::Null);
     }
@@ -1337,7 +1424,14 @@ mod tests {
         let branch = Project::open(&tree).unwrap();
         let mut record = record(&tree, "worktree");
         record.path = ".worktrees/feature".into();
-        let observation = inspect(&branch, &record, None, &mut Metrics::default()).unwrap();
+        let observation = inspect(
+            &branch,
+            &record,
+            None,
+            (&record).manifest.value().map(Path::new),
+            &mut Metrics::default(),
+        )
+        .unwrap();
         assert_eq!(observation.record.verification, "verified");
         assert_eq!(observation.record.path, ".worktrees/feature");
         assert_eq!(
@@ -1402,14 +1496,27 @@ mod tests {
         std::fs::remove_dir_all(&tree).unwrap();
         std::fs::write(&tree, &m.bytes).unwrap();
         assert_eq!(
-            inspect(&p, &r, None, &mut Metrics::default())
-                .unwrap()
-                .record
-                .verification,
+            inspect(
+                &p,
+                &r,
+                None,
+                (&r).manifest.value().map(Path::new),
+                &mut Metrics::default()
+            )
+            .unwrap()
+            .record
+            .verification,
             "unknown",
             "equal file/manifest bytes do not establish the prior directory payload"
         );
-        let observed = inspect(&p, &r, Some(&prior), &mut Metrics::default()).unwrap();
+        let observed = inspect(
+            &p,
+            &r,
+            Some(&prior),
+            (&r).manifest.value().map(Path::new),
+            &mut Metrics::default(),
+        )
+        .unwrap();
         assert_eq!(observed.record.verification, "verified");
         assert_eq!(observed.record.manifest, FieldString::Absent);
         assert!(observed.manifest.is_none());

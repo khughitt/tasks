@@ -2,7 +2,7 @@ use super::{basis, model::*, publish, reconcile, state, verify};
 use crate::{error::Result, model::TaskId, repo::Project};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) fn project_for(project: &Project, task: &str) -> Result<Project> {
+pub(crate) fn project_for(project: &Project, task: &str) -> Result<Project> {
     let id = TaskId::parse(task)?;
     if super::lineage::owns_prefix(project, &id.prefix) {
         Ok(project.clone())

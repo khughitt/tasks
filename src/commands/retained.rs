@@ -42,6 +42,18 @@ pub fn checkpoint(dir: Option<&Path>, id: String, request: PathBuf) -> Result<Ou
     let bytes = request_bytes(&ctx, &request)?;
     let r: CheckpointRequest = decode_request(&bytes)?;
     r.validate()?;
+    if r.inputs[0].task != id
+        && crate::retained::lineage::same(&ctx.project, &r.inputs[0].task, &id)?
+    {
+        let key = OperationKey {
+            coordinator: r.inputs[0].task.clone(),
+            operation_id: r.operation_id.clone(),
+        };
+        let operation = crate::retained::publish::open(dir, &[id], &key)?;
+        return Ok(Output::RetainedMutation(crate::retained::publish::replay(
+            operation, &bytes, false,
+        )?));
+    }
     if r.inputs[0].task != id {
         return Err(invalid(
             "checkpoint argument differs from its request input",
@@ -64,6 +76,19 @@ pub fn transfer(dir: Option<&Path>, from: String, to: String, request: PathBuf) 
     let bytes = request_bytes(&ctx, &request)?;
     let r: TransferRequest = decode_request(&bytes)?;
     r.validate()?;
+    if (r.inputs[0].task != from || r.inputs[1].task != to)
+        && crate::retained::lineage::same(&ctx.project, &r.inputs[0].task, &from)?
+        && crate::retained::lineage::same(&target.project, &r.inputs[1].task, &to)?
+    {
+        let key = OperationKey {
+            coordinator: r.inputs[0].task.clone(),
+            operation_id: r.operation_id.clone(),
+        };
+        let operation = crate::retained::publish::open(dir, &[from, to], &key)?;
+        return Ok(Output::RetainedMutation(crate::retained::publish::replay(
+            operation, &bytes, false,
+        )?));
+    }
     if r.inputs[0].task != from || r.inputs[1].task != to {
         return Err(invalid("transfer arguments differ from request inputs"));
     }
@@ -82,6 +107,24 @@ pub fn reconcile(dir: Option<&Path>, coordinator: String, request: PathBuf) -> R
     let bytes = request_bytes(&ctx, &request)?;
     let r: ReconcileRequest = decode_request(&bytes)?;
     r.validate()?;
+    if r.operation.coordinator != coordinator
+        && crate::retained::lineage::same(&ctx.project, &r.operation.coordinator, &coordinator)?
+    {
+        let mut ids = Vec::new();
+        for input in &r.inputs {
+            let p = crate::retained::proof::project_for(&ctx.project, &input.task)?;
+            let old = crate::model::TaskId::parse(&input.task)?;
+            let current = format!("{}-{}", p.prefix, old.hex);
+            if !crate::retained::lineage::same(&p, &input.task, &current)? {
+                return Err(invalid("unproved historical participant"));
+            }
+            ids.push(current);
+        }
+        let operation = crate::retained::publish::open(dir, &ids, &r.operation)?;
+        return Ok(Output::RetainedMutation(crate::retained::publish::replay(
+            operation, &bytes, true,
+        )?));
+    }
     if r.operation.coordinator != coordinator {
         return Err(invalid(
             "coordinator argument differs from reconciliation request",

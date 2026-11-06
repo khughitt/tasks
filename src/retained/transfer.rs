@@ -37,7 +37,7 @@ fn committed(ctx: &mut OperationCtx, id: &TaskId, index: usize) -> Result<bool> 
     ctx.metrics.history_bytes_read += exact.history_bytes_read;
     Ok(exact.task.notes.get(index) == pinned.task.notes.get(index))
 }
-fn counts(ctx: &mut OperationCtx, host: &str) -> Result<Counts> {
+pub(super) fn counts(ctx: &mut OperationCtx, host: &str) -> Result<Counts> {
     let mut out = Counts {
         kept_verified: 0,
         kept_unknown: 0,
@@ -112,7 +112,9 @@ fn selected(
                         "Selected identity is missing or its history is blocked".into(),
                     )
                 })?;
-            if item.state != "kept" || item.next_owner != format!("task:{owner}") {
+            if item.state != "kept"
+                || !super::lineage::owner_matches(ctx.project(id), &item.next_owner, owner)?
+            {
                 return Err(invalid(
                     "selected identity is not kept in the named task's custody",
                 ));
@@ -178,7 +180,12 @@ fn preflight(
         }
     }
     for record in originals {
-        verify::preflight(ctx.project(from), &record)?;
+        let manifest = record
+            .manifest
+            .value()
+            .map(|_| super::lineage::manifest_path(ctx.project(from), &ctx.tasks[from], &record))
+            .transpose()?;
+        verify::preflight(ctx.project(from), &record, manifest.as_deref())?;
         let path = verify::current_path(ctx.project(from), &record.path)?;
         if record.kind != "worktree" && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
             let root = path.canonicalize()?;
@@ -351,7 +358,7 @@ fn release(
                 .ok_or_else(|| invalid("receiver source kind"))?,
         )?;
         if r.identity() != map.receiver
-            || r.next_owner != format!("task:{to}")
+            || !super::lineage::owner_matches(ctx.project(to), &r.next_owner, to)?
             || r.purpose != request.purpose
             || r.cleanup_trigger != request.cleanup_trigger
         {

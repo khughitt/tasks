@@ -247,3 +247,287 @@ fn retention_rename_lineage_reconciled() {
     assert_eq!(f.json(&["retained", "state", &receiver])["complete"], true);
     let _ = host();
 }
+
+#[test]
+fn retention_rename_operations_custody() {
+    use common::retained::{transfer, transfer_request};
+    let mut f = observed("in-tree");
+    let old = f.id.clone();
+    seed_rename(&mut f, "new");
+    assert_eq!(
+        f.state()["items"][0]["record"]["next_owner"],
+        format!("task:{old}")
+    );
+    let to = f.json(&["add", "Receiver"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &f.id]);
+    f.json(&["start", &to]);
+    let request = transfer_request(&f, &to);
+    let result = transfer(&f, &to, &request);
+    assert_eq!(result["outcome"], "transferred");
+    assert_eq!(f.state()["items"][0]["record"]["state"], "released");
+}
+#[test]
+fn retention_rename_operations_manifest() {
+    for layout in ["in-tree", "detached", "linked"] {
+        let mut f = RetainedEnv::new(layout);
+        f.json(&["start", &f.id]);
+        let a = f.dir.join("scratch");
+        let b = f.dir.join("evidence");
+        for d in [&a, &b] {
+            std::fs::create_dir(d).unwrap();
+            std::fs::write(d.join("member"), "exact").unwrap();
+        }
+        checkpoint(
+            &f,
+            &checkpoint_request(
+                &f,
+                1,
+                json!([declaration(&a, "scratch"), declaration(&b, "evidence")]),
+            ),
+        );
+        f.json(&["park", &f.id, "rename"]);
+        let before = f.state();
+        let old_path =
+            std::path::PathBuf::from(before["items"][0]["record"]["manifest"].as_str().unwrap());
+        let bytes = std::fs::read(&old_path).unwrap();
+        seed_rename(&mut f, "new");
+        assert!(!old_path.exists());
+        let new_path = f.records.join(format!(
+            "tasks/files/{}/{}",
+            f.id,
+            old_path.file_name().unwrap().to_str().unwrap()
+        ));
+        assert_eq!(std::fs::read(&new_path).unwrap(), bytes);
+        f.json(&["start", &f.id]);
+        let result = checkpoint(&f, &checkpoint_request(&f, 2, json!([])));
+        assert_eq!(result["outcome"], "verified", "{result}");
+        let after = f.state();
+        assert_eq!(after["complete"], true);
+        for i in 0..2 {
+            assert_eq!(
+                after["items"][i]["record"]["path"],
+                before["items"][i]["record"]["path"]
+            );
+            assert_eq!(
+                after["items"][i]["record"]["next_owner"],
+                before["items"][i]["record"]["next_owner"]
+            );
+        }
+    }
+}
+#[test]
+fn retention_rename_operations_retry() {
+    let mut f = observed("in-tree");
+    let request = std::fs::read(f.dir.join("request.json")).unwrap();
+    f.json(&["start", &f.id]);
+    let original = f.json(&[
+        "retained",
+        "checkpoint",
+        &f.id,
+        "--request",
+        f.dir.join("request.json").to_str().unwrap(),
+    ]);
+    f.json(&["park", &f.id, "rename"]);
+    seed_rename(&mut f, "new");
+    f.json(&["start", &f.id]);
+    std::fs::remove_file(f.dir.join("payload")).unwrap();
+    let before = f.basis();
+    let path = f.dir.join("retry.json");
+    std::fs::write(&path, &request).unwrap();
+    let result = f.json(&[
+        "retained",
+        "checkpoint",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(result["publications"], original["publications"]);
+    assert_eq!(result["counts"], original["counts"]);
+    assert_eq!(f.basis(), before);
+    assert!(result["warnings"].as_array().unwrap().iter().any(|v|v=="Completed operation replay; current filesystem bytes were not inspected"));
+    let mut changed: serde_json::Value = serde_json::from_slice(&request).unwrap();
+    changed["declarations"][0]["purpose"] = json!("Changed");
+    std::fs::write(&path, changed.to_string()).unwrap();
+    assert!(
+        !f.cmd()
+            .args([
+                "retained",
+                "checkpoint",
+                &f.id,
+                "--request",
+                path.to_str().unwrap()
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn retention_rename_operations_cross_project_retry() {
+    use common::retained::{cross_receiver, transfer, transfer_request};
+    let mut f = observed("in-tree");
+    f.json(&["start", &f.id]);
+    let (other, to) = cross_receiver(&f, false);
+    f.json(&["-C", other.to_str().unwrap(), "start", &to]);
+    let request = transfer_request(&f, &to);
+    let original = transfer(&f, &to, &request);
+    f.json(&["park", &f.id, "rename"]);
+    f.json(&["-C", other.to_str().unwrap(), "park", &to, "rename"]);
+    let saved = (f.dir.clone(), f.records.clone(), f.id.clone());
+    f.dir = other.clone();
+    f.records = other;
+    f.id = to;
+    seed_rename(&mut f, "other");
+    let new_to = f.id.clone();
+    let other = f.dir.clone();
+    (f.dir, f.records, f.id) = saved;
+    seed_rename(&mut f, "new");
+    f.json(&["start", &f.id]);
+    f.json(&["-C", other.to_str().unwrap(), "start", &new_to]);
+    let result = transfer(&f, &new_to, &request);
+    assert_eq!(result["publications"], original["publications"]);
+    assert_eq!(result["counts"], original["counts"]);
+}
+#[test]
+fn retention_rename_operations_missing_manifest_refuses() {
+    let mut f = RetainedEnv::new("detached");
+    f.json(&["start", &f.id]);
+    let directory = f.dir.join("scratch");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("file"), "payload").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 1, json!([declaration(&directory, "scratch")])),
+    );
+    let manifest = f.state()["items"][0]["record"]["manifest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["park", &f.id, "rename"]);
+    seed_rename(&mut f, "new");
+    f.json(&["start", &f.id]);
+    let target = f.records.join(format!(
+        "tasks/files/{}/{}",
+        f.id,
+        std::path::Path::new(&manifest)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+    ));
+    std::fs::write(target, b"corrupt").unwrap();
+    let request = checkpoint_request(&f, 2, json!([]));
+    let path = f.request("corrupt.json", &request);
+    let before = f.basis();
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(f.basis(), before);
+}
+
+#[test]
+fn retention_rename_operations_reconcile_carried_custody() {
+    use common::retained::{host, transfer_request};
+    let mut f = observed("in-tree");
+    seed_rename(&mut f, "new");
+    f.json(&["start", &f.id]);
+    let to = f.json(&["add", "Receiver"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &to]);
+    let request = transfer_request(&f, &to);
+    let path = f.request("transfer.json", &request);
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "receiver_published")
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            &to,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(86));
+    std::fs::remove_file(f.dir.join("payload")).unwrap();
+    let request = json!({"version":1,"operation":{"coordinator":f.id,"operation_id":"a".repeat(32)},"reconciliation_id":"c".repeat(32),"inputs":[{"task":f.id,"basis":f.state()["basis"]},{"task":to,"basis":f.json(&["retained","state",&to])["basis"]}],"reason":"Keep custody after loss"});
+    let path = f.request("reconcile.json", &request);
+    let original = f.json(&[
+        "retained",
+        "reconcile",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(original["outcome"], "reconciled");
+    f.json(&["park", &f.id, "rename"]);
+    f.json(&["park", &to, "rename"]);
+    seed_rename(&mut f, "third");
+    let to = format!("third-{}", to.split_once('-').unwrap().1);
+    f.json(&["start", &f.id]);
+    f.json(&["start", &to]);
+    let replay = f.json(&[
+        "retained",
+        "reconcile",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(replay["publications"], original["publications"]);
+    assert_eq!(replay["counts"], original["counts"]);
+    let _ = host();
+}
+
+#[test]
+fn retention_rename_operations_external_manifest_is_not_aliased() {
+    let mut f = RetainedEnv::new("in-tree");
+    f.json(&["start", &f.id]);
+    let directory = f.dir.join("scratch");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("file"), "payload").unwrap();
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 1, json!([declaration(&directory, "scratch")])),
+    );
+    let mut record = f.state()["items"][0]["record"].clone();
+    let name = std::path::Path::new(record["manifest"].as_str().unwrap())
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    record["manifest"] = json!(
+        f.dir
+            .join(format!("external/tasks/files/{}/{name}", f.id))
+            .to_str()
+            .unwrap()
+    );
+    f.note(record);
+    f.json(&["park", &f.id, "rename"]);
+    seed_rename(&mut f, "new");
+    f.json(&["start", &f.id]);
+    assert!(
+        f.records
+            .join(format!("tasks/files/{}/{name}", f.id))
+            .exists()
+    );
+    let result = checkpoint(&f, &checkpoint_request(&f, 2, json!([])));
+    assert_eq!(result["outcome"], "accounted_unknown");
+}

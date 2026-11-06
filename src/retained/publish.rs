@@ -795,13 +795,9 @@ impl OperationCtx {
             if let Some(raw) = n.text.strip_prefix("retention operation: ") {
                 let note = decode_operation(raw)?;
                 if note.key == self.key {
-                    let context = note
-                        .input_bases
-                        .iter()
-                        .find(|i| i.task == id.to_string())
-                        .ok_or_else(|| invalid("phase lacks its participant input"))?
-                        .basis
-                        .clone();
+                    let input = super::lineage::participant(&project, &note, id)?;
+                    let historical_task = input.task.clone();
+                    let context = input.basis.clone();
                     let basis = super::basis::publication_basis(
                         &project,
                         id,
@@ -810,7 +806,7 @@ impl OperationCtx {
                         &mut self.metrics.history_bytes_read,
                     )?;
                     publications.push(Publication {
-                        task: id.to_string(),
+                        task: historical_task,
                         phase: note.phase,
                         basis,
                     });
@@ -1097,6 +1093,7 @@ pub fn result(
     for id in ids {
         publications.extend(ctx.phase_publications(&id)?);
     }
+    publications.sort_by(|a, b| a.task.cmp(&b.task));
     ctx.metrics.wall_ns = ctx.started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
     Ok(MutationResult {
         version: 1,
@@ -1708,4 +1705,78 @@ mod tests {
             "missing_ledger",
         )
     }
+}
+
+// Historical request replay retains current claims/locks but never admits a new intent.
+pub fn replay(
+    mut ctx: OperationCtx,
+    provided: &[u8],
+    reconciliation: bool,
+) -> Result<MutationResult> {
+    let mut from = None;
+    for id in ctx.tasks.keys() {
+        if super::lineage::same(ctx.project(id), &ctx.key.coordinator, &id.to_string())? {
+            if from.is_some() {
+                return Err(invalid("ambiguous historical coordinator"));
+            }
+            from = Some(id.clone());
+        }
+    }
+    let from = from.ok_or_else(|| invalid("historical coordinator is not locked"))?;
+    let project = ctx.project(&from).clone();
+    let pinned = ctx.tasks[&from].clone();
+    super::proof::validate_history(&project, &pinned, None)?;
+    super::reconcile::validate_terminal_history(&project, &pinned)?;
+    let (index, terminal) = ctx
+        .phase(&from)?
+        .ok_or_else(|| invalid("historical operation not found"))?;
+    if terminal.phase
+        != if reconciliation {
+            "reconciled"
+        } else {
+            "completed"
+        }
+    {
+        return Err(invalid(
+            "historical retry requires the exact terminal receipt",
+        ));
+    }
+    let input = super::lineage::participant(&project, &terminal, &from)?;
+    let publication = super::basis::publication_basis(
+        &project,
+        &from,
+        &input.basis,
+        &pinned.task.notes[..=index],
+        &mut ctx.metrics.history_bytes_read,
+    )?;
+    let locator = if reconciliation {
+        match &terminal.outputs {
+            PhaseOutputs::Reconciled(out) => &out.directive,
+            _ => return Err(invalid("reconciliation receipt shape")),
+        }
+    } else {
+        &terminal.request
+    };
+    let bytes = super::verify::artifact(
+        &project,
+        &locator.pinned(&input.task, &publication)?,
+        &mut ctx.metrics,
+    )?;
+    let original: serde_json::Value = decode_request(&bytes)?;
+    let supplied: serde_json::Value = decode_request(provided)?;
+    if original != supplied {
+        return Err(invalid(
+            "historical retry differs from the immutable parsed request",
+        ));
+    }
+    if reconciliation {
+        return super::reconcile::result(&mut ctx, &from, &terminal, true);
+    }
+    if terminal.input_bases.len() == 1 {
+        let request: CheckpointRequest = decode_request(provided)?;
+        return super::checkpoint::replay(&mut ctx, &from, &request)?
+            .ok_or_else(|| invalid("historical checkpoint receipt missing"));
+    }
+    let counts = super::transfer::counts(&mut ctx, &terminal.host)?;
+    result(&mut ctx, "transferred".into(), counts, Vec::new(), true)
 }

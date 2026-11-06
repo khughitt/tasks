@@ -170,7 +170,12 @@ fn inventory(
         }
     }
     for record in records.values() {
-        verify::preflight(ctx.project(id), record)?;
+        let manifest = record
+            .manifest
+            .value()
+            .map(|_| super::lineage::manifest_path(ctx.project(id), &ctx.tasks[id], record))
+            .transpose()?;
+        verify::preflight(ctx.project(id), record, manifest.as_deref())?;
         let path = verify::current_path(ctx.project(id), &record.path)?;
         if (record.kind == "scratch"
             || std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir())
@@ -226,7 +231,7 @@ fn checkpoint_note(
         text: format!("retention checkpoint: {raw}"),
     })
 }
-fn replay(
+pub(super) fn replay(
     ctx: &mut OperationCtx,
     id: &TaskId,
     request: &CheckpointRequest,

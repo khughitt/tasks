@@ -297,3 +297,90 @@ pub fn participant<'a>(
     }
     found.ok_or_else(|| invalid("operation lacks its source participant"))
 }
+
+pub fn owner_matches(project: &Project, owner: &str, id: &TaskId) -> Result<bool> {
+    match owner.strip_prefix("task:") {
+        Some(owner) => same(project, owner, &id.to_string()),
+        None => Ok(false),
+    }
+}
+pub fn manifest_path(
+    project: &Project,
+    pinned: &basis::PinnedTask,
+    record: &RetentionRecord,
+) -> Result<std::path::PathBuf> {
+    let raw = record
+        .manifest
+        .value()
+        .ok_or_else(|| invalid("record has no manifest"))?;
+    let original = super::verify::current_path(project, raw)?;
+    if project.retention_lineage.is_empty() {
+        return Ok(original);
+    }
+    let Some(name) = original.file_name().and_then(|v| v.to_str()) else {
+        return Err(invalid("manifest filename"));
+    };
+    let Some(digest) = record.sha256.value() else {
+        return Ok(original);
+    };
+    if name != format!("retained-manifest-{digest}.json") {
+        return Ok(original);
+    }
+    let root = basis::root(project)?;
+    for e in &project.retention_lineage {
+        let old = TaskId::parse(&format!("{}-{}", e.from_prefix, pinned.task.id.hex))?;
+        let source_dir = root.join(&e.from_subdir).join(format!("tasks/files/{old}"));
+        if source_dir.join(name) != original {
+            continue;
+        }
+        let b = Basis {
+            project: e.from_prefix.clone(),
+            layout: e.layout.clone(),
+            records_subdir: e.from_subdir.clone(),
+            commit: e.commit.clone(),
+            task_path: task_path(&e.from_subdir, &old),
+            retained_ref: e.retained_ref.clone(),
+        };
+        let source = basis::read_exact(project, &old, &b)?;
+        let observed = source
+            .task
+            .notes
+            .iter()
+            .filter_map(|n| {
+                n.text
+                    .strip_prefix("retained: ")
+                    .and_then(|r| decode_record(r).ok())
+            })
+            .any(|r| {
+                r.identity() == record.identity()
+                    && r.manifest.value() == Some(raw)
+                    && r.sha256.value() == Some(digest)
+            });
+        if !observed {
+            return Err(invalid(
+                "generated manifest lacks its exact historical observation",
+            ));
+        }
+        let loc = ArtifactLocator::Attachment {
+            task: old.to_string(),
+            name: name.into(),
+            basis: Some(b),
+            sha256: digest.into(),
+        };
+        super::verify::artifact(project, &loc, &mut super::verify::Metrics::default())?;
+        let current = TaskId::parse(&format!("{}-{}", project.prefix, pinned.task.id.hex))?;
+        crate::attachments::check_storage(project, &current)?;
+        if crate::attachments::ledger(&pinned.task).get(name)
+            != Some(&crate::attachments::Ledger::Attached)
+        {
+            return Err(invalid("moved manifest lacks a live attachment ledger"));
+        }
+        let path = crate::attachments::task_dir(project, &current).join(name);
+        let bytes = super::verify::read_local(&path, project.attachments_max_bytes)?;
+        if super::verify::hash_bytes(&bytes, &mut super::verify::Metrics::default()) != digest {
+            return Err(invalid("moved manifest digest mismatch"));
+        }
+        return Ok(path);
+    }
+    Ok(original)
+}

@@ -107,12 +107,15 @@ fn load_original(ctx: &mut OperationCtx, from: &TaskId) -> Result<Binding> {
         ctx.metrics.history_bytes_read += source.history_bytes_read;
         let state = state::replay(&project, &source.task, &source.basis, None)?;
         for identity in &request.items {
-            if !state.items.iter().any(|i| {
-                i.identity == *identity
-                    && i.record.as_ref().is_some_and(|r| {
-                        r.state == "kept" && r.next_owner == format!("task:{from}")
-                    })
-            }) {
+            let record = state
+                .items
+                .iter()
+                .find(|i| i.identity == *identity)
+                .and_then(|i| i.record.as_ref())
+                .ok_or_else(|| invalid("original transfer selection missing"))?;
+            if record.state != "kept"
+                || !super::lineage::owner_matches(&project, &record.next_owner, from)?
+            {
                 return Err(invalid(
                     "original transfer selection lacks sender custody in its pinned input",
                 ));
@@ -144,7 +147,7 @@ fn load_original(ctx: &mut OperationCtx, from: &TaskId) -> Result<Binding> {
                     if r.version != Some(1)
                         || r.state != "kept"
                         || r.identity() != mapping.receiver
-                        || r.next_owner != format!("task:{to}")
+                        || !super::lineage::owner_matches(ctx.project(&to), &r.next_owner, &to)?
                         || r.host != mapping.sender.host
                         || r.kind != mapping.sender.kind
                         || (r.kind != "worktree" || from.prefix == to.prefix)
@@ -749,7 +752,7 @@ fn ready(
     publish::stop("reconcile_ready");
     Ok(unresolved)
 }
-fn result(
+pub(super) fn result(
     ctx: &mut OperationCtx,
     from: &TaskId,
     terminal: &OperationNote,
