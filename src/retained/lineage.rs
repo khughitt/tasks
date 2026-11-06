@@ -527,10 +527,11 @@ fn protected_bytes(project: &Project, pinned: &basis::PinnedTask) -> Result<()> 
     }
     Ok(())
 }
-/// Rename carries every note byte unchanged, so a plain `retained:` item diagnostic reads
-/// the same on both sides of it and does not block it. Operation and checkpoint envelopes
-/// bind the evidence rename must preserve: any unresolved diagnostic on one refuses. An
-/// operation citing a malformed `retained:` ordinal is itself such a diagnostic.
+/// Rename carries every note byte unchanged, so a malformed plain `retained:` item note
+/// reads the same on both sides of it and does not block it. Operation and checkpoint
+/// envelopes bind the evidence rename must preserve: any unresolved diagnostic on one
+/// refuses. An operation citing a malformed `retained:` ordinal is itself such a
+/// diagnostic. An unsupported item version also refuses: an older reader is renaming.
 fn envelopes_complete(project: &Project, pinned: &basis::PinnedTask) -> Result<bool> {
     let state = super::state::replay(project, &pinned.task, &pinned.basis, None)?;
     Ok(state
@@ -538,11 +539,12 @@ fn envelopes_complete(project: &Project, pinned: &basis::PinnedTask) -> Result<b
         .iter()
         .filter(|d| d.resolved_by.is_none())
         .all(|d| {
-            d.source
-                .as_ref()
-                .and_then(|s| usize::try_from(s.ordinal).ok()?.checked_sub(1))
-                .and_then(|i| pinned.task.notes.get(i))
-                .is_some_and(|n| n.text.starts_with("retained: "))
+            d.code == "malformed_record"
+                && d.source
+                    .as_ref()
+                    .and_then(|s| usize::try_from(s.ordinal).ok()?.checked_sub(1))
+                    .and_then(|i| pinned.task.notes.get(i))
+                    .is_some_and(|n| n.text.starts_with("retained: "))
         }))
 }
 pub fn prepare(project: &Project, target: &str) -> Result<Option<RenameEdge>> {

@@ -254,11 +254,11 @@ in the existing rename inventory. It preserves old envelopes, ordinals, task
 suffixes, hashes, retained refs and original Git paths byte for byte.
 
 An unresolved diagnostic on a `retention operation:` or machine
-`retention checkpoint:` envelope refuses rename and fails post-rename `tasks check`;
-an operation citing a malformed `retained:` ordinal is such a diagnostic. A
-diagnostic on a plain `retained:` item note does not: rename carries the note
-unchanged, so `tasks retained state` reports the same diagnostic, still unresolved,
-under the new ID.
+`retention checkpoint:` envelope refuses rename, and fails post-rename `tasks check`
+for the renamed source history; an operation citing a malformed `retained:` ordinal
+is such a diagnostic, and so is an item note of an unsupported version. A malformed
+plain `retained:` item note does not block: rename carries the note unchanged, so
+`tasks retained state` reports the same diagnostic, still unresolved, under the new ID.
 
 Current state queries return the current task ID/basis. An explicit historical
 `--at` returns the ID and exact basis from that revision, even when requested

@@ -885,16 +885,22 @@ fn retention_rename_command_plain_item_diagnostics_do_not_block() {
             String::from_utf8_lossy(&check.stdout)
         );
     }
-    let f = observed("in-tree");
-    f.seed_note(r#"retention checkpoint: {"version":1}"#);
-    let before = f.basis();
-    let out = f.cmd().args(["rename", "sci", "new"]).output().unwrap();
-    assert!(!out.status.success());
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("incomplete retention history"),
-        "{out:?}"
-    );
-    assert_eq!(f.basis(), before);
+    // A newer-version item note means an older reader is renaming: refuse, as for a bad envelope.
+    for note in [
+        r#"retention checkpoint: {"version":1}"#,
+        r#"retained: {"version":2,"host":"host-a","kind":"worktree","path":".worktrees/x","state":"kept"}"#,
+    ] {
+        let f = observed("in-tree");
+        f.seed_note(note);
+        let before = f.basis();
+        let out = f.cmd().args(["rename", "sci", "new"]).output().unwrap();
+        assert!(!out.status.success(), "{note}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("incomplete retention history"),
+            "{note}: {out:?}"
+        );
+        assert_eq!(f.basis(), before);
+    }
 }
 #[test]
 fn retention_rename_command_bad_live_protected_bytes_refuse() {
