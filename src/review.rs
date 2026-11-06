@@ -290,7 +290,15 @@ pub fn apply(
             task.awaiting_user = true;
         }
         Awaiting::Clear => task.awaiting_user = false,
-        Awaiting::Keep => {}
+        Awaiting::Keep => {
+            if review == Review::Set && task.awaiting_user {
+                task.awaiting_user = false;
+                warnings.push(format!(
+                    "{} no longer awaits the user; add --awaiting-user to keep it",
+                    task.id
+                ));
+            }
+        }
     }
     if review == Review::Keep && awaiting == Awaiting::Keep && task.reviewed {
         warnings.push(if task.awaiting_user {

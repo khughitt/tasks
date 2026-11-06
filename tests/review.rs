@@ -1050,6 +1050,83 @@ fn awaiting_user_is_set_with_a_review_and_cleared_by_readmission() {
 }
 
 #[test]
+fn rereviewing_an_idea_clears_awaiting_user_and_warns_unless_kept() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let first = env.json(
+        &dir,
+        &[
+            "note",
+            &id,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    assert!(
+        !first["warnings"]
+            .to_string()
+            .contains("no longer awaits the user"),
+        "{first}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], true);
+
+    // Re-reviewing with --reviewed --awaiting-user keeps the marker without warning.
+    let kept = env.json(
+        &dir,
+        &[
+            "note",
+            &id,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question still stands",
+        ],
+    );
+    assert!(
+        !kept["warnings"]
+            .to_string()
+            .contains("no longer awaits the user"),
+        "{kept}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], true);
+
+    // Re-reviewing with --reviewed alone clears awaiting_user and warns, and once its new
+    // dependency closes the idea comes back as woken.
+    let edge = id_of(env.json(&dir, &["add", "Follow-up"]));
+    env.json(&dir, &["dep", &id, "--on", &edge]);
+    let cleared = env.json(&dir, &["note", &id, "--reviewed", "scope: briefed"]);
+    let warnings = cleared["warnings"].to_string();
+    assert!(
+        warnings.contains(&format!(
+            "{id} no longer awaits the user; add --awaiting-user to keep it"
+        )),
+        "{warnings}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], false);
+
+    // Re-reviewing when awaiting_user is already false does not warn.
+    let again = env.json(&dir, &["edit", &id, "--reviewed"]);
+    assert!(
+        !again["warnings"]
+            .to_string()
+            .contains("no longer awaits the user"),
+        "{again}"
+    );
+
+    env.json(&dir, &["done", &edge, "answered"]);
+    let list = env.json(&dir, &["list", "--needs-review"]);
+    let row = list["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == id)
+        .unwrap_or_else(|| panic!("{id} missing from needs-review: {list}"));
+    assert_eq!(row["needs_review"], true);
+    assert_eq!(row["review_reason"], "woken");
+}
+
+#[test]
 fn awaiting_user_is_refused_without_a_review_and_on_a_non_idea() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

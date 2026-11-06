@@ -109,7 +109,8 @@ See [configuration](configuration.md#project-settings).
 `reviewed` says an idea has been considered. Derived `needs_review` reasons are
 `unreviewed`, `woken`, `stranded` and `unassessed`. Reviewed ideas with a recorded
 user wait, future deferral, pending proposal, or open/unresolved dependency wait
-quietly. Once waits clear, new closure/deferral evidence can wake them; an idea
+quietly; a re-review (`--reviewed`) clears `awaiting_user` unless `--awaiting-user`
+is given again. Once waits clear, new closure/deferral evidence can wake them; an idea
 with no supported wait or wake evidence is stranded. Unassessed `todo`/`blocked`
 leaves need review when process is absent, except lanes. Use the scope skill for
 the review workflow rather than treating the mark as an execution decision.

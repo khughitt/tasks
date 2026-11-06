@@ -57,7 +57,8 @@ mean those documents were verified.
    selects unreviewed/woken first, stranded ideas second, unassessed rows third, then
    stranded shelves. In `--pretty` tables for a person, those rows carry a leading `*`.
    `note --reviewed --awaiting-user` records that a reviewed idea waits on the user;
-   `--no-reviewed` readmits it with the answer.
+   a re-review with `--reviewed` clears `awaiting_user` unless `--awaiting-user` is given
+   again, and `--no-reviewed` readmits it with the answer.
    `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
    phrase (literal, case-insensitive; notes are not searched) and takes every `list`
    option, so `tasks search "<phrase>" --all-projects` (all open work, including shelves) is the
