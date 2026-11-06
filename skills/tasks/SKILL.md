@@ -718,14 +718,23 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
-  After interrupted attachment publication, retry the same name and bytes through
-  `tasks attach`, then verify both the live ledger and the payload at the intended
-  Git basis. The retry publishes adopted payloads with the ledger record. With
-  older builds that leave an adopted file untracked, inspect the pending `tasks/`
-  sweep, resolve unrelated writes and run `tasks commit` when publication is
-  missing, then verify exact bytes
-  with `git show <basis>:<attachment-path>` in the records repository. A successful
-  audit or exit 0 alone does not establish committed evidence.
+  After interrupted attachment publication, first check whether the live ledger
+  already records the present file:
+  - Present file with no live `attached:` ledger entry and identical bytes: retry
+    the same name and bytes through `tasks attach` to adopt the payload and write
+    and publish the ledger entry.
+  - Present file already recorded by a matching live ledger entry (or an adopted
+    file left untracked by an older build): do not retry `tasks attach` (which
+    refuses a live name with `attachment_exists`); instead inspect the pending
+    `tasks/` sweep, resolve unrelated writes, and run `tasks commit` when
+    publication is missing.
+  - Conflicting bytes, incomplete evidence, or unsafe storage: `tasks attach`
+    refuses fail-closed (`attachment_exists` or `attachment_unsafe`); resolve the
+    conflict or detach/rename explicitly rather than overwriting bytes.
+  In every recovery case, verify both the live ledger and the exact committed
+  payload bytes with `git show <basis>:<attachment-path>` in the records
+  repository. A successful audit or exit 0 alone does not establish committed
+  evidence.
 - Oversized text evidence: `tasks attach <id> <path> --multipart`, or pipe the
   whole document into `tasks attach <id> - --name <name> --multipart`. This accepts
   one UTF-8 source, preserves exact bytes and validates `.json` syntax; clipboard,
