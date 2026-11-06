@@ -871,13 +871,8 @@ fn validate_closing(
     task: &Task,
 ) -> Result<()> {
     crate::format::validate_task(task)?;
-    crate::review::validate(task)?;
-    crate::defer::validate(task)?;
     project.validate_docs(task)?;
-    crate::hierarchy::validate_parent(project, registry, task)?;
-    crate::hierarchy::validate_lanes(project, registry, task)?;
-    crate::hierarchy::validate_periodic(project, registry, task)?;
-    crate::hierarchy::validate_defer(project, registry, task)
+    project.validate_invariants(registry, task)
 }
 
 fn list_ids(ids: &[TaskId]) -> String {

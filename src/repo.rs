@@ -1016,15 +1016,9 @@ impl Project {
             file: file.clone(),
             detail: error.to_string(),
         })?;
-        if &task.id != id {
-            return Err(Error::Parse {
-                file,
-                detail: format!("id field is {}", task.id),
-            });
-        }
         if task.id.prefix != self.prefix {
             return Err(Error::Parse {
-                file: format!("tasks/{id}.md"),
+                file,
                 detail: format!(
                     "prefix {:?} does not match project prefix {:?}",
                     task.id.prefix, self.prefix
@@ -1112,6 +1106,24 @@ impl Project {
         (tasks, errors)
     }
 
+    pub(crate) fn validate_invariants(&self, registry: &Registry, task: &Task) -> Result<()> {
+        self.validate_invariants_among(registry, task, &[])
+    }
+
+    pub(crate) fn validate_invariants_among(
+        &self,
+        registry: &Registry,
+        task: &Task,
+        projected: &[Task],
+    ) -> Result<()> {
+        crate::review::validate(task)?;
+        crate::defer::validate(task)?;
+        crate::hierarchy::validate_parent_among(self, registry, task, projected)?;
+        crate::hierarchy::validate_lanes_among(self, registry, task, projected)?;
+        crate::hierarchy::validate_periodic(self, registry, task)?;
+        crate::hierarchy::validate_defer(self, registry, task)
+    }
+
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
         self.write_task_guarded(registry, task, || Ok(()))
     }
@@ -1129,6 +1141,7 @@ impl Project {
             crate::retained::publish::WritePermission::Ordinary,
         )
     }
+
     pub(crate) fn write_task_permitted(
         &self,
         registry: &Registry,
@@ -1141,13 +1154,35 @@ impl Project {
             crate::retained::publish::check_write(self, &old, task, permission)?;
         }
 
-        crate::review::validate(task)?;
-        crate::defer::validate(task)?;
-        crate::hierarchy::validate_parent(self, registry, task)?;
-        crate::hierarchy::validate_lanes(self, registry, task)?;
-        crate::hierarchy::validate_periodic(self, registry, task)?;
-        crate::hierarchy::validate_defer(self, registry, task)?;
+        self.validate_invariants(registry, task)?;
         crate::migrating::freeze::check_stored(registry, self, task)?;
+        let path = self.task_path(&task.id);
+        let raw = serialize_physical(&self.physical_for_save(task)?);
+        before_write()?;
+        atomic_write(&path, raw.as_bytes())?;
+        self.record_task_written(task);
+        Ok(())
+    }
+
+    pub(crate) fn write_validated_task(&self, task: &Task) -> Result<()> {
+        self.write_validated_task_permitted(
+            task,
+            || Ok(()),
+            crate::retained::publish::WritePermission::Ordinary,
+        )
+    }
+
+    pub(crate) fn write_validated_task_permitted(
+        &self,
+        task: &Task,
+        before_write: impl FnOnce() -> Result<()>,
+        permission: crate::retained::publish::WritePermission,
+    ) -> Result<()> {
+        if self.task_path(&task.id).exists() {
+            let old = self.read_task(&task.id)?;
+            crate::retained::publish::check_write(self, &old, task, permission)?;
+        }
+
         let path = self.task_path(&task.id);
         let raw = serialize_physical(&self.physical_for_save(task)?);
         before_write()?;
@@ -1477,13 +1512,7 @@ impl Project {
         task: &mut Task,
         mut candidate: impl FnMut() -> u32,
     ) -> Result<()> {
-        crate::review::validate(task)?;
-        crate::defer::validate(task)?;
-        crate::hierarchy::validate_parent(self, registry, task)?;
-        crate::hierarchy::validate_lanes(self, registry, task)?;
-        // A new record has no children, so these refuse only a lane.
-        crate::hierarchy::validate_periodic(self, registry, task)?;
-        crate::hierarchy::validate_defer(self, registry, task)?;
+        self.validate_invariants(registry, task)?;
         // `add`'s write path: a new record has nothing to restore.
         crate::migrating::freeze::check_write(registry, self, None, task)?;
         for _ in 0..16 {
@@ -1511,14 +1540,9 @@ impl Project {
     /// Create the journal's reserved id exclusively; never redraw it on a collision.
     pub fn create_task_exact(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::format::validate_task(task)?;
-        crate::review::validate(task)?;
-        crate::defer::validate(task)?;
         self.validate_docs(task)?;
         crate::needs::require_declared(&self.needs, &task.needs)?;
-        crate::hierarchy::validate_parent(self, registry, task)?;
-        crate::hierarchy::validate_lanes(self, registry, task)?;
-        crate::hierarchy::validate_periodic(self, registry, task)?;
-        crate::hierarchy::validate_defer(self, registry, task)?;
+        self.validate_invariants(registry, task)?;
         let raw = serialize_physical(&self.physical_for_save(task)?);
         for _ in 0..16 {
             let temp = self.tasks_dir().join(format!(

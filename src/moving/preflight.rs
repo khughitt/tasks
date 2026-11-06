@@ -274,14 +274,9 @@ pub(crate) fn validate_record_among(
     projected: &[Task],
 ) -> Result<()> {
     validate_task(task)?;
-    crate::review::validate(task)?;
-    crate::defer::validate(task)?;
     project.validate_docs(task)?;
     crate::needs::require_declared(&project.needs, &task.needs)?;
-    hierarchy::validate_parent_among(project, registry, task, projected)?;
-    hierarchy::validate_lanes_among(project, registry, task, projected)?;
-    hierarchy::validate_periodic(project, registry, task)?;
-    hierarchy::validate_defer(project, registry, task)
+    project.validate_invariants_among(registry, task, projected)
 }
 
 pub(crate) fn validate_destination_docs(
