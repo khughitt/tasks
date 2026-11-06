@@ -5,12 +5,6 @@ pub mod snapshot;
 use crate::config::HostConfig;
 use crate::error::{Error, Result};
 
-/// Whether the relay level is configured on. Read by callers that treat a relay-level
-/// failure differently from a native one.
-pub fn enabled() -> Result<bool> {
-    Ok(HostConfig::load()?.relay_identity)
-}
-
 /// Stage 3 docs/task-model.md asking what the host offers rather than what the target triple
 /// says: a Linux build without a mounted `/proc` cannot establish scope either. The
 /// refusal belongs to the relay level, not to startup, so a session with `TASKS_SESSION`
@@ -29,9 +23,9 @@ pub fn stage_platform(enabled: bool, proc_available: bool) -> Result<()> {
 
 /// Stages 2, 3 and 4 docs/task-model.md in order. `Ok(None)` means relay is off or the caller is
 /// out of scope; either way the native ladder applies unchanged.
-pub fn level() -> Result<Option<resolve::Resolved>> {
+pub fn level(host: &HostConfig) -> Result<Option<resolve::Resolved>> {
     // Stage 2: configuration. Nothing below runs when relay is not enabled.
-    if !enabled()? {
+    if !host.relay_identity {
         return Ok(None);
     }
     // Stage 3: platform support.

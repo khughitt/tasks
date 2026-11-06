@@ -670,7 +670,9 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
     let Ok(task) = project.read_task(subject) else {
         return Vec::new();
     };
-    let resolver = crate::resolve::Resolver::new(&project, &registry);
+    let host = crate::config::HostConfig::default();
+    let mut resolver = crate::resolve::Resolver::new(&project, &registry, &host);
+    resolver.set_fetch(crate::resolve::Fetch::Disabled);
     let local = local_prefix(&line);
     let mut resolved: Vec<(TaskId, Option<Task>, Vec<String>)> = task
         .depends

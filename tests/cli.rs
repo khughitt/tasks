@@ -29892,6 +29892,19 @@ fn headers_label_each_table_view_and_leave_json_alone() {
             "{args:?}"
         );
         assert_eq!(env.json(&sci, &full), env.json(&sci, &args), "{args:?}");
+        let config = env.home.path().join(".config/tasks/config.toml");
+        std::fs::write(&config, "[output]\nheaders = true\n").unwrap();
+        assert_eq!(env.pretty(&sci, &args), text, "config default for {args:?}");
+        let mut disabled = vec!["--no-headers"];
+        disabled.extend(args.iter().copied());
+        assert!(
+            !env.pretty(&sci, &disabled)
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some("id")),
+            "{args:?}"
+        );
+        assert_eq!(env.json(&sci, &full), env.json(&sci, &args), "{args:?}");
+        std::fs::remove_file(config).unwrap();
     }
 }
 

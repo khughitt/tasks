@@ -108,7 +108,7 @@ fn load_holds(ctx: &mut ReadCtx, now: OffsetDateTime) -> Result<(HoldSnapshot, M
     let mine = if holds.is_empty() {
         Mine::default()
     } else {
-        super::list::view_holds(&holds, &mut fresh)?
+        super::list::view_holds(&holds, &mut fresh, &ctx.host)?
     };
     for warning in fresh {
         if !ctx.warnings.contains(&warning) {

@@ -1,10 +1,12 @@
 use super::model::*;
+use crate::config::HostConfig;
 use crate::{
     error::{Error, Result},
     model::{Status, Task},
     repo::Project,
 };
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 pub struct PendingOperation {
     pub note: OperationNote,
@@ -284,13 +286,14 @@ pub fn open(
     dir: Option<&std::path::Path>,
     ids: &[String],
     key: &OperationKey,
+    config: Arc<HostConfig>,
 ) -> Result<OperationCtx> {
     let started = std::time::Instant::now();
     key.validate()?;
     let mut contexts = BTreeMap::new();
     let mut resolved = std::collections::BTreeSet::new();
     for raw in ids {
-        let ctx = crate::commands::open_id_unlocked_ctx(dir, raw)?;
+        let ctx = crate::commands::open_id_unlocked_ctx(dir, raw, config.clone())?;
         let id = crate::commands::parse_id(&ctx.registry, &ctx.shorthand, raw)?;
         if id.to_string() != *raw {
             return Err(invalid("operation participants require canonical task ids"));
@@ -1522,7 +1525,13 @@ mod tests {
         crate::attachments::ensure_task_dir(&p, &id).unwrap();
         let path = crate::attachments::task_dir(&p, &id).join(&a.name);
         std::fs::write(&path, &a.bytes).unwrap();
-        let mut ctx = open(Some(&dir), &[id.to_string()], &key).unwrap();
+        let mut ctx = open(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            std::sync::Arc::new(crate::config::HostConfig::default()),
+        )
+        .unwrap();
         assert_eq!(ctx.project(&id).prefix, id.prefix);
         let result = batch(&mut ctx, &id, &[a], &[n]).unwrap();
         assert_eq!(result.publication.task, id.to_string());
@@ -1550,7 +1559,15 @@ mod tests {
         if case == "foreign_index" {
             std::fs::write(dir.join("foreign"), "foreign").unwrap();
             crate::common::git(&dir, &["add", "foreign"]);
-            assert!(open(Some(&dir), &[id.to_string()], &key).is_err());
+            assert!(
+                open(
+                    Some(&dir),
+                    &[id.to_string()],
+                    &key,
+                    std::sync::Arc::new(crate::config::HostConfig::default())
+                )
+                .is_err()
+            );
             assert!(
                 !p.read_task(&id)
                     .unwrap()
@@ -1564,7 +1581,13 @@ mod tests {
             crate::attachments::ensure_task_dir(&p, &id).unwrap();
             let path = crate::attachments::task_dir(&p, &id).join(&a.name);
             std::fs::write(&path, "different").unwrap();
-            let mut ctx = open(Some(&dir), &[id.to_string()], &key).unwrap();
+            let mut ctx = open(
+                Some(&dir),
+                &[id.to_string()],
+                &key,
+                std::sync::Arc::new(crate::config::HostConfig::default()),
+            )
+            .unwrap();
             assert!(batch(&mut ctx, &id, &[a], &[n]).is_err());
             assert_eq!(std::fs::read(path).unwrap(), b"different");
             return;
@@ -1580,7 +1603,13 @@ mod tests {
             let mut raw = std::fs::read_to_string(&path).unwrap();
             raw.push_str(&format!("- {} (fixture): {}\n", n.at, n.text));
             std::fs::write(path, raw).unwrap();
-            let mut ctx = open(Some(&dir), &[id.to_string()], &key).unwrap();
+            let mut ctx = open(
+                Some(&dir),
+                &[id.to_string()],
+                &key,
+                std::sync::Arc::new(crate::config::HostConfig::default()),
+            )
+            .unwrap();
             assert!(batch(&mut ctx, &id, &[a], &[n]).is_err());
             return;
         }
@@ -1596,7 +1625,13 @@ mod tests {
         if case == "warning" {
             std::fs::write(dir.join(".git/hooks/pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
         }
-        let mut ctx = open(Some(&dir), &[id.to_string()], &key).unwrap();
+        let mut ctx = open(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            std::sync::Arc::new(crate::config::HostConfig::default()),
+        )
+        .unwrap();
         assert_eq!(ctx.contexts.len(), 1);
         assert_eq!(ctx.locks.len(), 1);
         let before = super::super::basis::resolve(&p, "HEAD").unwrap();
@@ -1676,7 +1711,13 @@ mod tests {
         if std::env::var("TASKS_PUBLICATION_REVERSE").as_deref() == Ok("1") {
             ids.reverse();
         }
-        let mut ctx = open(Some(&dir), &ids, &key).unwrap();
+        let mut ctx = open(
+            Some(&dir),
+            &ids,
+            &key,
+            std::sync::Arc::new(crate::config::HostConfig::default()),
+        )
+        .unwrap();
         let (_, a, n) = example(&id);
         assert_eq!(ctx.contexts.len(), 2);
         assert_eq!(ctx.locks.len(), 1);

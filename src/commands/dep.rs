@@ -7,7 +7,7 @@ use crate::resolve::Resolver;
 
 /// Fails when `candidate` participates in a cycle or reaches an unknown task.
 pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
         let id = ctx.registry.canonical_id(id);
         if id == candidate.id {
@@ -133,7 +133,7 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
             )));
         }
     }
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let warnings = add_dependencies(&ctx, &resolver, &mut task, &on)?;
     ctx.warnings.extend(warnings);
     save(&mut ctx, &mut task)?;

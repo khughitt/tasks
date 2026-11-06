@@ -43,6 +43,23 @@ pub struct TestEnv {
     dirs: Vec<TempDir>,
 }
 
+/// Run a unit test's subprocess-producing body without inheriting host credentials.
+pub fn isolated_test(name: &str) -> bool {
+    if std::env::var("TASKS_ISOLATED_TEST").as_deref() == Ok(name) {
+        return false;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .envs(isolated_env(home.path()))
+        .env("TASKS_ISOLATED_TEST", name)
+        .args(["--exact", name, "--nocapture"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "isolated {name}: {out:?}");
+    true
+}
+
 impl TestEnv {
     pub fn new() -> TestEnv {
         TestEnv {

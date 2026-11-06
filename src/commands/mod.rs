@@ -40,6 +40,7 @@ pub mod where_;
 
 use crate::claims::{ClaimStore, Liveness, MutationLock};
 use crate::cli::{Cli, Command, FieldArgs, GroupAction, ScopeArgs};
+use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::format::{normalize_note_text, validate_body, validate_line, validate_task};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
@@ -51,6 +52,7 @@ use crate::scope::{Origin, Scope};
 use crate::shorthand::Shorthand;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// What `save` must do to the claim store once every validation has passed. Recorded by the
 /// guard in `transition` (or by `park`); **nothing is persisted until `save` acts on it.**
@@ -73,6 +75,7 @@ pub enum ClaimIntent {
 }
 
 pub struct Ctx {
+    pub host: Arc<HostConfig>,
     pub project: Project,
     pub registry: Registry,
     pub warnings: Vec<String>,
@@ -122,8 +125,15 @@ pub(crate) enum Ownership {
 }
 
 impl Ctx {
-    fn new(project: Project, registry: Registry, routing: Routing, shorthand: Shorthand) -> Self {
+    fn new(
+        project: Project,
+        registry: Registry,
+        routing: Routing,
+        shorthand: Shorthand,
+        host: Arc<HostConfig>,
+    ) -> Self {
         Self {
+            host,
             project,
             registry,
             shorthand,
@@ -207,9 +217,9 @@ impl Ctx {
     /// failure with relay off is raised here, exactly where `identity` raised it before,
     /// which is what holds the relay-off guarantee at every call site rather than at some.
     pub(crate) fn resolve_for_guard(&mut self) -> Result<crate::claims::Resolution> {
-        let me = crate::claims::resolve_identity(&mut self.warnings);
+        let me = crate::claims::resolve_identity(&self.host, &mut self.warnings);
         match me {
-            crate::claims::Resolution::Failed(error) if !crate::relay::enabled()? => Err(error),
+            crate::claims::Resolution::Failed(error) if !self.host.relay_identity => Err(error),
             other => Ok(other),
         }
     }
@@ -220,7 +230,7 @@ impl Ctx {
         let Some(existing) = existing else {
             return me.require().map(|_| ());
         };
-        if ownership(&existing, &me)? != Ownership::Foreign {
+        if ownership(&existing, &me, &self.host)? != Ownership::Foreign {
             return Ok(());
         }
         // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
@@ -255,7 +265,7 @@ impl Ctx {
             return Ok(());
         }
         let me = self.resolve_for_guard()?;
-        if ownership(&existing, &me)? == Ownership::Foreign {
+        if ownership(&existing, &me, &self.host)? == Ownership::Foreign {
             return Ok(());
         }
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
@@ -277,7 +287,7 @@ impl Ctx {
                 crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
             self.warnings.extend(warnings);
             // "Another session" by the ownership rule, as in `guard_holds`.
-            let mine = own_holds(&snapshot, &me)?;
+            let mine = own_holds(&snapshot, &me, &self.host)?;
             let held: Vec<(String, crate::holds::Holder)> = added
                 .iter()
                 .filter_map(|need| {
@@ -407,14 +417,14 @@ impl Ctx {
         if let Some(existing) = self.claims_mut()?.get(&task.id).cloned()
             && !crate::claims::liveness(&existing).is_stale()
             && holds.iter().all(|need| existing.holds.contains(need))
-            && ownership(&existing, &me)? != Ownership::Foreign
+            && ownership(&existing, &me, &self.host)? != Ownership::Foreign
         {
             return Ok(());
         }
         let (snapshot, warnings) =
             crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
         self.warnings.extend(warnings);
-        let mine = own_holds(&snapshot, &me)?;
+        let mine = own_holds(&snapshot, &me, &self.host)?;
         let Some((need, holder)) =
             crate::holds::held_back(&snapshot, &self.project.needs, task, &mine)
         else {
@@ -465,7 +475,7 @@ impl Ctx {
 
         let existing = self.claims_mut()?.get(id).cloned();
         let ownership = match &existing {
-            Some(claim) => ownership(claim, &resolution)?,
+            Some(claim) => ownership(claim, &resolution, &self.host)?,
             None => Ownership::Foreign,
         };
         let mine = ownership != Ownership::Foreign;
@@ -594,6 +604,7 @@ impl Ctx {
 pub(crate) fn ownership(
     claim: &crate::claims::Claim,
     me: &crate::claims::Resolution,
+    host: &HostConfig,
 ) -> Result<Ownership> {
     if let Some(identity) = me.identity()
         && claim.session == identity.session
@@ -604,7 +615,7 @@ pub(crate) fn ownership(
     // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
     // explicit mismatch is foreign however the ancestry looks. Spec constraint.
     let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
-    if explicit || !crate::relay::enabled()? {
+    if explicit || !host.relay_identity {
         return Ok(Ownership::Foreign);
     }
     let proved = crate::claims::proves_ownership(
@@ -628,8 +639,9 @@ pub(crate) fn ownership(
 pub(crate) fn own_holds(
     snapshot: &crate::holds::HoldSnapshot,
     me: &crate::claims::Resolution,
+    host: &HostConfig,
 ) -> Result<crate::holds::Mine> {
-    snapshot.mine(|claim| Ok(ownership(claim, me)? != Ownership::Foreign))
+    snapshot.mine(|claim| Ok(ownership(claim, me, host)? != Ownership::Foreign))
 }
 
 /// Which holds a read view counts as the caller's own (docs/user-guide.md). A read view
@@ -640,20 +652,27 @@ pub(crate) fn own_holds(
 pub(crate) fn read_holds(
     snapshot: &crate::holds::HoldSnapshot,
     me: &crate::claims::Resolution,
+    host: &HostConfig,
 ) -> Result<crate::holds::Mine> {
     match me {
         crate::claims::Resolution::Failed(_) => Ok(crate::holds::Mine::default()),
-        crate::claims::Resolution::Resolved(_) => own_holds(snapshot, me),
+        crate::claims::Resolution::Resolved(_) => own_holds(snapshot, me, host),
     }
 }
 
-pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
+pub fn open_ctx(dir: Option<&Path>, host: Arc<HostConfig>) -> Result<Ctx> {
     let start = start_dir(dir)?;
     let project = Project::locate(&start)?;
     let registry = Registry::load()?;
     reject_stale_local(&registry, &project)?;
     let shorthand = Shorthand::located(start, project.prefix.clone());
-    Ok(Ctx::new(project, registry, Routing::Local, shorthand))
+    Ok(Ctx::new(
+        project,
+        registry,
+        Routing::Local,
+        shorthand,
+        host.clone(),
+    ))
 }
 
 /// A checkout whose own prefix the registry has retired. Nothing else sees this:
@@ -686,18 +705,18 @@ pub fn retired_warning(project: &Project) -> Option<String> {
     })
 }
 
-fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
-    let mut ctx = open_id_ctx_unwarned(dir, id)?;
+fn open_id_ctx(dir: Option<&Path>, id: &str, host: Arc<HostConfig>) -> Result<Ctx> {
+    let mut ctx = open_id_ctx_unwarned(dir, id, host.clone())?;
     ctx.warnings.extend(retired_warning(&ctx.project));
     Ok(ctx)
 }
 
-pub fn open_id_unlocked_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
-    open_id_ctx(dir, id)
+pub fn open_id_unlocked_ctx(dir: Option<&Path>, id: &str, host: Arc<HostConfig>) -> Result<Ctx> {
+    open_id_ctx(dir, id, host.clone())
 }
 
-fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
-    let mut ctx = match open_ctx(dir) {
+fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str, host: Arc<HostConfig>) -> Result<Ctx> {
+    let mut ctx = match open_ctx(dir, host.clone()) {
         Ok(ctx) => ctx,
         Err(Error::NoProject(_)) => {
             let registry = Registry::load()?;
@@ -705,7 +724,13 @@ fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
             let id = parse_id(&registry, &shorthand, id)?;
             let project = crate::scope::open_registered(&registry, &id.prefix, Origin::Id(&id))?;
             let routing = Routing::Registered(id.prefix);
-            return Ok(Ctx::new(project, registry, routing, shorthand));
+            return Ok(Ctx::new(
+                project,
+                registry,
+                routing,
+                shorthand,
+                host.clone(),
+            ));
         }
         Err(error) => return Err(error),
     };
@@ -718,8 +743,8 @@ fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
 }
 
 /// The lock and claim store follow the resolved project, including outside a checkout.
-pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
-    let mut ctx = open_id_ctx(dir, id)?;
+pub fn open_id_write_ctx(dir: Option<&Path>, id: &str, host: Arc<HostConfig>) -> Result<Ctx> {
+    let mut ctx = open_id_ctx(dir, id, host.clone())?;
     let routing = ctx.routing.clone();
     lock_and_revalidate(&mut ctx, &routing)?;
     Ok(ctx)
@@ -890,15 +915,17 @@ pub fn open_id_read_ctx(
     dir: Option<&Path>,
     scope: &ScopeArgs,
     id: Option<&str>,
+    host: Arc<HostConfig>,
 ) -> Result<ReadCtx> {
     if scope.project.is_some() || scope.all_projects || scope.group.is_some() {
-        return open_read_ctx(dir, scope);
+        return open_read_ctx(dir, scope, host.clone());
     }
     let Some(id) = id else {
-        return open_read_ctx(dir, scope);
+        return open_read_ctx(dir, scope, host.clone());
     };
-    let ctx = open_id_ctx(dir, id)?;
+    let ctx = open_id_ctx(dir, id, host.clone())?;
     Ok(ReadCtx {
+        host: host.clone(),
         scope: Scope::Local(Box::new(ctx.project)),
         registry: ctx.registry,
         warnings: ctx.warnings,
@@ -911,6 +938,7 @@ fn open_filtered_read_ctx(
     scope: &ScopeArgs,
     parent: Option<&str>,
     under: Option<&str>,
+    host: Arc<HostConfig>,
 ) -> Result<ReadCtx> {
     if scope.project.is_none()
         && !scope.all_projects
@@ -918,7 +946,7 @@ fn open_filtered_read_ctx(
         && let (Some(parent), Some(under)) = (parent, under)
     {
         // Agree before routing, retaining the original checkout's shorthand and errors.
-        let (registry, shorthand) = match open_ctx(dir) {
+        let (registry, shorthand) = match open_ctx(dir, host.clone()) {
             Ok(ctx) => (ctx.registry, ctx.shorthand),
             Err(Error::NoProject(_)) => (Registry::load()?, Shorthand::new(start_dir(dir)?)),
             Err(error) => return Err(error),
@@ -932,7 +960,7 @@ fn open_filtered_read_ctx(
             )));
         }
     }
-    open_id_read_ctx(dir, scope, parent.or(under)).map_err(|error| match error {
+    open_id_read_ctx(dir, scope, parent.or(under), host.clone()).map_err(|error| match error {
         Error::NoProject(dir) => Error::NoProjectNext {
             dir,
             next: "choose --all-projects or --project <prefix> to set the read scope".into(),
@@ -942,6 +970,7 @@ fn open_filtered_read_ctx(
 }
 
 pub struct ReadCtx {
+    pub host: Arc<HostConfig>,
     pub scope: Scope,
     pub registry: Registry,
     pub warnings: Vec<String>,
@@ -992,7 +1021,11 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
 /// project is a `Local` scope like any other, so every command's output is what it
 /// would be run inside that project's registered root — a worktree sharing the prefix
 /// does not displace it, matching `add --project`.
-pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
+pub fn open_read_ctx(
+    dir: Option<&Path>,
+    scope: &ScopeArgs,
+    host: Arc<HostConfig>,
+) -> Result<ReadCtx> {
     let start = start_dir(dir)?;
     if scope.all_projects || scope.group.is_some() {
         let registry = Registry::load()?;
@@ -1001,6 +1034,7 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
             None => Scope::open_all(&registry, &start)?,
         };
         return Ok(ReadCtx {
+            host: host.clone(),
             scope,
             registry,
             warnings,
@@ -1025,6 +1059,7 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
     };
     let warnings = retired_warning(&project).into_iter().collect();
     Ok(ReadCtx {
+        host: host.clone(),
         scope: Scope::Local(Box::new(project)),
         registry,
         warnings,
@@ -1047,7 +1082,7 @@ pub fn apply_fields(
     fields: &FieldArgs,
     original: Option<&Task>,
 ) -> Result<()> {
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let plan_changed =
         fields.plan.as_ref().or(task.plan.as_ref()) != original.and_then(|task| task.plan.as_ref());
     let step_changed =
@@ -1359,14 +1394,14 @@ struct Occupants {
 fn occupants(ctx: &mut Ctx, root: &Path, gone: Option<&str>) -> Result<Occupants> {
     let snapshot =
         crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
-    let me = crate::claims::resolve_identity(&mut ctx.warnings);
+    let me = crate::claims::resolve_identity(&ctx.host, &mut ctx.warnings);
     let mut work = Vec::new();
     for (task, (claim, liveness)) in snapshot.iter() {
         let released = gone == Some(claim.session.as_str()) && !matches!(liveness, Liveness::Live);
         if !liveness.is_stale()
             && !released
             && Path::new(&claim.worktree) == root
-            && ownership(claim, &me)? == Ownership::Foreign
+            && ownership(claim, &me, &ctx.host)? == Ownership::Foreign
         {
             work.push((task.clone(), claim.session.clone()));
         }
@@ -1409,11 +1444,11 @@ pub(crate) fn follow_holder(
     let me = match me {
         Some(me) => me,
         None => {
-            resolved = crate::claims::resolve_identity(&mut ctx.warnings);
+            resolved = crate::claims::resolve_identity(&ctx.host, &mut ctx.warnings);
             &resolved
         }
     };
-    let identity = match ownership(&claim, me) {
+    let identity = match ownership(&claim, me, &ctx.host) {
         Ok(Ownership::Foreign) => return,
         // Proof-only ownership records the claim's own identity (docs/task-model.md of the relay
         // design), whose pid this write did not supply, so its evidence is kept.
@@ -1662,7 +1697,7 @@ pub(crate) fn note_need_holders(ctx: &mut Ctx, holders: HolderNotes) {
 
 /// Ids of dependencies that are open or unreachable.
 pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let mut open = Vec::new();
     for dependency in &task.depends {
         // The project's own file answers for its prefix, registered roots for the rest.
@@ -1821,7 +1856,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     let completing = to == Status::Done && task.status != Status::Done;
     if completing {
         crate::refs::require_outputs(
-            &Resolver::new(&ctx.project, &ctx.registry),
+            &Resolver::new(&ctx.project, &ctx.registry, &ctx.host),
             &ctx.project,
             task,
         )?;
@@ -2148,10 +2183,15 @@ fn fetch(no_fetch: bool) -> crate::resolve::Fetch {
     }
 }
 
-fn dispatch(cli: Cli) -> Result<Output> {
+fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
+    if let Command::Attachments { paths } = cli.command {
+        return attachments::run(cli.dir.as_deref(), paths);
+    }
+    let host =
+        host.ok_or_else(|| Error::Config("ordinary invocation has no host configuration".into()))?;
     let dir = cli.dir.as_deref();
     match cli.command {
-        Command::Retained { action } => retained::dispatch(dir, action),
+        Command::Retained { action } => retained::dispatch(dir, action, host.clone()),
         Command::Attachments { paths } => attachments::run(dir, paths),
         Command::Init {
             prefix,
@@ -2166,16 +2206,16 @@ fn dispatch(cli: Cli) -> Result<Output> {
             explain,
             adopt,
         } => rename::run(dir, old, new, explain, adopt),
-        Command::Move { id, to, explain } => move_::run(dir, &id, &to, explain),
+        Command::Move { id, to, explain } => move_::run(dir, &id, &to, explain, host.clone()),
         Command::Migrate {
             list,
             to,
             draft,
             explain,
-        } => migrate::run(dir, list, to, draft, explain),
+        } => migrate::run(dir, list, to, draft, explain, host.clone()),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Retire { successor, reason } => {
-            let project = open_ctx(dir)?.project;
+            let project = open_ctx(dir, host.clone())?.project;
             let prefix = project.prefix.clone();
             let retired = retire::retire(project, successor, reason)?;
             Ok(Output::Retire(crate::output::RetireOut {
@@ -2185,7 +2225,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             }))
         }
         Command::Unretire => {
-            let project = open_ctx(dir)?.project;
+            let project = open_ctx(dir, host.clone())?.project;
             let prefix = project.prefix.clone();
             retire::unretire(project)?;
             Ok(Output::Retire(crate::output::RetireOut {
@@ -2223,14 +2263,16 @@ fn dispatch(cli: Cli) -> Result<Output> {
                     let project =
                         crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
                     let shorthand = Shorthand::new(start_dir(dir)?);
-                    Ctx::new(project, registry, routing.clone(), shorthand)
+                    Ctx::new(project, registry, routing.clone(), shorthand, host.clone())
                 }
-                None => open_ctx(dir)?,
+                None => open_ctx(dir, host.clone())?,
             };
             lock_and_revalidate(&mut ctx, &routing)?;
             add::run(ctx, title, status, origin_session, fields)
         }
-        Command::Show { id, no_fetch } => show::run(open_id_ctx(dir, &id)?, id, fetch(no_fetch)),
+        Command::Show { id, no_fetch } => {
+            show::run(open_id_ctx(dir, &id, host.clone())?, id, fetch(no_fetch))
+        }
         Command::Doc {
             id,
             plan,
@@ -2238,7 +2280,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             handle,
             no_fetch,
         } => doc::run(
-            open_id_ctx(dir, &id)?,
+            open_id_ctx(dir, &id, host.clone())?,
             id,
             match handle {
                 Some(handle) => doc::DocTarget::Ref(handle),
@@ -2254,7 +2296,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             output,
             verify: _,
         } => export::run(
-            open_id_ctx(dir, &id)?,
+            open_id_ctx(dir, &id, host.clone())?,
             id,
             name,
             at,
@@ -2274,7 +2316,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 .as_deref()
                 .map(crate::filter::TextQuery::parse)
                 .transpose()?;
-            docs::run(open_read_ctx(dir, &scope)?, &kinds, text)
+            docs::run(open_read_ctx(dir, &scope, host.clone())?, &kinds, text)
         }
         Command::List { list: args } => list::list(
             open_filtered_read_ctx(
@@ -2282,6 +2324,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 &args.scope,
                 args.filter.parent.as_deref(),
                 args.filter.under.as_deref(),
+                host.clone(),
             )?,
             args,
             None,
@@ -2295,6 +2338,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                     &args.scope,
                     args.filter.parent.as_deref(),
                     args.filter.under.as_deref(),
+                    host.clone(),
                 )?,
                 args,
                 Some(text),
@@ -2312,6 +2356,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 &scope,
                 filter.parent.as_deref(),
                 filter.under.as_deref(),
+                host.clone(),
             )?,
             filter,
             limit,
@@ -2325,7 +2370,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             no_fetch,
             scope,
         } => list::next(
-            open_filtered_read_ctx(dir, &scope, None, under.as_deref())?,
+            open_filtered_read_ctx(dir, &scope, None, under.as_deref(), host.clone())?,
             max_complexity,
             without.without,
             under,
@@ -2336,8 +2381,15 @@ fn dispatch(cli: Cli) -> Result<Output> {
             older_than,
             seed,
             scope,
-        } => sample::sample(open_read_ctx(dir, &scope)?, limit, older_than, seed),
-        Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
+        } => sample::sample(
+            open_read_ctx(dir, &scope, host.clone())?,
+            limit,
+            older_than,
+            seed,
+        ),
+        Command::Edit { id, args } => {
+            edit::run(open_id_write_ctx(dir, &id, host.clone())?, id, args)
+        }
         Command::Prime {
             scope,
             closed,
@@ -2355,13 +2407,22 @@ fn dispatch(cli: Cli) -> Result<Output> {
             } else {
                 None
             };
-            list::prime(open_read_ctx(dir, &scope)?, closed, without.without, full)
+            list::prime(
+                open_read_ctx(dir, &scope, host.clone())?,
+                closed,
+                without.without,
+                full,
+            )
         }
         Command::Lanes {
             without,
             max_complexity,
             scope,
-        } => lanes::run(open_read_ctx(dir, &scope)?, without, max_complexity),
+        } => lanes::run(
+            open_read_ctx(dir, &scope, host.clone())?,
+            without,
+            max_complexity,
+        ),
         Command::Note {
             id,
             text,
@@ -2377,7 +2438,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 vec![text.expect("clap requires text unless --stdin")]
             };
             status::note(
-                open_id_write_ctx(dir, &id)?,
+                open_id_write_ctx(dir, &id, host.clone())?,
                 id,
                 texts,
                 stamp,
@@ -2393,7 +2454,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             name,
             caption,
         } => attach::attach(
-            open_id_write_ctx(dir, &id)?,
+            open_id_write_ctx(dir, &id, host.clone())?,
             id,
             attach::Source::from_args(source, clipboard)?,
             multipart,
@@ -2402,18 +2463,21 @@ fn dispatch(cli: Cli) -> Result<Output> {
         ),
         Command::ArchiveNotes { id, expect } => {
             let ctx = if expect.is_some() {
-                open_id_write_ctx(dir, &id)?
+                open_id_write_ctx(dir, &id, host.clone())?
             } else {
-                open_id_ctx(dir, &id)?
+                open_id_ctx(dir, &id, host.clone())?
             };
             archive_notes::run(ctx, id, expect)
         }
         Command::Detach { id, name, why } => {
-            attach::detach(open_id_write_ctx(dir, &id)?, id, name, why)
+            attach::detach(open_id_write_ctx(dir, &id, host.clone())?, id, name, why)
         }
-        Command::Start { id, force, reason } => {
-            status::start(open_id_write_ctx(dir, &id)?, id, force, reason)
-        }
+        Command::Start { id, force, reason } => status::start(
+            open_id_write_ctx(dir, &id, host.clone())?,
+            id,
+            force,
+            reason,
+        ),
         Command::Park {
             id,
             next_step,
@@ -2423,7 +2487,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             needs,
             minutes,
         } => park::run(
-            open_id_write_ctx(dir, &id)?,
+            open_id_write_ctx(dir, &id, host.clone())?,
             id,
             next_step,
             waiting_on,
@@ -2433,36 +2497,50 @@ fn dispatch(cli: Cli) -> Result<Output> {
             minutes,
         ),
         Command::Done { id, message, force } => status::close(
-            open_id_write_ctx(dir, &id)?,
+            open_id_write_ctx(dir, &id, host.clone())?,
             id,
             Status::Done,
             message,
             force,
         ),
         Command::Drop { id, message } => status::close(
-            open_id_write_ctx(dir, &id)?,
+            open_id_write_ctx(dir, &id, host.clone())?,
             id,
             Status::Dropped,
             message,
             false,
         ),
         Command::Release { id, why, adopting } => {
-            let (ctx, adopting) = release::open(dir, &id, adopting.as_deref())?;
+            let (ctx, adopting) = release::open(dir, &id, adopting.as_deref(), host.clone())?;
             release::run(ctx, adopting, id, why)
         }
-        Command::Block { id, message } => status::block(open_id_write_ctx(dir, &id)?, id, message),
-        Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id)?, id),
+        Command::Block { id, message } => {
+            status::block(open_id_write_ctx(dir, &id, host.clone())?, id, message)
+        }
+        Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id, host.clone())?, id),
         Command::Shelve {
             id,
             wake,
             wake_on,
             defer,
-        } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake, wake_on, defer),
-        Command::Unshelve { id } => status::unshelve(open_id_write_ctx(dir, &id)?, id),
-        Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
-        Command::Blockers(args) => blockers::run(open_read_ctx(dir, &args.scope)?, args),
-        Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
-        Command::Check { growth } => check::run(open_ctx(dir)?, growth),
+        } => status::shelve(
+            open_id_write_ctx(dir, &id, host.clone())?,
+            id,
+            wake,
+            wake_on,
+            defer,
+        ),
+        Command::Unshelve { id } => {
+            status::unshelve(open_id_write_ctx(dir, &id, host.clone())?, id)
+        }
+        Command::Dep { id, on, rm } => {
+            dep::run(open_id_write_ctx(dir, &id, host.clone())?, id, on, rm)
+        }
+        Command::Blockers(args) => {
+            blockers::run(open_read_ctx(dir, &args.scope, host.clone())?, args)
+        }
+        Command::Graph { format, all } => graph::run(open_ctx(dir, host.clone())?, format, all),
+        Command::Check { growth } => check::run(open_ctx(dir, host.clone())?, growth),
         Command::Commit { project } => {
             let routing = project.clone().map_or(Routing::Local, Routing::Registered);
             let mut ctx = match project {
@@ -2471,17 +2549,21 @@ fn dispatch(cli: Cli) -> Result<Output> {
                     let project =
                         crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
                     let shorthand = Shorthand::new(start_dir(dir)?);
-                    Ctx::new(project, registry, routing.clone(), shorthand)
+                    Ctx::new(project, registry, routing.clone(), shorthand, host.clone())
                 }
-                None => open_ctx(dir)?,
+                None => open_ctx(dir, host.clone())?,
             };
             lock_and_revalidate(&mut ctx, &routing)?;
             commit::run(ctx)
         }
-        Command::Tree { id, all, scope } => {
-            tree::run(open_id_read_ctx(dir, &scope, id.as_deref())?, id, all)
+        Command::Tree { id, all, scope } => tree::run(
+            open_id_read_ctx(dir, &scope, id.as_deref(), host.clone())?,
+            id,
+            all,
+        ),
+        Command::Tags { statuses, scope } => {
+            tags::run(open_read_ctx(dir, &scope, host.clone())?, statuses)
         }
-        Command::Tags { statuses, scope } => tags::run(open_read_ctx(dir, &scope)?, statuses),
         Command::Claims { all_projects: _ } => claims::run(),
         Command::Quiet {
             limit,
@@ -2494,7 +2576,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 project,
                 group,
             };
-            quiet::run(open_read_ctx(dir, &scope)?, limit)
+            quiet::run(open_read_ctx(dir, &scope, host.clone())?, limit)
         }
         Command::Goals {
             project,
@@ -2507,7 +2589,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
                 project,
                 group,
             };
-            goals::run(open_read_ctx(dir, &scope)?, closed)
+            goals::run(open_read_ctx(dir, &scope, host.clone())?, closed)
         }
         Command::Feedback {
             project,
@@ -2522,7 +2604,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             let body = body.unwrap_or_default();
             feedback::validate(&summary, &category, &body)?;
             let attribution = Attribution::parse(origin.as_deref(), origin_session.as_deref())?;
-            let (ctx, reporter) = feedback::open(dir, &project)?;
+            let (ctx, reporter) = feedback::open(dir, &project, host.clone())?;
             feedback::run(
                 ctx,
                 reporter,
@@ -2538,11 +2620,11 @@ fn dispatch(cli: Cli) -> Result<Output> {
     }
 }
 
-pub fn run(cli: Cli) -> Result<Output> {
+pub fn run(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
     crate::history::begin_metrics();
     let started = std::time::Instant::now();
     crate::written::begin(cli.command.commit_verb());
-    let result = dispatch(cli);
+    let result = dispatch(cli, host);
     // A command that failed after writing leaves its files uncommitted; `prime` lists
     // them. A successful one must have reached `finish`: anything left is a write path
     // that skipped it, which the debug build refuses so the test suite catches it.
@@ -2604,7 +2686,7 @@ pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
             "Run tasks start {id} to re-establish the stale claim before retry"
         )));
     }
-    if ownership(&claim, &me)? == Ownership::Foreign {
+    if ownership(&claim, &me, &ctx.host)? == Ownership::Foreign {
         return Err(Error::Claimed(
             id.to_string(),
             Ctx::describe_claim(&claim, &crate::claims::liveness(&claim)),

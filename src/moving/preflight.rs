@@ -44,8 +44,8 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     if let Some((claim, live)) = claims.get(id)
         && !live.is_stale()
     {
-        let me = crate::claims::resolve_identity(&mut ctx.source.warnings);
-        let remedy = match (commands::ownership(claim, &me)?, live) {
+        let me = crate::claims::resolve_identity(&ctx.source.host, &mut ctx.source.warnings);
+        let remedy = match (commands::ownership(claim, &me, &ctx.source.host)?, live) {
             (commands::Ownership::Foreign, crate::claims::Liveness::Unverifiable(why)) => format!(
                 "unverifiable: {why}{}",
                 commands::release::hint(&id.to_string(), &claim.session)
@@ -65,9 +65,9 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     let target_id = ctx.target.new_id()?;
     let pair = build_pair(&mut ctx.source, &ctx.target, &source, target_id, &now, "")?;
     let target = &pair.target;
-    validate_destination_docs(&ctx.target, &ctx.registry, target, id)?;
+    validate_destination_docs(&ctx.target, &ctx.registry, target, id, &ctx.source.host)?;
     validate_record(&ctx.target, &ctx.registry, target)?;
-    let destination = commands::open_ctx(Some(&ctx.target.records))?;
+    let destination = commands::open_ctx(Some(&ctx.target.records), ctx.source.host.clone())?;
     commands::dep::ensure_acyclic(&destination, target)?;
     if let Some((other, why)) = collision(&ctx.target, &ctx.registry, id)? {
         return Err(Error::Validation(format!(
@@ -289,8 +289,9 @@ pub(crate) fn validate_destination_docs(
     registry: &Registry,
     task: &Task,
     source: &TaskId,
+    host: &crate::config::HostConfig,
 ) -> Result<()> {
-    let resolver = Resolver::new(project, registry);
+    let resolver = Resolver::new(project, registry, host);
     for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
         if let Some(path) = path
             && crate::format::external_doc(path)?.is_none()

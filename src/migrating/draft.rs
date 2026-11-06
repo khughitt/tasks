@@ -73,7 +73,7 @@ pub fn write(ctx: &MigrateCtx, path: &Path) -> Result<DraftOut> {
         .map(|t| (t.id.to_string(), t))
         .collect();
     let claims = ClaimSnapshot::load(std::iter::once(source.prefix.as_str()))?;
-    let resolver = Resolver::new(&ctx.target, &ctx.registry);
+    let resolver = Resolver::new(&ctx.target, &ctx.registry, &ctx.source.host);
 
     let mut doc = DocumentMut::new();
     doc["version"] = value(1);

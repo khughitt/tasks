@@ -24,6 +24,7 @@ pub fn run(mut ctx: Ctx, id: String, fetch: Fetch) -> Result<Output> {
         &mut ctx.warnings,
         now,
         fetch,
+        &ctx.host,
     )?;
     Ok(Output::Show(Box::new(ShowOut {
         fields,
@@ -106,8 +107,9 @@ pub fn describe(
     warnings: &mut Vec<String>,
     now: OffsetDateTime,
     fetch: Fetch,
+    host: &crate::config::HostConfig,
 ) -> Result<ShowFields> {
-    let mut resolver = Resolver::new(project, registry);
+    let mut resolver = Resolver::new(project, registry, host);
     let deps = crate::review::Deps::of_scan(std::slice::from_ref(&task), |id| {
         crate::dependency::resolve(registry, id, |id| {
             match all.iter().find(|candidate| candidate.id == *id) {

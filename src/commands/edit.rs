@@ -441,7 +441,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     // must not be able to talk that check out of firing.
     edited.updated = original.updated.clone();
 
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let plan_or_step_changed = edited.plan != original.plan || edited.step != original.step;
     for (kind, link, before) in [
         (DocKind::Spec, &mut edited.spec, &original.spec),

@@ -286,7 +286,8 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         });
     }
 
-    let resolver = Resolver::new(&ctx.target, &ctx.registry);
+    let host = ctx.source.host.clone();
+    let resolver = Resolver::new(&ctx.target, &ctx.registry, &host);
     for work in &mut works {
         let id = work.carried.from.clone();
         let entry = work.entry;
@@ -624,7 +625,9 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
     for (work, view) in works.iter().zip(&views) {
         let from = &work.carried.from;
         let checked = validate_record_among(&ctx.target, &ctx.registry, view, &views)
-            .and_then(|()| validate_destination_docs(&ctx.target, &ctx.registry, view, from))
+            .and_then(|()| {
+                validate_destination_docs(&ctx.target, &ctx.registry, view, from, &ctx.source.host)
+            })
             .and_then(|()| crate::attachments::check_storage(&ctx.target, &view.id).map(|_| ()));
         match checked {
             Ok(()) => {}
@@ -956,7 +959,7 @@ fn project_closed_in(
 
     let owner = commands::owner_name(&ctx.source.project)?;
     let store = ClaimStore::load(&ctx.source.project.prefix)?;
-    let resolver = Resolver::new(&ctx.source.project, &ctx.registry);
+    let resolver = Resolver::new(&ctx.source.project, &ctx.registry, &ctx.source.host);
     let mut closed = Vec::new();
     let mut refusals = Vec::new();
     for entry in &list.list.tasks {

@@ -144,7 +144,7 @@ pub struct Resolver<'a> {
     main: OnceCell<Option<PathBuf>>,
     /// One line per document read from the main checkout, for the caller's warnings.
     from_main: RefCell<Vec<String>>,
-    host: OnceCell<crate::config::HostConfig>,
+    host: &'a crate::config::HostConfig,
     docs: RefCell<HashMap<String, DocRead>>,
     fetch_budget: Option<Duration>,
     fetch_deadline: OnceCell<Instant>,
@@ -152,13 +152,17 @@ pub struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(project: &'a Project, registry: &'a Registry) -> Resolver<'a> {
+    pub fn new(
+        project: &'a Project,
+        registry: &'a Registry,
+        host: &'a crate::config::HostConfig,
+    ) -> Resolver<'a> {
         Resolver {
             project,
             registry,
             main: OnceCell::new(),
             from_main: RefCell::new(Vec::new()),
-            host: OnceCell::new(),
+            host,
             docs: RefCell::new(HashMap::new()),
             fetch_budget: None,
             fetch_deadline: OnceCell::new(),
@@ -392,7 +396,7 @@ impl<'a> Resolver<'a> {
                 cause: UnavailableCause::FetchDisabled,
             });
         }
-        let host = self.host_config()?;
+        let host = self.host;
         let result = match host.docs_schemes.get(scheme) {
             None => self.missing_scheme(value, scheme)?,
             Some(command) => {
@@ -410,16 +414,6 @@ impl<'a> Resolver<'a> {
         };
         self.cache_doc(value, result.clone());
         Ok(result)
-    }
-
-    fn host_config(&self) -> Result<&crate::config::HostConfig> {
-        if self.host.get().is_none() {
-            let loaded = crate::config::HostConfig::load()?;
-            self.host
-                .set(loaded)
-                .expect("host config is initialized once");
-        }
-        Ok(self.host.get().expect("host config was initialized"))
     }
 
     fn missing_scheme(&self, value: &str, scheme: &str) -> Result<DocRead> {
@@ -475,7 +469,7 @@ impl<'a> Resolver<'a> {
         if references.is_empty() {
             return Ok(vec![]);
         }
-        let host = self.host_config()?;
+        let host = self.host;
         let mut requests = Vec::new();
         for reference in references {
             if self.docs.borrow().contains_key(reference) {
@@ -700,7 +694,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let project = Project::init(temp.path(), "xx", None).unwrap();
         let registry = Registry::default();
-        let resolver = Resolver::new(&project, &registry);
+        let host = crate::config::HostConfig::default();
+        let resolver = Resolver::new(&project, &registry, &host);
         let root = temp.path();
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::write(root.join("docs/a.md"), "a").unwrap();
@@ -727,10 +722,16 @@ mod tests {
 
     #[test]
     fn locate_entry_reports_a_fifo_and_a_symlink_to_one_as_special() {
+        if crate::common::isolated_test(
+            "resolve::tests::locate_entry_reports_a_fifo_and_a_symlink_to_one_as_special",
+        ) {
+            return;
+        }
         let temp = tempfile::tempdir().unwrap();
         let project = Project::init(temp.path(), "xx", None).unwrap();
         let registry = Registry::default();
-        let resolver = Resolver::new(&project, &registry);
+        let host = crate::config::HostConfig::default();
+        let resolver = Resolver::new(&project, &registry, &host);
         let root = temp.path();
         assert!(
             std::process::Command::new("mkfifo")
@@ -749,11 +750,17 @@ mod tests {
 
     #[test]
     fn locate_entry_uses_main_only_when_absent_here_and_propagates_errors() {
+        if crate::common::isolated_test(
+            "resolve::tests::locate_entry_uses_main_only_when_absent_here_and_propagates_errors",
+        ) {
+            return;
+        }
         let here = tempfile::tempdir().unwrap();
         let main = tempfile::tempdir().unwrap();
         let project = Project::init(here.path(), "xx", None).unwrap();
         let registry = Registry::default();
-        let resolver = Resolver::new(&project, &registry);
+        let host = crate::config::HostConfig::default();
+        let resolver = Resolver::new(&project, &registry, &host);
         resolver.main.set(Some(main.path().to_path_buf())).unwrap();
         std::fs::create_dir(main.path().join("target")).unwrap();
         assert!(
@@ -798,15 +805,18 @@ mod tests {
 
     #[test]
     fn prefetch_external_budget_is_shared_and_unstarted_refs_are_cached() {
+        if crate::common::isolated_test(
+            "resolve::tests::prefetch_external_budget_is_shared_and_unstarted_refs_are_cached",
+        ) {
+            return;
+        }
         let (temp, project, registry, command) = prefetch_fixture();
-        let mut resolver = Resolver::new(&project, &registry);
-        resolver
-            .host
-            .set(crate::config::HostConfig {
-                relay_identity: false,
-                docs_schemes: [("stub".into(), command)].into(),
-            })
-            .unwrap();
+        let host = crate::config::HostConfig {
+            headers: false,
+            relay_identity: false,
+            docs_schemes: [("stub".into(), command)].into(),
+        };
+        let mut resolver = Resolver::new(&project, &registry, &host);
         resolver.set_fetch_budget(Duration::from_millis(150));
         let refs: Vec<String> = ["a", "b", "c", "d", "e", "f"]
             .iter()
@@ -837,6 +847,11 @@ mod tests {
 
     #[test]
     fn prefetch_external_starts_at_most_four_then_refills() {
+        if crate::common::isolated_test(
+            "resolve::tests::prefetch_external_starts_at_most_four_then_refills",
+        ) {
+            return;
+        }
         let (temp, project, registry, command) = prefetch_fixture();
         let root = temp.path().to_owned();
         let refs: Vec<String> = ["a", "b", "c", "d", "e", "f"]
@@ -845,14 +860,12 @@ mod tests {
             .collect();
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
-                let mut resolver = Resolver::new(&project, &registry);
-                resolver
-                    .host
-                    .set(crate::config::HostConfig {
-                        relay_identity: false,
-                        docs_schemes: [("stub".into(), command)].into(),
-                    })
-                    .unwrap();
+                let host = crate::config::HostConfig {
+                    headers: false,
+                    relay_identity: false,
+                    docs_schemes: [("stub".into(), command)].into(),
+                };
+                let mut resolver = Resolver::new(&project, &registry, &host);
                 resolver.set_fetch_budget(Duration::from_secs(3));
                 assert!(resolver.prefetch_external(&refs).unwrap().is_empty());
                 for reference in refs {
@@ -888,6 +901,11 @@ mod tests {
 
     #[test]
     fn prefetch_external_alias_collision_preserves_available_body() {
+        if crate::common::isolated_test(
+            "resolve::tests::prefetch_external_alias_collision_preserves_available_body",
+        ) {
+            return;
+        }
         for (queued, alias_first) in [(true, true), (false, true), (false, false)] {
             let (temp, project, registry, _) = prefetch_fixture();
             let root = temp.path().to_owned();
@@ -904,14 +922,12 @@ mod tests {
             std::thread::scope(|scope| {
                 let command = format!("sh '{}'", script.display());
                 let worker = scope.spawn(move || {
-                    let mut resolver = Resolver::new(&project, &registry);
-                    resolver
-                        .host
-                        .set(crate::config::HostConfig {
-                            relay_identity: false,
-                            docs_schemes: [("stub".into(), command)].into(),
-                        })
-                        .unwrap();
+                    let host = crate::config::HostConfig {
+                        headers: false,
+                        relay_identity: false,
+                        docs_schemes: [("stub".into(), command)].into(),
+                    };
+                    let mut resolver = Resolver::new(&project, &registry, &host);
                     resolver.set_fetch_budget(Duration::from_secs(3));
                     assert!(resolver.prefetch_external(&refs).unwrap().is_empty());
                     for reference in ["stub:old", "stub:new"] {
@@ -958,11 +974,8 @@ mod tests {
     #[test]
     fn prefetch_external_missing_scheme_is_not_budget_exhaustion() {
         let (_, project, registry, _) = prefetch_fixture();
-        let mut resolver = Resolver::new(&project, &registry);
-        resolver
-            .host
-            .set(crate::config::HostConfig::default())
-            .unwrap();
+        let host = crate::config::HostConfig::default();
+        let mut resolver = Resolver::new(&project, &registry, &host);
         resolver.set_fetch_budget(Duration::ZERO);
         assert!(
             resolver
@@ -983,5 +996,33 @@ mod tests {
     fn step_headings_match_only_the_task_n_convention() {
         let text = "# P\n### Task 1: one\n## Task 12: twelve\n### Notes on Task 3\n### Task x: no\nTask 4: not a heading\n";
         assert_eq!(step_headings(text), ["Task 1: one", "Task 12: twelve"]);
+    }
+
+    #[test]
+    fn host_snapshot_survives_file_replacement() {
+        if crate::common::isolated_test("resolve::tests::host_snapshot_survives_file_replacement") {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let project = Project::init(temp.path(), "xx", None).unwrap();
+        let registry = Registry::default();
+        let path = temp.path().join("host.toml");
+        std::fs::write(&path, toml::to_string(&serde_json::json!({
+            "output": {"headers": true},
+            "docs": {"schemes": {"stub": "printf '%s' '{\"id\":\"doc\",\"body\":\"original\"}'; :"}}
+        })).unwrap()).unwrap();
+        let host = crate::config::HostConfig::load_from(&path).unwrap();
+        std::fs::write(&path, "[output]\nheaders = false\n").unwrap();
+        let resolver = Resolver::new(&project, &registry, &host);
+        assert_eq!(
+            resolver
+                .read_external("stub:doc")
+                .unwrap()
+                .required()
+                .unwrap()
+                .body,
+            "original"
+        );
+        assert!(host.headers);
     }
 }

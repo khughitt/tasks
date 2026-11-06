@@ -257,7 +257,8 @@ pub fn note(
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
     let mine = match &existing {
         Some(claim) => {
-            crate::commands::ownership(claim, &me)? != crate::commands::Ownership::Foreign
+            crate::commands::ownership(claim, &me, &ctx.host)?
+                != crate::commands::Ownership::Foreign
         }
         None => false,
     };
@@ -330,7 +331,7 @@ pub fn shelve(
     crate::format::validate_line("wake condition", &wake)?;
     let checkpoint =
         crate::defer::Defer::resolve(&defer, crate::time::parse(&crate::time::now())?.date())?;
-    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry);
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let mut targets = Vec::new();
     for value in wake_on {
         let given = ctx.shorthand.parse(&ctx.registry, &value)?;

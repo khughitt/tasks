@@ -1,7 +1,7 @@
 # The shared CLI vocabulary and the inventory of every in-scope CLI's commands.
 # Vendored from https://github.com/khughitt/ops (cli.toml); never edit the copy, see tools/README.md.
 #
-# Design: ops docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
+# Reference: ops docs/cli-conventions.md. This file is the authority:
 # each project vendors it byte-identical as tools/cli.toml and has one conformance test
 # that builds its live parser surface and asserts set equality with its rows here. A new
 # option or command anywhere is an edit here first; then each project runs ops's
@@ -295,6 +295,7 @@ path = []
 options = [
   { shared = "chdir", value = "path" },
   { names = ["--headers"], value = "none" },
+  { names = ["--no-headers"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -3120,6 +3121,13 @@ options = [
   {names = ["--purpose"], value = "string", required = true},
   {names = ["--name"], value = "string"},
   {names = ["--explain"], value = "none"},
+]
+
+[[cli.ops-projects.commands]]
+path = ["atlas"]
+summary = "Render the cross-project document of purposes, abstracts, subsystems and goal status"
+options = [
+  {names = ["--out"], value = "path"},
 ]
 
 # Minimal adoption surface; existing doc-review options remain outside this inventory.

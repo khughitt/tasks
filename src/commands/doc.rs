@@ -15,7 +15,7 @@ pub fn run(mut ctx: Ctx, id: String, target: DocTarget, fetch: Fetch) -> Result<
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let (recorded, task, _) = super::show::read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
-    let mut resolver = Resolver::new(project, &ctx.registry);
+    let mut resolver = Resolver::new(project, &ctx.registry, &ctx.host);
     resolver.set_fetch(fetch);
     let body = match target {
         DocTarget::Ref(handle) => {

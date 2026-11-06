@@ -70,7 +70,7 @@ pub(super) fn recorded_review_deps(
     project: &Project,
     scan: &[Task],
 ) -> Result<crate::review::Deps> {
-    let resolver = crate::resolve::Resolver::new(project, &ctx.registry);
+    let resolver = crate::resolve::Resolver::new(project, &ctx.registry, &ctx.host);
     let deps = crate::review::Deps::of_scan(scan, |id| {
         crate::dependency::resolve(&ctx.registry, id, |id| {
             match scan.iter().find(|task| task.id == *id) {
@@ -518,7 +518,7 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
     if snapshot.is_empty() {
         return Ok(());
     }
-    let mine = view_holds(&snapshot, &mut ctx.warnings)?;
+    let mine = view_holds(&snapshot, &mut ctx.warnings, &ctx.host)?;
     let mut held = crate::holds::HeldWarnings::default();
     tasks.retain(|task| {
         let Some(vocabulary) = vocabularies.get(task.id.prefix.as_str()) else {
@@ -542,14 +542,15 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
 pub(super) fn view_holds(
     snapshot: &crate::holds::HoldSnapshot,
     warnings: &mut Vec<String>,
+    host: &crate::config::HostConfig,
 ) -> Result<crate::holds::Mine> {
-    let me = crate::claims::resolve_identity(warnings);
+    let me = crate::claims::resolve_identity(host, warnings);
     if let crate::claims::Resolution::Failed(error) = &me {
         warnings.push(format!(
             "session identity unresolved ({error}); every hold counts as another session's"
         ));
     }
-    super::read_holds(snapshot, &me)
+    super::read_holds(snapshot, &me, host)
 }
 
 /// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and
@@ -714,6 +715,7 @@ pub fn next(
                 &mut warnings,
                 now,
                 fetch,
+                &ctx.host,
             )?;
             ctx.warnings.extend(warnings);
             Some(fields)
@@ -1028,6 +1030,7 @@ mod tests {
         registry.register("sci", &project.root).unwrap();
         registry.aliases.insert("old".into(), "sci".into());
         let ctx = ReadCtx {
+            host: std::sync::Arc::new(crate::config::HostConfig::default()),
             scope: Scope::All {
                 projects: vec![],
                 members: vec![],
