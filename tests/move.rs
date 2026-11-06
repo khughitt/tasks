@@ -941,26 +941,29 @@ fn check_warns_moved_dep_on_closed_and_shelved_records() {
     let dots = env.init("dots");
     let wali = env.init("wali");
     let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
-    let closed = id_of(env.json(&dots, &["add", "Closed", "-p", "2", "--depends", &a]));
+    let done = id_of(env.json(&dots, &["add", "Done", "-p", "2", "--depends", &a]));
+    let dropped = id_of(env.json(&dots, &["add", "Dropped", "-p", "2", "--depends", &a]));
     let shelved = id_of(env.json(&dots, &["add", "Shelved", "-p", "2", "--depends", &a]));
-    env.json(&dots, &["drop", &closed, "no longer needed"]);
+    env.json(&dots, &["drop", &dropped, "no longer needed"]);
     env.json(&dots, &["shelve", &shelved, "--defer", "30d", "later"]);
     let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    env.json(&wali, &["done", &n]);
+    env.json(&dots, &["done", &done]);
     let report = env.check(&dots);
-    for id in [closed, shelved] {
-        let finding = report["warnings"]
-            .as_array()
+    let moved_deps: Vec<_> = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "moved_dep")
+        .collect();
+    assert_eq!(moved_deps.len(), 1, "{report}");
+    assert_eq!(moved_deps[0]["id"], shelved);
+    assert!(
+        moved_deps[0]["detail"]
+            .as_str()
             .unwrap()
-            .iter()
-            .find(|f| f["kind"] == "moved_dep" && f["id"] == id)
-            .unwrap_or_else(|| panic!("missing moved_dep for {id}: {report}"));
-        assert!(
-            finding["detail"]
-                .as_str()
-                .unwrap()
-                .contains(&format!("tasks dep {id} --on {n} --rm {a}"))
-        );
-    }
+            .contains(&format!("tasks dep {shelved} --on {n} --rm {a}"))
+    );
 }
 
 #[test]

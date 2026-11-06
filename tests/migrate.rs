@@ -3487,3 +3487,23 @@ fn forge_shaped_fixture_migrates_in_one_list() {
         assert_clean(&env, dir);
     }
 }
+
+#[test]
+fn migrate_dropping_or_closing_dependents_of_carried_task_leaves_check_free_of_moved_dep() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let forge2 = env.init("forge2");
+    let a = id_of(env.json(&forge, &["add", "Carried prerequisite"]));
+    let dropped = id_of(env.json(&forge, &["add", "Dropped dependent", "--depends", &a]));
+    let closed = id_of(env.json(&forge, &["add", "Closed dependent", "--depends", &a]));
+    let (text, _) = draft_home(&env, &forge);
+    let mut text = decide(&text, &a, "carry", "");
+    text = decide(&text, &dropped, "drop", "reason = \"superseded\"\n");
+    text = decide(&text, &closed, "close", "reason = \"done in forge\"\n");
+    let list = env.home.path().join("list.toml");
+    std::fs::write(&list, text).unwrap();
+    let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "fresh", "{out}");
+    assert_clean(&env, &forge);
+    assert_clean(&env, &forge2);
+}
