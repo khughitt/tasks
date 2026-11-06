@@ -215,6 +215,12 @@ pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result
 }
 
 pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
+    if text.contains(['\n', '\r']) {
+        return Err(Error::Validation(format!(
+            "note text must be a single line; keep the message to one line and attach the full output with `tasks attach {} - --name <file> --caption \"<what it shows>\"`",
+            task.id
+        )));
+    }
     let text = normalize_note_text(text)?;
     task.notes.push(Note {
         at: crate::time::now(),

@@ -28780,3 +28780,30 @@ fn shelf_missing_target_in_parked_checkout_never_borrows_main() {
 fn shelf_missing_target_in_claimed_checkout_never_borrows_main() {
     shelf_missing_target_checkout_is_authoritative(true);
 }
+
+#[test]
+fn done_and_note_refuse_multiline_text_and_point_to_tasks_attach() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Verify output"]));
+    env.json(&dir, &["start", &id]);
+
+    for cmd in ["done", "note"] {
+        let out = env
+            .cmd(&dir)
+            .args([cmd, &id, "line one\nline two"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{cmd}: {out:?}");
+        assert_eq!(err_kind(&out), "validation", "{cmd}");
+        let detail = err_detail(&out);
+        assert!(
+            detail.contains("keep the message to one line")
+                && detail.contains(&format!(
+                    "tasks attach {id} - --name <file> --caption \"<what it shows>\""
+                )),
+            "{cmd}: {detail}"
+        );
+    }
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
+}

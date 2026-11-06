@@ -216,8 +216,11 @@ mean those documents were verified.
    readers before adding new host keys; changing host preferences remains separately
    authorized.
 6. `tasks done <id> "<what landed>"` on the task's branch before it merges (under `[git] commit`
-   the CLI commits the record itself; otherwise commit it with the code). If dependencies are
-   still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
+   the CLI commits the record itself; otherwise commit it with the code). The completion message
+   is one line; attach multi-line evidence such as verifier or test output (`tasks attach <id> -
+   --name <file> --caption "<what it shows>"`) and name the attachment in the message. If
+   dependencies are still open, do not `--force` unless the dependency is genuinely irrelevant;
+   say why in the message.
    Complete [retention accounting](#artifact-placement-and-retention) before closing;
    any surviving item needs an open owner or an agreed handoff.
    To reopen a done or dropped task (a correction handed back after close), run
