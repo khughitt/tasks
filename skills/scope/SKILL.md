@@ -57,12 +57,17 @@ every later task command:
   `.root` from the default JSON object; then run `tasks -C <root> where`.
 
 Keep `.project.records` and `.project.checkout` from `where` as separate locations.
-Read code and git history in the selected project's `checkout`. For an unscoped pass
-in a detached or linked project's code worktree, use the chosen `<root>` instead.
-Read working documents under `records`, using `tasks doc` for linked
+Read this project's code and git history in the selected project's `checkout`. For an
+unscoped pass in a detached or linked project's code worktree, use the chosen `<root>`
+instead. Read working documents under `records`, using `tasks doc` for linked
 references; detached projects also resolve retained documents in the code tree.
 Write new handoffs under `records`. It is already `<records-root>/<prefix>` for a
-detached project; do not append the prefix again.
+detached project; do not append the prefix again. Task commands, this project's
+records and code, and every document write stay in the fixed root; read-only evidence
+from another registered project (its records via `tasks --project <prefix>` / `tasks
+root`, its plans, ledgers, or the tool a feedback idea names) may be read from that
+project's registered checkout, never from a worktree of either project, and nothing is
+ever written there.
 
 Foreign ids in an unscoped batch, or no local project for an unscoped pass, require a
 corrected invocation before any write.
@@ -78,8 +83,12 @@ Run `tasks -C <root> show <id>` for each provisional member. Save `task.updated`
 read its body, links, notes, top-level `claim`, and relationships. Read each source,
 parent and relevant `tree`, named code and specs, useful history (`git log -S` or
 `--grep`), open duplicate candidates, and any existing brief or attached draft spec.
-Keep task reads in the fixed root, code evidence in the chosen code checkout, and
-document reads at their resolved paths.
+Keep this project's task reads in the fixed root, its code evidence in the chosen code
+checkout, and document reads at their resolved paths; read-only evidence from another
+registered project (its records via `tasks --project <prefix>` / `tasks root`, its
+plans, ledgers, or the tool a feedback idea names) may be read from that project's
+registered checkout, never from a worktree of either project, and nothing is ever
+written there.
 
 For a mindful source, confirm the local CLI form, strip only the optional `mindful:`
 wrapper, and pass the full typed reference to `mindful --json show`:
