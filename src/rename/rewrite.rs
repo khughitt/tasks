@@ -86,7 +86,11 @@ fn moved_reference(line: &str, old: &str, new: &str) -> Option<String> {
     let hex = tail.get(..6)?;
     let after = &tail[6..];
     crate::model::TaskId::parse(&format!("{old}-{hex}")).ok()?;
-    if !(after.is_empty() || after.starts_with(['/', '"', ' '])) {
+    // The reference ends at its closing quote when quoted, else at the end or the space
+    // before its description; anything else names a sibling, not this directory.
+    let end = if quote.is_empty() { ' ' } else { '"' };
+    if !(after.starts_with('/') || after.starts_with(end) || (quote.is_empty() && after.is_empty()))
+    {
         return None;
     }
     Some(format!("- {head}): {quote}tasks/files/{new}-{hex}{after}"))
@@ -123,9 +127,14 @@ depends: [dot-b11111, ops-c22222]\ntags: []\n---\n\n\nBody   with  odd    spacin
         let text = HAND_WRITTEN
             .replacen(
                 "\n## Notes\n",
-                "\nProse keeps tasks/files/dot-b11111/a.png.\n\n## References\n\n\
+                "\nProse keeps tasks/files/dot-b11111/a.png.\n\
+- z (context): tasks/files/dot-b11111/a.png\n\n## References\n\n\
 - a (input, required, kind=image): tasks/files/dot-b11111/a.png — tasks/files/dot-b11111\n\
 - b (context): \"tasks/files/dot-b11111\"\n\
+- g (context): \"tasks/files/dot-b11111 x/y.md\"\n\
+- h (context): tasks/files/dots-b11111/x.md\n\
+- i (context): tasks/files/dot-B11111/x.md\n\
+- j (context): tasks/files/dot-b1111g/x.md\n\
 - c (context): tasks/files/dot-b111110/x.md\n\
 - d (context): tasks/files/ops-c22222/x.md\n\
 - e (context): docs/tasks/files/dot-b11111/x.md\n\
@@ -148,6 +157,15 @@ depends: [dot-b11111, ops-c22222]\ntags: []\n---\n\n\nBody   with  odd    spacin
                 1,
             );
         assert_eq!(body(&out), expected);
+        let crlf = text.replace(
+            "- b (context): \"tasks/files/dot-b11111\"\n",
+            "- b (context): \"tasks/files/dot-b11111\"\r\n",
+        );
+        let out = rewrite_prefix(&crlf, "dot", "dots").unwrap();
+        assert!(
+            out.contains("- b (context): \"tasks/files/dots-b11111\"\r\n- g"),
+            "{out}"
+        );
     }
 
     #[test]
