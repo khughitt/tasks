@@ -298,17 +298,35 @@ impl Scope {
     /// The union of every project's tasks, projects in scope order.
     pub fn scan(&self) -> Result<Vec<Task>> {
         let mut all = Vec::new();
+        let qualify = matches!(self, Scope::All { .. });
         for project in self.projects() {
-            all.extend(project.scan()?);
+            let tasks = project.scan().map_err(|error| {
+                if qualify {
+                    error.in_project(&project.prefix)
+                } else {
+                    error
+                }
+            })?;
+            all.extend(tasks);
         }
         Ok(all)
     }
 
     /// One scan per project, for commands that group by project (`tree`).
     pub fn scan_each(&self) -> Result<Vec<(&Project, Vec<Task>)>> {
+        let qualify = matches!(self, Scope::All { .. });
         self.projects()
             .iter()
-            .map(|project| Ok((project, project.scan()?)))
+            .map(|project| {
+                let tasks = project.scan().map_err(|error| {
+                    if qualify {
+                        error.in_project(&project.prefix)
+                    } else {
+                        error
+                    }
+                })?;
+                Ok((project, tasks))
+            })
             .collect()
     }
 

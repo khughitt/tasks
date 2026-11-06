@@ -240,6 +240,17 @@ impl Error {
         }
     }
 
+    /// Names the owning project on a cross-project parse failure without changing the error kind.
+    pub fn in_project(self, prefix: &str) -> Error {
+        match self {
+            Error::Parse { file, detail } => Error::Parse {
+                file: format!("project {prefix}: {file}"),
+                detail,
+            },
+            other => other,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Error::SummaryRequiresJson => "summary_requires_json",

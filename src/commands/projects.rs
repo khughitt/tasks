@@ -75,7 +75,7 @@ pub fn run(
         let reachable = is_reachable(&registry, prefix)?;
         let (counts, total, last_activity, color, retired, located) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
-            let tasks = project.scan()?;
+            let tasks = project.scan().map_err(|error| error.in_project(prefix))?;
             // Timestamps are fixed-width UTC with no fractional part, so the lexical max
             // is the chronological one.
             let last = tasks.iter().map(|task| task.updated.clone()).max();

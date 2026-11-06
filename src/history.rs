@@ -99,16 +99,17 @@ pub fn validate_descriptors(archives: &[ArchiveDescriptor]) -> Result<()> {
     Ok(())
 }
 
-fn archive_error(name: &str, detail: impl std::fmt::Display) -> Error {
+fn archive_error(id: &TaskId, name: &str, detail: impl std::fmt::Display) -> Error {
     Error::Parse {
-        file: name.into(),
+        file: format!("tasks/{id}.md"),
         detail: format!(
-            "{detail}; restore the exact archive bytes from a verified source; never skip required history"
+            "tasks/files/{id}/{name}: {detail}; restore the exact archive bytes from a verified source; never skip required history"
         ),
     }
 }
 
 fn prefix(
+    id: &TaskId,
     archives: &[ArchiveDescriptor],
     mut resolve: impl FnMut(&ArchiveDescriptor) -> Result<Vec<u8>>,
 ) -> Result<(Vec<Note>, u64)> {
@@ -117,15 +118,22 @@ fn prefix(
     let mut total_bytes = 0;
     for archive in archives {
         let name = archive.file_name();
-        let bytes = resolve(archive).map_err(|error| archive_error(&name, error))?;
+        let bytes = match resolve(archive) {
+            Ok(bytes) => bytes,
+            Err(error @ Error::Parse { .. }) => return Err(error),
+            Err(error) => return Err(archive_error(id, &name, error)),
+        };
         if sha256(&bytes) != archive.sha256 {
-            return Err(archive_error(&name, "SHA-256 mismatch"));
+            return Err(archive_error(id, &name, "SHA-256 mismatch"));
         }
-        let text = std::str::from_utf8(&bytes).map_err(|error| archive_error(&name, error))?;
-        let segment = crate::format::parse_note_section(text, &name)
-            .map_err(|error| archive_error(&name, error))?;
+        let text = std::str::from_utf8(&bytes).map_err(|error| archive_error(id, &name, error))?;
+        let segment =
+            crate::format::parse_note_section(text, &name).map_err(|error| match error {
+                Error::Parse { detail, .. } => archive_error(id, &name, detail),
+                other => archive_error(id, &name, other),
+            })?;
         if segment.len() != archive.note_count {
-            return Err(archive_error(&name, "note count mismatch"));
+            return Err(archive_error(id, &name, "note count mismatch"));
         }
         total_bytes += bytes.len() as u64;
         notes.extend(segment);
@@ -139,6 +147,7 @@ fn validate_ledger(task: &Task) -> Result<()> {
         let name = archive.file_name();
         if ledger.get(&name) != Some(&Ledger::Attached) {
             return Err(archive_error(
+                &task.id,
                 &name,
                 "required archive has no live attached ledger entry",
             ));
@@ -151,7 +160,7 @@ pub fn load_logical(
     mut physical: PhysicalTask,
     resolve: impl FnMut(&ArchiveDescriptor) -> Result<Vec<u8>>,
 ) -> Result<Task> {
-    let (mut notes, _) = prefix(&physical.archives, resolve)?;
+    let (mut notes, _) = prefix(physical.id(), &physical.archives, resolve)?;
     notes.append(&mut physical.inline_notes);
     let task = physical.assemble(notes);
     validate_ledger(&task)?;
@@ -162,7 +171,7 @@ pub fn physical_for_save(
     task: &Task,
     resolve: impl FnMut(&ArchiveDescriptor) -> Result<Vec<u8>>,
 ) -> Result<PhysicalTask> {
-    let (archived, _) = prefix(&task.note_archives, resolve)?;
+    let (archived, _) = prefix(&task.id, &task.note_archives, resolve)?;
     if task.notes.get(..archived.len()) != Some(archived.as_slice()) {
         return Err(Error::Validation(format!(
             "{}: archived note prefix changed; immutable history cannot be edited",
@@ -180,7 +189,7 @@ pub fn archived_bytes(
     task: &Task,
     resolve: impl FnMut(&ArchiveDescriptor) -> Result<Vec<u8>>,
 ) -> Result<u64> {
-    prefix(&task.note_archives, resolve).map(|(_, bytes)| bytes)
+    prefix(&task.id, &task.note_archives, resolve).map(|(_, bytes)| bytes)
 }
 
 // Explicit records context also serves pinned journal/historical readers; no cwd lookup.
@@ -217,7 +226,7 @@ pub fn read_archive_at(
         }
         attachments::read_capped(file, max_bytes, &path.display().to_string())
     };
-    let bytes = read().map_err(|error| archive_error(&path.display().to_string(), error))?;
+    let bytes = read().map_err(|error| archive_error(id, &name, error))?;
     record_metadata_read(bytes.len());
     Ok(bytes)
 }

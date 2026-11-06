@@ -622,7 +622,7 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
     }
     let project =
         crate::scope::open_registered(registry, &id.prefix, crate::scope::Origin::Id(id))?;
-    read_present(&project, id)
+    read_present(&project, id).map_err(|error| error.in_project(&project.prefix))
 }
 
 /// The colour a registered project's config sets, as leniently as

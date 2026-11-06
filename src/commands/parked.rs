@@ -217,7 +217,9 @@ pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Ta
     if project.prefix != id.prefix {
         return Ok(None);
     }
-    let scan = project.scan()?;
+    let scan = project
+        .scan()
+        .map_err(|error| error.in_project(&project.prefix))?;
     let Some(task) = scan.iter().find(|task| task.id == *id).cloned() else {
         return Ok(None);
     };

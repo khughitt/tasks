@@ -98,11 +98,12 @@ fn archive_physical_and_logical_boundary() {
     assert_eq!(out.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(report["growth"].as_array().unwrap().is_empty());
+    assert_eq!(report["errors"][0]["file"], format!("tasks/{id}.md"));
+    let detail = report["errors"][0]["detail"].as_str().unwrap();
+    assert!(detail.contains(&format!("tasks/{id}.md")), "{detail}");
     assert!(
-        report["errors"][0]["detail"]
-            .as_str()
-            .unwrap()
-            .contains(&name)
+        detail.contains(&format!("tasks/files/{id}/{name}")),
+        "{detail}"
     );
 }
 
@@ -245,6 +246,28 @@ fn archive_invalid_segment() {
         assert!(out.stdout.is_empty(), "{failure}");
         let error: Value = serde_json::from_slice(&out.stderr).unwrap();
         assert_eq!(error["error"]["kind"], "parse", "{failure}: {error}");
+        let detail = error["error"]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains(&format!("tasks/{id}.md")),
+            "{failure}: {detail}"
+        );
+        if matches!(
+            failure,
+            "hash"
+                | "utf8"
+                | "grammar"
+                | "note-owner"
+                | "note-text"
+                | "ledger"
+                | "count"
+                | "file-symlink"
+                | "dir-symlink"
+        ) {
+            assert!(
+                detail.contains(&format!("tasks/files/{id}/notes-")),
+                "{failure}: {detail}"
+            );
+        }
         assert_eq!(std::fs::read_to_string(&record).unwrap(), raw, "{failure}");
     }
 }
@@ -1281,4 +1304,64 @@ fn archive_consumer_paths() {
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&completion.stdout).contains("archive-notes"));
+}
+
+#[test]
+fn archive_segment_errors_name_record_and_project_across_read_paths() {
+    let (mut env, dot, id, _, name, _) = fixture();
+    let sci = env.init("sci");
+    let sci_id = env.json(&sci, &["add", "Depends on dot", "--depends", &id])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&sci, &["group", "set", "both", "dot", "sci"]);
+
+    let segment_rel = format!("tasks/files/{id}/{name}");
+    let record_rel = format!("tasks/{id}.md");
+    let mut tampered = std::fs::read(dot.join(&segment_rel)).unwrap();
+    tampered.push(b'\n');
+    std::fs::write(dot.join(&segment_rel), tampered).unwrap();
+
+    // Single-project reads carry both the record path and the segment path.
+    for args in [&["show", id.as_str()][..], &["list"][..], &["ready"][..]] {
+        let out = env.cmd(&dot).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "parse", "{args:?}: {error}");
+        let detail = error["error"]["detail"].as_str().unwrap();
+        assert!(detail.contains(&record_rel), "{args:?}: {detail}");
+        assert!(detail.contains(&segment_rel), "{args:?}: {detail}");
+        assert!(detail.contains("SHA-256 mismatch"), "{args:?}: {detail}");
+    }
+
+    // Cross-project reads carry the project prefix, record path, and segment path.
+    for args in [
+        &["projects"][..],
+        &["list", "--all-projects"][..],
+        &["ready", "--all-projects"][..],
+        &["tree", "--all-projects"][..],
+        &["list", "--group", "both"][..],
+    ] {
+        let out = env.cmd(&sci).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "parse", "{args:?}: {error}");
+        let detail = error["error"]["detail"].as_str().unwrap();
+        assert!(detail.contains("project dot:"), "{args:?}: {detail}");
+        assert!(detail.contains(&record_rel), "{args:?}: {detail}");
+        assert!(detail.contains(&segment_rel), "{args:?}: {detail}");
+    }
+
+    // Foreign dependency resolution in `check` also names the project, record, and segment.
+    let check = env.check(&sci);
+    let warning = check["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["kind"] == "foreign_unparsable" && w["id"] == sci_id)
+        .unwrap_or_else(|| panic!("{check}"));
+    let detail = warning["detail"].as_str().unwrap();
+    assert!(detail.contains("project dot:"), "{detail}");
+    assert!(detail.contains(&record_rel), "{detail}");
+    assert!(detail.contains(&segment_rel), "{detail}");
 }
