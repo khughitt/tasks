@@ -293,7 +293,13 @@ writes as a reference on each task it scopes, including follow-ups that use it:
     tasks -C <root> edit <id> --ref 'brief (input, required, kind=brief): docs/notes/YYYY-MM-DD-<topic>-brief.md — context and questions for this work'
 
 The stored reference stays `docs/notes/...`, relative to `records`, even when the
-file is outside the code checkout. Commit it in the repository holding the records.
+file is outside the code checkout. `add` and `edit` require a local `input` or `context`
+reference target to exist when the task write runs, so use a two-stage write order:
+first write or update the brief on disk with named follow-up roles and clearly marked
+pending ids (such as `<pending>`, never fabricated task ids); next file or reuse the
+follow-up tasks with `--ref` pointing at that existing brief; then replace the pending
+ids in **Proposed decomposition** with the returned real follow-up ids before committing
+the brief in the repository holding `records`.
 Reuse the existing handle on reruns; mark `required` only when the brief must be read
 first. In a body the pass rewrites, cite `[ref:brief]` and say why it matters.
 
@@ -332,6 +338,8 @@ task.
 
 In the same pass that files or reuses a follow-up, record each wait as an edge: run
 `tasks -C <root> dep <idea> --on <follow-up>` for every idea its `Ideas it wakes` names.
+Complete the real-id brief decomposition, `Ideas it wakes` instructions, `--ref` links,
+and `dep` edges before writing the members' final scope audit notes.
 The edge puts the wait in the record (`show`'s `depends_on`) and keeps the block when
 the idea is later promoted to `todo`. When the follow-up closes, the edge readmits the idea by itself; the wake note still carries the finding to it.
 
@@ -346,14 +354,23 @@ reopened since selection. Treat unverifiable claims as live and skip them. Docum
 not say they were processed. If every member is skipped, create no goal or document.
 
 Revalidation comes once, before all of a member's writes, so its own writes cannot trip
-the comparison. An origin correction planned in §2 is one of them:
-`tasks -C <root> edit <id> --origin <value>` (or `--no-origin`), in the same edit as the
-verdict's other field changes when it has them, and always before the audit note, whose
-`origin:` segment names the stage outcomes and the evidence for the correction.
+the comparison. Once at least one member is confirmed unskipped, execute writes in this
+order:
+1. Write or reuse the brief (within the three-document ceiling) with named follow-up
+   roles and pending ids for any new follow-ups, and create or reuse the cluster goal.
+2. File or reuse follow-ups with valid `--ref` links to the existing brief, replace
+   pending ids in the brief's decomposition with the returned real ids, and record
+   `Ideas it wakes` instructions and `dep <idea> --on <follow-up>` edges.
+3. Apply each unskipped member's verdict edits (including `--ref` to the brief and any
+   `--origin <value>` or `--no-origin` correction planned in §2, in the same `edit` as
+   its other field changes when it has them), then write its `--stamp` audit note last,
+   whose `origin:` segment names the stage outcomes and the evidence for the correction.
 
 Write task records only through the CLI and handoffs through explicit paths under
-`records`. Preserve the exact successful operations when a later command fails, report
-partial work honestly, and never report skipped or failed writes as complete. The check
+`records`. On a rerun or after a partial failure, reuse the existing brief, goal, and
+follow-ups, preserve the exact successful operations when a later command fails, report
+exactly which writes succeeded, and never leave fabricated task ids or report skipped or
+failed writes as complete. The check
 is not a lock; propagate a CLI race failure. There is no per-member approval checkpoint.
 
 ## 7. Summarize and rerun
