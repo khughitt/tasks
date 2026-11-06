@@ -45,73 +45,31 @@ pub fn open(
     }
 }
 
-/// Every registered, reachable, unretired project that accepts feedback, with its
-/// scope, read from its config alone: a retired owner refuses the report anyway. Never a
-/// task file: a malformed task anywhere must not hide an owner. A config that cannot be
-/// read is listed with its error instead of failing the caller.
-pub fn owners(registry: &Registry) -> Vec<(String, std::result::Result<String, String>)> {
+/// Every registered, reachable, unretired project, with its declared `[feedback] scope`
+/// when present, read from its config alone: a retired project refuses the report anyway.
+/// Never a task file: a malformed task anywhere must not hide a target.
+pub fn owners(registry: &Registry) -> Vec<(String, Option<String>)> {
     let mut found = Vec::new();
     let dirs = registry
         .projects
         .keys()
         .filter_map(|prefix| crate::scope::config_dir(registry, prefix).map(|dir| (prefix, dir)));
     for (prefix, dir) in dirs {
-        match crate::scope::is_reachable(registry, prefix) {
-            Ok(true) => {}
-            Ok(false) => continue,
-            // An I/O error (e.g. permissions) is not "unreachable": it is named, not
-            // silently dropped from the refusal's list of who does accept.
-            Err(error) => {
-                found.push((prefix.clone(), Err(error.to_string())));
-                continue;
-            }
+        if !crate::scope::is_reachable(registry, prefix).unwrap_or(false) {
+            continue;
         }
-        match Project::open(&dir) {
-            Ok(project) => {
-                if project.retired.is_some() {
-                    continue;
-                }
-                if let Some(scope) = project.feedback {
-                    found.push((prefix.clone(), Ok(scope)));
-                }
-            }
-            Err(error) => found.push((prefix.clone(), Err(error.to_string()))),
+        if let Ok(project) = Project::open(&dir)
+            && project.retired.is_none()
+        {
+            found.push((prefix.clone(), project.feedback));
         }
     }
     found
 }
 
-/// The owner a report goes to: a registered project whose config has `[feedback]`.
+/// The owner a report goes to: a registered project.
 pub fn locate_target(registry: &Registry, prefix: &str) -> Result<Project> {
-    let target = crate::scope::open_registered(registry, prefix, Origin::Prefix)?;
-    require_acceptance(registry, prefix, &target)?;
-    Ok(target)
-}
-
-/// Refuses a target without `[feedback]`, listing the projects that accept so the
-/// reporter can reroute without a second lookup. Checked once to choose the target, and
-/// again on the project `lock_and_revalidate` hands back, since that reload may reflect
-/// an opt-out or a rename that happened while the command waited for the lock.
-fn require_acceptance(registry: &Registry, asked: &str, target: &Project) -> Result<()> {
-    if target.feedback.is_some() {
-        return Ok(());
-    }
-    let listed: Vec<String> = owners(registry)
-        .into_iter()
-        .map(|(owner, scope)| match scope {
-            Ok(scope) => format!("{owner} ({scope})"),
-            Err(error) => format!("{owner} (unreadable: {error})"),
-        })
-        .collect();
-    Err(Error::Validation(format!(
-        "{asked:?} does not accept feedback (no [feedback] in its {}); projects that do: {}",
-        crate::repo::CONFIG_REL,
-        if listed.is_empty() {
-            "none".to_string()
-        } else {
-            listed.join("; ")
-        }
-    )))
+    crate::scope::open_registered(registry, prefix, Origin::Prefix)
 }
 
 pub const NOTE_AUTHOR: &str = "feedback";
@@ -120,8 +78,8 @@ pub fn is_open_feedback(task: &Task) -> bool {
     task.status.is_open() && task.tags.iter().any(|tag| tag == "feedback")
 }
 
-/// The tags this command writes, which a project that accepts feedback holds as defined
-/// on its feedback records whatever its dictionary says. `from:` is judged by syntax
+/// The tags this command writes, which `check` holds as defined on feedback records in
+/// every project whatever its dictionary says. `from:` is judged by syntax
 /// alone: the registry is per host, so the source may be absent, unregistered, or renamed
 /// where the record is checked.
 pub fn writes_tag(task: &Task, tag: &str) -> bool {
@@ -169,8 +127,6 @@ pub fn run(
     // Only the target is locked, even when the reporter shares its prefix. Routing by the
     // name asked for lets a rename during the wait resolve through its alias, as before.
     super::lock_and_revalidate(&mut ctx, &super::Routing::Registered(project.clone()))?;
-    // The reload under the lock is what gets written; it must still accept.
-    require_acceptance(&ctx.registry, &project, &ctx.project)?;
     let owner = ctx.project.prefix.clone();
     let target = &ctx.project;
 

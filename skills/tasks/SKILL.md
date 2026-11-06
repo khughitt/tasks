@@ -1023,10 +1023,9 @@ from outside every project, in one command:
 
 File it at the moment it happens: the tool got in the way (`friction`), could not do
 something you needed (`gap`), gave you an idea (`idea`), or worked notably well
-(`positive`). `--project` is required and names a registered project whose
-`tasks/.config.toml` has a `[feedback]` table; any other is refused with the list of
-projects that accept, each with its scope. Your agent instructions may say when to
-report and list the owners; the refusal lists them either way. The report lands as an
+(`positive`). `--project` is required and names any registered, reachable, unretired
+project (every such project accepts feedback by default). Your agent instructions may
+say when to report and list the shared-tooling owners and their scopes. The report lands as an
 `idea` in the owner's registered checkout (committed there when the owner sets
 `[git] commit`), tagged `feedback`, the category,
 and `from:<your prefix>` (`from:unregistered` outside every project; a linked checkout
@@ -1043,7 +1042,9 @@ any registered project.
 
 ### In a project that accepts feedback
 
-A `[feedback]` table with a one-line `scope` opts the project in:
+Every registered, reachable, unretired project accepts feedback by default. An optional
+`[feedback]` table with a one-line `scope` in `tasks/.config.toml` declares the shared
+tooling the project owns for routing:
 
     [feedback]
     scope = "<what this project owns, for someone deciding where a report goes>"
@@ -1054,4 +1055,4 @@ the original). Ideas tagged `feedback` are the triage queue; scope, drop, or pro
 record the outcome in a note. Drop a misfiled report with a note naming the owner it
 belongs to. `check` holds `feedback`, the categories, and any `from:<prefix>` or
 `from:unregistered` as defined
-on feedback records, whatever the tag dictionary says.
+on feedback records in every project, whatever the tag dictionary says.

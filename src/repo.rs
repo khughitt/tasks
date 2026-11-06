@@ -108,8 +108,8 @@ pub struct Project {
     /// `None` when the project keeps no dictionary; then `check` says nothing about
     /// tags. See docs/task-model.md
     pub tags: Option<BTreeMap<String, String>>,
-    /// The `[feedback]` table's scope: `Some` means the project accepts feedback, and the
-    /// line says what it owns. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
+    /// The `[feedback]` table's scope: declares the shared tooling the project owns for
+    /// feedback routing. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
     pub feedback: Option<String>,
     /// The need vocabulary from the config's `[needs]` tables: name -> meaning and
     /// exclusivity. Empty when the project declares none. See

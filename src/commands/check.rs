@@ -319,9 +319,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             && task.status.is_open()
         {
             for tag in task.tags.iter().filter(|tag| {
-                !dictionary.contains_key(*tag)
-                    && !(ctx.project.feedback.is_some()
-                        && crate::commands::feedback::writes_tag(task, tag))
+                !dictionary.contains_key(*tag) && !crate::commands::feedback::writes_tag(task, tag)
             }) {
                 warnings.push(finding(
                     Some(task),

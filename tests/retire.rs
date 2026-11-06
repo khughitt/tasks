@@ -854,7 +854,7 @@ fn retired_read_feedback_owners_and_wide_id_completion_leave_it_out() {
     env.json(&ops, &["retire", "--reason", "r"]);
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "feedback", "--project", ""]),
-        ["ai"]
+        ["ai", "sci"]
     );
     let local = id_of(env.json(&sci, &["add", "Local"]));
     for scope in [vec!["--group", "all"], vec!["--all-projects"]] {
@@ -876,22 +876,19 @@ fn retired_read_feedback_owners_and_wide_id_completion_leave_it_out() {
         assert!(wide.contains(&local), "{scope:?}: {wide:?}");
         assert!(!wide.contains(&gone), "{scope:?}: {wide:?}");
     }
-    let out = env
-        .cmd(&sci)
-        .args([
-            "feedback",
-            "--project",
-            "sci",
-            "x is slow",
-            "--category",
-            "gap",
-        ])
-        .output()
-        .unwrap();
-    let detail = error_detail(&out);
-    assert!(
-        detail.contains("ai (") && !detail.contains("ops ("),
-        "{detail}"
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "feedback",
+                "--project",
+                "ops",
+                "x is slow",
+                "--category",
+                "gap",
+            ]
+        ),
+        "retired_project"
     );
 }
 

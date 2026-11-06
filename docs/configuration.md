@@ -23,7 +23,7 @@ The accepted top-level keys/tables are exactly those below.
 | `plan_dirs` | Optional list; defaults to `docs/plans`, `docs/superpowers/plans`. |
 | `[tags]` | Optional label-to-single-line-meaning dictionary; unknown labels warn, vocabulary is advisory. |
 | `[needs.<name>]` | Required nonblank single-line `meaning`, optional `exclusive = false`; unknown keys fail. Names use lowercase letters/digits/hyphens and no leading hyphen. |
-| `[feedback]` | Optional nonblank single-line `scope` for feedback reporting. |
+| `[feedback]` | Optional nonblank single-line `scope` declaring the shared tooling the project owns for feedback routing; every registered, reachable, unretired project accepts `tasks feedback` by default. |
 | `[attachments]` | Limits and multipart validator declarations described below. |
 | `[growth]` | Optional positive `warn_bytes`; default min(65,536, floor(max_bytes/4)), at least 1. An explicit larger threshold is accepted with a warning, not clamped. |
 | `[checkout]` | Required `path` when present; relative to records or absolute. Missing `kind` means linked; the other accepted kind is `detached`. Managed by init/relocation. |

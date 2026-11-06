@@ -184,7 +184,7 @@ never evidence that no work remains.
 ## Feedback, stamps and presentation
 
 `feedback --project <prefix> "<title>" --category friction|gap|idea|positive`
-records a tool observation. Existing matching feedback may recur; use `--new`
+records a tool observation in any registered, reachable, unretired project. Existing matching feedback may recur; use `--new`
 for a distinct issue and `-b` for context. Source is opaque evidence, while
 `--origin user|agent|mixed` records whose ask it is. Unknown origin stays absent;
 the CLI does not infer it from author, parent or session. Correct it explicitly

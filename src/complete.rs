@@ -706,7 +706,7 @@ pub fn feedback_owners() -> Vec<CompletionCandidate> {
     plain(
         crate::commands::feedback::owners(&registry)
             .into_iter()
-            .filter_map(|(prefix, scope)| scope.ok().map(|_| prefix))
+            .map(|(prefix, _)| prefix)
             .collect::<Vec<_>>(),
     )
 }

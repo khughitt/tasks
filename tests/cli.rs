@@ -1596,8 +1596,12 @@ fn check_holds_feedback_tags_defined_on_feedback_records_in_an_accepting_project
         "from:gone",
     ];
     env.json(&ai, &args);
-    // Without [feedback] the dictionary binds everything: three findings.
-    assert_eq!(env.check(&ai)["warnings"].as_array().unwrap().len(), 3);
+    // Every project holds the feedback tags as defined on feedback records, with or without [feedback].
+    let without_feedback = env.check(&ai);
+    assert!(
+        without_feedback["warnings"].as_array().unwrap().is_empty(),
+        "{without_feedback}"
+    );
 
     accept_feedback(&ai, "Agent instructions.");
     let clean = env.check(&ai);
@@ -7633,7 +7637,8 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
 #[test]
 fn feedback_outside_every_project_reports_as_unregistered() {
     let (mut env, target, _reporter) = feedback_env();
-    env.init("zz");
+    let zz = env.init("zz");
+    common::declare_retired(&zz, None);
     let nowhere = tempfile::tempdir().unwrap();
     let file = |summary: &str, extra: &[&str]| {
         let mut args = vec![
@@ -7720,7 +7725,7 @@ fn feedback_outside_every_project_reports_as_unregistered() {
         ),
         "invalid_id"
     );
-    // A target that does not accept is refused as it is from inside a project.
+    // A retired target is refused as it is from inside a project.
     assert_eq!(
         env.fail(
             nowhere.path(),
@@ -7733,7 +7738,7 @@ fn feedback_outside_every_project_reports_as_unregistered() {
                 "gap"
             ]
         ),
-        "validation"
+        "retired_project"
     );
     // Input is judged before any project is opened, so a bad summary is reported the same
     // way from both places even when the target is not registered.
@@ -8326,44 +8331,50 @@ fn feedback_lands_in_the_owner_named_by_project() {
 }
 
 #[test]
-fn feedback_refuses_an_owner_that_does_not_accept_and_lists_those_that_do() {
-    let (mut env, _ai, _ops, sci) = owners_env();
+fn feedback_accepts_every_registered_unretired_project_by_default() {
+    let (mut env, ai, _ops, sci) = owners_env();
     let dots = env.init("dots");
-    // A malformed task file in an unrelated project must not hide the owners.
-    std::fs::write(dots.join("tasks/dots-000001.md"), "not a record\n").unwrap();
-    // Nor may another project's unparsable config; it is named, not fatal.
-    let bad = env.init("bad");
-    std::fs::write(bad.join("tasks/.config.toml"), "prefix = \n").unwrap();
+    write_dictionary(&dots, "dots", &[("shell", "Shell config.")]);
 
-    let out = env
-        .cmd(&sci)
-        .args([
-            "feedback",
-            "--project",
-            "dots",
-            "x is slow",
-            "--category",
-            "friction",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    assert_eq!(error["error"]["kind"], "validation");
-    let detail = error["error"]["detail"].as_str().unwrap();
-    assert!(
-        detail.contains("\"dots\" does not accept feedback"),
-        "{detail}"
-    );
-    assert!(detail.contains("ai (Agent instructions.)"), "{detail}");
-    assert!(
-        detail.contains("ops (Shared tooling and hooks.)"),
-        "{detail}"
-    );
-    assert!(detail.contains("bad (unreadable:"), "{detail}");
-    assert!(
-        std::fs::read_dir(dots.join("tasks")).unwrap().count() == 2,
-        "nothing written beside the config and the malformed file"
+    for (owner, root) in [("dots", &dots), ("ai", &ai)] {
+        let out = env.json(
+            &sci,
+            &[
+                "feedback",
+                "--project",
+                owner,
+                "x is slow",
+                "--category",
+                "friction",
+            ],
+        );
+        assert_eq!(out["action"], "created", "{out}");
+        let id = out["id"].as_str().unwrap();
+        assert!(id.starts_with(&format!("{owner}-")), "{id}");
+        let shown = env.json(root, &["show", id]);
+        assert_eq!(
+            shown["task"]["tags"],
+            serde_json::json!(["feedback", "friction", "from:sci"])
+        );
+    }
+    let clean = env.check(&dots);
+    assert!(clean["warnings"].as_array().unwrap().is_empty(), "{clean}");
+
+    let retired = env.init("ret");
+    common::declare_retired(&retired, None);
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "feedback",
+                "--project",
+                "ret",
+                "x is slow",
+                "--category",
+                "gap"
+            ]
+        ),
+        "retired_project"
     );
 
     assert_eq!(
@@ -8384,8 +8395,8 @@ fn feedback_refuses_an_owner_that_does_not_accept_and_lists_those_that_do() {
     assert!(usage.contains("--project"), "{usage}");
 }
 
-// A permission error reading a project's config (not a parse error) must not be read as
-// "unreachable" and silently dropped from the refusal's list of who does accept.
+// A permission error reading an unrelated project's config must not break completion of
+// the remaining accepting projects.
 #[test]
 fn feedback_lists_a_permission_denied_owner_as_unreadable_not_dropped() {
     let (mut env, _ai, _ops, sci) = owners_env();
@@ -8395,26 +8406,10 @@ fn feedback_lists_a_permission_denied_owner_as_unreadable_not_dropped() {
         .permissions();
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
     std::fs::set_permissions(locked.join("tasks"), perms.clone()).unwrap();
-    let out = env
-        .cmd(&sci)
-        .args([
-            "feedback",
-            "--project",
-            "sci",
-            "permission denied owner",
-            "--category",
-            "friction",
-        ])
-        .output()
-        .unwrap();
+    let owners = env.complete(&sci, "bash", 3, &["tasks", "feedback", "--project", ""]);
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    assert_eq!(error["error"]["kind"], "validation");
-    let detail = error["error"]["detail"].as_str().unwrap();
-    assert!(detail.contains("lck (unreadable:"), "{detail}");
-    assert!(detail.contains("ai (Agent instructions.)"), "{detail}");
+    assert_eq!(owners, ["ai", "ops", "sci"]);
 }
 
 #[test]
@@ -8462,22 +8457,15 @@ fn feedback_rechecks_acceptance_after_waiting_for_the_target_lock() {
         }
         let mut child = command.spawn().unwrap();
         let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
-        // The owner opts out while the report waits for its lock; same prefix, same root.
-        std::fs::write(target.join("tasks/.config.toml"), "prefix = \"tasks\"\n").unwrap();
+        // The owner retires while the report waits for its lock; same prefix, same root.
+        common::declare_retired(&target, None);
         drop(held);
         let out = reap(child, REAP).unwrap();
 
         assert!(blocked, "feedback ignored the target lock");
         assert_eq!(out.status.code(), Some(1), "{out:?}");
         let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-        assert_eq!(error["error"]["kind"], "validation", "{error}");
-        assert!(
-            error["error"]["detail"]
-                .as_str()
-                .unwrap()
-                .contains("does not accept feedback"),
-            "{error}"
-        );
+        assert_eq!(error["error"]["kind"], "retired_project", "{error}");
         assert_eq!(listing(), before, "recur={recur}: no file created");
         assert_eq!(
             env.read(&target, &format!("tasks/{id}.md")),
@@ -8538,7 +8526,7 @@ fn feedback_recur_must_name_open_feedback_in_the_chosen_owner() {
 fn feedback_completion_offers_only_owners_and_their_open_reports() {
     let (env, ai, _ops, sci) = owners_env();
     let owners = env.complete(&sci, "bash", 3, &["tasks", "feedback", "--project", ""]);
-    assert_eq!(owners, ["ai", "ops"]);
+    assert_eq!(owners, ["ai", "ops", "sci"]);
     let open = id_of(env.json(&ai, &["add", "Open report", "--tag", "feedback"]));
     env.json(&ai, &["add", "Not feedback"]);
     let ids = env.complete(

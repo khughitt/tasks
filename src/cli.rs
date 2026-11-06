@@ -1026,7 +1026,7 @@ pub enum Command {
     },
     /// File feedback about a project's tooling into that project.
     Feedback {
-        /// The registered project that owns the tooling; its config must have [feedback].
+        /// The registered project that owns the tooling.
         #[arg(long, add = ArgValueCandidates::new(crate::complete::feedback_owners))]
         project: String,
         summary: String,
