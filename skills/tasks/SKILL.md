@@ -573,8 +573,8 @@ and only then ends reservations through the coordinator terminal. It never relea
 bytes or completes the requested transfer/checkpoint; committed sender release
 requires finishing the original operation. Malformed history remains blocked and
 needs explicit repair. Keep original named retained refs available. Use fresh
-checkpoint inputs for later repair; retain the installed manual procedure until
-full delivery and consumer acceptance.
+checkpoint inputs for later repair; unsupported or malformed retained history
+still requires explicit manual repair.
 
 Pending retained operations reserve task/evidence mutation while permitting reads,
 unrelated appended notes, start/claim refresh and park. Complete or reconcile them
