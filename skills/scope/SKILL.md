@@ -310,9 +310,15 @@ the handoff and audit note. Preserve every existing source; do not rewrite share
 incidentally. Research and design follow-ups are children of the cluster goal.
 
 When the cluster is a standalone effort meant to run beside the project's other work,
-create that goal with `--lane` and lead its body with the guidance paragraph: why the
-effort exists and its first milestone. A cluster inside an existing lane gets an ordinary
-child goal, never a lane.
+create a new goal with `--lane` and lead its body with the guidance paragraph: why the
+effort exists and its first milestone. When the pass instead reuses an existing goal or
+re-scopes its children (without scanning the rest of the backlog), assess the existing
+goals touched by the pass: if a touched top-level goal (`lane: false` and not inside an
+existing lane) is a standalone effort that belongs in the lanes view, report it in the
+final summary (§7) as a lane candidate with a short reason, without setting `--lane` or
+changing its priority. Never report a goal already marked as a lane (`lane: true`), and
+never propose a lane for a sub-effort inside an existing lane: a cluster inside an
+existing lane gets an ordinary child goal, never a nested lane.
 
 Reuse an existing goal, handoff, and open research task when its question still stands.
 If a new goal would have neither member nor follow-up children, do not create it merely
@@ -380,7 +386,9 @@ document once in the lead, then one line per selected member with a bold verdict
 reason (`- <id> — **<verdict>**: <short reason>`; a re-scoped member names what is now
 established, and a shelved member names the short revisit trigger and checkpoint date).
 Then include only nonempty groups that need user action: drops (id and supporting
-commit/id) and questions (id and text). Full shelf conditions, wake targets, rule UUIDs,
+commit/id), questions (id and text), and lane candidates among existing top-level goals
+touched by the pass (id and short reason, flagged without setting `--lane` or changing
+priority). Full shelf conditions, wake targets, rule UUIDs,
 and origin provenance stay in the task records.
 
 When later research completes, its completion must add a finding note with `--no-reviewed` to every waiting
