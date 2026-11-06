@@ -2,17 +2,34 @@ use super::{basis, model::*, publish, reconcile, state, verify};
 use crate::{error::Result, model::TaskId, repo::Project};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) fn project_for(project: &Project, task: &str) -> Result<Project> {
-    let id = TaskId::parse(task)?;
-    if super::lineage::owns_prefix(project, &id.prefix) {
-        Ok(project.clone())
-    } else {
-        crate::scope::open_registered(
-            &crate::registry::Registry::load()?,
-            &id.prefix,
-            crate::scope::Origin::Id(&id),
-        )
+// Keep the caller's verified pairing throughout a proof walk, including adoption before
+// this host has persisted the old-prefix alias. No registry state is changed here.
+pub(super) struct Resolver<'a> {
+    candidate: &'a Project,
+}
+impl<'a> Resolver<'a> {
+    pub fn new(candidate: &'a Project) -> Self {
+        Self { candidate }
     }
+    pub fn prefix(&self, project: &Project, prefix: &str) -> Result<Project> {
+        if super::lineage::owns_prefix(project, prefix) {
+            Ok(project.clone())
+        } else if super::lineage::owns_prefix(self.candidate, prefix) {
+            Ok(self.candidate.clone())
+        } else {
+            crate::scope::open_registered(
+                &crate::registry::Registry::load()?,
+                prefix,
+                crate::scope::Origin::Prefix,
+            )
+        }
+    }
+    pub fn task(&self, project: &Project, task: &str) -> Result<Project> {
+        self.prefix(project, &TaskId::parse(task)?.prefix)
+    }
+}
+pub(crate) fn project_for(project: &Project, task: &str) -> Result<Project> {
+    Resolver::new(project).task(project, task)
 }
 
 // Validate immutable metadata only; current payloads and working attachment files are irrelevant.
@@ -21,6 +38,7 @@ pub fn validate_history(
     pinned: &basis::PinnedTask,
     host: Option<&str>,
 ) -> Result<()> {
+    let resolver = Resolver::new(project);
     let mut pending = vec![(project.clone(), pinned.clone())];
     let mut seen = BTreeSet::new();
     let mut metrics = verify::Metrics::default();
@@ -54,7 +72,8 @@ pub fn validate_history(
                 &pinned.task.notes[..=index],
                 &mut metrics.history_bytes_read,
             )?;
-            let request = verify::artifact(
+            let request = verify::artifact_with(
+                &resolver,
                 &project,
                 &note
                     .request
@@ -80,10 +99,10 @@ pub fn validate_history(
                     ArtifactLocator::Directory { manifest, .. } => manifest.as_ref(),
                     _ => &artifact,
                 };
-                verify::artifact(&project, file, &mut metrics)?;
+                verify::artifact_with(&resolver, &project, file, &mut metrics)?;
             }
             for input in &note.input_bases {
-                let p = project_for(&project, &input.task)?;
+                let p = resolver.task(&project, &input.task)?;
                 let id = TaskId::parse(&input.task)?;
                 let original = basis::read_exact(&p, &id, &input.basis)?;
                 if super::lineage::same(&project, &input.task, &pinned.task.id.to_string())? {
@@ -122,7 +141,7 @@ pub fn validate_history(
                 if !note.input_bases.iter().any(|i| i.task == publication.task) {
                     return Err(invalid("publication names a foreign operation participant"));
                 }
-                let p = project_for(&project, &publication.task)?;
+                let p = resolver.task(&project, &publication.task)?;
                 let id = TaskId::parse(&publication.task)?;
                 let target = basis::read_exact(&p, &id, &publication.basis)?;
                 let replay = state::replay(&p, &target.task, &target.basis, host)?;
@@ -142,7 +161,8 @@ pub fn validate_history(
                 if actual != publication.basis
                     || source.note.host != note.host
                     || source.note.input_bases != note.input_bases
-                    || verify::artifact(
+                    || verify::artifact_with(
+                        &resolver,
                         &p,
                         &source.note.request.pinned(&publication.task, &actual)?,
                         &mut metrics,

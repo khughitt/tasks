@@ -1145,17 +1145,19 @@ pub(super) fn observation_artifacts(
             if let (Some(path), Some(digest)) = (record.manifest.value(), record.sha256.value()) {
                 let path = std::path::Path::new(path);
                 let input = super::lineage::participant(project, note, &task.id)?;
-                let parent = super::basis::root(project)?
-                    .join(&input.basis.records_subdir)
-                    .join(format!("tasks/files/{}", input.task));
-                if path.parent() == Some(parent.as_path()) {
+                let name = format!("retained-manifest-{digest}.json");
+                let suffix = format!("tasks/files/{}/{name}", input.task);
+                // The producing host's absolute root is not a Git locator. Bind the
+                // generated name to its participant and ledger, then pin at publication.
+                if path.ends_with(&suffix) {
+                    if crate::attachments::ledger(task).get(&name)
+                        != Some(&crate::attachments::Ledger::Attached)
+                    {
+                        return Err(invalid("ready manifest lacks an attachment ledger binding"));
+                    }
                     artifacts.push(ArtifactLocator::Attachment {
                         task: input.task.clone(),
-                        name: path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .ok_or_else(|| invalid("manifest filename"))?
-                            .into(),
+                        name,
                         basis: None,
                         sha256: digest.into(),
                     });

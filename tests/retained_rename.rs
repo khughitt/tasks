@@ -1144,3 +1144,271 @@ fn retention_rename_command_pilot() {
     assert_eq!(f.basis(), before);
     println!("pilot verdict: passed");
 }
+
+fn cross_reconciled(f: &RetainedEnv, to: &str) -> (serde_json::Value, serde_json::Value) {
+    use common::retained::transfer_request;
+    let path = f.request("transfer.json", &transfer_request(f, to));
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "receiver_published")
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            to,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(86));
+    std::fs::remove_file(f.dir.join("payload")).unwrap();
+    let request = json!({"version":1,"operation":{"coordinator":f.id,"operation_id":"a".repeat(32)},"reconciliation_id":"c".repeat(32),"inputs":[{"task":f.id,"basis":f.state()["basis"]},{"task":to,"basis":f.json(&["retained","state",to])["basis"]}],"reason":"Keep both custodies"});
+    let path = f.request("reconcile.json", &request);
+    let result = f.json(&[
+        "retained",
+        "reconcile",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ]);
+    (request, result)
+}
+
+#[test]
+fn retention_rename_review_receiver_reconcile_retry() {
+    use common::retained::cross_receiver;
+    let mut f = observed("in-tree");
+    f.json(&["start", &f.id]);
+    let (other, to) = cross_receiver(&f, false);
+    let (request, original) = cross_reconciled(&f, &to);
+    f.json(&["park", &f.id, "rename"]);
+    f.json(&["park", &to, "rename"]);
+    let saved = (f.dir.clone(), f.records.clone(), f.id.clone());
+    f.dir = other.clone();
+    f.records = other;
+    f.id = to;
+    renamed_live(&mut f, "other");
+    commit_rename(&f, "fam");
+    let new_to = f.id.clone();
+    (f.dir, f.records, f.id) = saved;
+    f.json(&["start", &f.id]);
+    f.json(&["start", &new_to]);
+    let before = f.basis();
+    let receiver_before = f.json(&["retained", "state", &new_to])["basis"].clone();
+    let path = f.request("reconcile-retry.json", &request);
+    let replay = f.json(&[
+        "retained",
+        "reconcile",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(replay["publications"], original["publications"]);
+    assert_eq!(replay["counts"], original["counts"]);
+    assert_eq!(f.basis(), before);
+    assert_eq!(
+        f.json(&["retained", "state", &new_to])["basis"],
+        receiver_before
+    );
+}
+
+#[test]
+fn retention_rename_review_cross_project_adopt() {
+    use common::retained::{cross_receiver, transfer, transfer_request};
+    for reconciled in [false, true] {
+        for layout in ["in-tree", "detached"] {
+            let mut f = observed(layout);
+            f.json(&["start", &f.id]);
+            let (other, to) = cross_receiver(&f, false);
+            if reconciled {
+                cross_reconciled(&f, &to);
+            } else {
+                transfer(&f, &to, &transfer_request(&f, &to));
+            }
+            f.json(&["park", &f.id, "rename"]);
+            f.json(&["park", &to, "rename"]);
+            let second = common::TestEnv::new();
+            let registry = second.home.path().join(".config/tasks/projects.toml");
+            std::fs::create_dir_all(registry.parent().unwrap()).unwrap();
+            std::fs::copy(
+                f.env.home.path().join(".config/tasks/projects.toml"),
+                &registry,
+            )
+            .unwrap();
+            renamed_live(&mut f, "new");
+            commit_rename(&f, "sci");
+            let before = f.basis();
+            let config = std::fs::read(f.records.join("tasks/.config.toml")).unwrap();
+            second.json(&f.dir, &["rename", "sci", "new", "--adopt"]);
+            assert_eq!(f.basis(), before);
+            assert_eq!(
+                std::fs::read(f.records.join("tasks/.config.toml")).unwrap(),
+                config
+            );
+            assert_eq!(
+                second.json(&f.dir, &["retained", "state", &f.id])["complete"],
+                true
+            );
+            assert_eq!(
+                second.json(&other, &["retained", "state", &to])["complete"],
+                true
+            );
+        }
+    }
+}
+
+#[test]
+fn retention_rename_review_unledgered_protected_refuses() {
+    for history in [false, true] {
+        for name in [
+            "retained-op-orphan.request.json",
+            "retained-manifest-orphan.json",
+            "retained-checkpoint-orphan.json",
+        ] {
+            let f = if history {
+                observed("in-tree")
+            } else {
+                RetainedEnv::new("in-tree")
+            };
+            let dir = f.records.join(format!("tasks/files/{}", f.id));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name), "uncertain evidence").unwrap();
+            git(&f.records, &["add", "tasks"]);
+            git(&f.records, &["commit", "-qm", "unledgered evidence"]);
+            let before = f.basis();
+            let config = std::fs::read(f.records.join("tasks/.config.toml")).unwrap();
+            let registry = f.env.home.path().join(".config/tasks/projects.toml");
+            let original = std::fs::read(&registry).unwrap();
+            let out = f.cmd().args(["rename", "sci", "new"]).output().unwrap();
+            assert!(
+                !out.status.success(),
+                "unledgered protected evidence was renamed: {name}"
+            );
+            assert_eq!(f.basis(), before);
+            assert_eq!(std::fs::read(registry).unwrap(), original);
+            assert_eq!(
+                std::fs::read(f.records.join("tasks/.config.toml")).unwrap(),
+                config
+            );
+            assert!(dir.join(name).is_file());
+            assert!(f.records.join(format!("tasks/{}.md", f.id)).is_file());
+            assert!(
+                !f.env
+                    .home
+                    .path()
+                    .join(".local/state/tasks/rename/sci.toml")
+                    .exists()
+            );
+        }
+    }
+}
+
+#[test]
+fn retention_rename_review_ready_manifest_other_root() {
+    let mut f = RetainedEnv::new("detached");
+    f.json(&["start", &f.id]);
+    let directory = f.dir.join("scratch");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("member"), "payload").unwrap();
+    let request = checkpoint_request(&f, 1, json!([declaration(&directory, "scratch")]));
+    let path = f.request("intent.json", &request);
+    let out = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "intent")
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(86));
+    let request = json!({"version":1,"operation":{"coordinator":f.id,"operation_id":format!("{:032x}",1)},"reconciliation_id":"c".repeat(32),"inputs":[{"task":f.id,"basis":f.state()["basis"]}],"reason":"Keep declared directory"});
+    let path = f.request("reconcile.json", &request);
+    f.json(&[
+        "retained",
+        "reconcile",
+        &f.id,
+        "--request",
+        path.to_str().unwrap(),
+    ]);
+    f.json(&["park", &f.id, "rename"]);
+    let manifest = f.state()["items"][0]["record"]["manifest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let name = std::path::Path::new(&manifest)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let old = f.id.clone();
+    let commit = f.basis();
+    renamed_live(&mut f, "new");
+    commit_rename(&f, "sci");
+    assert_eq!(f.state()["complete"], true);
+    fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let dest = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &dest);
+            } else {
+                std::fs::copy(entry.path(), dest).unwrap();
+            }
+        }
+    }
+    let paired = tempfile::tempdir().unwrap();
+    copy_tree(f.dir.parent().unwrap(), paired.path());
+    f.dir = paired.path().join("code");
+    f.records = paired.path().join("records/new");
+    let second = common::TestEnv::new();
+    second.json(
+        &f.dir,
+        &[
+            "init",
+            "--prefix",
+            "new",
+            "--records",
+            paired.path().join("records").to_str().unwrap(),
+            "--force",
+        ],
+    );
+    f.env = second;
+    assert_eq!(
+        f.state()["complete"],
+        true,
+        "intact evidence remains portable"
+    );
+    let git = |args: &[&str]| {
+        let out = common::git_fixture::command(f.env.home.path(), &f.records)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let oid = git(&[
+        "rev-parse",
+        &format!("{commit}:sci/tasks/files/{old}/{name}"),
+    ]);
+    let dir = std::path::PathBuf::from(git(&["rev-parse", "--absolute-git-dir"]));
+    common::git_fixture::assert_repo(f.env.home.path(), f.records.parent().unwrap());
+    assert!(dir.starts_with(f.records.parent().unwrap()));
+    let object = dir.join(format!("objects/{}/{}", &oid[..2], &oid[2..]));
+    assert!(object.is_file());
+    std::fs::remove_file(object).unwrap();
+    assert!(
+        !f.cmd()
+            .args(["retained", "state", &f.id])
+            .output()
+            .unwrap()
+            .status
+            .success(),
+        "missing original ready manifest cannot be replaced by the working attachment"
+    );
+}

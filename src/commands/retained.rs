@@ -107,30 +107,31 @@ pub fn reconcile(dir: Option<&Path>, coordinator: String, request: PathBuf) -> R
     let bytes = request_bytes(&ctx, &request)?;
     let r: ReconcileRequest = decode_request(&bytes)?;
     r.validate()?;
-    if r.operation.coordinator != coordinator
-        && crate::retained::lineage::same(&ctx.project, &r.operation.coordinator, &coordinator)?
-    {
-        let mut ids = Vec::new();
-        for input in &r.inputs {
-            let p = crate::retained::proof::project_for(&ctx.project, &input.task)?;
-            let old = crate::model::TaskId::parse(&input.task)?;
-            let current = format!("{}-{}", p.prefix, old.hex);
-            if !crate::retained::lineage::same(&p, &input.task, &current)? {
-                return Err(invalid("unproved historical participant"));
-            }
-            ids.push(current);
+    if !crate::retained::lineage::same(&ctx.project, &r.operation.coordinator, &coordinator)? {
+        return Err(invalid(
+            "coordinator argument differs from reconciliation request",
+        ));
+    }
+    let mut ids = Vec::new();
+    for input in &r.inputs {
+        let p = crate::retained::proof::project_for(&ctx.project, &input.task)?;
+        let old = crate::model::TaskId::parse(&input.task)?;
+        let current = format!("{}-{}", p.prefix, old.hex);
+        if !crate::retained::lineage::same(&p, &input.task, &current)? {
+            return Err(invalid("unproved historical participant"));
         }
+        ids.push(current);
+    }
+    if r.inputs
+        .iter()
+        .zip(&ids)
+        .any(|(input, id)| input.task != *id)
+    {
         let operation = crate::retained::publish::open(dir, &ids, &r.operation)?;
         return Ok(Output::RetainedMutation(crate::retained::publish::replay(
             operation, &bytes, true,
         )?));
     }
-    if r.operation.coordinator != coordinator {
-        return Err(invalid(
-            "coordinator argument differs from reconciliation request",
-        ));
-    }
-    let ids = r.inputs.iter().map(|i| i.task.clone()).collect::<Vec<_>>();
     let operation = crate::retained::publish::open(dir, &ids, &r.operation)?;
     Ok(Output::RetainedMutation(crate::retained::reconcile::run(
         operation, r, &bytes,

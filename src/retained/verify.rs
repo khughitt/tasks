@@ -308,6 +308,7 @@ pub fn read_local(path: &Path, cap: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 fn artifact_location(
+    resolver: &super::proof::Resolver<'_>,
     project: &Project,
     locator: &ArtifactLocator,
     metrics: &mut Metrics,
@@ -319,15 +320,7 @@ fn artifact_location(
         } => &basis.project,
         _ => return Err(invalid("directory locator has no file payload")),
     };
-    let resolved = if super::lineage::owns_prefix(project, declared) {
-        project.clone()
-    } else {
-        crate::scope::open_registered(
-            &crate::registry::Registry::load()?,
-            declared,
-            crate::scope::Origin::Prefix,
-        )?
-    };
+    let resolved = resolver.prefix(project, declared)?;
     let project = &resolved;
     let (b, path, expected) = match locator {
         ArtifactLocator::Git {
@@ -380,7 +373,20 @@ pub fn artifact(
     locator: &ArtifactLocator,
     metrics: &mut Metrics,
 ) -> Result<Vec<u8>> {
-    let (p, b, path, expected) = artifact_location(project, locator, metrics)?;
+    artifact_with(
+        &super::proof::Resolver::new(project),
+        project,
+        locator,
+        metrics,
+    )
+}
+pub(super) fn artifact_with(
+    resolver: &super::proof::Resolver<'_>,
+    project: &Project,
+    locator: &ArtifactLocator,
+    metrics: &mut Metrics,
+) -> Result<Vec<u8>> {
+    let (p, b, path, expected) = artifact_location(resolver, project, locator, metrics)?;
     let bytes = basis::blob(
         &p,
         &b.commit,
@@ -398,7 +404,12 @@ fn payload_digest(
     locator: &ArtifactLocator,
     metrics: &mut Metrics,
 ) -> Result<String> {
-    let (p, b, path, expected) = artifact_location(project, locator, metrics)?;
+    let (p, b, path, expected) = artifact_location(
+        &super::proof::Resolver::new(project),
+        project,
+        locator,
+        metrics,
+    )?;
     let mode = basis::git(&p, &["ls-tree", "-z", &b.commit, "--", &path])?;
     if !(mode.starts_with(b"100644 blob ") || mode.starts_with(b"100755 blob ")) {
         return Err(invalid("preserved payload is not a regular Git blob"));

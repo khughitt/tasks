@@ -183,6 +183,21 @@ fn ready_proofs(
     terminal: &OperationNote,
     metrics: &mut verify::Metrics,
 ) -> Result<Vec<basis::PinnedTask>> {
+    ready_proofs_with(
+        &super::proof::Resolver::new(project),
+        project,
+        coordinator,
+        terminal,
+        metrics,
+    )
+}
+fn ready_proofs_with(
+    resolver: &super::proof::Resolver<'_>,
+    project: &Project,
+    coordinator: &basis::PinnedTask,
+    terminal: &OperationNote,
+    metrics: &mut verify::Metrics,
+) -> Result<Vec<basis::PinnedTask>> {
     if !super::lineage::same(
         project,
         &terminal.key.coordinator,
@@ -235,14 +250,16 @@ fn ready_proofs(
             &mut metrics.history_bytes_read,
         )?
     };
-    let expected_request = verify::artifact(
+    let expected_request = verify::artifact_with(
+        resolver,
         project,
         &terminal
             .request
             .pinned(&terminal.key.coordinator, &publication)?,
         metrics,
     )?;
-    let expected_directive = verify::artifact(
+    let expected_directive = verify::artifact_with(
+        resolver,
         project,
         &out.directive
             .pinned(&terminal.key.coordinator, &publication)?,
@@ -277,15 +294,7 @@ fn ready_proofs(
             return Err(invalid("terminal refers to a non-ready publication"));
         }
         let id = TaskId::parse(&publication.task)?;
-        let p = if super::lineage::owns_prefix(project, &id.prefix) {
-            project.clone()
-        } else {
-            crate::scope::open_registered(
-                &crate::registry::Registry::load()?,
-                &id.prefix,
-                crate::scope::Origin::Id(&id),
-            )?
-        };
+        let p = resolver.task(project, &publication.task)?;
         let pinned = basis::read_exact(&p, &id, &publication.basis)?;
         metrics.history_bytes_read += pinned.history_bytes_read;
         for input in [
@@ -329,12 +338,14 @@ fn ready_proofs(
         if note.input_bases != terminal.input_bases
             || note.host != terminal.host
             || output.reconciliation_id != out.reconciliation_id
-            || verify::artifact(
+            || verify::artifact_with(
+                resolver,
                 project,
                 &note.request.pinned(&id.to_string(), &pinned.basis)?,
                 metrics,
             )? != expected_request
-            || verify::artifact(
+            || verify::artifact_with(
+                resolver,
                 project,
                 &output.directive.pinned(&id.to_string(), &pinned.basis)?,
                 metrics,

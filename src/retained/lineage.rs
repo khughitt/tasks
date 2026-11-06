@@ -384,6 +384,23 @@ pub fn manifest_path(
     Ok(original)
 }
 
+fn check_protected_storage(project: &Project, task: &Task) -> Result<()> {
+    if crate::attachments::check_storage(project, &task.id)? {
+        let ledger = crate::attachments::ledger(task);
+        for entry in std::fs::read_dir(crate::attachments::task_dir(project, &task.id))? {
+            let entry = entry?;
+            if let Some(name) = entry.file_name().to_str()
+                && super::publish::protected(name)
+                && ledger.get(name) != Some(&crate::attachments::Ledger::Attached)
+            {
+                return Err(invalid(
+                    "physical protected artifact lacks a live attachment ledger binding",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
 fn relevant(task: &Task) -> bool {
     task.notes.iter().any(|n| {
         ["retained:", "retention operation:", "retention checkpoint:"]
@@ -512,6 +529,9 @@ fn protected_bytes(project: &Project, pinned: &basis::PinnedTask) -> Result<()> 
 }
 pub fn prepare(project: &Project, target: &str) -> Result<Option<RenameEdge>> {
     let tasks = project.scan()?;
+    for task in &tasks {
+        check_protected_storage(project, task)?;
+    }
     if project.retention_lineage.is_empty() && !tasks.iter().any(relevant) {
         return Ok(None);
     }
@@ -580,6 +600,7 @@ pub fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
         return Ok(());
     }
     for task in tasks {
+        check_protected_storage(project, task)?;
         for edge in &project.retention_lineage {
             let old = TaskId::parse(&format!("{}-{}", edge.from_prefix, task.id.hex))?;
             let b = source_basis(&old, edge);
