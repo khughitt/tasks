@@ -970,6 +970,22 @@ mod tests {
         assert!(out.status.success(), "{out:?}");
         out.stdout
     }
+    fn assert_worktree(main: &Path, dir: &Path) {
+        let read = |arg| {
+            Path::new(
+                std::str::from_utf8(&git(dir, &["rev-parse", "--path-format=absolute", arg]))
+                    .unwrap()
+                    .trim(),
+            )
+            .canonicalize()
+            .unwrap()
+        };
+        let main = main.canonicalize().unwrap();
+        let dir = dir.canonicalize().unwrap();
+        assert_eq!(read("--show-toplevel"), dir);
+        assert!(read("--absolute-git-dir").starts_with(&main));
+        assert!(read("--git-common-dir").starts_with(&main));
+    }
     fn repo(root: &Path) {
         git(root, &["init", "-qb", "main"]);
         assert_eq!(
@@ -1431,7 +1447,7 @@ mod tests {
             root.path(),
             &["worktree", "add", "-qb", "feature", tree.to_str().unwrap()],
         );
-        crate::common::git_fixture::assert_worktree(root.path(), root.path(), &tree);
+        assert_worktree(root.path(), &tree);
         let branch = Project::open(&tree).unwrap();
         let mut record = record(&tree, "worktree");
         record.path = ".worktrees/feature".into();

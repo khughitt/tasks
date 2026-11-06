@@ -1333,7 +1333,132 @@ pub fn recover_saved(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    const CLI_HELPER_TEST: &str = "retained::publish::tests::retained_publish_cli_helper";
+    const CLI_JSON_PREFIX: &str = "TASKS_PUBLICATION_CLI_JSON:";
+
+    fn isolated_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
+        let mut vars: Vec<(&'static str, std::ffi::OsString)> = vec![
+            ("PATH", std::env::var_os("PATH").expect("PATH is set")),
+            ("HOME", home.into()),
+            ("USER", "tester".into()),
+            ("LC_ALL", "C".into()),
+            ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
+            ("GIT_CONFIG_NOSYSTEM", "1".into()),
+            ("GIT_AUTHOR_NAME", "t".into()),
+            ("GIT_AUTHOR_EMAIL", "t@t".into()),
+            ("GIT_COMMITTER_NAME", "t".into()),
+            ("GIT_COMMITTER_EMAIL", "t@t".into()),
+        ];
+        for key in ["GIT_CEILING_DIRECTORIES", "TMPDIR"] {
+            if let Some(value) = std::env::var_os(key) {
+                vars.push((key, value));
+            }
+        }
+        vars
+    }
+
+    fn git(home: &Path, dir: &Path, args: &[&str]) -> Vec<u8> {
+        let out = crate::git::at(dir)
+            .env_clear()
+            .envs(isolated_env(home))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        out.stdout
+    }
+
+    fn assert_repo(home: &Path, dir: &Path) {
+        let read = |arg| {
+            Path::new(
+                std::str::from_utf8(&git(
+                    home,
+                    dir,
+                    &["rev-parse", "--path-format=absolute", arg],
+                ))
+                .unwrap()
+                .trim(),
+            )
+            .canonicalize()
+            .unwrap()
+        };
+        let dir = dir.canonicalize().unwrap();
+        assert_eq!(read("--show-toplevel"), dir);
+        assert!(read("--absolute-git-dir").starts_with(&dir));
+        assert!(read("--git-common-dir").starts_with(&dir));
+    }
+
+    #[test]
+    fn retained_publish_cli_helper() {
+        let Ok(dir) = std::env::var("TASKS_PUBLICATION_CLI_DIR") else {
+            return;
+        };
+        let args: Vec<String> =
+            serde_json::from_str(&std::env::var("TASKS_PUBLICATION_CLI_ARGS").unwrap()).unwrap();
+        let mut argv = vec!["tasks".to_string(), "-C".to_string(), dir];
+        argv.extend(args);
+        let cli = <crate::cli::Cli as clap::Parser>::try_parse_from(argv).unwrap();
+        let host = std::sync::Arc::new(crate::config::HostConfig::default());
+        let out = match crate::commands::run(cli, Some(host)) {
+            Ok(out) => out,
+            Err(err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        };
+        let failed_check = matches!(&out, crate::output::Output::Check(c) if !c.errors.is_empty());
+        let rendered = crate::output::render(
+            &out,
+            crate::output::Format::Json,
+            &crate::style::Painter::new(
+                crate::style::ColorMode::Never,
+                crate::output::Format::Json,
+                false,
+            ),
+            &crate::table::Layout {
+                width: None,
+                headers: false,
+            },
+        );
+        println!(
+            "{CLI_JSON_PREFIX}{}",
+            serde_json::to_string(&serde_json::from_str::<serde_json::Value>(&rendered).unwrap())
+                .unwrap()
+        );
+        if failed_check {
+            std::process::exit(1);
+        }
+    }
+
+    fn run_cli(home: &Path, dir: &Path, args: &[&str]) -> serde_json::Value {
+        let exe = std::env::current_exe().unwrap();
+        let out = std::process::Command::new(exe)
+            .env_clear()
+            .envs(isolated_env(home))
+            .env("TASKS_SESSION", "retained-fixture")
+            .env("TASKS_PUBLICATION_CLI_DIR", dir)
+            .env(
+                "TASKS_PUBLICATION_CLI_ARGS",
+                serde_json::to_string(args).unwrap(),
+            )
+            .args(["--exact", CLI_HELPER_TEST, "--nocapture"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let line = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(CLI_JSON_PREFIX))
+            .unwrap_or_else(|| panic!("missing JSON output in {stdout:?}"));
+        serde_json::from_str(line).unwrap()
+    }
+
     fn fixture(test: &str) -> Option<(PathBuf, crate::model::TaskId)> {
         if let Ok(dir) = std::env::var("TASKS_PUBLICATION_FIXTURE") {
             return Some((
@@ -1342,42 +1467,64 @@ mod tests {
                     .unwrap(),
             ));
         }
-        let f = crate::common::retained::RetainedEnv::new("in-tree");
-        f.json(&["start", &f.id]);
-        let binary = std::env::current_exe()
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("code");
+        std::fs::create_dir_all(&dir).unwrap();
+        git(home.path(), &dir, &["init", "-q", "-b", "main"]);
+        assert_repo(home.path(), &dir);
+        std::fs::write(dir.join("README.md"), "Fixture\n").unwrap();
+        git(home.path(), &dir, &["add", "README.md"]);
+        git(home.path(), &dir, &["commit", "-qm", "seed"]);
+        run_cli(home.path(), &dir, &["init", "--prefix", "sci"]);
+        let config = dir.join("tasks/.config.toml");
+        let mut value: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        value.as_table_mut().unwrap().insert(
+            "git".into(),
+            toml::Value::Table(toml::map::Map::from_iter([(
+                "commit".into(),
+                toml::Value::Boolean(true),
+            )])),
+        );
+        std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
+        git(home.path(), &dir, &["add", "."]);
+        git(home.path(), &dir, &["commit", "-qm", "configuration"]);
+        let id = run_cli(home.path(), &dir, &["add", "Retained fixture"])["id"]
+            .as_str()
             .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("tasks");
+            .to_string();
+        run_cli(home.path(), &dir, &["start", &id]);
+        let exe = std::env::current_exe().unwrap();
         use std::os::unix::fs::PermissionsExt;
         let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-        let hook = f.dir.join(".git/hooks/pre-commit");
+        let hook = dir.join(".git/hooks/pre-commit");
         std::fs::write(
             &hook,
             format!(
-                "#!/bin/sh\nexec {} -C {} check >/dev/null\n",
-                quote(binary.to_str().unwrap()),
-                quote(f.dir.to_str().unwrap())
+                "#!/bin/sh\nTASKS_PUBLICATION_CLI_DIR={} TASKS_PUBLICATION_CLI_ARGS='[\"check\"]' exec {} --exact {CLI_HELPER_TEST} --nocapture >/dev/null\n",
+                quote(dir.to_str().unwrap()),
+                quote(exe.to_str().unwrap()),
             ),
         )
         .unwrap();
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
         let extra = tempfile::tempdir().unwrap();
         let second = if test.ends_with("same_git_lock") {
-            crate::common::git(extra.path(), &["init", "-qb", "main"]);
-            f.env.json(
+            git(home.path(), extra.path(), &["init", "-qb", "main"]);
+            assert_repo(home.path(), extra.path());
+            run_cli(
+                home.path(),
                 extra.path(),
                 &[
                     "init",
                     "--prefix",
                     "fam",
                     "--records",
-                    f.dir.to_str().unwrap(),
+                    dir.to_str().unwrap(),
                 ],
             );
-            let config = f.dir.join("fam/tasks/.config.toml");
+            let config = dir.join("fam/tasks/.config.toml");
             let mut value: toml::Value =
                 toml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
             value.as_table_mut().unwrap().insert(
@@ -1388,13 +1535,21 @@ mod tests {
                 )])),
             );
             std::fs::write(config, toml::to_string(&value).unwrap()).unwrap();
-            crate::common::git(&f.dir, &["add", "fam/tasks/.config.toml"]);
-            crate::common::git(&f.dir, &["commit", "-qm", "second records configuration"]);
-            let id = f.json(&["add", "Second participant", "--project", "fam"])["id"]
+            git(home.path(), &dir, &["add", "fam/tasks/.config.toml"]);
+            git(
+                home.path(),
+                &dir,
+                &["commit", "-qm", "second records configuration"],
+            );
+            let id = run_cli(
+                home.path(),
+                &dir,
+                &["add", "Second participant", "--project", "fam"],
+            )["id"]
                 .as_str()
                 .unwrap()
                 .to_string();
-            f.json(&["start", &id]);
+            run_cli(home.path(), &dir, &["start", &id]);
             Some(id)
         } else {
             None
@@ -1402,10 +1557,10 @@ mod tests {
         let command = || {
             let mut c = std::process::Command::new(std::env::current_exe().unwrap());
             c.env_clear()
-                .envs(crate::common::isolated_env(f.env.home.path()))
+                .envs(isolated_env(home.path()))
                 .env("TASKS_SESSION", "retained-fixture")
-                .env("TASKS_PUBLICATION_FIXTURE", &f.dir)
-                .env("TASKS_PUBLICATION_ID", &f.id)
+                .env("TASKS_PUBLICATION_FIXTURE", &dir)
+                .env("TASKS_PUBLICATION_ID", &id)
                 .args(["--exact", test, "--nocapture"]);
             if let Some(second) = &second {
                 c.env("TASKS_PUBLICATION_SECOND", second);
@@ -1558,7 +1713,8 @@ mod tests {
         let p = Project::open(&dir).unwrap();
         if case == "foreign_index" {
             std::fs::write(dir.join("foreign"), "foreign").unwrap();
-            crate::common::git(&dir, &["add", "foreign"]);
+            let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+            git(&home, &dir, &["add", "foreign"]);
             assert!(
                 open(
                     Some(&dir),

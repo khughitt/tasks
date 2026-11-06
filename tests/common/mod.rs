@@ -43,23 +43,6 @@ pub struct TestEnv {
     dirs: Vec<TempDir>,
 }
 
-/// Run a unit test's subprocess-producing body without inheriting host credentials.
-pub fn isolated_test(name: &str) -> bool {
-    if std::env::var("TASKS_ISOLATED_TEST").as_deref() == Ok(name) {
-        return false;
-    }
-    let home = tempfile::tempdir().unwrap();
-    let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .env_clear()
-        .envs(isolated_env(home.path()))
-        .env("TASKS_ISOLATED_TEST", name)
-        .args(["--exact", name, "--nocapture"])
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "isolated {name}: {out:?}");
-    true
-}
-
 impl TestEnv {
     pub fn new() -> TestEnv {
         TestEnv {
@@ -629,4 +612,228 @@ pub fn isolated_worktree(env: &TestEnv, dir: &Path, at: &Path) {
     git(&["add", "-A"]);
     git(&["commit", "-qm", "seed"]);
     git(&["worktree", "add", "-q", "-b", "wt", at.to_str().unwrap()]);
+}
+
+/// Opt a test project into feedback by appending a `[feedback]` table to its config.
+pub fn accept_feedback(dir: &std::path::Path, scope: &str) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!("\n[feedback]\nscope = \"{scope}\"\n"));
+    std::fs::write(path, text).unwrap();
+}
+
+pub fn feedback_env() -> (TestEnv, std::path::PathBuf, std::path::PathBuf) {
+    let mut env = TestEnv::new();
+    let target = env.init("tasks");
+    accept_feedback(&target, "The tasks CLI.");
+    let reporter = env.init("sci");
+    (env, target, reporter)
+}
+
+pub fn owners_env() -> (
+    TestEnv,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let mut env = TestEnv::new();
+    let ai = env.init("ai");
+    accept_feedback(&ai, "Agent instructions.");
+    let ops = env.init("ops");
+    accept_feedback(&ops, "Shared tooling and hooks.");
+    let sci = env.init("sci");
+    (env, ai, ops, sci)
+}
+
+/// Register `alias` as a retired prefix of `target` by writing the registry directly.
+pub fn alias_registry(env: &TestEnv, alias: &str, target: &str) {
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut registry: toml::Value = toml::from_str(&text).unwrap();
+    registry["aliases"]
+        .as_table_mut()
+        .unwrap()
+        .insert(alias.into(), toml::Value::String(target.into()));
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+}
+
+/// Writes a park entry straight into the store.
+pub fn write_park(
+    env: &TestEnv,
+    prefix: &str,
+    id: &str,
+    session: &str,
+    waiting_on: &str,
+    worktree: &str,
+) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[parks.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\nhost = \"h\"\n\
+         worktree = \"{worktree}\"\nat = \"2026-01-02T00:00:00Z\"\nnext_step = \"finish §3\"\n\
+         waiting_on = \"{waiting_on}\"\ntitle = \"T\"\n"
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+/// Run `tasks` as a named agent with a live pid.
+pub fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::Command {
+    let mut cmd = env.cmd(dir);
+    cmd.env("TASKS_SESSION", session)
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    cmd
+}
+
+/// The parsed `{"error": {"kind", "detail"}}` of a command expected to exit 1.
+pub fn error_of(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let out = env.cmd(dir).args(args).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stderr).unwrap()
+}
+
+pub fn err_kind(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    v["error"]["kind"].as_str().unwrap().to_string()
+}
+
+pub fn err_detail(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    v["error"]["detail"].as_str().unwrap().to_string()
+}
+
+pub fn error_detail(out: &std::process::Output) -> String {
+    err_detail(out)
+}
+
+/// Hold the project's mutation lock from the test process itself.
+pub fn hold_project_lock(env: &TestEnv, prefix: &str) -> std::fs::File {
+    let path = env
+        .claim_store(prefix)
+        .with_file_name(format!("{prefix}.lock"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let file = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    file.lock().unwrap();
+    file
+}
+
+/// Wait for a child, but never forever: a regression that makes a command block must fail
+/// the assertion, not hang the suite while still holding the lock.
+pub fn wait_bounded(child: &mut std::process::Child, limit: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Collect a child's output, killing it if it outlives `limit`. `None` means it had to be
+/// killed.
+pub fn reap(
+    mut child: std::process::Child,
+    limit: std::time::Duration,
+) -> Option<std::process::Output> {
+    if wait_bounded(&mut child, limit) {
+        return Some(child.wait_with_output().expect("already exited"));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    None
+}
+
+pub const REAP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A project that is its own git repository, with one task committed, plus a second
+/// worktree branched from that commit. Returns the two project roots and the task id.
+pub fn repo_with_worktree(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    repo_with_worktree_as(env, "sci")
+}
+
+/// `repo_with_worktree` for a project with the given prefix.
+pub fn repo_with_worktree_as(
+    env: &mut TestEnv,
+    prefix: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init(prefix);
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    (main, side, id)
+}
+
+pub fn warnings_of(v: &serde_json::Value) -> Vec<String> {
+    v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Enable relay identity for this test's HOME and return its relay state directory.
+pub fn relay_on(env: &TestEnv) -> std::path::PathBuf {
+    let config = env.home.path().join(".config/tasks/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
+    env.home.path().join("relay-state")
+}
+
+/// The preamble every shim script shares: exports, then the registry writer.
+pub fn shim_env(state: &std::path::Path, harness: &str, session: &str) -> String {
+    format!(
+        "RELAY_STATE_DIR={}\nHARNESS={harness}\nSESSION={session}\nAGENT_ID={harness}:{session}\n\
+         export RELAY_STATE_DIR HARNESS SESSION AGENT_ID TASKS_BIN\n{}",
+        state.display(),
+        WRITE_REGISTRY
+    )
+}
+
+/// Three registered projects; group `vf` holds the first two.
+pub fn grouped_projects(
+    env: &mut TestEnv,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let ops = env.init("ops");
+    env.json(&sci, &["group", "set", "vf", "sci", "fam"]);
+    (sci, fam, ops)
+}
+
+/// Declare `[retired]` in a checkout's config by hand (before `tasks retire` exists).
+pub fn declare_retired(root: &std::path::Path, successor: Option<&str>) {
+    let config = root.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[retired]\ndate = \"2026-10-04\"\nreason = \"superseded\"\n");
+    if let Some(s) = successor {
+        text.push_str(&format!("successor = \"{s}\"\n"));
+    }
+    std::fs::write(&config, text).unwrap();
 }

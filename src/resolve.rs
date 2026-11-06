@@ -689,6 +689,35 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn isolated_test(name: &str) -> bool {
+        if std::env::var("TASKS_ISOLATED_TEST").as_deref() == Ok(name) {
+            return false;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+        cmd.env_clear()
+            .env("PATH", std::env::var_os("PATH").expect("PATH is set"))
+            .env("HOME", home.path())
+            .env("USER", "tester")
+            .env("LC_ALL", "C")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .env("TASKS_ISOLATED_TEST", name)
+            .args(["--exact", name, "--nocapture"]);
+        for key in ["GIT_CEILING_DIRECTORIES", "TMPDIR"] {
+            if let Some(value) = std::env::var_os(key) {
+                cmd.env(key, value);
+            }
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "isolated {name}: {out:?}");
+        true
+    }
+
     #[test]
     fn locate_entry_finds_files_and_directories_here_first() {
         let temp = tempfile::tempdir().unwrap();
@@ -722,7 +751,7 @@ mod tests {
 
     #[test]
     fn locate_entry_reports_a_fifo_and_a_symlink_to_one_as_special() {
-        if crate::common::isolated_test(
+        if isolated_test(
             "resolve::tests::locate_entry_reports_a_fifo_and_a_symlink_to_one_as_special",
         ) {
             return;
@@ -750,7 +779,7 @@ mod tests {
 
     #[test]
     fn locate_entry_uses_main_only_when_absent_here_and_propagates_errors() {
-        if crate::common::isolated_test(
+        if isolated_test(
             "resolve::tests::locate_entry_uses_main_only_when_absent_here_and_propagates_errors",
         ) {
             return;
@@ -805,7 +834,7 @@ mod tests {
 
     #[test]
     fn prefetch_external_budget_is_shared_and_unstarted_refs_are_cached() {
-        if crate::common::isolated_test(
+        if isolated_test(
             "resolve::tests::prefetch_external_budget_is_shared_and_unstarted_refs_are_cached",
         ) {
             return;
@@ -847,9 +876,7 @@ mod tests {
 
     #[test]
     fn prefetch_external_starts_at_most_four_then_refills() {
-        if crate::common::isolated_test(
-            "resolve::tests::prefetch_external_starts_at_most_four_then_refills",
-        ) {
+        if isolated_test("resolve::tests::prefetch_external_starts_at_most_four_then_refills") {
             return;
         }
         let (temp, project, registry, command) = prefetch_fixture();
@@ -901,7 +928,7 @@ mod tests {
 
     #[test]
     fn prefetch_external_alias_collision_preserves_available_body() {
-        if crate::common::isolated_test(
+        if isolated_test(
             "resolve::tests::prefetch_external_alias_collision_preserves_available_body",
         ) {
             return;
@@ -1000,7 +1027,7 @@ mod tests {
 
     #[test]
     fn host_snapshot_survives_file_replacement() {
-        if crate::common::isolated_test("resolve::tests::host_snapshot_survives_file_replacement") {
+        if isolated_test("resolve::tests::host_snapshot_survives_file_replacement") {
             return;
         }
         let temp = tempfile::tempdir().unwrap();
