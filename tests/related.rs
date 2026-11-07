@@ -377,3 +377,123 @@ fn next_embeds_the_same_rows() {
     assert_eq!(next_task["wake_targets"], show_out["wake_targets"]);
     assert_eq!(next_task["source_task"], show_out["source_task"]);
 }
+
+#[test]
+fn pretty_related_section_lists_every_link_in_order() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let p = id_of(env.json(&dir, &["add", "Parent"]));
+    let dep = id_of(env.json(&dir, &["add", "Dep"]));
+    let s = id_of(env.json(&dir, &["add", "S"]));
+    let b = id_of(env.json(&dir, &["add", "B"]));
+    let w = id_of(env.json(&dir, &["add", "W"]));
+    env.json(&dir, &["done", &b]);
+    let a = id_of(env.json(&dir, &["add", "A", "--parent", &p, "--source", &s]));
+    env.json(&dir, &["dep", &a, "--on", &dep]);
+    env.json(
+        &dir,
+        &["shelve", &a, "wait on W", "--defer", "30d", "--wake-on", &w],
+    );
+    let c = id_of(env.json(&dir, &["add", "Child", "--parent", &a]));
+    relate_by_hand(&dir, &a, &[&b, "aa-ffffff"]);
+
+    let pretty_a = env.pretty(&dir, &["show", &a]);
+
+    // The overview has no "wake on:" line and no "source:" line.
+    assert!(
+        !pretty_a.contains("wake on:"),
+        "unexpected wake on in overview: {pretty_a}"
+    );
+    assert!(
+        !pretty_a.contains("source:"),
+        "unexpected source in overview: {pretty_a}"
+    );
+
+    // The `── related ──` lines start, in order, with "parent", "depends on", "wake on", "related",
+    // "source", "child"; each carries the id, a status and the title; an unresolved related id
+    // prints "(unresolved)".
+    let related_section = pretty_a
+        .split_once("── related ")
+        .expect("related section present")
+        .1
+        .split_once("\n── ")
+        .map(|(s, _)| s)
+        .unwrap_or_else(|| pretty_a.split_once("── related ").unwrap().1);
+    let rows: Vec<&str> = related_section
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    assert_eq!(rows.len(), 7, "expected 7 related rows: {rows:?}");
+    assert!(
+        rows[0].starts_with("parent")
+            && rows[0].contains(&p)
+            && rows[0].contains("todo")
+            && rows[0].contains("Parent"),
+        "row 0 mismatch: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].starts_with("depends on")
+            && rows[1].contains(&dep)
+            && rows[1].contains("todo")
+            && rows[1].contains("Dep"),
+        "row 1 mismatch: {:?}",
+        rows[1]
+    );
+    assert!(
+        rows[2].starts_with("wake on")
+            && rows[2].contains(&w)
+            && rows[2].contains("todo")
+            && rows[2].contains("W"),
+        "row 2 mismatch: {:?}",
+        rows[2]
+    );
+    assert!(
+        rows[3].starts_with("related")
+            && rows[3].contains(&b)
+            && rows[3].contains("done")
+            && rows[3].contains("B"),
+        "row 3 mismatch: {:?}",
+        rows[3]
+    );
+    assert!(
+        rows[4].starts_with("related")
+            && rows[4].contains("aa-ffffff")
+            && rows[4].contains("?")
+            && rows[4].contains("(unresolved)"),
+        "row 4 mismatch: {:?}",
+        rows[4]
+    );
+    assert!(
+        rows[5].starts_with("source")
+            && rows[5].contains(&s)
+            && rows[5].contains("todo")
+            && rows[5].contains("S"),
+        "row 5 mismatch: {:?}",
+        rows[5]
+    );
+    assert!(
+        rows[6].starts_with("child")
+            && rows[6].contains(&c)
+            && rows[6].contains("todo")
+            && rows[6].contains("Child"),
+        "row 6 mismatch: {:?}",
+        rows[6]
+    );
+
+    // A task whose source is a URL keeps "source:".
+    let u = id_of(env.json(
+        &dir,
+        &["add", "URL Task", "--source", "https://example.com/item"],
+    ));
+    let pretty_u = env.pretty(&dir, &["show", &u]);
+    assert!(
+        pretty_u
+            .lines()
+            .any(|l| l.starts_with("source:") && l.contains("https://example.com/item")),
+        "URL task missing source in overview: {pretty_u}"
+    );
+}

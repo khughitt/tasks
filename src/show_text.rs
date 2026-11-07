@@ -1,4 +1,4 @@
-//! The pretty `show` layout (docs/user-guide.md): ruled
+//! The pretty `show` layout (docs/user-guide.md, "Goals, lanes and dependencies"): ruled
 //! sections, aligned overview rows, and prose wrapped at a capped measure. `next`
 //! prints its task through the same renderer.
 
@@ -221,8 +221,9 @@ fn color(o: &ShowFields, id: &str) -> Option<Rgb> {
     crate::output::color_of(&o.project_colors, id)
 }
 
-/// Current contract (docs/user-guide.md): one row per field with a value, in this order. `depends` and `parent` are
-/// listed under `related` instead.
+/// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): one row per field with a value, in this
+/// order. Links (`parent`, `depends on`, `wake on`, `related`, and a task `source`) are listed under `── related ──`
+/// instead.
 fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     let t = &o.task;
     let mut rows = vec![
@@ -308,21 +309,13 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         }
         rows.push(("deferred", value));
     }
-    if !t.wake_on.is_empty() {
-        let mut value = Vec::new();
-        for target in &t.wake_on {
-            if !value.is_empty() {
-                value.push(Span::plain(", "));
-            }
-            let target = target.to_string();
-            value.push(present::id(&target, color(o, &target)));
+    if o.source_task.is_none() {
+        if let Some(source) = &t.source {
+            rows.push(("source", vec![present::owner(source)]));
         }
-        rows.push(("wake on", value));
     }
-    for (key, value) in [("source", &t.source), ("agent", &t.agent)] {
-        if let Some(value) = value {
-            rows.push((key, vec![present::owner(value)]));
-        }
+    if let Some(agent) = &t.agent {
+        rows.push(("agent", vec![present::owner(agent)]));
     }
     if let Some(origin) = t.origin {
         rows.push(("origin", vec![present::owner(origin.as_str())]));
@@ -454,7 +447,8 @@ fn hang(line: &str) -> usize {
     }
 }
 
-/// Current contract (docs/user-guide.md): `<label>  <id>  <status>  <title>`, columns aligned, titles hanging.
+/// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <title>`,
+/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `wake on`, `related`, `source`, `child`.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
     // The last field is the row's project colour; an unresolved dependency has none.
     let mut rows: Vec<(&str, &str, Span, &str, Option<Rgb>)> = Vec::new();
@@ -474,6 +468,33 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             present::status_of(dependency.status),
             dependency.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &dependency.id).filter(|_| dependency.resolved),
+        ));
+    }
+    for wake in &o.wake_targets {
+        rows.push((
+            "wake on",
+            wake.id.as_str(),
+            present::status_of(wake.status),
+            wake.title.as_deref().unwrap_or("(unresolved)"),
+            color(o, &wake.id).filter(|_| wake.resolved),
+        ));
+    }
+    for rel in &o.related_to {
+        rows.push((
+            "related",
+            rel.id.as_str(),
+            present::status_of(rel.status),
+            rel.title.as_deref().unwrap_or("(unresolved)"),
+            color(o, &rel.id).filter(|_| rel.resolved),
+        ));
+    }
+    if let Some(source) = &o.source_task {
+        rows.push((
+            "source",
+            source.id.as_str(),
+            present::status_of(source.status),
+            source.title.as_deref().unwrap_or("(unresolved)"),
+            color(o, &source.id).filter(|_| source.resolved),
         ));
     }
     for child in &o.children {
@@ -949,6 +970,74 @@ mod tests {
         assert!(
             text.contains("depends on  fam-000003  ?        (unresolved)\n"),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn related_rows_render_in_exact_order_and_overview_omits_wake_and_task_source() {
+        let mut o = fields();
+        o.task.wake_on = vec![crate::model::TaskId::parse("sci-000003").unwrap()];
+        o.task.source = Some("sci-000005".into());
+        o.parent = Some(Related {
+            id: "sci-000001".into(),
+            title: "Parent".into(),
+            status: Status::Todo,
+        });
+        o.depends_on = vec![DepInfo {
+            id: "sci-000002".into(),
+            title: Some("Dep".into()),
+            status: Some(Status::Todo),
+            resolved: true,
+        }];
+        o.wake_targets = vec![DepInfo {
+            id: "sci-000003".into(),
+            title: Some("Wake".into()),
+            status: Some(Status::Todo),
+            resolved: true,
+        }];
+        o.related_to = vec![DepInfo {
+            id: "sci-000004".into(),
+            title: Some("Rel".into()),
+            status: Some(Status::Done),
+            resolved: true,
+        }];
+        o.source_task = Some(DepInfo {
+            id: "sci-000005".into(),
+            title: Some("Source".into()),
+            status: Some(Status::Todo),
+            resolved: true,
+        });
+        o.children = vec![Related {
+            id: "sci-000006".into(),
+            title: "Child".into(),
+            status: Status::Todo,
+        }];
+
+        let text = render(&o, &plain(), Some(120));
+        assert!(!text.contains("wake on:"), "{text}");
+        assert!(!text.contains("source:"), "{text}");
+
+        let related_block = text.split_once("── related ").unwrap().1;
+        let lines: Vec<&str> = related_block
+            .lines()
+            .skip(1)
+            .take_while(|l| !l.is_empty())
+            .collect();
+        assert_eq!(lines.len(), 6, "{lines:?}");
+        assert!(lines[0].starts_with("parent      sci-000001  todo     Parent"));
+        assert!(lines[1].starts_with("depends on  sci-000002  todo     Dep"));
+        assert!(lines[2].starts_with("wake on     sci-000003  todo     Wake"));
+        assert!(lines[3].starts_with("related     sci-000004  done     Rel"));
+        assert!(lines[4].starts_with("source      sci-000005  todo     Source"));
+        assert!(lines[5].starts_with("child       sci-000006  todo     Child"));
+
+        // When source is opaque (source_task is None), it stays in overview.
+        o.source_task = None;
+        o.task.source = Some("https://example.com/item".into());
+        let text_url = render(&o, &plain(), Some(120));
+        assert!(
+            value(&text_url, "source").as_deref() == Some("https://example.com/item"),
+            "{text_url}"
         );
     }
 

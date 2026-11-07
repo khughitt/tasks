@@ -93,6 +93,14 @@ cross projects. Neither relation implies the other, and cycles are refused.
 left out unless `--closed` adds those closed in the last 14 days); dependency
 counts are reported separately and do not redefine the goal's intended scope.
 
+`related` expresses non-blocking informational links and may name foreign task
+ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
+`show` collects every task link in the `── related ──` section: rows run in the
+order `parent`, `depends on`, `wake on`, `related`, `source`, and `child`,
+formatted as `<label>  <id>  <status>  <title>` with aligned columns. An
+unresolved target prints `(unresolved)` with no status, while a moved target
+reads `moved`.
+
 A lane is a goal marked `--lane`: its descendant tree is one stream of work.
 Lanes cannot nest. A live claim in a lane makes sibling work in that lane busy.
 `--parallel` marks work assessed safe alongside other parallel work; it does
