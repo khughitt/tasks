@@ -320,7 +320,7 @@ fn related_links_change_no_execution_view() {
 
     let ready_before = env.json(&dir, &["ready"]);
     let next_before = env.json(&dir, &["next"]);
-    let blockers_before = env.json(&dir, &["blockers"]);
+    let mut blockers_before = env.json(&dir, &["blockers"]);
     let review_before = env.json(&dir, &["show", &a])["review_reason"].clone();
     let lanes_before = env.json(&dir, &["lanes"]);
 
@@ -328,9 +328,18 @@ fn related_links_change_no_execution_view() {
 
     let ready_after = env.json(&dir, &["ready"]);
     let next_after = env.json(&dir, &["next"]);
-    let blockers_after = env.json(&dir, &["blockers"]);
+    let mut blockers_after = env.json(&dir, &["blockers"]);
     let review_after = env.json(&dir, &["show", &a])["review_reason"].clone();
     let lanes_after = env.json(&dir, &["lanes"]);
+
+    blockers_before
+        .as_object_mut()
+        .unwrap()
+        .remove("observed_at");
+    blockers_after
+        .as_object_mut()
+        .unwrap()
+        .remove("observed_at");
 
     assert_eq!(ready_before, ready_after);
     assert_eq!(
