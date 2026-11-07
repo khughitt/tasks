@@ -55,10 +55,10 @@ pub fn validate_shape(prefix: &str, kind: crate::repo::Kind, edges: &[RenameEdge
         {
             return Err(invalid("conflicting or unsupported retention lineage"));
         }
-        if let Some(previous) = i.checked_sub(1).map(|i| &edges[i]) {
-            if previous.to_prefix != e.from_prefix || previous.to_subdir != e.from_subdir {
-                return Err(invalid("noncontiguous retention lineage"));
-            }
+        if let Some(previous) = i.checked_sub(1).map(|i| &edges[i])
+            && (previous.to_prefix != e.from_prefix || previous.to_subdir != e.from_subdir)
+        {
+            return Err(invalid("noncontiguous retention lineage"));
         }
     }
     if edges.last().is_some_and(|e| e.to_prefix != prefix) {
@@ -103,7 +103,7 @@ pub fn validate(project: &Project) -> Result<()> {
     }
     Ok(())
 }
-pub fn epoch_subdir<'a>(project: &'a Project, prefix: &str) -> Result<String> {
+pub fn epoch_subdir(project: &Project, prefix: &str) -> Result<String> {
     if prefix == project.prefix {
         return subdir(project);
     }
@@ -436,15 +436,12 @@ fn protected_bytes(project: &Project, pinned: &basis::PinnedTask) -> Result<()> 
             if let ArtifactLocator::Attachment {
                 task, name, sha256, ..
             } = file
+                && same(project, task, &pinned.task.id.to_string())?
+                && expected
+                    .insert(name.clone(), sha256.clone())
+                    .is_some_and(|old| old != *sha256)
             {
-                if same(project, task, &pinned.task.id.to_string())? {
-                    if expected
-                        .insert(name.clone(), sha256.clone())
-                        .is_some_and(|old| old != *sha256)
-                    {
-                        return Err(invalid("protected artifact has conflicting digests"));
-                    }
-                }
+                return Err(invalid("protected artifact has conflicting digests"));
             }
         }
     }

@@ -1017,10 +1017,7 @@ mod tests {
             &p,
             &record(t.path(), "worktree"),
             None,
-            (&record(t.path(), "worktree"))
-                .manifest
-                .value()
-                .map(Path::new),
+            record(t.path(), "worktree").manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1056,7 +1053,7 @@ mod tests {
             &p,
             &record(&path, "evidence"),
             None,
-            (&record(&path, "evidence")).manifest.value().map(Path::new),
+            record(&path, "evidence").manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1072,7 +1069,7 @@ mod tests {
             &p,
             &old.record,
             Some(&loc),
-            (&old.record).manifest.value().map(Path::new),
+            old.record.manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1101,7 +1098,7 @@ mod tests {
             &p,
             &r,
             None,
-            (&r).manifest.value().map(Path::new),
+            r.manifest.value().map(Path::new),
             &mut metrics,
         )
         .unwrap();
@@ -1123,7 +1120,7 @@ mod tests {
                 &p,
                 &record(&fifo, "evidence"),
                 None,
-                (&record(&fifo, "evidence")).manifest.value().map(Path::new),
+                record(&fifo, "evidence").manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1141,7 +1138,7 @@ mod tests {
                 &p,
                 &record(&path, "evidence"),
                 None,
-                (&record(&path, "evidence")).manifest.value().map(Path::new),
+                record(&path, "evidence").manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1215,7 +1212,7 @@ mod tests {
                 &p,
                 &r,
                 None,
-                (&r).manifest.value().map(Path::new),
+                r.manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1232,7 +1229,7 @@ mod tests {
                 &p,
                 &r,
                 Some(bare),
-                (&r).manifest.value().map(Path::new),
+                r.manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1246,7 +1243,7 @@ mod tests {
             &p,
             &r,
             Some(&loc),
-            (&r).manifest.value().map(Path::new),
+            r.manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1258,7 +1255,7 @@ mod tests {
                 &p,
                 &r,
                 Some(&loc),
-                (&r).manifest.value().map(Path::new),
+                r.manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1272,7 +1269,7 @@ mod tests {
                 &p,
                 &r,
                 None,
-                (&r).manifest.value().map(Path::new),
+                r.manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .is_err()
@@ -1335,7 +1332,7 @@ mod tests {
             &p,
             &r,
             None,
-            (&r).manifest.value().map(Path::new),
+            r.manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1346,7 +1343,7 @@ mod tests {
             &p,
             &record(&t.path().join("file"), "evidence"),
             None,
-            (&record(&t.path().join("file"), "evidence"))
+            record(&t.path().join("file"), "evidence")
                 .manifest
                 .value()
                 .map(Path::new),
@@ -1365,7 +1362,7 @@ mod tests {
             &p,
             &record(&path, "evidence"),
             None,
-            (&record(&path, "evidence")).manifest.value().map(Path::new),
+            record(&path, "evidence").manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1374,7 +1371,7 @@ mod tests {
             &p,
             &old.record,
             None,
-            (&old.record).manifest.value().map(Path::new),
+            old.record.manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1455,7 +1452,7 @@ mod tests {
             &branch,
             &record,
             None,
-            (&record).manifest.value().map(Path::new),
+            record.manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();
@@ -1527,7 +1524,7 @@ mod tests {
                 &p,
                 &r,
                 None,
-                (&r).manifest.value().map(Path::new),
+                r.manifest.value().map(Path::new),
                 &mut Metrics::default()
             )
             .unwrap()
@@ -1540,7 +1537,7 @@ mod tests {
             &p,
             &r,
             Some(&prior),
-            (&r).manifest.value().map(Path::new),
+            r.manifest.value().map(Path::new),
             &mut Metrics::default(),
         )
         .unwrap();

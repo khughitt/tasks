@@ -62,17 +62,17 @@ fn seed_rename(f: &mut RetainedEnv, target: &str) -> (String, String) {
     let registry = f.env.home.path().join(".config/tasks/projects.toml");
     let mut v: toml::Value = toml::from_str(&std::fs::read_to_string(&registry).unwrap()).unwrap();
     for key in ["projects", "records"] {
-        if let Some(t) = v.get_mut(key).and_then(|v| v.as_table_mut()) {
-            if let Some(old) = t.remove(&old_prefix) {
-                t.insert(
-                    target.into(),
-                    if key == "records" {
-                        toml::Value::String(f.records.to_str().unwrap().into())
-                    } else {
-                        old
-                    },
-                );
-            }
+        if let Some(t) = v.get_mut(key).and_then(|v| v.as_table_mut())
+            && let Some(old) = t.remove(&old_prefix)
+        {
+            t.insert(
+                target.into(),
+                if key == "records" {
+                    toml::Value::String(f.records.to_str().unwrap().into())
+                } else {
+                    old
+                },
+            );
         }
     }
     if let Some(aliases) = v.get_mut("aliases").and_then(|v| v.as_table_mut()) {

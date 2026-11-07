@@ -72,7 +72,7 @@ fn host_preferences_unreadable_file_fails() {
     let mut env = TestEnv::new();
     let root = env.init("sci");
     let path = write_config(&env, "[identity]\nrelay = false\n");
-    fs::set_permissions(&path, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o0)).unwrap();
     if fs::read(&path).is_ok() {
         eprintln!("SKIP: this user bypasses file permissions (root or equivalent)");
         return;
