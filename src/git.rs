@@ -26,7 +26,12 @@ mod tests {
         let envs: Vec<(&OsStr, Option<&OsStr>)> = cmd.get_envs().collect();
         assert!(envs.contains(&(OsStr::new("GIT_OPTIONAL_LOCKS"), Some(OsStr::new("0")))));
         assert!(envs.contains(&(OsStr::new("LC_ALL"), Some(OsStr::new("C")))));
-        for cleared in ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
+        for cleared in [
+            "GIT_DIR",
+            "GIT_COMMON_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+        ] {
             assert!(envs.contains(&(OsStr::new(cleared), None)));
         }
     }
