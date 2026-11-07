@@ -184,6 +184,7 @@ mod tests {
             completed: None,
             last_done: None,
             depends: vec![],
+            related: vec![],
             parent: None,
             tags: vec![],
             source: None,

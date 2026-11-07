@@ -7,7 +7,7 @@ use crate::model::{
 
 pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 36] = [
+const KEYS: [&str; 37] = [
     "id",
     "title",
     "status",
@@ -33,6 +33,7 @@ const KEYS: [&str; 36] = [
     "closed",
     "last_done",
     "depends",
+    "related",
     "parent",
     "tags",
     "source",
@@ -185,6 +186,11 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
     let mut task = Task {
         note_archives: Vec::new(),
         wake_on: optional_list("wake_on")?
+            .iter()
+            .map(|value| TaskId::parse(value))
+            .collect::<Result<Vec<_>>>()
+            .map_err(|error| perr(file, error.to_string()))?,
+        related: optional_list("related")?
             .iter()
             .map(|value| TaskId::parse(value))
             .collect::<Result<Vec<_>>>()
@@ -607,7 +613,7 @@ pub fn roots_hint(kind: &str) -> String {
 
 pub fn validate_task(t: &Task) -> Result<()> {
     TaskId::parse(&t.id.to_string())?;
-    for dependency in t.depends.iter().chain(&t.wake_on) {
+    for dependency in t.depends.iter().chain(&t.wake_on).chain(&t.related) {
         TaskId::parse(&dependency.to_string())?;
     }
     validate_line("title", &t.title)?;
@@ -770,6 +776,12 @@ pub fn serialize_physical(record: &PhysicalTask) -> String {
         String::from("depends"),
         Value::List(t.depends.iter().map(ToString::to_string).collect()),
     ));
+    if !t.related.is_empty() {
+        pairs.push((
+            "related".into(),
+            Value::List(t.related.iter().map(ToString::to_string).collect()),
+        ));
+    }
     if let Some(parent) = &t.parent {
         pairs.push(("parent".into(), s(&parent.to_string())));
     }
@@ -1337,6 +1349,21 @@ mod tests {
         assert!(
             crate::history::fixture(&own, "x").is_ok(),
             "self-parent is a hierarchy rule, not a format rule"
+        );
+    }
+    #[test]
+    fn related_roundtrips_after_depends() {
+        let with_related = MINIMAL.replace("depends: []", "depends: []\nrelated: [sci-000002]");
+        let t = crate::history::fixture(&with_related, "x").unwrap();
+        assert_eq!(t.related.len(), 1);
+        assert_eq!(t.related[0].to_string(), "sci-000002");
+        assert_eq!(crate::history::fixture_text(&t), with_related);
+        assert!(
+            crate::history::fixture(
+                &MINIMAL.replace("depends: []", "depends: []\nrelated: [bad-id]"),
+                "x"
+            )
+            .is_err()
         );
     }
     #[test]

@@ -50,6 +50,7 @@ optional booleans false, and other optional values absent.
 | `closed` | Done/drop closure checkpoint for wake decisions; cleared on reopen, not a moved redirect's closure. |
 | `last_done` | Recurring cycle anchor, preserved when reopening. |
 | `depends`, `parent` | Execution dependency ids (foreign allowed); optional same-project containment parent. |
+| `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
 | `source` | Opaque single-line origin reference; never interpreted for routing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |

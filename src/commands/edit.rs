@@ -28,6 +28,11 @@ fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
 }
 
 pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
+    if edited.related != original.related {
+        return Err(Error::Validation(
+            "related cannot be changed in the editor by this version of tasks".into(),
+        ));
+    }
     if edited.wake_on != original.wake_on {
         return Err(Error::Validation(format!(
             "wake_on is set by shelving; use `tasks shelve {}`",

@@ -514,6 +514,7 @@ pub(crate) mod tests {
             completed: None,
             last_done: None,
             depends: vec![],
+            related: vec![],
             parent: parent.map(|p| TaskId::parse(p).unwrap()),
             tags: vec![],
             source: None,

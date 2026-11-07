@@ -489,6 +489,7 @@ mod tests {
             completed: None,
             last_done: None,
             depends: vec![],
+            related: vec![],
             parent: parent.map(|parent| TaskId::parse(parent).unwrap()),
             tags: vec![],
             source: None,
