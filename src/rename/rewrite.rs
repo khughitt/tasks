@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
 
-/// Rewrite `id`, local `depends`/`parent`/`wake_on` references, and References entries
+/// Rewrite `id`, local `depends`/`parent`/`wake_on`/`related` references, and References entries
 /// pointing into a `tasks/files/<old>-<hex>` directory the rename moves, preserving every
 /// other byte: body prose and notes stay historical.
 pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
@@ -28,7 +28,7 @@ pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
                 ("id", Value::Scalar(v)) | ("parent", Value::Scalar(v)) => {
                     Value::Scalar(move_one(&v))
                 }
-                ("depends" | "wake_on", Value::List(items)) => {
+                ("depends" | "wake_on" | "related", Value::List(items)) => {
                     Value::List(items.iter().map(|item| move_one(item)).collect())
                 }
                 (key, Value::Scalar(v)) if crate::format::TIMESTAMP_KEYS.contains(&key) => {

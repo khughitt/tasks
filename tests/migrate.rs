@@ -3507,3 +3507,36 @@ fn migrate_dropping_or_closing_dependents_of_carried_task_leaves_check_free_of_m
     assert_clean(&env, &forge);
     assert_clean(&env, &forge2);
 }
+
+#[test]
+fn migrate_carries_related_ids_with_a_note() {
+    let mut env = TestEnv::new();
+    let source = env.init("forge");
+    let destination = env.init("forge2");
+    let a = id_of(env.json(&source, &["add", "A"]));
+    let b = id_of(env.json(&source, &["add", "B"]));
+
+    let path_a = source.join(format!("tasks/{a}.md"));
+    let raw_a = std::fs::read_to_string(&path_a).unwrap();
+    std::fs::write(
+        &path_a,
+        raw_a.replacen("tags: []\n", &format!("related: [{b}]\ntags: []\n"), 1),
+    )
+    .unwrap();
+
+    let list = uniform_list(&env, &source, &[&a, &b], "carry");
+    let migrated = env.json(&source, &["migrate", list.to_str().unwrap()]);
+    let new_a = new_id(&migrated, &a);
+    let new_b = new_id(&migrated, &b);
+
+    let show_a = env.json(&destination, &["show", &new_a]);
+    assert_eq!(show_a["task"]["related"], serde_json::json!([new_b]));
+    let notes = show_a["task"]["notes"].as_array().unwrap();
+    assert!(
+        notes.iter().any(|n| n["text"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("related {b} carried as {new_b}"))),
+        "notes did not contain carried note: {notes:?}"
+    );
+}

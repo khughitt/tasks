@@ -434,6 +434,19 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 }
             }
         }
+        for related in &task.related {
+            let related_id = ctx.registry.canonical_id(related);
+            if related_id.prefix == ctx.project.prefix
+                && !ctx.project.task_path(&related_id).try_exists()?
+            {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "dangling_related",
+                    format!("relates to missing {related}"),
+                ));
+            }
+        }
         if let Some(parent) = &task.parent {
             let parent_id = ctx.registry.canonical_id(parent);
             if parent_id.prefix != ctx.project.prefix {
@@ -568,6 +581,14 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 file.clone(),
                 "wake_status",
                 "only a shelved task carries wake_on".into(),
+            ));
+        }
+        if !task.related.is_empty() && task.status == Status::Moved {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "related_status",
+                "a tombstone cannot carry related".into(),
             ));
         }
         if task.defer.is_some() {

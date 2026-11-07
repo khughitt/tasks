@@ -139,6 +139,7 @@ pub(crate) fn build_pair(
         &format!("moved from {id}{note_suffix}"),
     )?;
     let mut tombstone = source.clone();
+    tombstone.related.clear();
     if source.status == Status::Shelved {
         tombstone.wake_on.clear();
         tombstone.defer = None;

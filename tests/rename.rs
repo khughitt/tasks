@@ -2667,3 +2667,53 @@ fn rename_explain_refuses_a_retired_project_as_the_run_does() {
         assert_eq!(err_kind(&out), "retired_project", "{args:?}");
     }
 }
+
+#[test]
+fn rename_rewrites_local_related_ids() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    git(&aa, &["init", "-q", "-b", "main"]);
+    let a = id_of(env.json(&aa, &["add", "Task A", "-p", "2"]));
+    let b = id_of(env.json(&aa, &["add", "Task B", "-p", "2"]));
+    let path_a = aa.join(format!("tasks/{a}.md"));
+    let raw_a = std::fs::read_to_string(&path_a).unwrap();
+    std::fs::write(
+        &path_a,
+        raw_a.replacen("tags: []\n", &format!("related: [{b}]\ntags: []\n"), 1),
+    )
+    .unwrap();
+
+    let bb_task = id_of(env.json(&bb, &["add", "BB Task", "-p", "2"]));
+    let path_bb = bb.join(format!("tasks/{bb_task}.md"));
+    let raw_bb = std::fs::read_to_string(&path_bb).unwrap();
+    std::fs::write(
+        &path_bb,
+        raw_bb.replacen("tags: []\n", &format!("related: [{a}]\ntags: []\n"), 1),
+    )
+    .unwrap();
+
+    git(&aa, &["add", "-A"]);
+    git(&aa, &["commit", "-qm", "seed"]);
+
+    let v = env.json(&aa, &["rename", "aa", "ab"]);
+    assert_eq!(v["recovery"], "fresh");
+
+    let hex_a = a.split_once('-').unwrap().1;
+    let hex_b = b.split_once('-').unwrap().1;
+    let new_a = format!("ab-{hex_a}");
+    let new_b = format!("ab-{hex_b}");
+
+    let a_content = env.read(&aa, &format!("tasks/{new_a}.md"));
+    assert!(
+        a_content.contains(&format!("related: [{new_b}]")),
+        "A's file did not hold rewritten related id: {a_content}"
+    );
+
+    let shown_bb = env.json(&bb, &["show", &bb_task]);
+    assert_eq!(shown_bb["task"]["related"], serde_json::json!([a]));
+    assert_eq!(shown_bb["related_to"][0]["id"], a);
+    assert_eq!(shown_bb["related_to"][0]["resolved"], true);
+    assert_eq!(shown_bb["related_to"][0]["title"], "Task A");
+    assert_eq!(shown_bb["related_to"][0]["status"], "todo");
+}

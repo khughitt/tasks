@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::format::{parse_physical, serialize_physical, validate_doc_path};
-use crate::model::{Task, TaskId, is_valid_prefix};
+use crate::model::{Status, Task, TaskId, is_valid_prefix};
 use crate::registry::Registry;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -1121,6 +1121,12 @@ impl Project {
         task: &Task,
         projected: &[Task],
     ) -> Result<()> {
+        if task.status == Status::Moved && !task.related.is_empty() {
+            return Err(Error::Validation(format!(
+                "{} is a tombstone and cannot carry related",
+                task.id
+            )));
+        }
         crate::review::validate(task)?;
         crate::defer::validate(task)?;
         crate::hierarchy::validate_parent_among(self, registry, task, projected)?;
@@ -2155,5 +2161,29 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "untouched");
         assert_eq!(std::fs::read_link(&collision).unwrap(), victim);
         assert!(!dir.path().join(".target.000002.tmp").exists());
+    }
+
+    #[test]
+    fn validate_invariants_refuses_related_on_a_tombstone() {
+        let (_dir, p) = temp_project();
+        let registry = Registry::default();
+        let mut task = sample(&p);
+        task.status = Status::Moved;
+        task.moved_to = Some(TaskId::parse("tst-111111").unwrap());
+        task.related = vec![TaskId::parse("tst-222222").unwrap()];
+        let err = p
+            .validate_invariants_among(&registry, &task, &[])
+            .unwrap_err();
+        match err {
+            Error::Validation(msg) => {
+                assert_eq!(
+                    msg,
+                    format!("{} is a tombstone and cannot carry related", task.id)
+                );
+            }
+            other => panic!("expected Validation error, got: {other:?}"),
+        }
+        task.related.clear();
+        assert!(p.validate_invariants_among(&registry, &task, &[]).is_ok());
     }
 }

@@ -497,3 +497,87 @@ fn pretty_related_section_lists_every_link_in_order() {
         "URL task missing source in overview: {pretty_u}"
     );
 }
+
+#[test]
+fn check_refuses_related_on_a_tombstone() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    env.init("bb");
+    let t = id_of(env.json(&dir, &["add", "Task"]));
+    let other = id_of(env.json(&dir, &["add", "Other"]));
+    env.json(&dir, &["move", &t, "--to", "bb"]);
+
+    relate_by_hand(&dir, &t, &[&other]);
+
+    let (rc, findings) = common::check_findings(&env, &dir);
+    assert_eq!(rc, 1);
+    let errors = findings["errors"].as_array().unwrap();
+    let error_kinds: Vec<_> = errors.iter().map(|f| f["kind"].as_str().unwrap()).collect();
+    assert_eq!(
+        error_kinds
+            .iter()
+            .filter(|k| **k == "related_status")
+            .count(),
+        1,
+        "{findings}"
+    );
+    assert!(!error_kinds.contains(&"parse"), "{findings}");
+    let warnings = findings["warnings"].as_array().unwrap();
+    let warning_kinds: Vec<_> = warnings
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap())
+        .collect();
+    assert!(!warning_kinds.contains(&"parse"), "{findings}");
+
+    let path = dir.join(format!("tasks/{t}.md"));
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(env.fail(&dir, &["note", &t, "x"]), "moved");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn check_warns_dangling_related_only_for_local_ids() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let _other_dir = env.init("bb");
+    let a = id_of(env.json(&dir, &["add", "Task A"]));
+    let moved_src = id_of(env.json(&dir, &["add", "Moved Source"]));
+    env.json(&dir, &["move", &moved_src, "--to", "bb"]);
+
+    let missing_local = "aa-ffffff";
+    let unreachable_foreign = "cc-111111";
+
+    relate_by_hand(&dir, &a, &[missing_local, unreachable_foreign, &moved_src]);
+
+    let (rc, findings) = common::check_findings(&env, &dir);
+    assert_eq!(rc, 0, "check should exit 0 with only warnings: {findings}");
+    let errors = findings
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(errors.is_empty(), "expected no errors: {errors:?}");
+
+    let warnings = findings
+        .get("warnings")
+        .and_then(|w| w.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let warning_kinds: Vec<_> = warnings
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        warning_kinds
+            .iter()
+            .filter(|k| **k == "dangling_related")
+            .count(),
+        1,
+        "{findings}"
+    );
+    assert_eq!(
+        warning_kinds.len(),
+        1,
+        "expected only dangling_related warning: {warnings:?}"
+    );
+}

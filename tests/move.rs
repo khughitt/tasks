@@ -3308,3 +3308,57 @@ fn pretty_move_names_the_recovery_and_the_changed_paths() {
         "{refused}"
     );
 }
+
+#[test]
+fn a_moved_record_keeps_related_and_its_tombstone_has_none() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let target = id_of(env.json(&source, &["add", "Target"]));
+
+    // Case 1: an ordinary todo source
+    let todo_task = id_of(env.json(&source, &["add", "Todo Source"]));
+    let path_todo = source.join(format!("tasks/{todo_task}.md"));
+    let raw_todo = std::fs::read_to_string(&path_todo).unwrap();
+    std::fs::write(
+        &path_todo,
+        raw_todo.replacen("tags: []\n", &format!("related: [{target}]\ntags: []\n"), 1),
+    )
+    .unwrap();
+
+    let moved_todo = id_of(env.json(&source, &["move", &todo_task, "--to", "wali"]));
+    let shown_moved_todo = env.json(&destination, &["show", &moved_todo]);
+    assert_eq!(
+        shown_moved_todo["task"]["related"],
+        serde_json::json!([target])
+    );
+    let shown_tomb_todo = env.json(&source, &["show", &todo_task]);
+    assert!(shown_tomb_todo["task"].get("related").is_none());
+    let tomb_todo_raw = env.read(&source, &format!("tasks/{todo_task}.md"));
+    assert!(!tomb_todo_raw.contains("related:"));
+
+    // Case 2: a shelved source
+    let shelved_task = id_of(env.json(&source, &["add", "Shelved Source"]));
+    env.json(
+        &source,
+        &["shelve", &shelved_task, "--defer", "30d", "later"],
+    );
+    let path_shelved = source.join(format!("tasks/{shelved_task}.md"));
+    let raw_shelved = std::fs::read_to_string(&path_shelved).unwrap();
+    std::fs::write(
+        &path_shelved,
+        raw_shelved.replacen("tags: []\n", &format!("related: [{target}]\ntags: []\n"), 1),
+    )
+    .unwrap();
+
+    let moved_shelved = id_of(env.json(&source, &["move", &shelved_task, "--to", "wali"]));
+    let shown_moved_shelved = env.json(&destination, &["show", &moved_shelved]);
+    assert_eq!(
+        shown_moved_shelved["task"]["related"],
+        serde_json::json!([target])
+    );
+    let shown_tomb_shelved = env.json(&source, &["show", &shelved_task]);
+    assert!(shown_tomb_shelved["task"].get("related").is_none());
+    let tomb_shelved_raw = env.read(&source, &format!("tasks/{shelved_task}.md"));
+    assert!(!tomb_shelved_raw.contains("related:"));
+}
