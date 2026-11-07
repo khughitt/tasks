@@ -50,7 +50,7 @@ optional booleans false, and other optional values absent.
 | `closed` | Done/drop closure checkpoint for wake decisions; cleared on reopen, not a moved redirect's closure. |
 | `last_done` | Recurring cycle anchor, preserved when reopening. |
 | `depends`, `parent` | Execution dependency ids (foreign allowed); optional same-project containment parent. |
-| `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. |
+| `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. Written by add/edit --related, edit --rm-related and edit --no-related. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
 | `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status; that display reads the record and changes nothing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |

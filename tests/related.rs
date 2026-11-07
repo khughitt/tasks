@@ -49,7 +49,236 @@ fn related_round_trips_and_is_omitted_when_empty() {
 }
 
 #[test]
-fn phase_one_editor_save_cannot_change_related() {
+fn add_and_edit_related_link_local_and_foreign_ids() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let cc = env.init("cc");
+
+    let local = id_of(env.json(&aa, &["add", "Local Target"]));
+    let foreign = id_of(env.json(&bb, &["add", "Foreign Target"]));
+    let to_rename = id_of(env.json(&cc, &["add", "Rename Target"]));
+    env.json(&cc, &["rename", "cc", "newcc"]);
+    let retired_spelling = to_rename.clone();
+    let canonical_renamed = to_rename.replacen("cc-", "newcc-", 1);
+    let suffix_target = id_of(env.json(&aa, &["add", "Suffix Target"]));
+    let bare_suffix = &suffix_target[3..];
+
+    // add --related with local and foreign
+    let t1 = id_of(env.json(
+        &aa,
+        &["add", "T1", "--related", &local, "--related", &foreign],
+    ));
+    let shown1 = env.json(&aa, &["show", &t1]);
+    assert_eq!(shown1["task"]["related"], json!([local, foreign]));
+
+    // edit --related with retired prefix spelling and bare six-hex suffix
+    env.json(
+        &aa,
+        &[
+            "edit",
+            &t1,
+            "--related",
+            &retired_spelling,
+            "--related",
+            bare_suffix,
+        ],
+    );
+    let shown2 = env.json(&aa, &["show", &t1]);
+    assert_eq!(
+        shown2["task"]["related"],
+        json!([local, foreign, canonical_renamed, suffix_target])
+    );
+
+    // edit --rm-related removes by canonical id
+    env.json(&aa, &["edit", &t1, "--rm-related", &local]);
+    let shown3 = env.json(&aa, &["show", &t1]);
+    assert_eq!(
+        shown3["task"]["related"],
+        json!([foreign, canonical_renamed, suffix_target])
+    );
+
+    // edit --no-related clears the list
+    env.json(&aa, &["edit", &t1, "--no-related"]);
+    let shown4 = env.json(&aa, &["show", &t1]);
+    assert!(shown4["task"].get("related").is_none());
+}
+
+#[test]
+fn related_refusals_name_their_cause() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let _bb = env.init("bb");
+    let t = id_of(env.json(&aa, &["add", "Task"]));
+    let moved_task = id_of(env.json(&aa, &["add", "Moved"]));
+    let moved_successor = id_of(env.json(&aa, &["move", &moved_task, "--to", "bb"]));
+
+    // 1. Missing id fails with error kind unresolvable_id (add and edit)
+    let out = env
+        .cmd(&aa)
+        .args(["add", "New", "--related", "aa-ffffff"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "unresolvable_id");
+
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--related", "aa-ffffff"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "unresolvable_id");
+
+    // 2. Tombstone refuses as moved, naming the successor (add and edit)
+    let out = env
+        .cmd(&aa)
+        .args(["add", "New", "--related", &moved_task])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "moved");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(&moved_successor),
+        "stderr missing successor: {stderr}"
+    );
+
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--related", &moved_task])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "moved");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(&moved_successor),
+        "stderr missing successor: {stderr}"
+    );
+
+    // 3. Self link refuses
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--related", &t])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "validation");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(&format!("{t} cannot relate to itself")),
+        "stderr missing self refusal: {stderr}"
+    );
+
+    // 4. --related X --rm-related X refuses
+    let target = id_of(env.json(&aa, &["add", "Target"]));
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--related", &target, "--rm-related", &target])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "validation");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "{target} is named by both --related and --rm-related"
+        )),
+        "stderr missing both refusal: {stderr}"
+    );
+
+    // 5. --no-related --related X and --no-related --rm-related X are usage errors (exit 2)
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--no-related", "--related", &target])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--no-related", "--rm-related", &target])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+
+    // 6. --rm-related of an absent id refuses
+    let out = env
+        .cmd(&aa)
+        .args(["edit", &t, "--rm-related", &target])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "validation");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(&format!("{t} is not related to {target}")),
+        "stderr missing absent refusal: {stderr}"
+    );
+}
+
+#[test]
+fn repeated_and_alias_spellings_deduplicate_with_a_warning() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let b = id_of(env.json(&aa, &["add", "B"]));
+    let x = id_of(env.json(&bb, &["add", "X"]));
+    env.json(&bb, &["rename", "bb", "newbb"]);
+    let retired_x = x.clone();
+    let canonical_x = x.replacen("bb-", "newbb-", 1);
+
+    // add with repeated --related within the same command: deduplicated silently, no warning
+    let out = env.json(&aa, &["add", "A", "--related", &b, "--related", &b]);
+    let a = id_of(out.clone());
+    let warnings = out["warnings"].as_array().unwrap();
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings on repeated add: {warnings:?}"
+    );
+    let shown_a = env.json(&aa, &["show", &a]);
+    assert_eq!(shown_a["task"]["related"], json!([b]));
+
+    // edit --related with an already-related id: leaves list unchanged and warns
+    let out = env.json(&aa, &["edit", &a, "--related", &b]);
+    let warnings = out["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0],
+        format!("{a} is already related to {b}; unchanged")
+    );
+    let shown_a = env.json(&aa, &["show", &a]);
+    assert_eq!(shown_a["task"]["related"], json!([b]));
+
+    // edit --related with canonical_x
+    env.json(&aa, &["edit", &a, "--related", &canonical_x]);
+    let shown_a = env.json(&aa, &["show", &a]);
+    assert_eq!(shown_a["task"]["related"], json!([b, canonical_x]));
+
+    // edit --related with alias spelling of canonical_x: deduplicates and warns
+    let out = env.json(&aa, &["edit", &a, "--related", &retired_x]);
+    let warnings = out["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0],
+        format!("{a} is already related to {canonical_x}; unchanged")
+    );
+    let shown_a = env.json(&aa, &["show", &a]);
+    assert_eq!(shown_a["task"]["related"], json!([b, canonical_x]));
+
+    // edit --related with repeats within one call when id was already present: exactly one warning
+    let out = env.json(&aa, &["edit", &a, "--related", &b, "--related", &b]);
+    let warnings = out["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0],
+        format!("{a} is already related to {b}; unchanged")
+    );
+}
+
+#[test]
+fn editor_saves_may_change_related_and_are_validated() {
     let mut env = TestEnv::new();
     let dir = env.init("aa");
     let a = id_of(env.json(&dir, &["add", "A"]));
@@ -58,80 +287,60 @@ fn phase_one_editor_save_cannot_change_related() {
 
     let path_a = dir.join("tasks").join(format!("{a}.md"));
 
-    // Case 1: An editor script adds `related: [<b>]`; the edit fails, and the record bytes
-    // match what was read before the edit.
-    let bytes_before = std::fs::read(&path_a).unwrap();
+    // Case 1: An editor save adding a valid id succeeds
     let add_script = editor_script(&dir, &format!("sed -i '/^tags:/i related: [{b}]' \"$1\""));
-    let out = env
-        .cmd(&dir)
-        .env("EDITOR", &add_script)
-        .args(["edit", &a, "--editor"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert_eq!(err_kind(&out), "validation");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("related cannot be changed in the editor by this version of tasks"),
-        "stderr missing refusal: {stderr}"
-    );
-    assert_eq!(std::fs::read(&path_a).unwrap(), bytes_before);
-
-    // Prepare a hand-written related list on `a`: [b, c]
-    relate_by_hand(&dir, &a, &[&b, &c]);
-    let bytes_with_related = std::fs::read(&path_a).unwrap();
-
-    // Case 2: Removing a hand-written list fails the same way.
-    let remove_script = editor_script(&dir, "sed -i '/^related:/d' \"$1\"");
-    let out = env
-        .cmd(&dir)
-        .env("EDITOR", &remove_script)
-        .args(["edit", &a, "--editor"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert_eq!(err_kind(&out), "validation");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("related cannot be changed in the editor by this version of tasks"),
-        "stderr missing refusal: {stderr}"
-    );
-    assert_eq!(std::fs::read(&path_a).unwrap(), bytes_with_related);
-
-    // Case 3: Reordering a hand-written list fails the same way.
-    let reorder_script = editor_script(
-        &dir,
-        &format!("sed -i 's/related: \\[{b}, {c}\\]/related: [{c}, {b}]/' \"$1\""),
-    );
-    let out = env
-        .cmd(&dir)
-        .env("EDITOR", &reorder_script)
-        .args(["edit", &a, "--editor"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert_eq!(err_kind(&out), "validation");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("related cannot be changed in the editor by this version of tasks"),
-        "stderr missing refusal: {stderr}"
-    );
-    assert_eq!(std::fs::read(&path_a).unwrap(), bytes_with_related);
-
-    // Case 4: A save that changes only the title succeeds and keeps `related`.
-    let retitle_script = editor_script(&dir, "sed -i 's/^title: A$/title: Renamed/' \"$1\"");
     env.cmd(&dir)
-        .env("EDITOR", &retitle_script)
+        .env("EDITOR", &add_script)
         .args(["edit", &a, "--editor"])
         .assert()
         .success();
     let shown = env.json(&dir, &["show", &a]);
-    assert_eq!(shown["task"]["title"], "Renamed");
-    assert_eq!(shown["task"]["related"], json!([b, c]));
+    assert_eq!(shown["task"]["related"], json!([b]));
     assert!(
         env.read(&dir, &format!("tasks/{a}.md"))
-            .contains(&format!("related: [{b}, {c}]"))
+            .contains(&format!("related: [{b}]"))
     );
+
+    // Case 2: Adding a missing id refuses without writing
+    let bytes_before = std::fs::read(&path_a).unwrap();
+    let bad_script = editor_script(&dir, "sed -i 's/related: .*/related: [aa-ffffff]/' \"$1\"");
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &bad_script)
+        .args(["edit", &a, "--editor"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "unresolvable_id");
+    assert_eq!(std::fs::read(&path_a).unwrap(), bytes_before);
+
+    // Case 3: A removal succeeds
+    let remove_script = editor_script(&dir, "sed -i '/^related:/d' \"$1\"");
+    env.cmd(&dir)
+        .env("EDITOR", &remove_script)
+        .args(["edit", &a, "--editor"])
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &a]);
+    assert!(shown["task"].get("related").is_none());
+    assert!(
+        !env.read(&dir, &format!("tasks/{a}.md"))
+            .contains("related:")
+    );
+
+    // Case 4: Multiple related and removing one succeeds
+    relate_by_hand(&dir, &a, &[&b, &c]);
+    let remove_one_script = editor_script(
+        &dir,
+        &format!("sed -i 's/related: \\[{b}, {c}\\]/related: [{c}]/' \"$1\""),
+    );
+    env.cmd(&dir)
+        .env("EDITOR", &remove_one_script)
+        .args(["edit", &a, "--editor"])
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &a]);
+    assert_eq!(shown["task"]["related"], json!([c]));
 }
 
 #[test]

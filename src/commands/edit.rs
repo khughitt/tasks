@@ -28,11 +28,6 @@ fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
 }
 
 pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
-    if edited.related != original.related {
-        return Err(Error::Validation(
-            "related cannot be changed in the editor by this version of tasks".into(),
-        ));
-    }
     if edited.wake_on != original.wake_on {
         return Err(Error::Validation(format!(
             "wake_on is set by shelving; use `tasks shelve {}`",
@@ -178,7 +173,10 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         || !fields.needs.is_empty()
         || !args.rm_needs.is_empty()
         || args.no_needs
-        || !args.rm_tags.is_empty();
+        || !args.rm_tags.is_empty()
+        || !fields.related.is_empty()
+        || !args.rm_related.is_empty()
+        || args.no_related;
     if !has_flags {
         if !args.editor && !std::io::stdin().is_terminal() {
             return Err(Error::Editor(
@@ -306,7 +304,39 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
             )));
         }
     }
+    let related_additions = args
+        .fields
+        .related
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    let related_removals = args
+        .rm_related
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(both) = related_additions
+        .iter()
+        .find(|id| related_removals.contains(id))
+    {
+        return Err(Error::Validation(format!(
+            "{both} is named by both --related and --rm-related"
+        )));
+    }
+    if args.no_related {
+        task.related.clear();
+    }
+    if !args.rm_related.is_empty() {
+        crate::related::remove_related(&ctx.registry, &mut task, &related_removals)?;
+    }
+    let related_before_adds = task.related.len();
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
+    let _related_change = crate::related::RelatedChange {
+        added: task.related[related_before_adds..].to_vec(),
+        removed: related_removals,
+        cleared: args.no_related,
+        editor_changed: false,
+    };
     // Current contract (docs/user-guide.md): needs change under no live claim or the caller's own, and
     // under the caller's own the claim's holds follow in the same save.
     // The target's override notes are appended here and land with its save. The
@@ -484,6 +514,14 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             crate::tombstone::refuse_reference(&found, "dependency").map_err(keep)?;
         }
     }
+    crate::related::validate_editor_related(&ctx.registry, &resolver, &original, &edited)
+        .map_err(keep)?;
+    let _related_change = crate::related::RelatedChange {
+        added: Vec::new(),
+        removed: Vec::new(),
+        cleared: false,
+        editor_changed: edited.related != original.related,
+    };
     let from_main = resolver.take_warnings();
     ctx.warnings.extend(from_main);
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;

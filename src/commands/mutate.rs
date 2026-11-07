@@ -150,6 +150,10 @@ pub fn apply_fields(
     // `edit --no-depends` clears the list before this runs; `dep --rm` removes one.
     let warnings = dep::add_dependencies(ctx, &resolver, task, &fields.depends)?;
     ctx.warnings.extend(warnings);
+    // Additive like `--depends`: an edit that names one related link appends to the list.
+    // `edit --no-related` clears the list before this runs; `edit --rm-related` removes one.
+    let related_warnings = crate::related::add_related(ctx, &resolver, task, &fields.related)?;
+    ctx.warnings.extend(related_warnings);
     if let Some(parent) = &fields.parent {
         task.parent = Some(parse_id(&ctx.registry, &ctx.shorthand, parent)?);
     }

@@ -124,6 +124,12 @@ pub fn run(
     let mut task = blank(&ctx.project, title, status, agent)?;
     task.origin = attribution.origin;
     apply_fields(&mut ctx, &mut task, &fields, None)?;
+    let _related_change = crate::related::RelatedChange {
+        added: task.related.clone(),
+        removed: Vec::new(),
+        cleared: false,
+        editor_changed: false,
+    };
     let stamp = super::occurrence_stamp(&mut ctx.warnings);
     let at = task.created.clone();
     super::append_occurrence_note(

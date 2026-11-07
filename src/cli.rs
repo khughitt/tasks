@@ -308,6 +308,10 @@ pub struct FieldArgs {
     /// and `dep --rm`.
     #[arg(long = "depends", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
     pub depends: Vec<String>,
+    /// Relate to another task (repeatable). On `edit` this appends; see `--rm-related`
+    /// and `--no-related`.
+    #[arg(long = "related", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
+    pub related: Vec<String>,
     #[arg(long)]
     pub spec: Option<String>,
     #[arg(long)]
@@ -338,8 +342,9 @@ pub struct EditArgs {
         "no_awaiting_user", "no_every", "no_defer", "no_source", "no_agent",
         "no_spec", "no_plan", "no_step", "no_complexity", "no_process", "no_origin", "model",
         "no_model", "rm_tags", "no_tags", "rm_needs", "no_needs", "no_depends",
+        "rm_related", "no_related",
         "refs", "body", "priority", "size", "complexity", "process", "origin", "parallel",
-        "lane", "every", "defer", "tags", "needs", "depends", "spec", "plan",
+        "lane", "every", "defer", "tags", "needs", "depends", "related", "spec", "plan",
         "step", "parent", "source", "agent"
     ])]
     pub editor: bool,
@@ -440,6 +445,17 @@ pub struct EditArgs {
     /// Clear every dependency; with `--depends`, replaces the list wholesale.
     #[arg(long)]
     pub no_depends: bool,
+    /// Remove a related task (repeatable); `--related` adds one.
+    #[arg(
+        long = "rm-related",
+        value_name = "REF",
+        conflicts_with = "no_related",
+        add = ArgValueCompleter::new(crate::complete::resolvable)
+    )]
+    pub rm_related: Vec<String>,
+    /// Clear every related task.
+    #[arg(long, conflicts_with_all = ["related", "rm_related"])]
+    pub no_related: bool,
     #[command(flatten)]
     pub fields: FieldArgs,
 }
