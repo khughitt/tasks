@@ -267,6 +267,7 @@ pub struct OperationCtx {
     staged_recovery: Option<(crate::model::TaskId, StagedRecovery)>,
     pub tasks: BTreeMap<crate::model::TaskId, super::basis::PinnedTask>,
     pub metrics: super::verify::Metrics,
+    pub warnings: Vec<String>,
     contexts: BTreeMap<String, crate::commands::Ctx>,
     locks: BTreeMap<std::path::PathBuf, crate::record_commit::CommitLock>,
 }
@@ -328,13 +329,16 @@ pub fn open(
             .or_insert_with(|| ctx.project.records.clone());
     }
     let mut locks = BTreeMap::new();
+    let mut op_warnings = Vec::new();
     for (common, records) in repositories {
         let lock =
             crate::record_commit::lock(&records).map_err(Error::RetainedPublicationUnsupported)?;
-        let warnings = lock.commit_paths(&records, &[], "chore(tasks): retained preflight");
-        if !warnings.is_empty() {
-            return Err(Error::RetainedHistoryBlocked(warnings.join("; ")));
+        let (refused, warnings) =
+            lock.commit_paths(&records, &[], "chore(tasks): retained preflight");
+        if !refused.is_empty() {
+            return Err(Error::RetainedHistoryBlocked(refused.join("; ")));
         }
+        op_warnings.extend(warnings);
         locks.insert(common, lock);
     }
     let mut tasks = BTreeMap::new();
@@ -405,6 +409,7 @@ pub fn open(
         started,
         staged_recovery: None,
         tasks,
+        warnings: op_warnings,
         contexts,
         locks,
         metrics,
@@ -683,7 +688,7 @@ pub fn batch(
         .unwrap_or_default();
     let common = crate::record_commit::common_dir(&context.project.records)
         .map_err(Error::RetainedPublicationUnsupported)?;
-    let warnings = ctx
+    let (refused, warnings) = ctx
         .locks
         .get(&common)
         .ok_or_else(|| invalid("publication repository changed under held lock"))?
@@ -692,13 +697,14 @@ pub fn batch(
             &paths,
             &format!("chore(tasks): retained {} {}", id, operation.phase),
         );
-    if !warnings.is_empty() {
+    ctx.warnings.extend(warnings);
+    if !refused.is_empty() {
         return Err(Error::RetainedHistoryBlocked(format!(
             "Operation {}/{} publication incomplete at {}: {}",
             ctx.key.coordinator,
             ctx.key.operation_id,
             operation.phase,
-            warnings.join("; ")
+            refused.join("; ")
         )));
     }
     stop_phase("commit", &operation.phase);
@@ -1106,10 +1112,15 @@ pub fn result(
         counts,
         actions,
         metrics: ctx.metrics.finish(),
-        warnings: if replay {
-            vec!["Completed operation replay; current filesystem bytes were not inspected".into()]
-        } else {
-            Vec::new()
+        warnings: {
+            let mut warnings = std::mem::take(&mut ctx.warnings);
+            if replay {
+                warnings.push(
+                    "Completed operation replay; current filesystem bytes were not inspected"
+                        .into(),
+                );
+            }
+            warnings
         },
     })
 }

@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::output::{CommitOut, Output};
 use std::path::PathBuf;
 
-pub fn run(ctx: Ctx) -> Result<Output> {
+pub fn run(mut ctx: Ctx) -> Result<Output> {
     let Some(files) = ctx.project.uncommitted_task_files()? else {
         return Err(Error::Validation(format!(
             "commit_unavailable: {} is not in a git repository (or git is missing)",
@@ -22,7 +22,9 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     }
     let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     let message = format!("chore(tasks): commit {} records", paths.len());
-    let refused = crate::record_commit::commit_paths(&ctx.project.records, &paths, &message);
+    let (refused, warnings) =
+        crate::record_commit::commit_paths(&ctx.project.records, &paths, &message);
+    ctx.warnings.extend(warnings);
     if !refused.is_empty() {
         return Err(Error::Validation(refused.join("\n")));
     }

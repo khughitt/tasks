@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 const SHOWN: usize = 5;
+const INDEX_LOCK_BACKOFF_MS: &[u64] = &[5, 10, 20, 40, 80, 120, 160, 200];
 
 #[derive(Debug)]
 pub struct Committed {
@@ -80,12 +81,82 @@ fn state_home() -> Result<PathBuf, String> {
 }
 
 /// Commits `paths` (relative to `dir`, any directory inside the working tree) in one
-/// commit. An empty result means committed, or nothing differed from HEAD.
-pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
+/// commit. Returns `(refused, warnings)`: an empty `refused` means committed, or nothing
+/// differed from HEAD.
+pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> (Vec<String>, Vec<String>) {
     match state_home() {
         Ok(state) => commit_paths_in(dir, paths, message, &state, &mut || {}, &mut || {}, git),
-        Err(error) => vec![failed(dir, paths, &error, None)],
+        Err(error) => (vec![failed(dir, paths, &error, None)], Vec::new()),
     }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default)]
+pub struct Recovery {
+    pub unstaged: Vec<PathBuf>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StagedLedger {
+    version: u32,
+    toplevel: PathBuf,
+    git_dir: PathBuf,
+    entries: Vec<StagedEntry>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct StagedEntry {
+    path: String,
+    staged_blob: Option<Option<String>>,
+}
+
+fn staged_ledger_path(git_dir: &Path, state: &Path) -> PathBuf {
+    let digest = crate::history::sha256(git_dir.as_os_str().as_encoded_bytes());
+    let hex = &digest[..16];
+    state.join(format!("tasks/claims/.commit-{hex}.staged"))
+}
+
+fn write_staged_ledger(path: &Path, ledger: &StagedLedger) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let tmp = path.with_extension("staged.tmp");
+    let bytes = serde_json::to_vec(ledger).map_err(|error| error.to_string())?;
+    std::fs::write(&tmp, bytes).map_err(|error| error.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|error| error.to_string())
+}
+
+fn remove_staged_ledger(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn relative_to_dir(prefix: &Path, toplevel_rel: &str) -> PathBuf {
+    Path::new(toplevel_rel)
+        .strip_prefix(prefix)
+        .unwrap_or(Path::new(toplevel_rel))
+        .to_path_buf()
+}
+
+pub fn recovery_warning(left_uncommitted: &[PathBuf]) -> Option<String> {
+    if left_uncommitted.is_empty() {
+        return None;
+    }
+    let set: BTreeSet<PathBuf> = left_uncommitted.iter().cloned().collect();
+    let ids = ids_of(&set);
+    let retry = if ids.is_empty() {
+        "tasks commit".to_string()
+    } else {
+        format!("tasks commit {}", ids.join(" "))
+    };
+    Some(format!(
+        "recovered staged changes from an earlier interrupted commit: {}; left uncommitted in the working tree; run `{retry}` to commit them",
+        listed(rel(left_uncommitted))
+    ))
 }
 
 fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
@@ -212,11 +283,33 @@ fn unstage(repo: &Repo, ours: &[String]) -> Result<(), String> {
         vec!["rm", "--cached", "-q", "-r", "--ignore-unmatch", "--"]
     };
     args.extend(ours.iter().map(String::as_str));
-    match (repo.git)(&repo.toplevel, &args) {
+    match git_mutating(repo, &args) {
         Ok(output) if output.status.success() => Ok(()),
         Ok(output) => Err(cause_of(args[0], &output)),
         Err(error) => Err(error.to_string()),
     }
+}
+
+fn git_mutating(repo: &Repo, args: &[&str]) -> std::io::Result<Output> {
+    let mut result = (repo.git)(&repo.toplevel, args);
+    for ms in INDEX_LOCK_BACKOFF_MS {
+        let should_retry = match &result {
+            Ok(output) => !output.status.success() && stderr_tail(output).contains("index.lock"),
+            Err(_) => false,
+        };
+        if !should_retry {
+            break;
+        }
+        #[cfg(not(test))]
+        std::thread::sleep(std::time::Duration::from_millis(*ms));
+        #[cfg(test)]
+        {
+            let _ = ms;
+            std::thread::yield_now();
+        }
+        result = (repo.git)(&repo.toplevel, args);
+    }
+    result
 }
 
 /// Unstages `ours`, then says what a person must look at: `None` only when the unstage
@@ -315,8 +408,10 @@ pub(crate) fn commit_paths_in(
     before_commit: &mut dyn FnMut(),
     after_commit: &mut dyn FnMut(),
     git: Git,
-) -> Vec<String> {
-    commit_paths_report_in(dir, paths, message, state, before_commit, after_commit, git).0
+) -> (Vec<String>, Vec<String>) {
+    let (refused, warnings, _) =
+        commit_paths_report_in(dir, paths, message, state, before_commit, after_commit, git);
+    (refused, warnings)
 }
 
 fn commit_paths_report_in(
@@ -327,17 +422,25 @@ fn commit_paths_report_in(
     before_commit: &mut dyn FnMut(),
     after_commit: &mut dyn FnMut(),
     git: Git,
-) -> (Vec<String>, Option<Committed>) {
+) -> (Vec<String>, Vec<String>, Option<Committed>) {
     let repo = match discover(dir, git) {
         Ok(Some(repo)) => repo,
-        Ok(None) => return (vec![unavailable(dir, paths)], None),
-        Err(error) => return (vec![failed(dir, paths, &error, None)], None),
+        Ok(None) => return (vec![unavailable(dir, paths)], Vec::new(), None),
+        Err(error) => return (vec![failed(dir, paths, &error, None)], Vec::new(), None),
     };
     let _lock = match lock_for(&repo.common, state) {
         Ok(lock) => lock,
-        Err(error) => return (vec![failed(dir, paths, &error, None)], None),
+        Err(error) => return (vec![failed(dir, paths, &error, None)], Vec::new(), None),
     };
-    commit_under_lock(&repo, dir, paths, message, before_commit, after_commit)
+    commit_under_lock(
+        &repo,
+        dir,
+        paths,
+        message,
+        state,
+        before_commit,
+        after_commit,
+    )
 }
 
 fn commit_under_lock(
@@ -345,12 +448,14 @@ fn commit_under_lock(
     dir: &Path,
     paths: &[PathBuf],
     message: &str,
+    state: &Path,
     before_commit: &mut dyn FnMut(),
     after_commit: &mut dyn FnMut(),
-) -> (Vec<String>, Option<Committed>) {
+) -> (Vec<String>, Vec<String>, Option<Committed>) {
     let git = repo.git;
     let mut committed = None;
-    let warnings = (|| {
+    let mut warnings = Vec::new();
+    let refused = (|| {
         if let Some(what) = in_progress(&repo.git_dir) {
             return vec![deferred(
                 dir,
@@ -363,18 +468,6 @@ fn commit_under_lock(
             .is_ok_and(|output| output.status.success())
         {
             return vec![deferred(dir, paths, "HEAD is detached", None)];
-        }
-        match staged(repo) {
-            Ok(already) if !already.is_empty() => {
-                return vec![deferred(
-                    dir,
-                    paths,
-                    &format!("staged changes: {}", listed(&already)),
-                    None,
-                )];
-            }
-            Ok(_) => {}
-            Err(error) => return vec![failed(dir, paths, &error, None)],
         }
         let prefix = match dir.canonicalize() {
             Ok(dir) => match dir.strip_prefix(&repo.toplevel) {
@@ -394,9 +487,74 @@ fn commit_under_lock(
             .iter()
             .map(|path| prefix.join(path).display().to_string())
             .collect();
+        let ledger_path = staged_ledger_path(&repo.git_dir, state);
+        let had_ledger = ledger_path.exists();
+        match recover_staged(repo, state) {
+            Ok((unstaged, ledger_warnings)) => {
+                warnings.extend(ledger_warnings);
+                let left_uncommitted: Vec<PathBuf> = unstaged
+                    .into_iter()
+                    .filter(|p| !ours.contains(p))
+                    .map(|p| relative_to_dir(&prefix, &p))
+                    .collect();
+                if let Some(w) = recovery_warning(&left_uncommitted) {
+                    warnings.push(w);
+                }
+            }
+            Err(error) => return vec![failed(dir, paths, &error, None)],
+        }
+        match staged(repo) {
+            Ok(already) if !already.is_empty() => {
+                let already_vec: Vec<String> = already.iter().cloned().collect();
+                let mechanism_b_ok = if !had_ledger
+                    && !ours.is_empty()
+                    && already.iter().all(|p| ours.contains(p))
+                {
+                    match path_blobs(repo, None, &already_vec)
+                        .and_then(|blobs| working_tree_matches_index(repo, &already_vec, &blobs))
+                    {
+                        Ok(ok) => ok,
+                        Err(error) => return vec![failed(dir, paths, &error, None)],
+                    }
+                } else {
+                    false
+                };
+                if !mechanism_b_ok {
+                    return vec![deferred(
+                        dir,
+                        paths,
+                        &format!("staged changes: {}", listed(&already)),
+                        None,
+                    )];
+                }
+            }
+            Ok(_) => {}
+            Err(error) => return vec![failed(dir, paths, &error, None)],
+        }
+        if ours.is_empty() {
+            return Vec::new();
+        }
+        if let Err(error) = write_staged_ledger(
+            &ledger_path,
+            &StagedLedger {
+                version: 1,
+                toplevel: repo.toplevel.clone(),
+                git_dir: repo.git_dir.clone(),
+                entries: ours
+                    .iter()
+                    .map(|path| StagedEntry {
+                        path: path.clone(),
+                        staged_blob: None,
+                    })
+                    .collect(),
+            },
+        ) {
+            return vec![failed(dir, paths, &error, None)];
+        }
         let (present, missing): (Vec<&String>, Vec<&String>) = ours
             .iter()
             .partition(|path| repo.toplevel.join(path).exists());
+        let mut staged_groups: Vec<String> = Vec::new();
         for (base, group) in [
             (vec!["add", "-A", "--"], present),
             (
@@ -409,32 +567,112 @@ fn commit_under_lock(
             }
             let mut args = base;
             args.extend(group.iter().map(|path| path.as_str()));
-            let cause = match git(&repo.toplevel, &args) {
-                Ok(output) if output.status.success() => continue,
+            let cause = match git_mutating(repo, &args) {
+                Ok(output) if output.status.success() => {
+                    staged_groups.extend(group.into_iter().cloned());
+                    match path_blobs(repo, None, &staged_groups) {
+                        Ok(blobs) => {
+                            let _ = write_staged_ledger(
+                                &ledger_path,
+                                &StagedLedger {
+                                    version: 1,
+                                    toplevel: repo.toplevel.clone(),
+                                    git_dir: repo.git_dir.clone(),
+                                    entries: staged_groups
+                                        .iter()
+                                        .map(|path| StagedEntry {
+                                            path: path.clone(),
+                                            staged_blob: Some(blobs.get(path).cloned()),
+                                        })
+                                        .collect(),
+                                },
+                            );
+                        }
+                        Err(error) => {
+                            let cl = cleanup(repo, &staged_groups);
+                            if cl.is_none() {
+                                let _ = remove_staged_ledger(&ledger_path);
+                            }
+                            return vec![failed(dir, paths, &error, cl)];
+                        }
+                    }
+                    continue;
+                }
                 Ok(output) => cause_of(args[0], &output),
                 Err(error) => error.to_string(),
             };
-            return vec![failed(dir, paths, &cause, cleanup(repo, &ours))];
+            if staged_groups.is_empty() && cause.starts_with("index locked") {
+                let _ = remove_staged_ledger(&ledger_path);
+                return vec![failed(dir, paths, &cause, None)];
+            }
+            let cleanup_targets: Vec<String> = if staged_groups.is_empty() {
+                ours.clone()
+            } else {
+                staged_groups.clone()
+            };
+            let write_note = match path_blobs(repo, None, &cleanup_targets).and_then(|blobs| {
+                write_staged_ledger(
+                    &ledger_path,
+                    &StagedLedger {
+                        version: 1,
+                        toplevel: repo.toplevel.clone(),
+                        git_dir: repo.git_dir.clone(),
+                        entries: cleanup_targets
+                            .iter()
+                            .filter(|path| blobs.contains_key(*path))
+                            .map(|path| StagedEntry {
+                                path: path.clone(),
+                                staged_blob: Some(blobs.get(path).cloned()),
+                            })
+                            .collect(),
+                    },
+                )
+            }) {
+                Ok(()) => String::new(),
+                Err(write_err) => format!("; could not update staged ledger ({write_err})"),
+            };
+            let cl = cleanup(repo, &cleanup_targets);
+            if cl.is_none() {
+                let _ = remove_staged_ledger(&ledger_path);
+            }
+            return vec![failed(dir, paths, &format!("{cause}{write_note}"), cl)];
         }
         before_commit();
         let now = match staged(repo) {
             Ok(now) => now,
-            Err(error) => return vec![failed(dir, paths, &error, cleanup(repo, &ours))],
+            Err(error) => {
+                let cl = cleanup(repo, &ours);
+                if cl.is_none() {
+                    let _ = remove_staged_ledger(&ledger_path);
+                }
+                return vec![failed(dir, paths, &error, cl)];
+            }
         };
         if now.is_empty() {
+            let _ = remove_staged_ledger(&ledger_path);
             return Vec::new(); // the files already match HEAD
         }
         let foreign: Vec<&String> = now.iter().filter(|path| !ours.contains(path)).collect();
         if !foreign.is_empty() {
             let cause = format!("staged changes appeared: {}", listed(&foreign));
-            return vec![deferred(dir, paths, &cause, cleanup(repo, &ours))];
+            let cl = cleanup(repo, &ours);
+            if cl.is_none() {
+                let _ = remove_staged_ledger(&ledger_path);
+            }
+            return vec![deferred(dir, paths, &cause, cl)];
         }
         let expected = match path_blobs(repo, None, &ours) {
             Ok(blobs) => blobs,
-            Err(error) => return vec![failed(dir, paths, &error, cleanup(repo, &ours))],
+            Err(error) => {
+                let cl = cleanup(repo, &ours);
+                if cl.is_none() {
+                    let _ = remove_staged_ledger(&ledger_path);
+                }
+                return vec![failed(dir, paths, &error, cl)];
+            }
         };
-        let output = git(
-            &repo.toplevel,
+        let output = git_mutating(
+            repo,
             &[
                 "-c",
                 "core.abbrev=no",
@@ -452,17 +690,21 @@ fn commit_under_lock(
         let output = match output {
             Ok(output) if output.status.success() => output,
             Ok(output) => {
-                return vec![failed(
-                    dir,
-                    paths,
-                    &cause_of("commit", &output),
-                    cleanup(repo, &ours),
-                )];
+                let cl = cleanup(repo, &ours);
+                if cl.is_none() {
+                    let _ = remove_staged_ledger(&ledger_path);
+                }
+                return vec![failed(dir, paths, &cause_of("commit", &output), cl)];
             }
             Err(error) => {
-                return vec![failed(dir, paths, &error.to_string(), cleanup(repo, &ours))];
+                let cl = cleanup(repo, &ours);
+                if cl.is_none() {
+                    let _ = remove_staged_ledger(&ledger_path);
+                }
+                return vec![failed(dir, paths, &error.to_string(), cl)];
             }
         };
+        let _ = remove_staged_ledger(&ledger_path);
         let identified = commit_identity(&output.stdout).filter(|sha| {
             git(&repo.toplevel, &["cat-file", "-t", sha])
                 .is_ok_and(|out| out.status.success() && out.stdout == b"commit\n")
@@ -483,7 +725,125 @@ fn commit_under_lock(
             )],
         }
     })();
-    (warnings, committed)
+    (refused, warnings, committed)
+}
+
+fn working_tree_matches_index(
+    repo: &Repo,
+    paths: &[String],
+    index_blobs: &BTreeMap<String, String>,
+) -> Result<bool, String> {
+    if paths.is_empty() {
+        return Ok(true);
+    }
+    let mut args = vec!["diff", "--name-only", "-z", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let output = (repo.git)(&repo.toplevel, &args).map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(cause_of("diff", &output));
+    }
+    if !output.stdout.is_empty() {
+        return Ok(false);
+    }
+    for path in paths {
+        if !index_blobs.contains_key(path) && repo.toplevel.join(path).exists() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn recover_staged(repo: &Repo, state: &Path) -> Result<(Vec<String>, Vec<String>), String> {
+    let ledger_path = staged_ledger_path(&repo.git_dir, state);
+    if !ledger_path.exists() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    if in_progress(&repo.git_dir).is_some()
+        || !(repo.git)(&repo.toplevel, &["symbolic-ref", "-q", "HEAD"])
+            .is_ok_and(|output| output.status.success())
+    {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let raw = match std::fs::read(&ledger_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            let _ = remove_staged_ledger(&ledger_path);
+            return Ok((
+                Vec::new(),
+                vec![format!(
+                    "discarded unreadable or mismatched staged-commit ledger at {}: {error}; inspect `git status` if staged changes remain",
+                    ledger_path.display()
+                )],
+            ));
+        }
+    };
+    let ledger: StagedLedger = match serde_json::from_slice(&raw) {
+        Ok(ledger) => ledger,
+        Err(error) => {
+            let _ = remove_staged_ledger(&ledger_path);
+            return Ok((
+                Vec::new(),
+                vec![format!(
+                    "discarded unreadable or mismatched staged-commit ledger at {}: {error}; inspect `git status` if staged changes remain",
+                    ledger_path.display()
+                )],
+            ));
+        }
+    };
+    if ledger.version != 1 || ledger.toplevel != repo.toplevel || ledger.git_dir != repo.git_dir {
+        let _ = remove_staged_ledger(&ledger_path);
+        return Ok((
+            Vec::new(),
+            vec![format!(
+                "discarded unreadable or mismatched staged-commit ledger at {}: mismatched repository or version; inspect `git status` if staged changes remain",
+                ledger_path.display()
+            )],
+        ));
+    }
+    let currently_staged = staged(repo)?;
+    let entry_paths: Vec<String> = ledger.entries.iter().map(|e| e.path.clone()).collect();
+    let current_blobs = if entry_paths.is_empty() {
+        BTreeMap::new()
+    } else {
+        path_blobs(repo, None, &entry_paths)?
+    };
+    let mut to_unstage_entries = Vec::new();
+    for entry in ledger.entries {
+        if !currently_staged.contains(&entry.path) {
+            continue;
+        }
+        if entry.staged_blob == Some(current_blobs.get(&entry.path).cloned()) {
+            to_unstage_entries.push(entry);
+        } else if entry.staged_blob.is_none()
+            && working_tree_matches_index(repo, std::slice::from_ref(&entry.path), &current_blobs)?
+        {
+            to_unstage_entries.push(entry);
+        }
+    }
+    let to_unstage_paths: Vec<String> =
+        to_unstage_entries.iter().map(|e| e.path.clone()).collect();
+    if !to_unstage_paths.is_empty() {
+        if let Err(error) = unstage(repo, &to_unstage_paths) {
+            let suffix = match write_staged_ledger(
+                &ledger_path,
+                &StagedLedger {
+                    version: 1,
+                    toplevel: repo.toplevel.clone(),
+                    git_dir: repo.git_dir.clone(),
+                    entries: to_unstage_entries,
+                },
+            ) {
+                Ok(()) => String::new(),
+                Err(write_err) => format!("; could not update staged ledger ({write_err})"),
+            };
+            return Err(format!(
+                "could not unstage {} ({error}){suffix}",
+                listed(&to_unstage_paths)
+            ));
+        }
+    }
+    let _ = remove_staged_ledger(&ledger_path);
+    Ok((to_unstage_paths, Vec::new()))
 }
 
 /// The top level of the working tree `dir` lies in, canonical; `None` outside git or
@@ -547,16 +907,23 @@ fn ids_of(paths: &BTreeSet<PathBuf>) -> Vec<String> {
             .components()
             .map(|part| part.as_os_str().to_string_lossy().into_owned())
             .collect();
-        match parts.as_slice() {
-            [tasks, file] if tasks == "tasks" => {
-                if let Some(id) = file.strip_suffix(".md") {
-                    ids.insert(id.to_string());
-                }
+        if let [.., tasks, file] = parts.as_slice()
+            && tasks == "tasks"
+            && let Some(id) = file.strip_suffix(".md")
+            && crate::model::TaskId::parse(id).is_ok()
+        {
+            ids.insert(id.to_string());
+            continue;
+        }
+        for (idx, window) in parts.windows(3).enumerate() {
+            if window[0] == "tasks"
+                && window[1] == "files"
+                && idx + 3 < parts.len()
+                && crate::model::TaskId::parse(&window[2]).is_ok()
+            {
+                ids.insert(window[2].clone());
+                break;
             }
-            [tasks, files, id, ..] if tasks == "tasks" && files == "files" => {
-                ids.insert(id.clone());
-            }
-            _ => {}
         }
     }
     ids.into_iter().collect()
@@ -670,7 +1037,7 @@ fn commit_drained(
             .collect();
         match state_home() {
             Ok(state) => {
-                let (refused, report) = commit_paths_report_in(
+                let (refused, recovery_warnings, report) = commit_paths_report_in(
                     &top,
                     &relative,
                     &compose(verb, &ids, &tree.projects),
@@ -682,6 +1049,7 @@ fn commit_drained(
                 if refused.is_empty() {
                     paths.extend(tree.absolute);
                 }
+                warnings.extend(recovery_warnings);
                 warnings.extend(refused);
                 committed.extend(report);
             }
@@ -693,6 +1061,7 @@ fn commit_drained(
 
 pub struct CommitLock {
     common: PathBuf,
+    state: PathBuf,
     _guard: MutationLock,
 }
 pub fn common_dir(dir: &Path) -> Result<PathBuf, String> {
@@ -700,28 +1069,84 @@ pub fn common_dir(dir: &Path) -> Result<PathBuf, String> {
         .map(|r| r.common)
         .ok_or_else(|| "retained publication requires Git records".into())
 }
+#[allow(dead_code)]
+pub fn try_lock(dir: &Path) -> Result<Option<CommitLock>, String> {
+    let Some(repo) = discover(dir, git)? else {
+        return Ok(None);
+    };
+    let state = state_home()?;
+    let guard = lock_for(&repo.common, &state)?;
+    Ok(Some(CommitLock {
+        common: repo.common,
+        state,
+        _guard: guard,
+    }))
+}
 pub fn lock(dir: &Path) -> Result<CommitLock, String> {
     let common = common_dir(dir)?;
-    let guard = lock_for(&common, &state_home()?)?;
+    let state = state_home()?;
+    let guard = lock_for(&common, &state)?;
     Ok(CommitLock {
         common,
+        state,
         _guard: guard,
     })
 }
 impl CommitLock {
-    pub fn commit_paths(&self, dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
+    #[allow(dead_code)]
+    pub fn recover(&self, dir: &Path) -> Result<Recovery, String> {
+        let repo = match discover(dir, git)? {
+            Some(r) if r.common == self.common => r,
+            _ => {
+                return Err("held commit lock no longer matches records repository".to_string());
+            }
+        };
+        let prefix = dir
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+            .strip_prefix(&repo.toplevel)
+            .map_err(|_| "not under the repository top level".to_string())?
+            .to_path_buf();
+        let (unstaged, warnings) = recover_staged(&repo, &self.state)?;
+        Ok(Recovery {
+            unstaged: unstaged
+                .into_iter()
+                .map(|p| relative_to_dir(&prefix, &p))
+                .collect(),
+            warnings,
+        })
+    }
+
+    pub fn commit_paths(
+        &self,
+        dir: &Path,
+        paths: &[PathBuf],
+        message: &str,
+    ) -> (Vec<String>, Vec<String>) {
         let repo = match discover(dir, git) {
             Ok(Some(r)) if r.common == self.common => r,
             _ => {
-                return vec![failed(
-                    dir,
-                    paths,
-                    "held commit lock no longer matches records repository",
-                    None,
-                )];
+                return (
+                    vec![failed(
+                        dir,
+                        paths,
+                        "held commit lock no longer matches records repository",
+                        None,
+                    )],
+                    Vec::new(),
+                );
             }
         };
-        commit_under_lock(&repo, dir, paths, message, &mut || {}, &mut || {}).0
+        let (refused, warnings, _) = commit_under_lock(
+            &repo,
+            dir,
+            paths,
+            message,
+            &self.state,
+            &mut || {},
+            &mut || {},
+        );
+        (refused, warnings)
     }
 }
 
@@ -869,7 +1294,7 @@ mod tests {
     }
 
     fn commit(root: &Path, paths: &[PathBuf], state: &Path) -> Vec<String> {
-        commit_paths_in(
+        let (refused, warnings) = commit_paths_in(
             root,
             paths,
             "chore(tasks): note tst-000001",
@@ -877,7 +1302,9 @@ mod tests {
             &mut || {},
             &mut || {},
             isolated_git,
-        )
+        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        refused
     }
 
     fn report(
@@ -886,7 +1313,7 @@ mod tests {
         after: &mut dyn FnMut(),
     ) -> (Vec<String>, Option<Committed>) {
         let state = state_home();
-        commit_paths_report_in(
+        let (refused, warnings, committed) = commit_paths_report_in(
             root,
             paths,
             "chore(tasks): note tst-000001",
@@ -894,7 +1321,9 @@ mod tests {
             &mut || {},
             after,
             isolated_git,
-        )
+        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        (refused, committed)
     }
 
     #[test]
@@ -910,7 +1339,7 @@ mod tests {
         let root = dir.path();
         let path = write(root, "tasks/tst-000001.md", "record");
         let state = state_home();
-        let (warnings, result) = commit_paths_report_in(
+        let (warnings, recovery_warnings, result) = commit_paths_report_in(
             root,
             &[path],
             "m",
@@ -919,6 +1348,7 @@ mod tests {
             &mut || {},
             without_identity,
         );
+        assert!(recovery_warnings.is_empty());
         assert!(result.is_none());
         assert!(warnings[0].starts_with("commit_failed:"));
         assert!(warnings[0].contains("commit made but not identified"));
@@ -1132,7 +1562,7 @@ mod tests {
             let root = dir.path();
             let state = state_home();
             let record = write(root, "tasks/a*.txt", "ours");
-            let warnings = commit_paths_in(
+            let (warnings, recovery_warnings) = commit_paths_in(
                 root,
                 &[record],
                 "m",
@@ -1144,6 +1574,7 @@ mod tests {
                 &mut || {},
                 isolated_git,
             );
+            assert!(recovery_warnings.is_empty());
             assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
             assert_eq!(staged(root).trim(), "tasks/ab.txt");
             assert!(
@@ -1313,7 +1744,7 @@ mod tests {
         let root = dir.path();
         let state = state_home();
         let record = write(root, "tasks/tst-000001.md", "a");
-        let warnings = commit_paths_in(
+        let (warnings, recovery_warnings) = commit_paths_in(
             root,
             &[record],
             "m",
@@ -1325,6 +1756,7 @@ mod tests {
             &mut || {},
             isolated_git,
         );
+        assert!(recovery_warnings.is_empty());
         assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
         assert_eq!(staged(root).trim(), "other.txt");
     }
@@ -1452,7 +1884,7 @@ mod tests {
                         let record =
                             write(&root, &format!("tasks/tst-00000{n}.md"), &format!("{i}"));
                         let message = format!("chore(tasks): note tst-00000{n}");
-                        let warnings = commit_paths_in(
+                        let (warnings, recovery_warnings) = commit_paths_in(
                             &root,
                             &[record],
                             &message,
@@ -1462,6 +1894,7 @@ mod tests {
                             isolated_git,
                         );
                         assert_eq!(warnings, Vec::<String>::new());
+                        assert_eq!(recovery_warnings, Vec::<String>::new());
                     }
                 })
             })
@@ -1487,7 +1920,7 @@ mod tests {
         // Another git process takes the index lock after the records are staged: the
         // commit fails, and so does the unstage, which must be reported, not swallowed.
         let lock = root.join(".git/index.lock");
-        let warnings = commit_paths_in(
+        let (warnings, recovery_warnings) = commit_paths_in(
             root,
             &[record],
             "m",
@@ -1498,6 +1931,7 @@ mod tests {
             &mut || {},
             isolated_git,
         );
+        assert!(recovery_warnings.is_empty());
         std::fs::remove_file(&lock).unwrap();
         assert!(warnings[0].starts_with("commit_failed:"), "{warnings:?}");
         assert!(
@@ -1510,5 +1944,608 @@ mod tests {
             "{warnings:?}"
         );
         assert_eq!(staged(root).trim(), "tasks/tst-000001.md");
+    }
+
+    #[test]
+    fn transient_index_lock_retries_and_succeeds() {
+        use std::cell::Cell;
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::ExitStatus;
+
+        thread_local! {
+            static ADD_FAILS: Cell<usize> = const { Cell::new(0) };
+        }
+
+        fn flaky_git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
+            if args.first().copied() == Some("add") {
+                let n = ADD_FAILS.with(|c| {
+                    let v = c.get();
+                    c.set(v + 1);
+                    v
+                });
+                if n < 3 {
+                    return Ok(Output {
+                        status: ExitStatus::from_raw(128 << 8),
+                        stdout: Vec::new(),
+                        stderr: b"fatal: Unable to create '/repo/.git/index.lock': File exists.\n"
+                            .to_vec(),
+                    });
+                }
+            }
+            isolated_git(dir, args)
+        }
+
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let record = write(root, "tasks/tst-000001.md", "a");
+        ADD_FAILS.with(|c| c.set(0));
+        let (warnings, recovery_warnings) = commit_paths_in(
+            root,
+            &[record],
+            "chore(tasks): note tst-000001",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            flaky_git,
+        );
+        assert!(warnings.is_empty() && recovery_warnings.is_empty(), "{warnings:?}");
+        assert_eq!(ADD_FAILS.with(|c| c.get()), 4);
+        assert_eq!(last_files(root).trim(), "tasks/tst-000001.md");
+    }
+
+    #[test]
+    fn persistent_index_lock_exhausts_retries_without_unlinking_lock() {
+        use std::cell::Cell;
+
+        thread_local! {
+            static ATTEMPTS: Cell<usize> = const { Cell::new(0) };
+        }
+
+        fn counting_git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
+            if args.first().copied() == Some("add") {
+                ATTEMPTS.with(|c| c.set(c.get() + 1));
+            }
+            isolated_git(dir, args)
+        }
+
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let lock = root.join(".git/index.lock");
+        std::fs::write(&lock, "").unwrap();
+        let record = write(root, "tasks/tst-000001.md", "a");
+        ATTEMPTS.with(|c| c.set(0));
+        let (warnings, recovery_warnings) = commit_paths_in(
+            root,
+            &[record],
+            "chore(tasks): note tst-000001",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            counting_git,
+        );
+        assert!(recovery_warnings.is_empty());
+        assert!(lock.exists(), ".git/index.lock must never be unlinked");
+        std::fs::remove_file(&lock).unwrap();
+        assert_eq!(
+            ATTEMPTS.with(|c| c.get()),
+            1 + INDEX_LOCK_BACKOFF_MS.len()
+        );
+        assert!(
+            warnings[0].starts_with("commit_failed:") && warnings[0].contains("index locked"),
+            "{warnings:?}"
+        );
+    }
+
+    fn repo_git_dir(root: &Path) -> PathBuf {
+        PathBuf::from(git(root, &["rev-parse", "--absolute-git-dir"]).trim())
+            .canonicalize()
+            .unwrap()
+    }
+
+    #[test]
+    fn recovers_self_staged_entries_left_by_failed_commit_and_unstage() {
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let record = write(root, "tasks/tst-000001.md", "v1");
+        let lock = root.join(".git/index.lock");
+        let (refused, warnings) = commit_paths_in(
+            root,
+            std::slice::from_ref(&record),
+            "m",
+            state.path(),
+            &mut || {
+                std::fs::write(&lock, "").unwrap();
+            },
+            &mut || {},
+            isolated_git,
+        );
+        assert!(!refused.is_empty());
+        assert!(warnings.is_empty());
+        std::fs::remove_file(&lock).unwrap();
+        let ledger_path = staged_ledger_path(&repo_git_dir(root), state.path());
+        assert!(ledger_path.exists());
+
+        let (refused, warnings) = commit_paths_in(
+            root,
+            &[record],
+            "chore(tasks): note tst-000001",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused.is_empty(), "{refused:?}");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(!ledger_path.exists());
+        assert_eq!(last_files(root).trim(), "tasks/tst-000001.md");
+    }
+
+    #[test]
+    fn recovers_stranded_same_task_after_new_working_tree_write_and_commits_updated_bytes() {
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let record = write(root, "tasks/tst-000001.md", "v1");
+        let lock = root.join(".git/index.lock");
+        let (refused, _) = commit_paths_in(
+            root,
+            std::slice::from_ref(&record),
+            "m1",
+            state.path(),
+            &mut || {
+                std::fs::write(&lock, "").unwrap();
+            },
+            &mut || {},
+            isolated_git,
+        );
+        assert!(!refused.is_empty());
+        std::fs::remove_file(&lock).unwrap();
+
+        // Simulate Task::save() writing new bytes ("v2") in a subsequent `tasks note` on the same task (`MM` state).
+        write(root, "tasks/tst-000001.md", "v2");
+        let (refused, warnings) = commit_paths_in(
+            root,
+            &[record],
+            "chore(tasks): note tst-000001",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused.is_empty(), "{refused:?}");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(git(root, &["show", "HEAD:tasks/tst-000001.md"]), "v2");
+        assert_eq!(staged(root), "");
+        assert!(!staged_ledger_path(&repo_git_dir(root), state.path()).exists());
+    }
+
+    #[test]
+    fn recovers_stranded_task_a_when_task_b_commits_and_warns_without_refusing() {
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let task_a = write(root, "tasks/tst-000001.md", "task a");
+        let lock = root.join(".git/index.lock");
+        let (refused, _) = commit_paths_in(
+            root,
+            &[task_a],
+            "m1",
+            state.path(),
+            &mut || {
+                std::fs::write(&lock, "").unwrap();
+            },
+            &mut || {},
+            isolated_git,
+        );
+        assert!(!refused.is_empty());
+        std::fs::remove_file(&lock).unwrap();
+
+        let task_b = write(root, "tasks/tst-000002.md", "task b");
+        let (refused, warnings) = commit_paths_in(
+            root,
+            &[task_b],
+            "chore(tasks): note tst-000002",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused.is_empty(), "{refused:?}");
+        assert_eq!(last_files(root).trim(), "tasks/tst-000002.md");
+        assert_eq!(staged(root), "");
+        assert!(root.join("tasks/tst-000001.md").exists());
+        assert!(!staged_ledger_path(&repo_git_dir(root), state.path()).exists());
+        assert_eq!(
+            warnings,
+            vec![
+                "recovered staged changes from an earlier interrupted commit: tasks/tst-000001.md; left uncommitted in the working tree; run `tasks commit tst-000001` to commit them".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn recover_does_not_unstage_during_merge_rebase_or_detached_head() {
+        let dir = repo(true);
+        let root = dir.path().canonicalize().unwrap();
+        let state = state_home();
+        let record = write(&root, "tasks/tst-000001.md", "v1");
+        let lock_file = root.join(".git/index.lock");
+        let _ = commit_paths_in(
+            &root,
+            std::slice::from_ref(&record),
+            "m1",
+            state.path(),
+            &mut || {
+                std::fs::write(&lock_file, "").unwrap();
+            },
+            &mut || {},
+            isolated_git,
+        );
+        std::fs::remove_file(&lock_file).unwrap();
+        let ledger_path = staged_ledger_path(&repo_git_dir(&root), state.path());
+        assert!(ledger_path.exists());
+
+        let head = git(&root, &["rev-parse", "HEAD"]);
+        // 1. MERGE_HEAD
+        std::fs::write(root.join(".git/MERGE_HEAD"), &head).unwrap();
+        let (refused, warnings) = commit_paths_in(
+            &root,
+            std::slice::from_ref(&record),
+            "m2",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused[0].starts_with("commit_deferred:"));
+        assert!(warnings.is_empty());
+        assert_eq!(staged(&root).trim(), "tasks/tst-000001.md");
+        assert!(ledger_path.exists());
+        std::fs::remove_file(root.join(".git/MERGE_HEAD")).unwrap();
+
+        // 2. rebase-merge directory
+        std::fs::create_dir_all(root.join(".git/rebase-merge")).unwrap();
+        let (refused, warnings) = commit_paths_in(
+            &root,
+            std::slice::from_ref(&record),
+            "m2",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused[0].starts_with("commit_deferred:"));
+        assert!(warnings.is_empty());
+        assert_eq!(staged(&root).trim(), "tasks/tst-000001.md");
+        assert!(ledger_path.exists());
+        std::fs::remove_dir_all(root.join(".git/rebase-merge")).unwrap();
+
+        // 3. detached HEAD
+        git(&root, &["checkout", "-q", "--detach"]);
+        let (refused, warnings) = commit_paths_in(
+            &root,
+            &[record],
+            "m2",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused[0].starts_with("commit_deferred:"));
+        assert!(warnings.is_empty());
+        assert_eq!(staged(&root).trim(), "tasks/tst-000001.md");
+        assert!(ledger_path.exists());
+        let commit_lock = CommitLock {
+            common: repo_git_dir(&root),
+            state: state.path().to_path_buf(),
+            _guard: lock_for(&repo_git_dir(&root), state.path()).unwrap(),
+        };
+        let recovery = commit_lock.recover(&root).unwrap();
+        assert!(recovery.unstaged.is_empty() && recovery.warnings.is_empty());
+        assert_eq!(staged(&root).trim(), "tasks/tst-000001.md");
+        assert!(ledger_path.exists());
+    }
+
+    #[test]
+    fn failed_recovery_unstage_retains_only_to_unstage_entries_in_ledger() {
+        let dir = repo(true);
+        let root = dir.path().canonicalize().unwrap();
+        let state = state_home();
+        let _a = write(&root, "tasks/tst-000001.md", "a");
+        git(&root, &["add", "tasks/tst-000001.md"]);
+        git(&root, &["commit", "-q", "-m", "commit a"]);
+        let b = write(&root, "tasks/tst-000002.md", "b");
+        git(&root, &["add", "tasks/tst-000002.md"]);
+        let r = discover(&root, isolated_git).unwrap().unwrap();
+        let blobs = path_blobs(&r, None, &["tasks/tst-000002.md".to_string()]).unwrap();
+        let ledger_path = staged_ledger_path(&r.git_dir, state.path());
+        write_staged_ledger(
+            &ledger_path,
+            &StagedLedger {
+                version: 1,
+                toplevel: r.toplevel.clone(),
+                git_dir: r.git_dir.clone(),
+                entries: vec![
+                    StagedEntry {
+                        path: "tasks/tst-000001.md".to_string(),
+                        staged_blob: Some(Some("100644 deadbeef".to_string())),
+                    },
+                    StagedEntry {
+                        path: "tasks/tst-000002.md".to_string(),
+                        staged_blob: Some(blobs.get("tasks/tst-000002.md").cloned()),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let lock_file = root.join(".git/index.lock");
+        std::fs::write(&lock_file, "").unwrap();
+        let (refused, _) = commit_paths_in(
+            &root,
+            &[b],
+            "m",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        std::fs::remove_file(&lock_file).unwrap();
+        assert!(
+            refused[0].starts_with("commit_failed:") && refused[0].contains("index locked"),
+            "{refused:?}"
+        );
+        let updated: StagedLedger =
+            serde_json::from_slice(&std::fs::read(&ledger_path).unwrap()).unwrap();
+        assert_eq!(updated.entries.len(), 1);
+        assert_eq!(updated.entries[0].path, "tasks/tst-000002.md");
+    }
+
+    #[test]
+    fn failed_first_git_add_removes_ledger_without_leaving_null_entries() {
+        let dir = repo(true);
+        let root = dir.path().canonicalize().unwrap();
+        let state = state_home();
+        let record = write(&root, "tasks/tst-000001.md", "v1");
+        let lock_file = root.join(".git/index.lock");
+        std::fs::write(&lock_file, "").unwrap();
+        let (refused, _) = commit_paths_in(
+            &root,
+            std::slice::from_ref(&record),
+            "m",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        std::fs::remove_file(&lock_file).unwrap();
+        assert!(refused[0].starts_with("commit_failed:"));
+        let ledger_path = staged_ledger_path(&repo_git_dir(&root), state.path());
+        assert!(!ledger_path.exists());
+
+        // User partially stages v1 and writes v2 in working tree (`MM`); next commit must defer and keep v1 staged.
+        git(&root, &["add", "tasks/tst-000001.md"]);
+        write(&root, "tasks/tst-000001.md", "v2");
+        let (refused, _) = commit_paths_in(
+            &root,
+            &[record],
+            "m2",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused[0].starts_with("commit_deferred:"), "{refused:?}");
+        assert_eq!(git(&root, &["show", ":tasks/tst-000001.md"]), "v1");
+    }
+
+    #[test]
+    fn null_staged_blob_from_sigkill_unstages_only_when_index_matches_working_tree() {
+        // Subcase (a): index matches working tree -> recovery unstages and commits cleanly.
+        {
+            let dir = repo(true);
+            let root = dir.path().canonicalize().unwrap();
+            let state = state_home();
+            let record = write(&root, "tasks/tst-000001.md", "v1");
+            git(&root, &["add", "tasks/tst-000001.md"]);
+            let r = discover(&root, isolated_git).unwrap().unwrap();
+            let ledger_path = staged_ledger_path(&r.git_dir, state.path());
+            write_staged_ledger(
+                &ledger_path,
+                &StagedLedger {
+                    version: 1,
+                    toplevel: r.toplevel.clone(),
+                    git_dir: r.git_dir.clone(),
+                    entries: vec![StagedEntry {
+                        path: "tasks/tst-000001.md".to_string(),
+                        staged_blob: None,
+                    }],
+                },
+            )
+            .unwrap();
+            let (refused, warnings) = commit_paths_in(
+                &root,
+                &[record],
+                "m",
+                state.path(),
+                &mut || {},
+                &mut || {},
+                isolated_git,
+            );
+            assert!(refused.is_empty() && warnings.is_empty(), "{refused:?}");
+            assert!(!ledger_path.exists());
+            assert_eq!(git(&root, &["show", "HEAD:tasks/tst-000001.md"]), "v1");
+        }
+
+        // Subcase (b): index has v1 while working tree has v2 (`MM`) -> drops null entry as foreign and defers.
+        {
+            let dir = repo(true);
+            let root = dir.path().canonicalize().unwrap();
+            let state = state_home();
+            let record = write(&root, "tasks/tst-000001.md", "v1");
+            git(&root, &["add", "tasks/tst-000001.md"]);
+            write(&root, "tasks/tst-000001.md", "v2");
+            let r = discover(&root, isolated_git).unwrap().unwrap();
+            let ledger_path = staged_ledger_path(&r.git_dir, state.path());
+            write_staged_ledger(
+                &ledger_path,
+                &StagedLedger {
+                    version: 1,
+                    toplevel: r.toplevel.clone(),
+                    git_dir: r.git_dir.clone(),
+                    entries: vec![StagedEntry {
+                        path: "tasks/tst-000001.md".to_string(),
+                        staged_blob: None,
+                    }],
+                },
+            )
+            .unwrap();
+            let (refused, _) = commit_paths_in(
+                &root,
+                &[record],
+                "m",
+                state.path(),
+                &mut || {},
+                &mut || {},
+                isolated_git,
+            );
+            assert!(refused[0].starts_with("commit_deferred:"), "{refused:?}");
+            assert!(!ledger_path.exists());
+            assert_eq!(git(&root, &["show", ":tasks/tst-000001.md"]), "v1");
+        }
+    }
+
+    #[test]
+    fn externally_restaged_ledger_entry_is_dropped_as_foreign_and_defers() {
+        let dir = repo(true);
+        let root = dir.path().canonicalize().unwrap();
+        let state = state_home();
+        let record = write(&root, "tasks/tst-000001.md", "restaged");
+        git(&root, &["add", "tasks/tst-000001.md"]);
+        let r = discover(&root, isolated_git).unwrap().unwrap();
+        let ledger_path = staged_ledger_path(&r.git_dir, state.path());
+        write_staged_ledger(
+            &ledger_path,
+            &StagedLedger {
+                version: 1,
+                toplevel: r.toplevel.clone(),
+                git_dir: r.git_dir.clone(),
+                entries: vec![StagedEntry {
+                    path: "tasks/tst-000001.md".to_string(),
+                    staged_blob: Some(Some(
+                        "100644 0000000000000000000000000000000000000000".to_string(),
+                    )),
+                }],
+            },
+        )
+        .unwrap();
+        let (refused, _) = commit_paths_in(
+            &root,
+            &[record],
+            "m",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused[0].starts_with("commit_deferred:"), "{refused:?}");
+        assert!(!ledger_path.exists());
+        assert_eq!(git(&root, &["show", ":tasks/tst-000001.md"]), "restaged");
+    }
+
+    #[test]
+    fn mechanism_b_proceeds_when_staged_subset_of_ours_matches_working_tree() {
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let record = write(root, "tasks/tst-000001.md", "cleanly staged");
+        git(root, &["add", "tasks/tst-000001.md"]);
+        assert_eq!(commit(root, &[record], state.path()), Vec::<String>::new());
+        assert_eq!(
+            git(root, &["show", "HEAD:tasks/tst-000001.md"]),
+            "cleanly staged"
+        );
+    }
+
+    #[test]
+    fn mechanism_b_defers_when_a_staged_deletion_is_recreated_in_the_working_tree() {
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let record = write(root, "tasks/tst-000001.md", "v1");
+        git(root, &["add", "tasks/tst-000001.md"]);
+        git(root, &["commit", "-q", "-m", "seed"]);
+        git(root, &["rm", "-q", "tasks/tst-000001.md"]);
+        write(root, "tasks/tst-000001.md", "recreated in working tree");
+        let refused = commit(root, &[record], state.path());
+        assert!(refused[0].starts_with("commit_deferred:"), "{refused:?}");
+        assert_eq!(staged(root).trim(), "tasks/tst-000001.md");
+    }
+
+    #[test]
+    fn linked_worktree_commit_does_not_touch_another_worktrees_staged_ledger() {
+        let dir = repo(true);
+        let main = dir.path().canonicalize().unwrap();
+        let state = state_home();
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt = wt_dir.path().join("wt");
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "side", wt.to_str().unwrap()],
+        );
+        let main_record = write(&main, "tasks/tst-000001.md", "main stranded");
+        let main_lock = main.join(".git/index.lock");
+        let (refused, _) = commit_paths_in(
+            &main,
+            &[main_record],
+            "m1",
+            state.path(),
+            &mut || {
+                std::fs::write(&main_lock, "").unwrap();
+            },
+            &mut || {},
+            isolated_git,
+        );
+        assert!(!refused.is_empty());
+        std::fs::remove_file(&main_lock).unwrap();
+        let main_ledger = staged_ledger_path(&repo_git_dir(&main), state.path());
+        assert!(main_ledger.exists());
+
+        let wt_record = write(&wt, "tasks/tst-000002.md", "wt record");
+        assert_eq!(commit(&wt, &[wt_record], state.path()), Vec::<String>::new());
+        assert!(main_ledger.exists(), "main's ledger must not be touched by wt");
+        assert_eq!(staged(&main).trim(), "tasks/tst-000001.md");
+    }
+
+    #[test]
+    fn corrupt_or_mismatched_staged_ledger_warns_and_is_removed() {
+        let dir = repo(true);
+        let root = dir.path().canonicalize().unwrap();
+        let state = state_home();
+        let ledger_path = staged_ledger_path(&repo_git_dir(&root), state.path());
+        std::fs::create_dir_all(ledger_path.parent().unwrap()).unwrap();
+        std::fs::write(&ledger_path, "{not json").unwrap();
+
+        let record = write(&root, "tasks/tst-000001.md", "v1");
+        let (refused, warnings) = commit_paths_in(
+            &root,
+            &[record],
+            "m",
+            state.path(),
+            &mut || {},
+            &mut || {},
+            isolated_git,
+        );
+        assert!(refused.is_empty(), "{refused:?}");
+        assert!(!ledger_path.exists());
+        assert!(
+            warnings
+                .first()
+                .is_some_and(|w| w.contains("discarded unreadable or mismatched staged-commit ledger at")),
+            "{warnings:?}"
+        );
     }
 }

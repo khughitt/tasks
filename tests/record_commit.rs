@@ -765,3 +765,74 @@ fn archive_publish_after_new_archive() {
 fn archive_publish_after_move() {
     archive_recovery_publication("move");
 }
+
+#[test]
+fn prime_and_start_do_not_create_index_lock_when_stat_cache_is_dirty() {
+    use std::os::unix::fs::MetadataExt;
+    use std::time::Duration;
+
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let id = add(&env, &root, "a task");
+    let task_file = root.join(format!("tasks/{id}.md"));
+    let old_mtime = std::fs::metadata(&task_file).unwrap().modified().unwrap();
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&task_file)
+        .unwrap();
+    f.set_modified(old_mtime + Duration::from_secs(2)).unwrap();
+    drop(f);
+
+    let index_path = root.join(".git/index");
+    let before = std::fs::metadata(&index_path).unwrap();
+    let before_key = (before.ino(), before.modified().unwrap());
+
+    let out = env.json(&root, &["prime"]);
+    let warnings = out["warnings"].to_string();
+    assert!(!warnings.contains("uncommitted task files"), "{out}");
+
+    let after = std::fs::metadata(&index_path).unwrap();
+    let after_key = (after.ino(), after.modified().unwrap());
+    assert_eq!(
+        after_key, before_key,
+        "git status refreshed .git/index via optional index.lock"
+    );
+}
+
+#[test]
+fn tasks_note_recovers_after_failed_commit_and_unstage_on_same_task() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let id = add(&env, &root, "a task");
+
+    // Pre-commit hook creates .git/index.lock and exits 1 so both `git commit` and `cleanup`'s `unstage` fail,
+    // stranding the staged entry in `.git/index` and `.commit-<git_dir_hex>.staged`.
+    let hook = root.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\n: > .git/index.lock\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out1 = env.json(&root, &["note", &id, "first note"]);
+    let warnings1 = out1["warnings"].to_string();
+    assert!(warnings1.contains("commit_failed"), "{out1}");
+    assert!(warnings1.contains("cleanup needs attention"), "{out1}");
+
+    std::fs::remove_file(&hook).unwrap();
+    std::fs::remove_file(root.join(".git/index.lock")).unwrap();
+    assert_eq!(
+        git(&root, &["diff", "--cached", "--name-only"]).trim(),
+        format!("tasks/{id}.md")
+    );
+
+    // Subsequent `tasks note` on the same task modifies `tasks/<id>.md` on disk (`MM`),
+    // recovers its own earlier staged entry via the ledger, and commits both notes cleanly.
+    let out2 = env.json(&root, &["note", &id, "second note"]);
+    assert_eq!(out2["warnings"], serde_json::json!([]), "{out2}");
+    let head_body = git(&root, &["show", &format!("HEAD:tasks/{id}.md")]);
+    assert!(
+        head_body.contains("first note") && head_body.contains("second note"),
+        "{head_body}"
+    );
+    assert!(clean(&root));
+}
