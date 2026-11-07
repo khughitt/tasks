@@ -451,6 +451,12 @@ pub struct ShowFields {
     pub step_found: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<DepInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub related_to: Vec<DepInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wake_targets: Vec<DepInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_task: Option<DepInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<Related>,
     /// The nearest lane at or above the task; omitted when none.

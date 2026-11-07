@@ -493,6 +493,11 @@ impl Registry {
         }
     }
 
+    /// Whether a prefix is registered on this host (live or retired). Does not include group names.
+    pub fn knows_prefix(&self, prefix: &str) -> bool {
+        self.projects.contains_key(prefix) || self.aliases.contains_key(prefix)
+    }
+
     /// Whether a prefix may be claimed. A live prefix, a retired one and a group's name
     /// are all taken, because a name must never mean two things.
     pub fn is_taken(&self, prefix: &str) -> bool {
@@ -743,6 +748,10 @@ mod tests {
         assert!(r.is_taken("dots"), "a live prefix is taken");
         assert!(r.is_taken("dot"), "an alias is taken");
         assert!(!r.is_taken("free"));
+
+        assert!(r.knows_prefix("dots"), "a live prefix is known");
+        assert!(r.knows_prefix("dot"), "an alias is known");
+        assert!(!r.knows_prefix("free"));
     }
 
     #[test]

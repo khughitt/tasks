@@ -17,6 +17,17 @@ fn relate_by_hand(dir: &Path, id: &str, ids: &[&str]) {
     std::fs::write(&path, text).unwrap();
 }
 
+fn wake_by_hand(dir: &Path, id: &str, ids: &[&str]) {
+    let path = dir.join("tasks").join(format!("{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = text.replacen(
+        "\ntags:",
+        &format!("\nwake_on: [{}]\ntags:", ids.join(", ")),
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+}
+
 #[test]
 fn related_round_trips_and_is_omitted_when_empty() {
     let mut env = TestEnv::new();
@@ -121,4 +132,248 @@ fn phase_one_editor_save_cannot_change_related() {
         env.read(&dir, &format!("tasks/{a}.md"))
             .contains(&format!("related: [{b}, {c}]"))
     );
+}
+
+#[test]
+fn show_resolves_related_wake_and_source_rows() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let s = id_of(env.json(&dir, &["add", "S"]));
+    let b = id_of(env.json(&dir, &["add", "B"]));
+    let w = id_of(env.json(&dir, &["add", "W"]));
+    env.json(&dir, &["done", &b]);
+    let a = id_of(env.json(&dir, &["add", "A", "--source", &s]));
+    env.json(
+        &dir,
+        &["shelve", &a, "wait on W", "--defer", "30d", "--wake-on", &w],
+    );
+    relate_by_hand(&dir, &a, &[&b]);
+
+    let shown = env.json(&dir, &["show", &a]);
+    assert_eq!(
+        shown["related_to"],
+        json!([{"id": b, "title": "B", "status": "done", "resolved": true}])
+    );
+    assert_eq!(
+        shown["wake_targets"],
+        json!([{"id": w, "title": "W", "status": "todo", "resolved": true}])
+    );
+    assert_eq!(
+        shown["source_task"],
+        json!({"id": s, "title": "S", "status": "todo", "resolved": true})
+    );
+}
+
+#[test]
+fn rows_resolve_across_projects_without_a_full_scan() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let a = id_of(env.json(&aa, &["add", "A"]));
+    let x = id_of(env.json(&bb, &["add", "X"]));
+    relate_by_hand(&aa, &a, &[&x]);
+
+    let shown = env.json(&aa, &["show", &a]);
+    assert_eq!(shown["related_to"][0]["id"], x);
+    assert_eq!(shown["related_to"][0]["title"], "X");
+    assert_eq!(shown["related_to"][0]["status"], "todo");
+    assert_eq!(shown["related_to"][0]["resolved"], true);
+}
+
+#[test]
+fn unresolved_rows_warn_once_each() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let a = id_of(env.json(&aa, &["add", "A", "--source", "aa-eeeeee"]));
+    relate_by_hand(&aa, &a, &["aa-ffffff"]);
+
+    let shown = env.json(&aa, &["show", &a]);
+    assert_eq!(shown["related_to"][0]["resolved"], false);
+    assert_eq!(shown["related_to"][0]["id"], "aa-ffffff");
+    assert_eq!(shown["source_task"]["resolved"], false);
+    assert_eq!(shown["source_task"]["id"], "aa-eeeeee");
+
+    let warnings = shown["warnings"].as_array().unwrap();
+    assert_eq!(
+        warnings
+            .iter()
+            .filter(|w| w.as_str() == Some("related task aa-ffffff is unreachable"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        warnings
+            .iter()
+            .filter(|w| w.as_str() == Some("source task aa-eeeeee is unreachable"))
+            .count(),
+        1
+    );
+
+    let unshelved = id_of(env.json(&aa, &["add", "Unshelved"]));
+    wake_by_hand(&aa, &unshelved, &["aa-cccccc"]);
+    let shown_unshelved = env.json(&aa, &["show", &unshelved]);
+    assert_eq!(shown_unshelved["wake_targets"][0]["resolved"], false);
+    let u_warnings = shown_unshelved["warnings"].as_array().unwrap();
+    assert_eq!(
+        u_warnings
+            .iter()
+            .filter(|w| w.as_str() == Some("wake target aa-cccccc is unreachable"))
+            .count(),
+        1
+    );
+
+    let d = id_of(env.json(&aa, &["add", "D"]));
+    let shelved = id_of(env.json(&aa, &["add", "Shelved"]));
+    env.json(
+        &aa,
+        &[
+            "shelve",
+            &shelved,
+            "reason",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &d,
+        ],
+    );
+    std::fs::remove_file(aa.join("tasks").join(format!("{d}.md"))).unwrap();
+    let shown_shelved = env.json(&aa, &["show", &shelved]);
+    assert_eq!(shown_shelved["wake_targets"][0]["resolved"], false);
+    let s_warnings = shown_shelved["warnings"].as_array().unwrap();
+    assert_eq!(
+        s_warnings
+            .iter()
+            .filter(|w| w.as_str()
+                == Some(&format!(
+                    "{shelved}: wake target {d} is unreachable; repair the shelf condition"
+                )))
+            .count(),
+        1
+    );
+    assert_eq!(
+        s_warnings
+            .iter()
+            .filter(|w| w.as_str() == Some(&format!("wake target {d} is unreachable")))
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn moved_rows_show_the_tombstone() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let _bb = env.init("bb");
+    let a = id_of(env.json(&aa, &["add", "A"]));
+    let b = id_of(env.json(&aa, &["add", "B"]));
+    let c = id_of(env.json(&aa, &["add", "C"]));
+    env.json(&aa, &["dep", &c, "--on", &b]);
+    relate_by_hand(&aa, &a, &[&b]);
+    env.json(&aa, &["move", &b, "--to", "bb"]);
+
+    let shown_a = env.json(&aa, &["show", &a]);
+    assert_eq!(
+        shown_a["related_to"][0],
+        json!({"id": b, "title": "B", "status": "moved", "resolved": true})
+    );
+
+    let shown_c = env.json(&aa, &["show", &c]);
+    assert_eq!(
+        shown_c["depends_on"][0],
+        json!({"id": b, "title": "B", "status": "moved", "resolved": true})
+    );
+}
+
+#[test]
+fn a_source_with_surrounding_text_stays_opaque() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let s = id_of(env.json(&aa, &["add", "S"]));
+    for source in [
+        format!("from {s}"),
+        format!(" {s}"),
+        format!("{s}/x"),
+        "zz-123456".to_string(),
+    ] {
+        let t = id_of(env.json(&aa, &["add", "T", "--source", &source]));
+        let shown = env.json(&aa, &["show", &t]);
+        assert!(
+            shown.get("source_task").is_none(),
+            "expected no source_task for {source:?}, got {:?}",
+            shown.get("source_task")
+        );
+        let warnings = shown["warnings"].as_array().unwrap();
+        assert_eq!(
+            warnings.len(),
+            0,
+            "expected no warnings for {source:?}, got {warnings:?}"
+        );
+    }
+}
+
+#[test]
+fn related_links_change_no_execution_view() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let b = id_of(env.json(&dir, &["add", "B"]));
+    let a = id_of(env.json(&dir, &["add", "A"]));
+
+    let ready_before = env.json(&dir, &["ready"]);
+    let next_before = env.json(&dir, &["next"]);
+    let blockers_before = env.json(&dir, &["blockers"]);
+    let review_before = env.json(&dir, &["show", &a])["review_reason"].clone();
+    let lanes_before = env.json(&dir, &["lanes"]);
+
+    relate_by_hand(&dir, &a, &[&b]);
+
+    let ready_after = env.json(&dir, &["ready"]);
+    let next_after = env.json(&dir, &["next"]);
+    let blockers_after = env.json(&dir, &["blockers"]);
+    let review_after = env.json(&dir, &["show", &a])["review_reason"].clone();
+    let lanes_after = env.json(&dir, &["lanes"]);
+
+    assert_eq!(ready_before, ready_after);
+    assert_eq!(
+        next_before["next"]["task"]["id"],
+        next_after["next"]["task"]["id"]
+    );
+    assert_eq!(blockers_before, blockers_after);
+    assert_eq!(review_before, review_after);
+    assert_eq!(lanes_before, lanes_after);
+
+    env.cmd(&dir).args(["done", &a]).assert().success();
+}
+
+#[test]
+fn next_embeds_the_same_rows() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let s = id_of(env.json(&dir, &["add", "S"]));
+    let b = id_of(env.json(&dir, &["add", "B"]));
+    let w = id_of(env.json(&dir, &["add", "W"]));
+    let a = id_of(env.json(&dir, &["add", "A", "-p", "1", "--source", &s]));
+    relate_by_hand(&dir, &a, &[&b]);
+    wake_by_hand(&dir, &a, &[&w]);
+
+    let next_out = env.json(&dir, &["next"]);
+    let show_out = env.json(&dir, &["show", &a]);
+
+    let next_task = &next_out["next"];
+    assert_eq!(next_task["task"]["id"], a);
+    assert_eq!(
+        next_task["related_to"],
+        json!([{"id": b, "title": "B", "status": "todo", "resolved": true}])
+    );
+    assert_eq!(
+        next_task["wake_targets"],
+        json!([{"id": w, "title": "W", "status": "todo", "resolved": true}])
+    );
+    assert_eq!(
+        next_task["source_task"],
+        json!({"id": s, "title": "S", "status": "todo", "resolved": true})
+    );
+
+    assert_eq!(next_task["related_to"], show_out["related_to"]);
+    assert_eq!(next_task["wake_targets"], show_out["wake_targets"]);
+    assert_eq!(next_task["source_task"], show_out["source_task"]);
 }

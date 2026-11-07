@@ -128,31 +128,47 @@ pub fn describe(
     resolver.set_fetch(fetch);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
-        // The scan the caller already holds answers first, so `next` describes the same
-        // snapshot it chose from; only ids outside it touch the filesystem.
-        let dependency_id = registry.canonical_id(dependency);
-        let resolved = match all.iter().find(|candidate| candidate.id == dependency_id) {
-            Some(found) => Some(found.clone()),
-            None => resolver.resolve_task(dependency)?,
-        };
-        match resolved {
-            Some(task) => depends_on.push(DepInfo {
-                id: dependency.to_string(),
-                title: Some(task.title),
-                status: Some(task.status),
-                resolved: true,
-            }),
-            None => {
-                warnings.push(format!("dependency {dependency} is unreachable"));
-                depends_on.push(DepInfo {
-                    id: dependency.to_string(),
-                    title: None,
-                    status: None,
-                    resolved: false,
-                });
+        let row = resolve_row(registry, all, &resolver, dependency)?;
+        if !row.resolved {
+            warnings.push(format!("dependency {dependency} is unreachable"));
+        }
+        depends_on.push(row);
+    }
+    let mut related_to = Vec::new();
+    for related in &task.related {
+        let row = resolve_row(registry, all, &resolver, related)?;
+        if !row.resolved {
+            warnings.push(format!("related task {related} is unreachable"));
+        }
+        related_to.push(row);
+    }
+    let mut wake_targets = Vec::new();
+    for target in &task.wake_on {
+        let row = resolve_row(registry, all, &resolver, target)?;
+        if !row.resolved {
+            let already_warned = warnings
+                .iter()
+                .any(|w| w.contains(&format!("wake target {target} is unreachable")));
+            if !already_warned {
+                warnings.push(format!("wake target {target} is unreachable"));
             }
         }
+        wake_targets.push(row);
     }
+    let source_id = task
+        .source
+        .as_deref()
+        .and_then(|source| crate::related::source_task_id(registry, source));
+    let source_task = match &source_id {
+        Some(id) => {
+            let row = resolve_row(registry, all, &resolver, id)?;
+            if !row.resolved {
+                warnings.push(format!("source task {id} is unreachable"));
+            }
+            Some(row)
+        }
+        None => None,
+    };
     let step_found = match (&task.plan, &task.step) {
         (Some(plan), None) if crate::format::external_doc(plan)?.is_some() => None,
         (Some(plan), Some(step)) if crate::format::external_doc(plan)?.is_some() => {
@@ -284,9 +300,11 @@ pub fn describe(
     let named = task
         .depends
         .iter()
+        .chain(&task.related)
         .chain(&task.wake_on)
         .chain(&task.moved_to)
-        .chain(&task.moved_from);
+        .chain(&task.moved_from)
+        .chain(source_id.as_ref());
     for id in named {
         if !looked_up.contains_key(&id.prefix) {
             let live = registry.canonical_id(id).prefix;
@@ -310,6 +328,9 @@ pub fn describe(
         plan_path,
         step_found,
         depends_on,
+        related_to,
+        wake_targets,
+        source_task,
         parent,
         in_lane: crate::hierarchy::lane_of(all, &task, registry),
         children,
@@ -329,4 +350,31 @@ pub fn describe(
         inventory,
         task,
     })
+}
+
+fn resolve_row(
+    registry: &Registry,
+    all: &[Task],
+    resolver: &Resolver<'_>,
+    id: &crate::model::TaskId,
+) -> Result<DepInfo> {
+    let canonical = registry.canonical_id(id);
+    let resolved = match all.iter().find(|candidate| candidate.id == canonical) {
+        Some(found) => Some(found.clone()),
+        None => resolver.resolve_task(id)?,
+    };
+    match resolved {
+        Some(task) => Ok(DepInfo {
+            id: id.to_string(),
+            title: Some(task.title),
+            status: Some(task.status),
+            resolved: true,
+        }),
+        None => Ok(DepInfo {
+            id: id.to_string(),
+            title: None,
+            status: None,
+            resolved: false,
+        }),
+    }
 }

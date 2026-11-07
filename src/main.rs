@@ -44,6 +44,7 @@ mod query;
 mod record_commit;
 mod refs;
 mod registry;
+mod related;
 mod relay;
 mod rename;
 mod repo;
