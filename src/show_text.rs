@@ -309,10 +309,10 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         }
         rows.push(("deferred", value));
     }
-    if o.source_task.is_none() {
-        if let Some(source) = &t.source {
-            rows.push(("source", vec![present::owner(source)]));
-        }
+    if o.source_task.is_none()
+        && let Some(source) = &t.source
+    {
+        rows.push(("source", vec![present::owner(source)]));
     }
     if let Some(agent) = &t.agent {
         rows.push(("agent", vec![present::owner(agent)]));
