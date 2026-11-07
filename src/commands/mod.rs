@@ -411,10 +411,11 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
         }
         Command::Graph { format, all } => graph::run(open_ctx(dir, host.clone())?, format, all),
         Command::Check { growth } => check::run(open_ctx(dir, host.clone())?, growth),
-        Command::Commit { project } => {
-            let ctx = open_project_write_ctx(dir, project, host.clone())?;
-            commit::run(ctx)
-        }
+        Command::Commit {
+            targets,
+            message,
+            project,
+        } => commit::open_and_run(dir, targets, message, project, host.clone()),
         Command::Tree { id, all, scope } => tree::run(
             open_id_read_ctx(dir, &scope, id.as_deref(), host.clone())?,
             id,

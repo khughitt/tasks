@@ -9,6 +9,11 @@ use std::path::{Path, PathBuf};
 
 pub const CONFIG_REL: &str = "tasks/.config.toml";
 
+pub(crate) struct StatusPaths {
+    pub dirty: Vec<String>,
+    pub ignored: Vec<String>,
+}
+
 pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
     atomic_write_with(path, contents, || fastrand::u32(..0x100_0000))
 }
@@ -1446,20 +1451,32 @@ impl Project {
         Ok(Some(copies))
     }
 
-    /// Project-relative paths of changed or untracked files under tasks/, or `None` in the
-    /// two cases `git_toplevel` documents.
-    pub fn uncommitted_task_files(&self) -> Result<Option<Vec<String>>> {
+    /// Project-relative (`self.records`-relative) dirty and optionally gitignored paths
+    /// under `pathspecs` (each relative to `self.records`), or `None` in the two cases
+    /// `git_toplevel` documents. Filters `.tmp` and `.edit.md` scratch files out of `dirty`.
+    pub(crate) fn status_paths(
+        &self,
+        pathspecs: &[&str],
+        include_ignored: bool,
+    ) -> Result<Option<StatusPaths>> {
         let Some(toplevel) = self.git_toplevel()? else {
             return Ok(None);
         };
-        let output = self.git(&[
+        let mut args = vec![
+            "-c",
+            "core.quotePath=false",
+            "--literal-pathspecs",
             "status",
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
-            "--",
-            "tasks/",
-        ])?;
+        ];
+        if include_ignored {
+            args.push("--ignored=matching");
+        }
+        args.push("--");
+        args.extend_from_slice(pathspecs);
+        let output = self.git(&args)?;
         if !output.status.success() {
             return Err(Error::Io(format!(
                 "git status in {} failed ({}): {}",
@@ -1472,7 +1489,9 @@ impl Project {
         // spaces or non-ASCII), and a rename or copy record carries the new path in the
         // record and the old path as the next NUL-terminated field. Paths are relative to
         // the repository top level, which is not the project root for a nested project.
-        let mut files = Vec::new();
+        let mut dirty = Vec::new();
+        let mut ignored = Vec::new();
+        let canonical_records = self.records.canonicalize().ok();
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut fields = stdout.split('\0').filter(|field| !field.is_empty());
         while let Some(record) = fields.next() {
@@ -1481,12 +1500,25 @@ impl Project {
                 fields.next(); // the source path of the rename or copy
             }
             let absolute = toplevel.join(repo_relative); // bound first: strip_prefix borrows it
-            let Ok(relative) = absolute.strip_prefix(&self.records) else {
-                return Err(Error::Io(format!(
-                    "git status reported {repo_relative:?}, which is not under {}",
-                    self.records.display()
-                )));
+            let relative = match absolute.strip_prefix(&self.records).or_else(|_| {
+                canonical_records
+                    .as_deref()
+                    .ok_or(())
+                    .and_then(|canon| absolute.strip_prefix(canon).map_err(|_| ()))
+            }) {
+                Ok(rel) => rel,
+                Err(()) => {
+                    return Err(Error::Io(format!(
+                        "git status reported {repo_relative:?}, which is not under {}",
+                        self.records.display()
+                    )));
+                }
             };
+            let rel_str = relative.display().to_string();
+            if status == "!! " {
+                ignored.push(rel_str);
+                continue;
+            }
             let name = relative
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -1494,9 +1526,15 @@ impl Project {
             if name.ends_with(".tmp") || name.ends_with(".edit.md") {
                 continue; // transient files of an in-flight write or edit
             }
-            files.push(relative.display().to_string());
+            dirty.push(rel_str);
         }
-        Ok(Some(files))
+        Ok(Some(StatusPaths { dirty, ignored }))
+    }
+
+    /// Project-relative paths of changed or untracked files under tasks/, or `None` in the
+    /// two cases `git_toplevel` documents.
+    pub fn uncommitted_task_files(&self) -> Result<Option<Vec<String>>> {
+        Ok(self.status_paths(&["tasks/"], false)?.map(|s| s.dirty))
     }
 
     /// Assigns a fresh id and links the file into place with an exclusive operation, so a

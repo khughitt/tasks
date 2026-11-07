@@ -390,13 +390,15 @@ order:
    whose `origin:` segment names the stage outcomes and the evidence for the correction.
 4. Commit the pass's writes in the project's records repository: under `[git] commit =
    true`, the CLI commits each task write as it lands, so read any `commit_deferred:` or
-   `commit_failed:` warning and resolve it (`tasks commit` is the recovery path only,
-   since it sweeps every uncommitted file under `tasks/`), then commit any brief or draft
-   spec the pass wrote by pathspec; otherwise commit only the records and documents the
-   pass wrote, by pathspec (`git -C <root> commit -m "chore(tasks): scope pass" -- <paths>`,
-   using `.project.records` for a detached project), unless that project's profile or own
-   instructions decide commits differently, in which case leave them uncommitted and list
-   the uncommitted paths in the summary. Never push.
+   `commit_failed:` warning and resolve it with `tasks -C <root> commit <id>...` for the
+   affected task IDs, then commit any brief or draft spec the pass wrote with
+   `tasks -C <root> commit <doc-path>... -m "docs(<prefix>): <summary>"`; otherwise commit
+   only the records and documents the pass wrote with
+   `tasks -C <root> commit <id>... <doc-path>... -m "chore(tasks): scope pass"` (or
+   `tasks -C <root> commit <id>... -m "chore(tasks): scope pass"` when no documents were
+   written), unless that project's profile or own instructions decide commits differently,
+   in which case leave them uncommitted and list the uncommitted paths in the summary.
+   Never push.
 
 Write task records only through the CLI and handoffs through explicit paths under
 `records`. On a rerun or after a partial failure, reuse the existing brief, goal, and

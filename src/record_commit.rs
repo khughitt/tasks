@@ -83,14 +83,18 @@ fn state_home() -> Result<PathBuf, String> {
 /// Commits `paths` (relative to `dir`, any directory inside the working tree) in one
 /// commit. Returns `(refused, warnings)`: an empty `refused` means committed, or nothing
 /// differed from HEAD.
+#[allow(dead_code)]
 pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> (Vec<String>, Vec<String>) {
     match state_home() {
-        Ok(state) => commit_paths_in(dir, paths, message, &state, &mut || {}, &mut || {}, git),
+        Ok(state) => {
+            let (refused, warnings, _) =
+                commit_paths_report_in(dir, paths, message, &state, &mut || {}, &mut || {}, git);
+            (refused, warnings)
+        }
         Err(error) => (vec![failed(dir, paths, &error, None)], Vec::new()),
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct Recovery {
     pub unstaged: Vec<PathBuf>,
@@ -400,6 +404,7 @@ fn cause_of(operation: &str, output: &Output) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn commit_paths_in(
     dir: &Path,
     paths: &[PathBuf],
@@ -812,35 +817,37 @@ fn recover_staged(repo: &Repo, state: &Path) -> Result<(Vec<String>, Vec<String>
         if !currently_staged.contains(&entry.path) {
             continue;
         }
-        if entry.staged_blob == Some(current_blobs.get(&entry.path).cloned()) {
-            to_unstage_entries.push(entry);
-        } else if entry.staged_blob.is_none()
-            && working_tree_matches_index(repo, std::slice::from_ref(&entry.path), &current_blobs)?
+        if entry.staged_blob == Some(current_blobs.get(&entry.path).cloned())
+            || (entry.staged_blob.is_none()
+                && working_tree_matches_index(
+                    repo,
+                    std::slice::from_ref(&entry.path),
+                    &current_blobs,
+                )?)
         {
             to_unstage_entries.push(entry);
         }
     }
-    let to_unstage_paths: Vec<String> =
-        to_unstage_entries.iter().map(|e| e.path.clone()).collect();
-    if !to_unstage_paths.is_empty() {
-        if let Err(error) = unstage(repo, &to_unstage_paths) {
-            let suffix = match write_staged_ledger(
-                &ledger_path,
-                &StagedLedger {
-                    version: 1,
-                    toplevel: repo.toplevel.clone(),
-                    git_dir: repo.git_dir.clone(),
-                    entries: to_unstage_entries,
-                },
-            ) {
-                Ok(()) => String::new(),
-                Err(write_err) => format!("; could not update staged ledger ({write_err})"),
-            };
-            return Err(format!(
-                "could not unstage {} ({error}){suffix}",
-                listed(&to_unstage_paths)
-            ));
-        }
+    let to_unstage_paths: Vec<String> = to_unstage_entries.iter().map(|e| e.path.clone()).collect();
+    if !to_unstage_paths.is_empty()
+        && let Err(error) = unstage(repo, &to_unstage_paths)
+    {
+        let suffix = match write_staged_ledger(
+            &ledger_path,
+            &StagedLedger {
+                version: 1,
+                toplevel: repo.toplevel.clone(),
+                git_dir: repo.git_dir.clone(),
+                entries: to_unstage_entries,
+            },
+        ) {
+            Ok(()) => String::new(),
+            Err(write_err) => format!("; could not update staged ledger ({write_err})"),
+        };
+        return Err(format!(
+            "could not unstage {} ({error}){suffix}",
+            listed(&to_unstage_paths)
+        ));
     }
     let _ = remove_staged_ledger(&ledger_path);
     Ok((to_unstage_paths, Vec::new()))
@@ -1069,7 +1076,6 @@ pub fn common_dir(dir: &Path) -> Result<PathBuf, String> {
         .map(|r| r.common)
         .ok_or_else(|| "retained publication requires Git records".into())
 }
-#[allow(dead_code)]
 pub fn try_lock(dir: &Path) -> Result<Option<CommitLock>, String> {
     let Some(repo) = discover(dir, git)? else {
         return Ok(None);
@@ -1093,7 +1099,6 @@ pub fn lock(dir: &Path) -> Result<CommitLock, String> {
     })
 }
 impl CommitLock {
-    #[allow(dead_code)]
     pub fn recover(&self, dir: &Path) -> Result<Recovery, String> {
         let repo = match discover(dir, git)? {
             Some(r) if r.common == self.common => r,
@@ -1989,7 +1994,10 @@ mod tests {
             &mut || {},
             flaky_git,
         );
-        assert!(warnings.is_empty() && recovery_warnings.is_empty(), "{warnings:?}");
+        assert!(
+            warnings.is_empty() && recovery_warnings.is_empty(),
+            "{warnings:?}"
+        );
         assert_eq!(ADD_FAILS.with(|c| c.get()), 4);
         assert_eq!(last_files(root).trim(), "tasks/tst-000001.md");
     }
@@ -2028,10 +2036,7 @@ mod tests {
         assert!(recovery_warnings.is_empty());
         assert!(lock.exists(), ".git/index.lock must never be unlinked");
         std::fs::remove_file(&lock).unwrap();
-        assert_eq!(
-            ATTEMPTS.with(|c| c.get()),
-            1 + INDEX_LOCK_BACKOFF_MS.len()
-        );
+        assert_eq!(ATTEMPTS.with(|c| c.get()), 1 + INDEX_LOCK_BACKOFF_MS.len());
         assert!(
             warnings[0].starts_with("commit_failed:") && warnings[0].contains("index locked"),
             "{warnings:?}"
@@ -2515,8 +2520,14 @@ mod tests {
         assert!(main_ledger.exists());
 
         let wt_record = write(&wt, "tasks/tst-000002.md", "wt record");
-        assert_eq!(commit(&wt, &[wt_record], state.path()), Vec::<String>::new());
-        assert!(main_ledger.exists(), "main's ledger must not be touched by wt");
+        assert_eq!(
+            commit(&wt, &[wt_record], state.path()),
+            Vec::<String>::new()
+        );
+        assert!(
+            main_ledger.exists(),
+            "main's ledger must not be touched by wt"
+        );
         assert_eq!(staged(&main).trim(), "tasks/tst-000001.md");
     }
 
@@ -2542,9 +2553,9 @@ mod tests {
         assert!(refused.is_empty(), "{refused:?}");
         assert!(!ledger_path.exists());
         assert!(
-            warnings
-                .first()
-                .is_some_and(|w| w.contains("discarded unreadable or mismatched staged-commit ledger at")),
+            warnings.first().is_some_and(
+                |w| w.contains("discarded unreadable or mismatched staged-commit ledger at")
+            ),
             "{warnings:?}"
         );
     }

@@ -596,13 +596,16 @@ notes through `tasks note`.
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
 Each write commits the records and attachments it wrote, plus whatever the repository's own pre-commit hook stages, once per git working tree. Staging another git process makes while the commit runs can land in it.
-Configuration changes (`init`, `rename`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` yourself or sweep it with `tasks commit`. `init --records` warns when it left such a config uncommitted.
+Configuration changes (`init`, `rename`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` with `tasks commit tasks/.config.toml -m "chore(tasks): update config"`. `init --records` warns when it left such a config uncommitted.
 `commit_unavailable:` means git is missing or the root is outside git.
 `commit_deferred:` means staged changes, detached HEAD, or an in-progress git operation prevented the commit; clear the cause first.
 `commit_failed:` means a git operation or hook failed; resolve the cause, using [Record-commit recovery routes](#record-commit-recovery-routes) above for a refusing hook.
 A successful write still exits 0 when its commit is skipped or fails; read its warnings.
 `cleanup needs attention:` means cleanup failed or the index could not be checked; inspect the named paths and index before retrying.
-`tasks commit [--project <p>]` recovers skipped commits or sweeps every uncommitted file under `tasks/` into one commit, regardless of the switch; it exits 1 when it cannot commit.
+`tasks commit [--project <p>] [<id|path>...] [-m <msg>]` commits under the repository's `.commit-<common_hex>.lock` regardless of `[git] commit` and exits 1 when it cannot commit:
+- `tasks commit <id>...` commits only the named tasks (`tasks/<id>.md` and `tasks/files/<id>/`) with default message `chore(tasks): commit <ids>` (or `-m <msg>`); use it after a `commit_deferred:` or `commit_failed:` warning so unrelated uncommitted tasks in the same project are not swept in.
+- `tasks commit <path>... -m "<msg>"` (or combined `tasks commit <id>... <path>... -m "<msg>"`) commits records-relative working documents (such as `docs/specs/<name>.md`, `docs/plans/<name>.md`, or `docs/briefs/<name>.md`, or an absolute path under `records`) under the same repository lock; `-m <msg>` is required whenever any path target is given. Prefer `tasks commit <path>... -m "<msg>"` over raw `git -C <records> add`/`commit` in shared records repositories so document commits serialize cleanly with concurrent `tasks` writes.
+- `tasks commit` with no targets sweeps every uncommitted file under `tasks/` into one commit.
 
 ### Lifecycle provenance
 

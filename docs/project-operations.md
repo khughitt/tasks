@@ -75,7 +75,8 @@ recorded former storage, without making that checkout writable.
 
 ## Record commits
 
-`[git] commit = true` opts record writes into scoped commits, once per git worktree.
+`[git] commit = true` opts record writes into scoped commits, once per git worktree,
+serialized per repository under `$XDG_STATE_HOME/tasks/claims/.commit-<common_hex>.lock`.
 Default false is manual. Commits include command record/attachment paths plus
 anything a hook stages; concurrent git staging can also land. Subjects are
 `chore(tasks): <verb> <ids>` (add/feedback include title, capped at 72 characters),
@@ -83,10 +84,21 @@ without attribution trailers. Migrate uses its source/successor/count subject
 and ids in the body. Configuration edits from init/rename/retire/unretire are
 not auto-committed.
 
+Read-only status and diff calls run with `GIT_OPTIONAL_LOCKS=0` so they never
+create `.git/index.lock`. Index-mutating Git calls retry briefly on transient
+`index.lock` contention without unlinking `.git/index.lock`. Before staging,
+each commit records its own paths and staged blobs in a per-worktree ledger
+(`.commit-<git_dir_hex>.staged`); if a commit is interrupted or fails to
+unstage on cleanup, the next commit in that worktree recovers its own staged
+entries while still deferring on foreign staging.
+
 `commit_unavailable`, `commit_deferred`, `commit_failed` and cleanup warnings do
 not undo the record write or change its success exit status. Inspect paths/index,
-clear the cause, then `tasks commit [--project <p>]` to sweep uncommitted tasks/
-paths; this explicit command ignores the switch and fails if it cannot commit.
+clear the cause, then run `tasks commit [--project <p>] [<id|path>...] [-m <msg>]`
+to commit specific task IDs (`tasks/<id>.md` plus `tasks/files/<id>/`),
+records-relative paths (such as `docs/specs/...` or `docs/plans/...`, which
+require `-m <msg>`), or with no targets every uncommitted file under `tasks/`;
+this explicit command ignores the switch and fails if it cannot commit.
 Git repository selection ignores inherited hook GIT_DIR/COMMON_DIR/WORK_TREE/
 INDEX_FILE, except the migration guard deliberately checks the committing index.
 

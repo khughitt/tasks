@@ -836,3 +836,400 @@ fn tasks_note_recovers_after_failed_commit_and_unstage_on_same_task() {
     );
     assert!(clean(&root));
 }
+
+#[test]
+fn tasks_commit_id_commits_only_that_task_and_its_attachments_leaving_other_tasks_and_config_uncommitted()
+ {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", false);
+    let a = add(&env, &root, "task a");
+    let b = add(&env, &root, "task b");
+    let shot = env.home.path().join("shot.png");
+    std::fs::write(&shot, "png").unwrap();
+    env.json(&root, &["attach", &a, shot.to_str().unwrap()]);
+    let cfg = root.join("tasks/.config.toml");
+    let cfg_text = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&cfg, format!("{cfg_text}# edited\n")).unwrap();
+
+    let out = env.json(&root, &["commit", &a]);
+    assert_eq!(out["committed"], 2, "{out}");
+    assert_eq!(subjects(&root)[0], format!("chore(tasks): commit {a}"));
+    let files = last_files(&root);
+    assert!(
+        files.contains(&format!("tasks/{a}.md"))
+            && files.contains(&format!("tasks/files/{a}/shot.png"))
+            && files.len() == 2,
+        "{files:?}"
+    );
+    let status = git(&root, &["status", "--porcelain"]);
+    assert!(
+        status.contains(&format!("tasks/{b}.md")) && status.contains("tasks/.config.toml"),
+        "{status}"
+    );
+
+    let out2 = env.json(&root, &["commit", &a]);
+    assert_eq!(out2["committed"], 0, "{out2}");
+    assert_eq!(out2["paths"], serde_json::json!([]), "{out2}");
+}
+
+#[test]
+fn tasks_commit_id_commits_pending_task_and_attachment_deletions() {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let a = add(&env, &root, "task a");
+    let shot = env.home.path().join("shot.png");
+    std::fs::write(&shot, "png").unwrap();
+    env.json(&root, &["attach", &a, shot.to_str().unwrap()]);
+
+    std::fs::remove_file(root.join(format!("tasks/{a}.md"))).unwrap();
+    std::fs::remove_dir_all(root.join(format!("tasks/files/{a}"))).unwrap();
+
+    let out = env.json(&root, &["commit", &a]);
+    assert_eq!(out["committed"], 2, "{out}");
+    assert_eq!(subjects(&root)[0], format!("chore(tasks): commit {a}"));
+    assert!(clean(&root));
+
+    let missing = env
+        .cmd(&root)
+        .args(["commit", "tst-deadbe"])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    let err: serde_json::Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "task_not_found", "{err}");
+}
+
+#[test]
+fn tasks_commit_path_commits_document_with_explicit_message_and_accepts_absolute_path_under_records()
+ {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", false);
+    let a = add(&env, &root, "task a");
+    let spec = root.join("docs/specs/2026-11-07-example.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "# spec\n").unwrap();
+    let plan = root.join("docs/plans/2026-11-07-plan.md");
+    std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
+    std::fs::write(&plan, "# plan\n").unwrap();
+
+    let out1 = env.json(
+        &root,
+        &[
+            "commit",
+            "docs/specs/2026-11-07-example.md",
+            "-m",
+            "docs(tasks): draft spec",
+        ],
+    );
+    assert_eq!(out1["committed"], 1, "{out1}");
+    assert_eq!(
+        out1["paths"],
+        serde_json::json!(["docs/specs/2026-11-07-example.md"])
+    );
+    assert_eq!(subjects(&root)[0], "docs(tasks): draft spec");
+    assert_eq!(
+        last_files(&root),
+        vec!["docs/specs/2026-11-07-example.md".to_string()]
+    );
+
+    let out2 = env.json(
+        &root,
+        &[
+            "commit",
+            plan.to_str().unwrap(),
+            "-m",
+            "docs(tasks): draft plan",
+        ],
+    );
+    assert_eq!(out2["committed"], 1, "{out2}");
+    assert_eq!(
+        out2["paths"],
+        serde_json::json!(["docs/plans/2026-11-07-plan.md"])
+    );
+    assert_eq!(subjects(&root)[0], "docs(tasks): draft plan");
+    assert_eq!(
+        last_files(&root),
+        vec!["docs/plans/2026-11-07-plan.md".to_string()]
+    );
+
+    let status = git(&root, &["status", "--porcelain"]);
+    assert!(status.contains(&format!("tasks/{a}.md")), "{status}");
+}
+
+#[test]
+fn nested_shared_records_project_commits_id_path_and_recovers_with_records_relative_paths() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut env = TestEnv::new();
+    let (_dir, top, roots) = shared_repo(&mut env, &["aaa", "bbb"]);
+    let aaa = &roots[0];
+    let config = aaa.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config)
+        .unwrap()
+        .replace("commit = true", "commit = false");
+    std::fs::write(&config, text).unwrap();
+    git(&top, &["add", "-A"]);
+    git(&top, &["commit", "-q", "-m", "manual aaa"]);
+
+    let a1 = add(&env, aaa, "first");
+    let a2 = add(&env, aaa, "second");
+    let spec = aaa.join("docs/specs/s.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "# s\n").unwrap();
+
+    // 1. Commit task ID in nested project: paths in output are relative to `aaa`, commit in git is `aaa/tasks/<a1>.md`
+    let out1 = env.json(aaa, &["commit", &a1]);
+    assert_eq!(out1["committed"], 1, "{out1}");
+    assert_eq!(out1["paths"], serde_json::json!([format!("tasks/{a1}.md")]));
+    assert_eq!(last_files(&top), vec![format!("aaa/tasks/{a1}.md")]);
+
+    // 2. Commit records-relative path in nested project
+    let out2 = env.json(aaa, &["commit", "docs/specs/s.md", "-m", "docs(aaa): spec"]);
+    assert_eq!(out2["committed"], 1, "{out2}");
+    assert_eq!(out2["paths"], serde_json::json!(["docs/specs/s.md"]));
+    assert_eq!(last_files(&top), vec!["aaa/docs/specs/s.md".to_string()]);
+
+    // 3. Stranded staging of `a2` in nested project: committing `a1` unstages `a2` and warns with records-relative path `tasks/<a2>.md`;
+    //    committing `a2` directly when `a2` is stranded in the ledger commits `a2` with no warning!
+    let hook = top.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\n: > .git/index.lock\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let fail = env.cmd(aaa).args(["commit", &a2]).output().unwrap();
+    assert!(!fail.status.success());
+    std::fs::remove_file(&hook).unwrap();
+    std::fs::remove_file(top.join(".git/index.lock")).unwrap();
+    assert_eq!(
+        git(&top, &["diff", "--cached", "--name-only"]).trim(),
+        format!("aaa/tasks/{a2}.md")
+    );
+
+    env.json(aaa, &["note", &a1, "touch a1"]);
+    let out3 = env.json(aaa, &["commit", &a1]);
+    assert_eq!(out3["committed"], 1, "{out3}");
+    let w3 = out3["warnings"].to_string();
+    assert!(
+        w3.contains(&format!(
+            "recovered staged changes from an earlier interrupted commit: tasks/{a2}.md; left uncommitted in the working tree; run `tasks commit {a2}` to commit them"
+        )),
+        "{out3}"
+    );
+
+    // Now strand `a2` again and run `tasks commit <a2>`: `recovery.unstaged` (`tasks/<a2>.md`) matches `paths`, so `warnings` is empty!
+    std::fs::write(&hook, "#!/bin/sh\n: > .git/index.lock\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let fail2 = env.cmd(aaa).args(["commit", &a2]).output().unwrap();
+    assert!(!fail2.status.success());
+    std::fs::remove_file(&hook).unwrap();
+    std::fs::remove_file(top.join(".git/index.lock")).unwrap();
+
+    let out4 = env.json(aaa, &["commit", &a2]);
+    assert_eq!(out4["committed"], 1, "{out4}");
+    assert_eq!(out4["warnings"], serde_json::json!([]), "{out4}");
+    assert!(clean(&top));
+}
+
+#[test]
+fn tasks_commit_path_and_concurrent_task_writes_serialize_without_absorption() {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let mut ids = Vec::new();
+    for i in 0..4 {
+        ids.push(add(&env, &root, &format!("task {i}")));
+        let spec = root.join(format!("docs/specs/s{i}.md"));
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::write(&spec, format!("spec {i}\n")).unwrap();
+    }
+
+    let mut children = Vec::new();
+    for (i, id) in ids.iter().enumerate() {
+        children.push(
+            env.raw(&root)
+                .args([
+                    "commit",
+                    &format!("docs/specs/s{i}.md"),
+                    "-m",
+                    &format!("docs: spec {i}"),
+                ])
+                .spawn()
+                .unwrap(),
+        );
+        children.push(
+            env.raw(&root)
+                .args(["note", id, &format!("note {i}")])
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(parsed["warnings"], serde_json::json!([]), "{parsed}");
+    }
+
+    let log = git(&root, &["log", "--format=@%s", "--name-only", "-8"]);
+    for block in log.split('@').filter(|b| !b.trim().is_empty()) {
+        let mut lines = block.lines().filter(|l| !l.is_empty());
+        let subj = lines.next().unwrap();
+        let files: Vec<_> = lines.collect();
+        if let Some(i) = subj.strip_prefix("docs: spec ") {
+            assert_eq!(files, vec![format!("docs/specs/s{i}.md")], "{log}");
+        } else if let Some(id) = subj.strip_prefix("chore(tasks): note ") {
+            assert_eq!(files, vec![format!("tasks/{id}.md")], "{log}");
+        }
+    }
+    assert!(clean(&root));
+}
+
+#[test]
+fn tasks_commit_path_without_message_or_with_whitespace_only_message_is_refused() {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", false);
+    let spec = root.join("docs/specs/2026-11-07-example.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "# spec\n").unwrap();
+
+    for args in [
+        vec!["commit", "docs/specs/2026-11-07-example.md"],
+        vec!["commit", "docs/specs/2026-11-07-example.md", "-m", "   "],
+    ] {
+        let out = env.cmd(&root).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["error"]["kind"], "validation", "{err}");
+    }
+}
+
+#[test]
+fn tasks_commit_mixed_id_and_path_commits_both_in_one_commit() {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", false);
+    let a = add(&env, &root, "task a");
+    let plan = root.join("docs/plans/2026-11-07-plan.md");
+    std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
+    std::fs::write(&plan, "# plan\n").unwrap();
+
+    let out = env.json(
+        &root,
+        &[
+            "commit",
+            &a,
+            "docs/plans/2026-11-07-plan.md",
+            "-m",
+            "docs(tasks): link plan",
+        ],
+    );
+    assert_eq!(out["committed"], 2, "{out}");
+    assert_eq!(subjects(&root)[0], "docs(tasks): link plan");
+    let files = last_files(&root);
+    assert!(
+        files.contains(&format!("tasks/{a}.md"))
+            && files.contains(&"docs/plans/2026-11-07-plan.md".to_string()),
+        "{files:?}"
+    );
+}
+
+#[test]
+fn tasks_commit_directory_target_excludes_scratch_and_ignored_siblings_and_refuses_explicit_invalid_paths()
+ {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", false);
+    std::fs::write(root.join(".gitignore"), "docs/specs/*.ignored\n").unwrap();
+    git(&root, &["add", ".gitignore"]);
+    git(&root, &["commit", "-q", "-m", "gitignore"]);
+
+    std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+    std::fs::write(root.join("docs/specs/valid.md"), "ok\n").unwrap();
+    std::fs::write(root.join("docs/specs/draft.md.tmp"), "scratch\n").unwrap();
+    std::fs::write(root.join("docs/specs/draft.edit.md"), "scratch\n").unwrap();
+    std::fs::write(root.join("docs/specs/skip.ignored"), "ignored\n").unwrap();
+
+    let out = env.json(&root, &["commit", "docs/specs", "-m", "docs: add specs"]);
+    assert_eq!(out["committed"], 1, "{out}");
+    assert_eq!(out["paths"], serde_json::json!(["docs/specs/valid.md"]));
+    assert_eq!(last_files(&root), vec!["docs/specs/valid.md".to_string()]);
+    assert!(root.join("docs/specs/draft.md.tmp").exists());
+    assert!(root.join("docs/specs/draft.edit.md").exists());
+    assert!(root.join("docs/specs/skip.ignored").exists());
+
+    for bad in [
+        "../outside.md",
+        "docs/missing.md",
+        "docs/specs/draft.md.tmp",
+        "docs/specs/skip.ignored",
+    ] {
+        let res = env
+            .cmd(&root)
+            .args(["commit", bad, "-m", "m"])
+            .output()
+            .unwrap();
+        assert_eq!(res.status.code(), Some(1), "expected failure for {bad}");
+        let err: serde_json::Value = serde_json::from_slice(&res.stderr).unwrap();
+        assert_eq!(err["error"]["kind"], "validation", "{bad}: {err}");
+    }
+}
+
+#[test]
+fn tasks_commit_routing_and_validation_are_order_independent() {
+    let mut env = TestEnv::new();
+    let aaa = project(&mut env, "aaa", false);
+    let bbb = project(&mut env, "bbb", false);
+    let a_id = add(&env, &aaa, "in aaa");
+    let b_id = add(&env, &bbb, "in bbb");
+    std::fs::create_dir_all(aaa.join("docs/specs")).unwrap();
+    std::fs::write(aaa.join("docs/specs/x.md"), "x\n").unwrap();
+
+    // 1. Trailing punctuation stripped and routes to bbb from aaa
+    let out = env.json(&aaa, &["commit", &format!("{b_id}.")]);
+    assert_eq!(out["committed"], 1, "{out}");
+    assert_eq!(subjects(&bbb)[0], format!("chore(tasks): commit {b_id}"));
+
+    // 2. Mixed project prefixes refused in both argument orders
+    env.json(&bbb, &["note", &b_id, "edit b"]);
+    for pair in [[&b_id, &a_id], [&a_id, &b_id]] {
+        let res = env
+            .cmd(&aaa)
+            .args(["commit", pair[0], pair[1]])
+            .output()
+            .unwrap();
+        assert_eq!(res.status.code(), Some(1));
+        let err: serde_json::Value = serde_json::from_slice(&res.stderr).unwrap();
+        assert_eq!(err["error"]["kind"], "validation", "{err}");
+    }
+
+    // 3. Cross-project ID + local path refused in both argument orders
+    for pair in [
+        vec!["commit", &b_id, "docs/specs/x.md", "-m", "m"],
+        vec!["commit", "docs/specs/x.md", &b_id, "-m", "m"],
+    ] {
+        let res = env.cmd(&aaa).args(&pair).output().unwrap();
+        assert_eq!(res.status.code(), Some(1));
+        let err: serde_json::Value = serde_json::from_slice(&res.stderr).unwrap();
+        assert_eq!(err["error"]["kind"], "validation", "{err}");
+    }
+}
+
+#[test]
+fn tasks_commit_expands_bare_hex_suffix_unless_file_exists_in_records() {
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", false);
+    let id = add(&env, &root, "a task");
+    let hex = id.strip_prefix("tst-").unwrap();
+
+    // 1. No file named `<hex>` -> expands to `tst-<hex>`
+    let out1 = env.json(&root, &["commit", hex]);
+    assert_eq!(out1["committed"], 1, "{out1}");
+    assert_eq!(out1["paths"], serde_json::json!([format!("tasks/{id}.md")]));
+    assert_eq!(subjects(&root)[0], format!("chore(tasks): commit {id}"));
+
+    // 2. File literally named `<hex>` exists under records -> treated as path target
+    std::fs::write(root.join(hex), "literal hex file\n").unwrap();
+    let out2 = env.json(&root, &["commit", hex, "-m", "chore: hex file"]);
+    assert_eq!(out2["committed"], 1, "{out2}");
+    assert_eq!(out2["paths"], serde_json::json!([hex]));
+    assert_eq!(subjects(&root)[0], "chore: hex file");
+}

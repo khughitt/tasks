@@ -115,14 +115,13 @@ retained reference document may resolve in the code tree instead.
 For each project whose records the pass edited:
 
 - Under `[git] commit = true`, the CLI commits each write as it lands; read every
-  `commit_deferred:` or `commit_failed:` warning and resolve it before finishing (`tasks
-  commit` is the recovery path only, since it sweeps every uncommitted file under
-  `tasks/`).
+  `commit_deferred:` or `commit_failed:` warning and resolve it before finishing with
+  `tasks -C <root> commit <id>...` for the affected task IDs (avoid bare `tasks commit`
+  when unrelated uncommitted tasks exist).
 - Otherwise, commit only the task records the pass wrote in that project's records
-  repository by pathspec (`git -C <root> commit -m "chore(tasks): curate pass" -- <paths>`,
-  using `.project.records` for a detached project), unless that project's profile or own
-  instructions decide commits differently, in which case leave them uncommitted and list
-  the uncommitted paths in the summary.
+  repository with `tasks -C <root> commit <id>... -m "chore(tasks): curate pass"`,
+  unless that project's profile or own instructions decide commits differently, in which
+  case leave them uncommitted and list the uncommitted paths in the summary.
 - Never push.
 
 ## Pending proposals

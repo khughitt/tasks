@@ -988,10 +988,16 @@ pub enum Command {
         #[arg(value_name = "PATH", required = true, num_args = 1..=128)]
         paths: Vec<String>,
     },
-    /// Commit every uncommitted file under tasks/ in one commit
+    /// Commit uncommitted task records or records-relative paths in one commit
     Commit {
-        /// One registered project, by prefix
-        #[arg(long)]
+        /// Task IDs (or bare suffixes locally) or records-relative paths to commit; omit to sweep all uncommitted tasks/ files
+        #[arg(value_name = "ID|PATH")]
+        targets: Vec<String>,
+        /// Commit message (defaults to `chore(tasks): commit ...` for task targets; required when committing path targets)
+        #[arg(short = 'm', long = "message", value_name = "MESSAGE")]
+        message: Option<String>,
+        /// Commit in this registered project instead of the current directory's
+        #[arg(long, value_name = "PREFIX", add = ArgValueCandidates::new(crate::complete::prefixes))]
         project: Option<String>,
     },
     /// Session context for agents.
