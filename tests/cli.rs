@@ -27822,14 +27822,13 @@ fn agy_provenance_from_another_host_reads_and_checks_clean() {
 }
 
 #[test]
-fn origin_session_agy_is_refused_until_the_writer_phase() {
+fn origin_session_accepts_agy_keys() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    assert_eq!(
-        env.fail(&dir, &["add", "T", "--origin-session", "agy:x"]),
-        "validation"
-    );
-    let id = id_of(env.json(&dir, &["add", "Plain"]));
+    let id = id_of(env.json(&dir, &["add", "T", "--origin-session", "agy:x"]));
+    let task = shown_task(&env, &dir, &id);
+    assert_eq!(task["notes"][0]["origin_session"], "agy:x");
+
     add_with_env(
         &env,
         &dir,
@@ -27840,7 +27839,11 @@ fn origin_session_agy_is_refused_until_the_writer_phase() {
     let notes = task["notes"].as_array().unwrap();
     assert_eq!(notes.len(), 2);
     assert_eq!(notes[1]["text"], "x");
-    assert!(notes[1].get("harness_session").is_none(), "{notes:?}");
+    assert_eq!(notes[1]["harness_session"], "agy:c1");
+    assert_eq!(
+        notes[1]["harness_session_source"],
+        "ANTIGRAVITY_CONVERSATION_ID"
+    );
 }
 
 #[test]

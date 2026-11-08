@@ -158,17 +158,17 @@ occurrence labels speak again without rewriting notes. Add a stamped evidence
 note for a correction.
 
 The optional native pair is `harness_session` plus `harness_session_source`:
-`claude-code:<id>` with `CLAUDE_CODE_SESSION_ID`, or `codex:<id>` with
-`CODEX_THREAD_ID`/`CODEX_SESSION_ID`. Native ids must be nonempty and control-free.
-Codex thread takes precedence over session; conflicting Claude/Codex variables
-or a contradictory native-prefixed TASKS_SESSION refuse provenance. Arbitrary
-claim identities do not create native provenance. Occurrence `origin_session`
-accepts these same two key prefixes. Optional `root_session` is a codex key only
-with a CODEX_THREAD_ID harness pair; a differing CODEX_SESSION_ID supplies it.
-Readers also accept `agy:<id>` with `ANTIGRAVITY_CONVERSATION_ID` and `agy:`
-occurrence keys; writers emit them only from the Phase 2 release
-(docs/specs/2026-11-08-agy-session-identity-design.md in the records).
-Relay claim support does not add other provenance source strings to this format.
+`claude-code:<id>` with `CLAUDE_CODE_SESSION_ID`, `codex:<id>` with
+`CODEX_THREAD_ID`/`CODEX_SESSION_ID`, or `agy:<id>` with
+`ANTIGRAVITY_CONVERSATION_ID`. Native ids must be nonempty and control-free.
+Codex thread takes precedence over session, and `ANTIGRAVITY_CONVERSATION_ID`
+is read only when neither Claude Code nor Codex is set; conflicting Claude/Codex
+variables or a contradictory native-prefixed TASKS_SESSION refuse provenance.
+Arbitrary claim identities do not create native provenance. Occurrence
+`origin_session` accepts these same three key prefixes (`claude-code:`, `codex:`,
+`agy:`). Optional `root_session` is a codex key only with a CODEX_THREAD_ID
+harness pair; a differing CODEX_SESSION_ID supplies it. Relay claim support does
+not add other provenance source strings to this format.
 
 ## JSON and errors
 

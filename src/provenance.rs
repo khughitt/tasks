@@ -32,18 +32,6 @@ pub fn validate_session_key(key: &str) -> Result<(), String> {
     }
 }
 
-/// A session key that writers may record in this release: `validate_session_key`, with
-/// `agy:` keys refused until the writer rollout phase.
-pub fn writable_session_key(key: &str) -> Result<(), String> {
-    validate_session_key(key)?;
-    if key.starts_with("agy:") {
-        return Err(format!(
-            "session key {key:?} is readable, but agy: keys are not yet writable in this release"
-        ));
-    }
-    Ok(())
-}
-
 pub fn resolve_from(
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Result<Option<HarnessProvenance>, String> {
@@ -66,10 +54,15 @@ pub fn resolve_from(
         }
         (Some(id), None) => (format!("claude-code:{id}"), "CLAUDE_CODE_SESSION_ID"),
         (None, Some((id, source))) => (format!("codex:{id}"), source),
-        (None, None) => return Ok(None),
+        (None, None) => match var("ANTIGRAVITY_CONVERSATION_ID")? {
+            Some(id) => (format!("agy:{id}"), "ANTIGRAVITY_CONVERSATION_ID"),
+            None => return Ok(None),
+        },
     };
     if let Some(explicit) = explicit
-        && (explicit.starts_with("claude-code:") || explicit.starts_with("codex:"))
+        && (explicit.starts_with("claude-code:")
+            || explicit.starts_with("codex:")
+            || explicit.starts_with("agy:"))
         && explicit != key
     {
         return Err(format!(
@@ -323,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn phase_one_writers_neither_emit_nor_accept_agy() {
+    fn agy_stamps_only_as_the_sole_harness() {
         let lookup = |vars: Vars<'_>| {
             resolve_from(|name| {
                 vars.iter()
@@ -331,18 +324,84 @@ mod tests {
                     .map(|(_, v)| OsString::from(v))
             })
         };
-        assert_eq!(lookup(&[("ANTIGRAVITY_CONVERSATION_ID", "c1")]), Ok(None));
+        let agy_pair = HarnessProvenance {
+            harness_session: "agy:conv-1".into(),
+            harness_session_source: "ANTIGRAVITY_CONVERSATION_ID".into(),
+        };
+        let claude_pair = HarnessProvenance {
+            harness_session: "claude-code:p".into(),
+            harness_session_source: "CLAUDE_CODE_SESSION_ID".into(),
+        };
+        let codex_pair = HarnessProvenance {
+            harness_session: "codex:t".into(),
+            harness_session_source: "CODEX_THREAD_ID".into(),
+        };
+
+        assert_eq!(
+            lookup(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-1")]),
+            Ok(Some(agy_pair.clone()))
+        );
         assert_eq!(
             lookup(&[
                 ("CLAUDE_CODE_SESSION_ID", "p"),
-                ("ANTIGRAVITY_CONVERSATION_ID", "c1"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
             ]),
-            Ok(Some(HarnessProvenance {
-                harness_session: "claude-code:p".into(),
-                harness_session_source: "CLAUDE_CODE_SESSION_ID".into(),
-            }))
+            Ok(Some(claude_pair.clone()))
         );
-        assert!(writable_session_key("agy:c1").is_err());
-        assert!(writable_session_key("codex:c1").is_ok());
+        assert_eq!(
+            lookup(&[
+                ("CODEX_THREAD_ID", "t"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+            ]),
+            Ok(Some(codex_pair))
+        );
+
+        let err = lookup(&[
+            ("CLAUDE_CODE_SESSION_ID", "p"),
+            ("CODEX_THREAD_ID", "t"),
+            ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+        ])
+        .unwrap_err();
+        assert!(err.contains("CLAUDE_CODE_SESSION_ID"), "{err}");
+        assert!(err.contains("CODEX_THREAD_ID"), "{err}");
+        assert!(!err.contains("ANTIGRAVITY_CONVERSATION_ID"), "{err}");
+
+        assert_eq!(
+            lookup(&[
+                ("CLAUDE_CODE_SESSION_ID", "p"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "a\nb"),
+            ]),
+            Ok(Some(claude_pair))
+        );
+
+        let err = lookup(&[("ANTIGRAVITY_CONVERSATION_ID", "a\nb")]).unwrap_err();
+        assert!(err.contains("ANTIGRAVITY_CONVERSATION_ID"), "{err}");
+
+        let err = lookup(&[
+            ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+            ("TASKS_SESSION", "agy:other"),
+        ])
+        .unwrap_err();
+        assert!(
+            err.contains("TASKS_SESSION conflicts with ANTIGRAVITY_CONVERSATION_ID"),
+            "{err}"
+        );
+
+        assert_eq!(
+            lookup(&[
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+                ("TASKS_SESSION", "agy:conv-1"),
+            ]),
+            Ok(Some(agy_pair.clone()))
+        );
+
+        assert_eq!(
+            resolve_root_from(Some(&agy_pair), |name| match name {
+                "ANTIGRAVITY_CONVERSATION_ID" => Some(OsString::from("conv-1")),
+                "CODEX_SESSION_ID" => Some(OsString::from("root")),
+                _ => None,
+            }),
+            None
+        );
     }
 }

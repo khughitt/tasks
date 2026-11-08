@@ -606,7 +606,7 @@ pub enum Command {
         #[arg(long, add = ArgValueCandidates::new(crate::complete::prefixes))]
         project: Option<String>,
         /// The session where the ask was made, when that is not this one
-        /// (`claude-code:<id>` or `codex:<id>`); recorded on the creation note.
+        /// (`claude-code:<id>`, `codex:<id>` or `agy:<id>`); recorded on the creation note.
         #[arg(long, value_name = "KEY")]
         origin_session: Option<String>,
         #[command(flatten)]

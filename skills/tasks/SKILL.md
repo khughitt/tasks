@@ -678,7 +678,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   phrased the asks never change it. A decomposition child of a user-requested goal is
   `agent` unless the user asked for that piece. When unsure, omit the flag; the tool
   never infers it. When the ask was made in an earlier session, not this one, add
-  `--origin-session <key>` (`claude-code:<id>` or `codex:<id>`) to say where to look; it does not
+  `--origin-session <key>` (`claude-code:<id>`, `codex:<id>` or `agy:<id>`) to say where to look; it does not
   claim that the user asked. Correct a record later with `tasks edit <id> --origin
   <value>` (or `--no-origin`) plus `tasks note <id> "<evidence>" --stamp`; see
   [Origin](../../docs/task-model.md#origin-and-provenance).
