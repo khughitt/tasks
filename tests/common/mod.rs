@@ -328,28 +328,8 @@ fn shim_command(program: &Path, dir: &Path, home: &Path) -> std::process::Comman
     let mut command = std::process::Command::new(program);
     command
         .current_dir(dir)
-        .env("HOME", home)
-        .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_STATE_HOME")
-        .env_remove("TASKS_FORMAT")
-        .env_remove("TASKS_OWNER")
-        .env_remove("TASKS_SESSION")
-        .env_remove("TASKS_SESSION_PID")
-        .env_remove("TASKS_MODEL")
-        .env_remove("TASKS_AGENT")
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("TASKS_WITHOUT")
-        .env_remove("CLAUDE_PID")
-        .env_remove("CODEX_SESSION_ID")
-        .env_remove("CODEX_THREAD_ID")
-        // `write_registry` reads these; an ambient value would rewrite every shim row.
-        .env_remove("SCOPE")
-        .env_remove("ROOT_ID")
-        .env_remove("TASKS_THEME")
-        // The shim's own invocations never query the terminal of whoever runs the suite,
-        // and never inherit a malformed value: TASKS_PALETTE is validated whenever set.
-        .env("TASKS_PALETTE", TEST_PALETTE)
-        .env("USER", "tester")
+        .env_clear()
+        .envs(isolated_env(home))
         .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"));
     command
 }

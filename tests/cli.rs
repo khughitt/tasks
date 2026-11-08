@@ -19852,6 +19852,79 @@ EOF\n\
 }
 
 #[test]
+fn harness_shim_starts_from_isolated_env_and_drops_ambient_variables() {
+    if std::env::var_os("TASKS_SHIM_ENV_CHILD").is_none() {
+        let scratch = tempfile::tempdir().unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .envs(common::isolated_env(scratch.path()))
+            .env("TASKS_SHIM_ENV_CHILD", "1")
+            .env("DUMMY_SECRET", "sentinel-secret-value")
+            .env("ANTIGRAVITY_CONVERSATION_ID", "leaked-agy-conv")
+            .env("RELAY_STATE_DIR", "/leaked/relay/state")
+            .args([
+                "--exact",
+                "harness_shim_starts_from_isolated_env_and_drops_ambient_variables",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "shim env child failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        return;
+    }
+
+    let env = TestEnv::new();
+    let script = r#"
+[ -z "${DUMMY_SECRET+x}" ] || { echo "leaked DUMMY_SECRET"; exit 11; }
+[ -z "${ANTIGRAVITY_CONVERSATION_ID+x}" ] || { echo "leaked ANTIGRAVITY_CONVERSATION_ID"; exit 12; }
+[ -z "${RELAY_STATE_DIR+x}" ] || { echo "leaked RELAY_STATE_DIR"; exit 13; }
+[ -z "${TASKS_SHIM_ENV_CHILD+x}" ] || { echo "leaked TASKS_SHIM_ENV_CHILD"; exit 14; }
+printf 'HOME=%s\nUSER=%s\nTASKS_PALETTE=%s\nTASKS_BIN=%s\nPATH=%s\n' \
+  "$HOME" "$USER" "$TASKS_PALETTE" "$TASKS_BIN" "$PATH"
+"#;
+    let out = common::harness_shim(env.home.path(), env.home.path(), "agy", script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let expected_bin = assert_cmd::cargo::cargo_bin("tasks");
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l == format!("HOME={}", env.home.path().display())),
+        "{stdout}"
+    );
+    assert!(stdout.lines().any(|l| l == "USER=tester"), "{stdout}");
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l == format!("TASKS_PALETTE={}", common::TEST_PALETTE)),
+        "{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l == format!("TASKS_BIN={}", expected_bin.display())),
+        "{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.strip_prefix("PATH=").is_some_and(|p| !p.is_empty())),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn an_unreadable_registry_fails_instead_of_reading_empty() {
     use std::os::unix::fs::PermissionsExt;
     let mut env = TestEnv::new();
