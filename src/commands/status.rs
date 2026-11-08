@@ -3,7 +3,7 @@ use super::{
     save, transition,
 };
 use crate::error::{Error, Result};
-use crate::model::{Status, Task};
+use crate::model::{Status, Task, TaskId};
 use crate::output::Output;
 
 pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> Result<Output> {
@@ -369,6 +369,18 @@ pub fn shelve(
     }
     transition(&mut ctx, &mut task, Status::Shelved, false)?;
     task.defer = Some(checkpoint);
+    let dropped: Vec<TaskId> = task
+        .wake_on
+        .iter()
+        .filter(|old| {
+            let old_canonical = ctx.registry.canonical_id(old);
+            !targets
+                .iter()
+                .any(|new| ctx.registry.canonical_id(new) == old_canonical)
+        })
+        .cloned()
+        .collect();
+    crate::related::carry_wake_targets(&ctx.registry, &mut task, dropped);
     task.wake_on = targets;
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &format!("shelved: {wake}"))?;

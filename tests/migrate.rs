@@ -3540,3 +3540,34 @@ fn migrate_carries_related_ids_with_a_note() {
         "notes did not contain carried note: {notes:?}"
     );
 }
+
+#[test]
+fn migrate_drop_of_a_shelf_carries_its_targets() {
+    let mut env = TestEnv::new();
+    let forge = env.init("forge");
+    let _forge2 = env.init("forge2");
+    let ops = env.init("ops");
+    let w = id_of(env.json(&ops, &["add", "W"]));
+    let shelf = id_of(env.json(&forge, &["add", "S"]));
+    env.json(
+        &forge,
+        &[
+            "shelve",
+            &shelf,
+            "when W lands",
+            "--defer",
+            "2099-01-01",
+            "--wake-on",
+            &w,
+        ],
+    );
+    let list = uniform_list(&env, &forge, &[&shelf], "drop");
+    let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
+    assert_eq!(out["recovery"], "fresh", "{out}");
+    let shown = env.json(&forge, &["show", &shelf]);
+    assert_eq!(shown["task"]["status"], "dropped");
+    assert_eq!(shown["task"]["related"], serde_json::json!([w]));
+    assert!(
+        shown["task"].get("wake_on").is_none() || shown["task"]["wake_on"] == serde_json::json!([])
+    );
+}

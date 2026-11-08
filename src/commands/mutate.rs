@@ -391,6 +391,7 @@ fn next_due(now: &str, every: crate::periodic::Interval) -> Result<time::OffsetD
 /// notes: `transition` runs its checks first, and `migrate` renders a drop or close
 /// through this (docs/project-operations.md). `model` is recorded on a completion.
 pub(crate) fn apply_status_effects(
+    registry: &crate::registry::Registry,
     task: &mut Task,
     to: Status,
     now: &str,
@@ -418,6 +419,8 @@ pub(crate) fn apply_status_effects(
         // Current contract (docs/task-model.md): a deferral is spent by a status change.
         task.defer = None;
         if task.status == Status::Shelved {
+            let targets = std::mem::take(&mut task.wake_on);
+            crate::related::carry_wake_targets(registry, task, targets);
             task.wake_on.clear();
         }
         // Current contract (docs/user-guide.md): a status change spends a review; a return to idea
@@ -522,7 +525,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     } else {
         None
     };
-    apply_status_effects(task, to, &now, model)?;
+    apply_status_effects(&ctx.registry, task, to, &now, model)?;
     if completing && let Some(every) = task.every {
         let next = next_due(&now, every)?;
         let owner = owner_name(&ctx.project)?;
@@ -604,6 +607,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             store.save()?;
 
             let error = match ctx.project.write_validated_task_permitted(
+                &ctx.registry,
                 task,
                 || Ok(()),
                 crate::retained::publish::WritePermission::Claim,
@@ -651,7 +655,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 announce_escalation,
             },
         )) => {
-            ctx.project.write_validated_task(task)?;
+            ctx.project.write_validated_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove(&id);
@@ -707,6 +711,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // Record first, then store: a note with no entry is a trail that says what was
             // intended, while an entry with no note would be state the record never saw.
             ctx.project.write_validated_task_permitted(
+                &ctx.registry,
                 task,
                 || Ok(()),
                 crate::retained::publish::WritePermission::Park,
@@ -734,7 +739,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             })
         }
         Some((id, ClaimIntent::ClearEscalation(escalation))) => {
-            ctx.project.write_validated_task(task)?;
+            ctx.project.write_validated_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove_escalation(&id);
@@ -758,11 +763,13 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             }
             Ok(())
         }
-        Some((_, ClaimIntent::PreserveStore)) => ctx.project.write_validated_task(task),
+        Some((_, ClaimIntent::PreserveStore)) => {
+            ctx.project.write_validated_task(&ctx.registry, task)
+        }
         None => {
             // Resolve the store before writing so a corrupt store cannot hide a landed edit.
             ctx.claims_mut()?;
-            ctx.project.write_validated_task(task)?;
+            ctx.project.write_validated_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             if let Err(error) = store.save() {

@@ -581,7 +581,7 @@ fn reopen_unreleased(
 ) -> Result<Vec<String>> {
     let mut reopened = task.clone();
     let now = crate::time::after(&task.updated)?;
-    crate::commands::apply_status_effects(&mut reopened, Status::Todo, &now, None)?;
+    crate::commands::apply_status_effects(registry, &mut reopened, Status::Todo, &now, None)?;
     reopened.updated = now;
     if restores_release(journal, registry, task, &reopened) {
         return Ok(Vec::new());

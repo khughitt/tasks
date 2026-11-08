@@ -858,8 +858,10 @@ pub fn reason_text<'a>(list: &'a DecisionList, reason: &'a str) -> &'a str {
 /// The record `drop` (`Decision::Drop`) or `done` (`Decision::Close`) would write for
 /// `task` at `now`, with `note` as its one stamped note. Applies the status effects only;
 /// the caller checks. A carry is a caller error.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_closing(
     task: &Task,
+    registry: &crate::registry::Registry,
     decision: Decision,
     now: &str,
     model: Option<String>,
@@ -878,7 +880,7 @@ pub(crate) fn render_closing(
         }
     };
     let mut closed = task.clone();
-    commands::apply_status_effects(&mut closed, to, now, model)?;
+    commands::apply_status_effects(registry, &mut closed, to, now, model)?;
     closed.updated = now.to_string();
     commands::append_stamped_note_to(warnings, &mut closed, owner, note)?;
     Ok(closed)
@@ -1126,6 +1128,7 @@ fn project_closed_in(
         };
         let record = render_closing(
             task,
+            &ctx.registry,
             decision,
             now,
             model,
@@ -1296,9 +1299,11 @@ mod tests {
 
     /// Renders, then reads the written text back and runs the record-level write checks.
     fn render(task: &Task, decision: Decision) -> (Task, String) {
+        let registry = crate::registry::Registry::default();
         let mut warnings = Vec::new();
         let rendered = render_closing(
             task,
+            &registry,
             decision,
             NOW,
             Some("m-1".into()),
@@ -1347,6 +1352,10 @@ mod tests {
         let (read, text) = render(&shelf, Decision::Drop);
         assert_eq!(read.status, Status::Dropped);
         assert!(read.defer.is_none() && read.wake_on.is_empty());
+        assert_eq!(
+            read.related,
+            vec![crate::model::TaskId::parse("ops-000002").unwrap()]
+        );
         assert!(
             !text.contains("defer") && !text.contains("wake_on"),
             "{text}"
@@ -1377,8 +1386,10 @@ mod tests {
 
     #[test]
     fn a_carry_is_not_rendered_as_closed() {
+        let registry = crate::registry::Registry::default();
         let error = render_closing(
             &record("status: todo\n"),
+            &registry,
             Decision::Carry,
             NOW,
             None,

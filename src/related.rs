@@ -121,10 +121,106 @@ pub fn source_task_id(registry: &Registry, source: &str) -> Option<TaskId> {
         .filter(|id| registry.knows_prefix(&id.prefix))
 }
 
+/// Appends each target in `targets` to `task.related` in order, unless `related` already
+/// holds it by canonical id.
+///
+/// Wake targets leaving a shelf carry into `related` exactly as stored, with no resolution.
+pub fn carry_wake_targets(
+    registry: &Registry,
+    task: &mut Task,
+    targets: impl IntoIterator<Item = TaskId>,
+) {
+    for target in targets {
+        let canonical = registry.canonical_id(&target);
+        if !task
+            .related
+            .iter()
+            .any(|existing| registry.canonical_id(existing) == canonical)
+        {
+            task.related.push(target);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Status;
     use std::path::Path;
+
+    fn test_task(id: &str) -> Task {
+        Task {
+            note_archives: Vec::new(),
+            wake_on: Vec::new(),
+            id: TaskId::parse(id).unwrap(),
+            title: "T".into(),
+            status: Status::Todo,
+            priority: 2,
+            size: None,
+            complexity: None,
+            process: None,
+            parallel: false,
+            lane: false,
+            reviewed: false,
+            awaiting_user: false,
+            reviewed_at: None,
+            closed: None,
+            needs: vec![],
+            every: None,
+            defer: None,
+            owner: None,
+            created: "2026-09-09T00:00:00Z".into(),
+            updated: "2026-09-09T00:00:00Z".into(),
+            started: None,
+            completed: None,
+            last_done: None,
+            depends: vec![],
+            related: vec![],
+            parent: None,
+            tags: vec![],
+            source: None,
+            model: None,
+            agent: None,
+            origin: None,
+            spec: None,
+            plan: None,
+            step: None,
+            moved_to: None,
+            moved_from: None,
+            body: String::new(),
+            refs: vec![],
+            notes: vec![],
+        }
+    }
+
+    #[test]
+    fn carry_wake_targets_appends_in_order_deduplicating_by_canonical_id() {
+        let mut r = Registry::default();
+        r.register("aa", Path::new("/tmp/aa")).unwrap();
+        r.register("bb", Path::new("/tmp/bb")).unwrap();
+        r.aliases.insert("oldbb".into(), "bb".into());
+
+        let mut task = test_task("aa-000001");
+        task.related = vec![TaskId::parse("aa-111111").unwrap()];
+
+        let targets = vec![
+            TaskId::parse("aa-111111").unwrap(),    // duplicate of existing
+            TaskId::parse("oldbb-222222").unwrap(), // new, stored spelling kept
+            TaskId::parse("bb-222222").unwrap(),    // alias duplicate of preceding
+            TaskId::parse("aa-333333").unwrap(),    // new
+        ];
+
+        carry_wake_targets(&r, &mut task, targets);
+
+        assert_eq!(
+            task.related,
+            vec![
+                TaskId::parse("aa-111111").unwrap(),
+                TaskId::parse("oldbb-222222").unwrap(),
+                TaskId::parse("aa-333333").unwrap(),
+            ]
+        );
+    }
 
     #[test]
     fn source_task_id_recognizes_registered_prefixes_only() {

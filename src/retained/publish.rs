@@ -3,6 +3,7 @@ use crate::config::HostConfig;
 use crate::{
     error::{Error, Result},
     model::{Status, Task},
+    registry::Registry,
     repo::Project,
 };
 use std::collections::BTreeMap;
@@ -133,6 +134,7 @@ pub fn project_permission(project: &Project, identity: bool) -> Result<()> {
 }
 pub fn check_write(
     project: &Project,
+    registry: &Registry,
     old: &Task,
     new: &Task,
     permission: WritePermission,
@@ -183,7 +185,7 @@ pub fn check_write(
     {
         let at = new.started.as_deref().unwrap_or(&new.updated);
         crate::time::parse(at)?;
-        crate::commands::apply_status_effects(&mut allowed, Status::Doing, at, None)?;
+        crate::commands::apply_status_effects(registry, &mut allowed, Status::Doing, at, None)?;
         allowed.owner = Some(crate::commands::owner_name(project)?);
     }
     if matches!(permission, WritePermission::Park) {

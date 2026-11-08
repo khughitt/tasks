@@ -84,7 +84,8 @@ Recurring goals are refused; `every` and `defer` coexist only on a shelf, where
 the date is a required review checkpoint. `defer` is strict
 `YYYY-MM-DD`, due from that day's start in UTC; setting it requires a future
 date. Status transitions clear it; shelve then writes the new required checkpoint
-and wake targets. Shelf wake edges are independent from depends. Unshelve returns
+and wake targets. Shelf wake edges are independent from depends. A wake target leaves
+`wake_on` only into `related`. Unshelve returns
 to unreviewed idea; ordinary list/search retain shelves while pickers omit them.
 Pickers and derived review states are explained in the [user guide](user-guide.md).
 

@@ -799,3 +799,182 @@ fn check_warns_dangling_related_only_for_local_ids() {
         "expected only dangling_related warning: {warnings:?}"
     );
 }
+
+#[test]
+fn renewing_a_shelf_keeps_dropped_targets_as_related() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let x = id_of(env.json(&dir, &["add", "X"]));
+    let y = id_of(env.json(&dir, &["add", "Y"]));
+    let s = id_of(env.json(&dir, &["add", "S"]));
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &s,
+            "wait on X and Y",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &x,
+            "--wake-on",
+            &y,
+        ],
+    );
+    env.json(&dir, &["done", &x]);
+
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &s,
+            "wait on Y only",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &y,
+        ],
+    );
+    let shown = env.json(&dir, &["show", &s]);
+    assert_eq!(shown["task"]["related"], json!([x]));
+    assert_eq!(shown["task"]["wake_on"], json!([y]));
+
+    let control = id_of(env.json(&dir, &["add", "Control"]));
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &control,
+            "wait on Y only",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &y,
+        ],
+    );
+    let control_shown = env.json(&dir, &["show", &control]);
+    assert_eq!(shown["review_reason"], control_shown["review_reason"]);
+}
+
+#[test]
+fn leaving_a_shelf_carries_every_target() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let x = id_of(env.json(&dir, &["add", "X"]));
+    let y = id_of(env.json(&dir, &["add", "Y"]));
+
+    // unshelve
+    let s1 = id_of(env.json(&dir, &["add", "S1"]));
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &s1,
+            "wait",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &x,
+            "--wake-on",
+            &y,
+        ],
+    );
+    env.json(&dir, &["unshelve", &s1]);
+    let shown1 = env.json(&dir, &["show", &s1]);
+    assert_eq!(shown1["task"]["related"], json!([x, y]));
+    assert!(shown1["task"].get("wake_on").is_none() || shown1["task"]["wake_on"] == json!([]));
+
+    // drop
+    let s2 = id_of(env.json(&dir, &["add", "S2"]));
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &s2,
+            "wait",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &x,
+            "--wake-on",
+            &y,
+        ],
+    );
+    env.json(&dir, &["drop", &s2]);
+    let shown2 = env.json(&dir, &["show", &s2]);
+    assert_eq!(shown2["task"]["related"], json!([x, y]));
+    assert!(shown2["task"].get("wake_on").is_none() || shown2["task"]["wake_on"] == json!([]));
+
+    // done
+    let s3 = id_of(env.json(&dir, &["add", "S3"]));
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &s3,
+            "wait",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &x,
+            "--wake-on",
+            &y,
+        ],
+    );
+    env.json(&dir, &["done", &s3]);
+    let shown3 = env.json(&dir, &["show", &s3]);
+    assert_eq!(shown3["task"]["related"], json!([x, y]));
+    assert!(shown3["task"].get("wake_on").is_none() || shown3["task"]["wake_on"] == json!([]));
+}
+
+#[test]
+fn a_target_already_related_is_not_duplicated() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+
+    // Case 1: the same spelling
+    let x = id_of(env.json(&aa, &["add", "X"]));
+    let y = id_of(env.json(&aa, &["add", "Y"]));
+    let s1 = id_of(env.json(&aa, &["add", "S1"]));
+    relate_by_hand(&aa, &s1, &[&x]);
+    env.json(
+        &aa,
+        &[
+            "shelve",
+            &s1,
+            "wait",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &x,
+            "--wake-on",
+            &y,
+        ],
+    );
+    env.json(&aa, &["unshelve", &s1]);
+    let shown1 = env.json(&aa, &["show", &s1]);
+    assert_eq!(shown1["task"]["related"], json!([x, y]));
+
+    // Case 2: an alias spelling
+    let target = id_of(env.json(&bb, &["add", "Target"]));
+    let s2 = id_of(env.json(&aa, &["add", "S2"]));
+    env.json(
+        &aa,
+        &[
+            "shelve",
+            &s2,
+            "wait",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &target,
+        ],
+    );
+    env.json(&bb, &["rename", "bb", "bc"]);
+    let canonical_target = target.replacen("bb-", "bc-", 1);
+    relate_by_hand(&aa, &s2, &[&canonical_target]);
+    env.json(&aa, &["unshelve", &s2]);
+    let shown2 = env.json(&aa, &["show", &s2]);
+    assert_eq!(shown2["task"]["related"], json!([canonical_target]));
+}

@@ -1162,7 +1162,7 @@ impl Project {
     ) -> Result<()> {
         if self.task_path(&task.id).exists() {
             let old = self.read_task(&task.id)?;
-            crate::retained::publish::check_write(self, &old, task, permission)?;
+            crate::retained::publish::check_write(self, registry, &old, task, permission)?;
         }
 
         self.validate_invariants(registry, task)?;
@@ -1175,8 +1175,9 @@ impl Project {
         Ok(())
     }
 
-    pub(crate) fn write_validated_task(&self, task: &Task) -> Result<()> {
+    pub(crate) fn write_validated_task(&self, registry: &Registry, task: &Task) -> Result<()> {
         self.write_validated_task_permitted(
+            registry,
             task,
             || Ok(()),
             crate::retained::publish::WritePermission::Ordinary,
@@ -1185,13 +1186,14 @@ impl Project {
 
     pub(crate) fn write_validated_task_permitted(
         &self,
+        registry: &Registry,
         task: &Task,
         before_write: impl FnOnce() -> Result<()>,
         permission: crate::retained::publish::WritePermission,
     ) -> Result<()> {
         if self.task_path(&task.id).exists() {
             let old = self.read_task(&task.id)?;
-            crate::retained::publish::check_write(self, &old, task, permission)?;
+            crate::retained::publish::check_write(self, registry, &old, task, permission)?;
         }
 
         let path = self.task_path(&task.id);
