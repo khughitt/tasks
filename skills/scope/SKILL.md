@@ -326,16 +326,36 @@ Members already owned by different goals retain those parents and are associated
 the handoff and audit note. Preserve every existing source; do not rewrite shared goals
 incidentally. Research and design follow-ups are children of the cluster goal.
 
-When the cluster is a standalone effort meant to run beside the project's other work,
-create a new goal with `--lane` and lead its body with the guidance paragraph: why the
-effort exists and its first milestone. When the pass instead reuses an existing goal or
-re-scopes its children (without scanning the rest of the backlog), assess the existing
-goals touched by the pass: if a touched top-level goal (`lane: false` and not inside an
-existing lane) is a standalone effort that belongs in the lanes view, report it in the
-final summary (§7) as a lane candidate with a short reason, without setting `--lane` or
-changing its priority. Never report a goal already marked as a lane (`lane: true`), and
-never propose a lane for a sub-effort inside an existing lane: a cluster inside an
-existing lane gets an ordinary child goal, never a nested lane.
+Decide lanes yourself; the user overrides from the summary. A lane makes its subtree one
+stream: a live claim anywhere in it makes the rest of that subtree busy. Before creating
+a cluster goal, and for each existing goal the pass touches (reused, or the parent of a
+re-scoped member; no scan of the rest of the backlog), read `tasks -C <root> lanes` and
+apply these in order:
+
+1. **An existing lane owns the work.** When a lane already covers the same subsystem,
+   files or state, parent the new cluster goal, or a touched top-level goal, under that
+   lane with `--parent <lane-id>`. It stays an ordinary goal: lanes cannot nest.
+2. **The lane test.** A top-level goal (`lane: false`, outside every lane) is a lane only
+   when it has at least two open or blocked steps that share code or state closely
+   enough that one live claim should hold the rest. It is not a lane when it has at most
+   one open or blocked step left, is a finite closeout or audit batch, or is an umbrella
+   whose children can run concurrently. A single-item cluster never gets `--lane`.
+3. **Act when the test clearly holds.** Create a new cluster goal with `--lane` and lead
+   its body with the guidance paragraph: why the effort exists and its first milestone.
+   For a touched top-level goal, set `--lane`; when its body does not already lead with
+   such a paragraph, prepend one in the same `edit --body -`, keeping the existing body
+   below it. Revalidate a touched goal as §6 does a member before writing it, and skip it
+   when it changed or holds a live claim. Never change its priority.
+4. **Report only what stays ambiguous** as a lane candidate in the summary (§7), without
+   writing it: a goal where the test's serialization question cannot be settled from
+   the record and code.
+
+Never set, report or propose a lane for a goal already marked `lane: true` or for a
+sub-effort inside an existing lane: a cluster inside a lane gets an ordinary child goal.
+Each goal a step changes or reports carries its counts in §7: open todo steps
+(`tasks -C <root> list --under <goal> --status todo`) and open descendants (the goal
+row's `open_descendant_count`), so the reader sees the stream's size, not the size of
+this pass's batch.
 
 Reuse an existing goal, handoff, and open research task when its question still stands.
 If a new goal would have neither member nor follow-up children, do not create it merely
@@ -414,10 +434,13 @@ document once in the lead, then one line per selected member with a bold verdict
 reason (`- <id> — **<verdict>**: <short reason>`; a re-scoped member names what is now
 established, and a shelved member names the short revisit trigger and checkpoint date),
 and name the project's commit or why none was made (listing any uncommitted paths left by
-the project's profile or instructions).
+the project's profile or instructions). Add one line per lane decision §4 acted on (a goal
+created or marked `--lane`, or parented under an existing lane): the goal id, the action,
+a short reason, and its counts (`<n> open todo, <m> open descendants`), so the user can
+override it.
 Then include only nonempty groups that need user action: drops (id and supporting
-commit/id), questions (id and text), and lane candidates among existing top-level goals
-touched by the pass (id and short reason, flagged without setting `--lane` or changing
+commit/id), questions (id and text), and lane candidates §4 left ambiguous (id, the
+unsettled question, and the same counts; flagged without setting `--lane` or changing
 priority). Full shelf conditions, wake targets, rule UUIDs,
 and origin provenance stay in the task records.
 
