@@ -54,8 +54,10 @@ parks are visible to every agent, not an exclusive handoff.
 
 Identity resolves as a pair from one level: explicit nonempty `TASKS_SESSION`
 with optional `TASKS_SESSION_PID`; enabled relay; native Claude session with
-optional CLAUDE_PID; native Codex thread (otherwise session) without a PID; then
-Unix session id. A missing PID is never borrowed from another level. Codex
+optional CLAUDE_PID; native Codex thread (otherwise session) without a PID;
+native agy conversation (`ANTIGRAVITY_CONVERSATION_ID`, stored as `agy:<id>`)
+without a PID, only when no Claude or Codex variable is present; then Unix
+session id. A missing PID is never borrowed from another level. Codex
 commands can be their own short-lived session leaders, so the native Codex level
 uses TTL rather than a command PID. Without usable process evidence a claim's
 seen stamp remains live for four hours. Session id 0 is refused; set an explicit

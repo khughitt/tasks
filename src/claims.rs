@@ -133,6 +133,19 @@ pub fn identity_from(
             pid_source: None,
         });
     }
+    if let Some(conv) =
+        crate::native::value(&get, "ANTIGRAVITY_CONVERSATION_ID").map_err(invalid_native)?
+    {
+        let session = format!("agy:{conv}");
+        return Ok(Identity {
+            tagged: session.clone(),
+            session,
+            pid: None,
+            proof: None,
+            root_session: None,
+            pid_source: None,
+        });
+    }
     match session_pid {
         // The session leader lives outside this PID namespace, so every shell in the
         // namespace reads 0: it would key them all as one owner.
@@ -152,7 +165,8 @@ pub fn identity_from(
         }),
         None => Err(Error::Config(
             "cannot determine a session identity: set TASKS_SESSION (no \
-             CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID, and /proc/self/stat is unreadable)"
+             CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID, or ANTIGRAVITY_CONVERSATION_ID, and \
+             /proc/self/stat is unreadable)"
                 .into(),
         )),
     }
@@ -1742,6 +1756,119 @@ mod tests {
     }
 
     #[test]
+    fn an_agy_conversation_is_the_native_level_below_codex() {
+        let id = identity_from(
+            env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-1")]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(id.session, "agy:conv-1");
+        assert_eq!(id.tagged, "agy:conv-1");
+        assert_eq!(id.pid, None);
+        assert_eq!(id.pid_source, None);
+        assert_eq!(id.root_session, None);
+        assert_eq!(id.proof, None);
+    }
+
+    #[test]
+    fn an_agy_conversation_never_displaces_claude_or_codex() {
+        let claude = identity_from(
+            env_of(&[
+                ("CLAUDE_CODE_SESSION_ID", "c1"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+            ]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(claude.session, "c1");
+        assert_eq!(claude.tagged, "claude:c1");
+
+        let codex = identity_from(
+            env_of(&[
+                ("CODEX_THREAD_ID", "t1"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+            ]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(codex.session, "t1");
+        assert_eq!(codex.tagged, "codex:t1");
+
+        let all_three = identity_from(
+            env_of(&[
+                ("CLAUDE_CODE_SESSION_ID", "c1"),
+                ("CODEX_THREAD_ID", "t1"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+            ]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(all_three.session, "c1");
+        assert_eq!(all_three.tagged, "claude:c1");
+
+        let claude_with_malformed_agy = identity_from(
+            env_of(&[
+                ("CLAUDE_CODE_SESSION_ID", "c1"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "a\nb"),
+            ]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(claude_with_malformed_agy.session, "c1");
+        assert_eq!(claude_with_malformed_agy.tagged, "claude:c1");
+
+        let codex_with_malformed_agy = identity_from(
+            env_of(&[
+                ("CODEX_THREAD_ID", "t1"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "a\nb"),
+            ]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(codex_with_malformed_agy.session, "t1");
+        assert_eq!(codex_with_malformed_agy.tagged, "codex:t1");
+    }
+
+    #[test]
+    fn a_malformed_agy_conversation_refuses_when_agy_is_selected() {
+        let error = identity_from(
+            env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "bad\nvalue")]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("ANTIGRAVITY_CONVERSATION_ID"), "{error}");
+        assert!(error.contains("TASKS_SESSION"), "{error}");
+        assert!(!error.contains("bad"), "{error}");
+    }
+
+    #[test]
+    fn an_empty_agy_conversation_is_unset() {
+        let id = identity_from(
+            env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "")]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(id.session, "sid:11");
+    }
+
+    #[test]
     fn a_level_never_borrows_another_levels_pid() {
         let id = identity_from(
             env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]),
@@ -1803,8 +1930,9 @@ mod tests {
     fn unresolvable_identity_is_an_error_not_a_shared_placeholder() {
         let error = identity_from(env_of(&[]), None, relay_off(), &mut Vec::new()).unwrap_err();
         assert_eq!(error.kind(), "config");
+        let msg = error.to_string();
         assert!(
-            error.to_string().contains("TASKS_SESSION"),
+            msg.contains("TASKS_SESSION") && msg.contains("ANTIGRAVITY_CONVERSATION_ID"),
             "the message names the way out: {error}"
         );
     }

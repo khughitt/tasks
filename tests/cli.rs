@@ -752,6 +752,35 @@ fn a_codex_claim_outlives_the_command_that_made_it() {
 }
 
 #[test]
+fn agy_start_claims_by_conversation_without_a_pid() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let as_agy = |conv: &str| {
+        let mut cmd = env.cmd(&sci);
+        cmd.env("ANTIGRAVITY_CONVERSATION_ID", conv);
+        cmd
+    };
+
+    as_agy("conv-1").args(["start", &id]).assert().success();
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["claim"]["session"], "agy:conv-1");
+    assert_eq!(shown["claim"]["live"], true);
+    assert!(shown["claim"]["pid"].is_null(), "{}", shown["claim"]);
+
+    let out = as_agy("conv-2").args(["start", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "claimed");
+    assert!(
+        err_detail(&out).contains("agy:conv-1"),
+        "{}",
+        err_detail(&out)
+    );
+
+    as_agy("conv-1").args(["start", &id]).assert().success();
+}
+
+#[test]
 fn lifecycle_provenance_covers_editor_and_flag_transitions() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
