@@ -389,7 +389,7 @@ fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -
         " ".repeat(DETAIL_INDENT),
         format!("{label}:")
     );
-    let indent = DETAIL_INDENT + DETAIL_LABEL + 1;
+    let indent = visible_width(&lead);
     let lead = painter.paint(Style::Chrome, &lead);
     let (text, wrap) = match item {
         Detail::Wrap(text) => (text, true),
@@ -511,6 +511,34 @@ mod tests {
             width: Some(width),
             headers: false,
         }
+    }
+
+    #[test]
+    fn detail_labels_wrap_at_their_visible_prefix() {
+        let source = std::iter::repeat_n("word", 40)
+            .collect::<Vec<_>>()
+            .join(" ");
+        for painter in [plain(), colored()] {
+            for (label, indent) in [("progress", 18), ("attention", 19)] {
+                let text = detail(label, &Detail::Wrap(source.clone()), Some(80), &painter);
+                assert!(text.lines().all(|line| visible_width(line) <= 80), "{text}");
+                let clean = strip(&text);
+                assert!(clean.lines().count() > 1);
+                let mut words = Vec::new();
+                for line in clean.lines() {
+                    assert!(
+                        line[..indent].trim().is_empty()
+                            || line.starts_with(&format!("        {label}: "))
+                    );
+                    words.extend(line[indent..].split_whitespace());
+                }
+                assert_eq!(words, source.split_whitespace().collect::<Vec<_>>());
+            }
+        }
+        assert_eq!(
+            detail("note", &Detail::Wrap("short".into()), Some(80), &plain()),
+            "        note:   short\n"
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ mod config;
 mod defer;
 mod dependency;
 mod doc_fetch;
+mod ellipsis;
 mod error;
 mod filter;
 mod format;

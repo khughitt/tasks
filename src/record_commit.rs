@@ -870,11 +870,7 @@ pub fn message(verb: &str, ids: &[String], title: Option<&str>) -> String {
     if room < 2 {
         return subject;
     }
-    let title = if title.chars().count() > room {
-        format!("{}…", title.chars().take(room - 1).collect::<String>())
-    } else {
-        title.to_string()
-    };
+    let title = crate::ellipsis::clip(title, room, crate::ellipsis::Measure::Characters);
     format!("{subject} {title}")
 }
 
@@ -1157,6 +1153,13 @@ impl CommitLock {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_message_keeps_its_unicode_character_budget() {
+        let text = message("add", &["tst-000001".into()], Some(&"界".repeat(100)));
+        assert_eq!(text.chars().count(), 72);
+        assert!(text.ends_with('…'));
+    }
+
     #[test]
     fn the_message_names_verb_and_ids_and_truncates_a_title_to_72() {
         assert_eq!(
