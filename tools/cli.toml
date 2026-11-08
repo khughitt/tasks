@@ -238,12 +238,6 @@ tier = "typed"
 default_output = "pretty"
 env = "FAMILIAR"
 
-[cli.forge]
-project = "forge"
-tier = "automation"
-default_output = "pretty"
-env = "FORGE"
-
 [cli.relay]
 project = "relay"
 tier = "automation"
@@ -874,6 +868,8 @@ options = [
 path = ["goals"]
 summary = "The goals you asked for across projects: progress, recent activity, and what needs attention"
 options = [
+  { shared = "sort", role = "select", value = "enum", values = ["project", "activity", "priority"], default = "project" },
+  { shared = "reverse", value = "none" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
@@ -3013,46 +3009,6 @@ path = ["niri", "focus"]
 output = "none"
 summary = "Focus a Niri workspace by its stable ID"
 args = [{ name = "id", value = "string", required = true }]
-
-# ---- forge
-
-[[cli.forge.commands]]
-path = ["graph"]
-summary = "Project the graph, or check committed records"
-options = [
-  { names = ["--check"], value = "none" },
-  { names = ["--partition"], value = "string", default = "all" },
-  { names = ["--theme-graph"], value = "path" },
-  { names = ["--sync-theme"], value = "none" },
-]
-exception = "check is a flag on the projection command rather than a verb, because the check re-derives the same graph"
-
-[[cli.forge.commands]]
-path = ["show"]
-verb = "show"
-summary = "Show one committed graph node"
-args = [{ name = "node", value = "ref", required = true }]
-options = [
-  { names = ["--theme-graph"], value = "path" },
-]
-
-[[cli.forge.commands]]
-path = ["seed"]
-summary = "Seed a new exploration flow from a committed node"
-args = [{ name = "dest-flow-dir", value = "path", required = true }]
-options = [
-  { names = ["--from"], value = "ref", required = true },
-  { names = ["--member"], value = "string", required = true },
-  { names = ["--goal"], value = "string", required = true },
-  { names = ["--family"], value = "string", required = true },
-  { names = ["--riff"], value = "string", required = true },
-  { names = ["--namespace"], value = "string", required = true },
-  { names = ["--model"], value = "string", default = "gpt-image" },
-  { names = ["--floor-rows"], value = "int", default = "12" },
-  { names = ["--body-plan"], value = "string", default = "cat" },
-  { names = ["--reason"], value = "string" },
-  { names = ["--theme-graph"], value = "path" },
-]
 
 # ---- relay
 

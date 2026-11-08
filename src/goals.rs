@@ -23,6 +23,43 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GoalSort {
+    #[default]
+    Project,
+    Activity,
+    Priority,
+}
+
+impl GoalSort {
+    pub const ALL: [Self; 3] = [Self::Project, Self::Activity, Self::Priority];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Activity => "activity",
+            Self::Priority => "priority",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|sort| sort.as_str() == value)
+            .ok_or_else(|| {
+                crate::error::Error::Validation(format!(
+                    "unknown goals sort {value:?}; expected project, activity, or priority"
+                ))
+            })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GoalOrder {
+    pub sort: GoalSort,
+    pub reverse: bool,
+}
+
 /// A goal's progress over its descendants.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Pieces {
@@ -316,8 +353,9 @@ pub fn attention(
     Ok((!out.is_empty()).then_some(out))
 }
 
-/// The selected rows, open ones first by subtree activity, then total, then id; closed
-/// ones after, newest close first, then id. Open dependencies change neither order nor
+/// The selected rows, ordered within separate open and recently closed sections.
+/// Activity means subtree activity for open rows and closure for closed rows.
+/// Open dependencies change neither order nor
 /// flags. Closed rows appear only when `include_closed` is set. `lookup` reads
 /// one record by canonical id for [`dependencies`].
 pub fn goal_rows(
@@ -326,10 +364,11 @@ pub fn goal_rows(
     registry: &Registry,
     now: OffsetDateTime,
     include_closed: bool,
+    order: GoalOrder,
     mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
 ) -> Result<Vec<GoalRow>> {
-    let mut open: Vec<(OffsetDateTime, GoalRow)> = Vec::new();
-    let mut closed: Vec<(OffsetDateTime, GoalRow)> = Vec::new();
+    let mut open: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
+    let mut closed: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
     for task in all {
         if !matches!(task.origin, Some(Origin::User | Origin::Mixed)) {
             continue;
@@ -357,6 +396,7 @@ pub fn goal_rows(
                 closed,
             })
         };
+        let project = registry.canonical_id(&task.id).prefix;
         match task.status {
             Status::Idea | Status::Todo | Status::Doing | Status::Blocked => {
                 let row = row(
@@ -364,7 +404,7 @@ pub fn goal_rows(
                     attention(task, all, claims, registry, now)?,
                     dependencies(task, &descendants, registry, &mut lookup)?,
                 )?;
-                open.push((crate::time::parse(&row.last_activity)?, row));
+                open.push((crate::time::parse(&row.last_activity)?, project, row));
             }
             Status::Done if !include_closed => {}
             Status::Done => {
@@ -372,19 +412,47 @@ pub fn goal_rows(
                 let at = crate::time::parse(stamp)?;
                 if now - at < CLOSED_WINDOW {
                     let dependencies = dependencies(task, &descendants, registry, &mut lookup)?;
-                    closed.push((at, row(Some(stamp.to_string()), None, dependencies)?));
+                    closed.push((
+                        at,
+                        project,
+                        row(Some(stamp.to_string()), None, dependencies)?,
+                    ));
                 }
             }
             Status::Shelved | Status::Dropped | Status::Moved => {}
         }
     }
-    open.sort_by(|(a_at, a), (b_at, b)| {
-        b_at.cmp(a_at)
-            .then_with(|| b.pieces.total.cmp(&a.pieces.total))
-            .then_with(|| a.id.cmp(&b.id))
-    });
-    closed.sort_by(|(a_at, a), (b_at, b)| b_at.cmp(a_at).then_with(|| a.id.cmp(&b.id)));
-    Ok(open.into_iter().chain(closed).map(|(_, row)| row).collect())
+    let sort = |rows: &mut Vec<(OffsetDateTime, String, GoalRow)>, count_pieces: bool| {
+        rows.sort_by(|(a_at, a_project, a), (b_at, b_project, b)| {
+            let primary = match order.sort {
+                GoalSort::Project => a_project.cmp(b_project),
+                GoalSort::Activity => std::cmp::Ordering::Equal,
+                GoalSort::Priority => a.priority.cmp(&b.priority),
+            };
+            let ordering = primary
+                .then_with(|| b_at.cmp(a_at))
+                .then_with(|| {
+                    if count_pieces {
+                        b.pieces.total.cmp(&a.pieces.total)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
+                .then_with(|| a.id.cmp(&b.id));
+            if order.reverse {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        });
+    };
+    sort(&mut open, true);
+    sort(&mut closed, false);
+    Ok(open
+        .into_iter()
+        .chain(closed)
+        .map(|(_, _, row)| row)
+        .collect())
 }
 
 #[cfg(test)]

@@ -828,6 +828,8 @@ pub struct QuietOut {
 /// `tasks goals` (docs/user-guide.md).
 #[derive(Serialize)]
 pub struct GoalsOut {
+    #[serde(skip)]
+    pub order: crate::goals::GoalOrder,
     pub observed_at: String,
     pub park_evidence: ParkEvidence,
     pub goals: Vec<crate::goals::GoalRow>,

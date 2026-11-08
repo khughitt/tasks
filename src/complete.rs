@@ -195,6 +195,14 @@ pub fn sorts() -> Vec<CompletionCandidate> {
     plain(["priority", "updated", "created"])
 }
 
+pub fn goal_sorts() -> Vec<CompletionCandidate> {
+    plain(
+        crate::goals::GoalSort::ALL
+            .into_iter()
+            .map(crate::goals::GoalSort::as_str),
+    )
+}
+
 /// Common cadences. A convenience, not the accepted set: any interval matching the
 /// grammar in docs/user-guide.md is valid.
 pub fn intervals() -> Vec<CompletionCandidate> {

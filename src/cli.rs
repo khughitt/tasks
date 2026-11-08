@@ -1142,6 +1142,15 @@ pub enum Command {
     /// The goals you asked for across projects: progress, recent activity, and what needs
     /// attention.
     Goals {
+        /// Order: project (prefix, then newest activity), activity, or priority.
+        /// Closed goals use closure date; ties use total (open only), then id.
+        #[arg(long, default_value = "project",
+            add = ArgValueCandidates::new(crate::complete::goal_sorts),
+            add = ValueSet, value_parser = ValueSet)]
+        sort: String,
+        /// Reverse all chosen keys within each section; closed goals remain last.
+        #[arg(long)]
+        reverse: bool,
         /// One registered project instead of all of them.
         #[arg(
             long,

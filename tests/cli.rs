@@ -29114,3 +29114,12 @@ fn done_and_note_refuse_multiline_text_and_point_to_tasks_attach() {
     }
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
 }
+
+#[test]
+fn goals_sort_completion() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let mut offered = env.complete_values(&aa, "bash", 3, &["tasks", "goals", "--sort", ""]);
+    offered.sort();
+    assert_eq!(offered, ["activity", "priority", "project"]);
+}

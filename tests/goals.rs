@@ -907,3 +907,148 @@ fn pretty_title_uses_a_wide_terminal() {
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(line_of(&text, &g).contains(title), "{text}");
 }
+
+#[test]
+fn goals_sort_project_default() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let (a, ac) = goal_with_child(&env, &aa, "Older A");
+    let (b, bc) = goal_with_child(&env, &bb, "Newer B");
+    backdate(&aa, &[&a, &ac], &ago(5));
+    backdate(&bb, &[&b, &bc], &ago(1));
+    assert_eq!(ids(&goals(&env, &aa, &[])), [a.clone(), b.clone()]);
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--sort", "project"])),
+        [a.clone(), b.clone()]
+    );
+    assert_eq!(ids(&goals(&env, &aa, &["--project", "aa"])), [a]);
+}
+
+#[test]
+fn goals_sort_activity_and_priority() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let (a, ac) = goal_with_child(&env, &aa, "Older priority zero");
+    let (b, bc) = goal_with_child(&env, &bb, "New priority two");
+    env.json(&aa, &["edit", &a, "--priority", "0"]);
+    backdate(&aa, &[&a, &ac], &ago(5));
+    backdate(&bb, &[&b, &bc], &ago(1));
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--sort", "activity"])),
+        [b.clone(), a.clone()]
+    );
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--sort", "priority"])),
+        [a.clone(), b.clone()]
+    );
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--reverse"])),
+        [b.clone(), a.clone()]
+    );
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--sort", "priority", "--reverse"])),
+        [b, a]
+    );
+}
+
+#[test]
+fn goals_sort_reverse_keeps_closed_last() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let (open, _) = goal_with_child(&env, &aa, "Open");
+    let (a, ac) = goal_with_child(&env, &aa, "Closed A");
+    let (b, bc) = goal_with_child(&env, &bb, "Closed B");
+    for (dir, g, child) in [(&aa, &a, &ac), (&bb, &b, &bc)] {
+        env.json(dir, &["done", child]);
+        env.json(dir, &["done", g]);
+    }
+    set_field(&aa, &a, "closed", Some(&ago(1)));
+    set_field(&bb, &b, "closed", Some(&ago(2)));
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--closed"])),
+        [open.clone(), a.clone(), b.clone()]
+    );
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--closed", "--reverse"])),
+        [open.clone(), b.clone(), a.clone()]
+    );
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--closed", "--sort", "activity"])),
+        [open.clone(), a.clone(), b.clone()]
+    );
+    assert_eq!(
+        ids(&goals(
+            &env,
+            &aa,
+            &["--closed", "--sort", "activity", "--reverse"]
+        )),
+        [open, b, a]
+    );
+}
+
+#[test]
+fn goals_sort_offsets_and_ties() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (a, ac) = goal_with_child(&env, &aa, "A");
+    let (b, bc) = goal_with_child(&env, &aa, "B");
+    // 10:00 UTC is newer than 11:00 at +02:00, despite the local date text.
+    backdate(&aa, &[&a, &ac], "2026-10-01T10:00:00Z");
+    backdate(&aa, &[&b, &bc], "2026-10-01T11:00:00+02:00");
+    let rejected = env
+        .cmd(&aa)
+        .args(["goals", "--sort", "activity"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("must be UTC with Z suffix"));
+    backdate(&aa, &[&b, &bc], "2026-10-01T09:00:00Z");
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--sort", "activity"])),
+        [a.clone(), b.clone()]
+    );
+    backdate(&aa, &[&a, &ac, &b, &bc], "2026-10-01T10:00:00Z");
+    let mut ascending = vec![a.clone(), b.clone()];
+    ascending.sort();
+    assert_eq!(ids(&goals(&env, &aa, &[])), ascending);
+    ascending.reverse();
+    assert_eq!(ids(&goals(&env, &aa, &["--reverse"])), ascending);
+    let extra = add(&env, &aa, "extra", &["--parent", &b]);
+    backdate(&aa, &[&a, &ac, &b, &bc, &extra], "2026-10-01T10:00:00Z");
+    assert_eq!(ids(&goals(&env, &aa, &[])), [b.clone(), a.clone()]);
+    assert_eq!(ids(&goals(&env, &aa, &["--reverse"])), [a, b]);
+}
+
+#[test]
+fn goals_sort_rejects_unknown() {
+    let env = TestEnv::new();
+    let dir = env.home.path();
+    env.cmd(dir)
+        .args(["goals", "--sort", "unknown"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn goals_sort_json_shape() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, _) = goal_with_child(&env, &aa, "Goal");
+    let out = goals(&env, &aa, &["--sort", "priority"]);
+    let mut keys: Vec<_> = out
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(keys, ["goals", "observed_at", "park_evidence", "warnings"]);
+    assert_eq!(
+        row(&out, &g)["pieces"],
+        serde_json::json!({"done":0,"total":1})
+    );
+    assert!(row(&out, &g).get("order").is_none());
+}

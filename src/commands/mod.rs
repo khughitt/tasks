@@ -439,6 +439,8 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             quiet::run(open_read_ctx(dir, &scope, host.clone())?, limit)
         }
         Command::Goals {
+            sort,
+            reverse,
             project,
             all_projects: _,
             group,
@@ -449,7 +451,11 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
                 project,
                 group,
             };
-            goals::run(open_read_ctx(dir, &scope, host.clone())?, closed)
+            let order = crate::goals::GoalOrder {
+                sort: crate::goals::GoalSort::parse(&sort)?,
+                reverse,
+            };
+            goals::run(open_read_ctx(dir, &scope, host.clone())?, closed, order)
         }
         Command::Feedback {
             project,
