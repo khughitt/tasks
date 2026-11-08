@@ -331,6 +331,8 @@ pub struct DepInfo {
     /// Typed, but serde still emits the same lowercase strings as before.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated: Option<String>,
     pub resolved: bool,
 }
 
@@ -340,6 +342,7 @@ pub struct Related {
     pub title: String,
     /// Typed, but serde still emits the same lowercase strings as before.
     pub status: Status,
+    pub updated: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

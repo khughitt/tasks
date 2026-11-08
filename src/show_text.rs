@@ -447,16 +447,21 @@ fn hang(line: &str) -> usize {
     }
 }
 
-/// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <title>`,
+/// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <date>  <title>`,
 /// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `wake on`, `related`, `source`, `child`.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
+    let date_of = |updated: Option<&str>| match updated {
+        Some(ts) => present::date(ts),
+        None => Span::plain(""),
+    };
     // The last field is the row's project colour; an unresolved dependency has none.
-    let mut rows: Vec<(&str, &str, Span, &str, Option<Rgb>)> = Vec::new();
+    let mut rows = Vec::new();
     if let Some(parent) = &o.parent {
         rows.push((
             "parent",
             parent.id.as_str(),
             present::status(parent.status),
+            present::date(&parent.updated),
             parent.title.as_str(),
             color(o, &parent.id),
         ));
@@ -466,6 +471,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             "depends on",
             dependency.id.as_str(),
             present::status_of(dependency.status),
+            date_of(dependency.updated.as_deref()),
             dependency.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &dependency.id).filter(|_| dependency.resolved),
         ));
@@ -475,6 +481,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             "wake on",
             wake.id.as_str(),
             present::status_of(wake.status),
+            date_of(wake.updated.as_deref()),
             wake.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &wake.id).filter(|_| wake.resolved),
         ));
@@ -484,6 +491,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             "related",
             rel.id.as_str(),
             present::status_of(rel.status),
+            date_of(rel.updated.as_deref()),
             rel.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &rel.id).filter(|_| rel.resolved),
         ));
@@ -493,6 +501,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             "source",
             source.id.as_str(),
             present::status_of(source.status),
+            date_of(source.updated.as_deref()),
             source.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &source.id).filter(|_| source.resolved),
         ));
@@ -502,6 +511,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             "child",
             child.id.as_str(),
             present::status(child.status),
+            present::date(&child.updated),
             child.title.as_str(),
             color(o, &child.id),
         ));
@@ -517,14 +527,17 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
         .unwrap_or(0);
     // The longest status names (`blocked`, `shelved`, `dropped`) are seven wide.
     let status_width = 7;
-    let lead_width = label_width + 2 + id_width + 2 + status_width + 2;
+    // Dates are `YYYY-MM-DD`, ten columns wide.
+    let date_width = 10;
+    let lead_width = label_width + 2 + id_width + 2 + status_width + 2 + date_width + 2;
     let mut rendered = present::rule("related", painter, width.unwrap_or(MEASURE));
-    for (label, id, status, title, project) in rows {
+    for (label, id, status, date, title, project) in rows {
         let lead = format!(
-            "{}  {}  {}  ",
+            "{}  {}  {}  {}  ",
             painter.paint(Style::Chrome, &format!("{label:<label_width$}")),
             present::id(id, project).left(id_width).paint(painter),
             status.left(status_width).paint(painter),
+            date.left(date_width).paint(painter),
         );
         rendered.push_str(&block(
             &lead,
@@ -940,11 +953,13 @@ mod tests {
             id: "sci-000002".into(),
             title: "Goal".into(),
             status: Status::Todo,
+            updated: "2026-10-02T00:00:00Z".into(),
         });
         o.depends_on = vec![DepInfo {
             id: "fam-000003".into(),
             title: None,
             status: None,
+            updated: None,
             resolved: false,
         }];
         let text = render(&o, &plain(), Some(120));
@@ -964,11 +979,11 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("parent      sci-000002  todo     Goal\n"),
+            text.contains("parent      sci-000002  todo     2026-10-02  Goal\n"),
             "{text}"
         );
         assert!(
-            text.contains("depends on  fam-000003  ?        (unresolved)\n"),
+            text.contains("depends on  fam-000003  ?                    (unresolved)\n"),
             "{text}"
         );
     }
@@ -982,35 +997,41 @@ mod tests {
             id: "sci-000001".into(),
             title: "Parent".into(),
             status: Status::Todo,
+            updated: "2026-01-01T00:00:00Z".into(),
         });
         o.depends_on = vec![DepInfo {
             id: "sci-000002".into(),
             title: Some("Dep".into()),
             status: Some(Status::Todo),
+            updated: Some("2026-01-02T00:00:00Z".into()),
             resolved: true,
         }];
         o.wake_targets = vec![DepInfo {
             id: "sci-000003".into(),
             title: Some("Wake".into()),
             status: Some(Status::Todo),
+            updated: Some("2026-01-03T00:00:00Z".into()),
             resolved: true,
         }];
         o.related_to = vec![DepInfo {
             id: "sci-000004".into(),
             title: Some("Rel".into()),
             status: Some(Status::Done),
+            updated: Some("2026-01-04T00:00:00Z".into()),
             resolved: true,
         }];
         o.source_task = Some(DepInfo {
             id: "sci-000005".into(),
             title: Some("Source".into()),
             status: Some(Status::Todo),
+            updated: Some("2026-01-05T00:00:00Z".into()),
             resolved: true,
         });
         o.children = vec![Related {
             id: "sci-000006".into(),
             title: "Child".into(),
             status: Status::Todo,
+            updated: "2026-01-06T00:00:00Z".into(),
         }];
 
         let text = render(&o, &plain(), Some(120));
@@ -1024,12 +1045,12 @@ mod tests {
             .take_while(|l| !l.is_empty())
             .collect();
         assert_eq!(lines.len(), 6, "{lines:?}");
-        assert!(lines[0].starts_with("parent      sci-000001  todo     Parent"));
-        assert!(lines[1].starts_with("depends on  sci-000002  todo     Dep"));
-        assert!(lines[2].starts_with("wake on     sci-000003  todo     Wake"));
-        assert!(lines[3].starts_with("related     sci-000004  done     Rel"));
-        assert!(lines[4].starts_with("source      sci-000005  todo     Source"));
-        assert!(lines[5].starts_with("child       sci-000006  todo     Child"));
+        assert!(lines[0].starts_with("parent      sci-000001  todo     2026-01-01  Parent"));
+        assert!(lines[1].starts_with("depends on  sci-000002  todo     2026-01-02  Dep"));
+        assert!(lines[2].starts_with("wake on     sci-000003  todo     2026-01-03  Wake"));
+        assert!(lines[3].starts_with("related     sci-000004  done     2026-01-04  Rel"));
+        assert!(lines[4].starts_with("source      sci-000005  todo     2026-01-05  Source"));
+        assert!(lines[5].starts_with("child       sci-000006  todo     2026-01-06  Child"));
 
         // When source is opaque (source_task is None), it stays in overview.
         o.source_task = None;
@@ -1038,6 +1059,89 @@ mod tests {
         assert!(
             value(&text_url, "source").as_deref() == Some("https://example.com/item"),
             "{text_url}"
+        );
+    }
+
+    #[test]
+    fn related_rows_align_hanging_wrapped_titles_and_paint_dates_by_recency() {
+        let mut o = fields();
+        o.parent = Some(Related {
+            id: "sci-000001".into(),
+            title: "Alpha beta gamma delta".into(),
+            status: Status::Todo,
+            updated: "2026-09-25T12:00:00Z".into(),
+        });
+        o.related_to = vec![
+            DepInfo {
+                id: "fam-000002".into(),
+                title: Some("Old target".into()),
+                status: Some(Status::Done),
+                updated: Some("2020-01-01T00:00:00Z".into()),
+                resolved: true,
+            },
+            DepInfo {
+                id: "fam-000003".into(),
+                title: None,
+                status: None,
+                updated: None,
+                resolved: false,
+            },
+        ];
+
+        // label_width = 7 ("related"), id_width = 10, status_width = 7, date_width = 10 -> lead_width = 42.
+        let text = render(&o, &plain(), Some(56));
+        let related_block = text.split_once("── related ").unwrap().1;
+        let lines: Vec<&str> = related_block
+            .lines()
+            .skip(1)
+            .take_while(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                "parent   sci-000001  todo     2026-09-25  Alpha beta",
+                "                                          gamma delta",
+                "related  fam-000002  done     2020-01-01  Old target",
+                "related  fam-000003  ?                    (unresolved)",
+            ],
+            "{related_block}"
+        );
+
+        let palette = crate::palette::Palette {
+            fg: Rgb {
+                r: 229,
+                g: 227,
+                b: 215,
+            },
+            bg: Rgb {
+                r: 19,
+                g: 20,
+                b: 13,
+            },
+            cyan: Rgb {
+                r: 0,
+                g: 215,
+                b: 255,
+            },
+            magenta: None,
+        };
+        let today = time::Date::from_calendar_date(2026, time::Month::September, 25).unwrap();
+        let painter = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false)
+            .with_recency(crate::style::Recency::new(today, &palette));
+        let painted = render(&o, &painter, Some(120));
+        assert!(
+            painted.contains("\x1b[38;2;0;215;255m2026-09-25\x1b[0m  Alpha beta gamma delta"),
+            "{painted:?}"
+        );
+        assert!(
+            painted.contains("\x1b[38;2;125;125;115m2020-01-01\x1b[0m  Old target"),
+            "{painted:?}"
+        );
+        assert!(
+            painted.contains(
+                "\x1b[2mfam-000003\x1b[0m  \x1b[2m?      \x1b[0m              (unresolved)"
+            ),
+            "{painted:?}"
         );
     }
 

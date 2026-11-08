@@ -97,9 +97,10 @@ counts are reported separately and do not redefine the goal's intended scope.
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
 `show` collects every task link in the `── related ──` section: rows run in the
 order `parent`, `depends on`, `wake on`, `related`, `source`, and `child`,
-formatted as `<label>  <id>  <status>  <title>` with aligned columns. An
-unresolved target prints `(unresolved)` with no status, while a moved target
-reads `moved`.
+formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
+Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
+recency scale); an unresolved target leaves the date blank and prints
+`(unresolved)` with `?` for status, while a moved target reads `moved`.
 
 A lane is a goal marked `--lane`: its descendant tree is one stream of work.
 Lanes cannot nest. A live claim in a lane makes sibling work in that lane busy.

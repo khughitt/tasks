@@ -3896,6 +3896,7 @@ fn show_resolves_local_and_foreign_dependencies() {
     assert_eq!(deps[1]["id"], fid);
     assert_eq!(deps[1]["title"], "Foreign dep");
 
+    let today = s["depends_on"][0]["updated"].as_str().unwrap()[..10].to_string();
     let out = env
         .cmd(&sci)
         .args(["--pretty", "--color", "always", "show", &bid])
@@ -3903,11 +3904,15 @@ fn show_resolves_local_and_foreign_dependencies() {
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(
-        text.contains(&format!("\x1b[2m{aid}\x1b[0m  todo     Local dep")),
+        text.contains(&format!(
+            "\x1b[2m{aid}\x1b[0m  todo     \x1b[38;2;0;215;255m{today}\x1b[0m  Local dep"
+        )),
         "{text:?}"
     );
     assert!(
-        text.contains(&format!("\x1b[2m{fid}\x1b[0m  todo     Foreign dep")),
+        text.contains(&format!(
+            "\x1b[2m{fid}\x1b[0m  todo     \x1b[38;2;0;215;255m{today}\x1b[0m  Foreign dep"
+        )),
         "{text:?}"
     );
 
@@ -7366,6 +7371,10 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
         "task_not_found"
     );
 
+    let today = env.json(&dir, &["show", &one])["task"]["updated"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
     let colored = |id: &str| {
         let out = env
             .cmd(&dir)
@@ -7376,23 +7385,31 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
     };
     let text = colored(&goal);
     assert!(
-        text.contains(&format!("\x1b[2m{one}\x1b[0m  todo     One")),
+        text.contains(&format!(
+            "\x1b[2m{one}\x1b[0m  todo     \x1b[38;2;0;215;255m{today}\x1b[0m  One"
+        )),
         "{text:?}"
     );
     assert!(
-        text.contains(&format!("\x1b[2m{two}\x1b[0m  todo     Two")),
+        text.contains(&format!(
+            "\x1b[2m{two}\x1b[0m  todo     \x1b[38;2;0;215;255m{today}\x1b[0m  Two"
+        )),
         "{text:?}"
     );
 
     env.json(&dir, &["block", &two, "waiting"]);
     let text = colored(&goal);
     assert!(
-        text.contains(&format!("\x1b[2m{two}\x1b[0m  \x1b[31mblocked\x1b[0m  Two")),
+        text.contains(&format!(
+            "\x1b[2m{two}\x1b[0m  \x1b[31mblocked\x1b[0m  \x1b[38;2;0;215;255m{today}\x1b[0m  Two"
+        )),
         "footer statuses use the same role as tables: {text:?}"
     );
     let text = colored(&one);
     assert!(
-        text.contains(&format!("\x1b[2m{goal}\x1b[0m  todo     Goal")),
+        text.contains(&format!(
+            "\x1b[2m{goal}\x1b[0m  todo     \x1b[38;2;0;215;255m{today}\x1b[0m  Goal"
+        )),
         "{text:?}"
     );
 }
