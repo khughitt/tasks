@@ -36,10 +36,9 @@ url = "https://github.com/khughitt/flows"
 label = "Task states, gates, evidence and the tools that judge them"
 
 [[members]]
-name = "forge v2"
+name = "forge"
 prefix = "forge2"
-title = "forge"
-url = "https://github.com/khughitt/forge2"
+url = "https://github.com/khughitt/forge"
 label = "Pet themes from picked images"
 
 [[members]]
