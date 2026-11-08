@@ -102,3 +102,7 @@ label = "A phone inbox for agents' typed questions"
 [readme]
 lead = ["purpose", "abstract"]
 sections = ["Install", "Usage", "Configuration", "Layout", "Documentation", "License"]
+
+# Members follow the code organization guide.
+[code]
+
