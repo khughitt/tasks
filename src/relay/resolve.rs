@@ -39,6 +39,7 @@ pub fn hint_for(harness: &str, get: &impl Fn(&str) -> Option<OsString>) -> Resul
             let thread = crate::native::value(get, "CODEX_THREAD_ID").map_err(refuse)?;
             Ok(thread.or(session))
         }
+        "agy" => crate::native::value(get, "ANTIGRAVITY_CONVERSATION_ID").map_err(refuse),
         _ => Ok(None),
     }
 }
@@ -125,9 +126,16 @@ fn no_match(
 /// The actor hint names none of the qualifying rows. When one of them is this caller's own
 /// Codex root, the caller is a worker relay has not registered, and it must not claim as its
 /// controller (delegated identity , 2026-10-15 amendment). Neither message names a session.
-fn hint_mismatch(root: Option<&str>, candidates: &[&crate::relay::snapshot::Agent]) -> Error {
-    let detail = if root.is_some_and(|root| candidates.iter().any(|agent| agent.session_id == root))
-    {
+fn hint_mismatch(
+    harness: &str,
+    root: Option<&str>,
+    candidates: &[&crate::relay::snapshot::Agent],
+) -> Error {
+    let detail = if harness == "agy" {
+        "relay has no row for this agy conversation (relay has not yet seen its first \
+         hook, or retired its row), so it cannot claim as another conversation on the \
+         same agy process"
+    } else if root.is_some_and(|root| candidates.iter().any(|agent| agent.session_id == root)) {
         if candidates.iter().any(|agent| agent.scope == "worker") {
             // A worker row among the candidates means this relay does write worker rows
             // (relay-635fdc), so the registry cannot predate them and its Codex hooks are
@@ -178,6 +186,13 @@ pub fn resolve(
     // Validate native inputs before reading the registry, so malformed values are
     // diagnosed without becoming a match failure.
     let hint = hint_for(harness, get)?;
+    if harness == "agy" && hint.is_none() {
+        return Err(refuse(
+            "ANTIGRAVITY_CONVERSATION_ID is missing, and conversations sharing the agy \
+             process cannot be told apart without it"
+                .into(),
+        ));
+    }
     // Both Codex exports, already validated by `hint_for`. The root is the claim's
     // association  and names this caller's own root row in a refusal; only the thread
     // can select a worker row.
@@ -232,14 +247,16 @@ pub fn resolve(
                 hint.as_deref(),
             ));
         }
-        // Codex workers share their controller's process (relay spec 2026-10-15), so the
-        // actor hint tells their rows apart. Snapshot keys are unique and each id is
-        // `codex:<sessionId>`, so at most one row carries the hint.
+        // Codex workers and agy conversations share their process, so the actor hint
+        // tells their rows apart. Snapshot keys are unique and each id is
+        // `<harness>:<sessionId>`, so at most one row carries the hint.
         many => match (harness, hint.as_deref()) {
-            ("codex", Some(hint)) => match many.iter().find(|agent| agent.session_id == hint) {
-                Some(agent) => *agent,
-                None => return Err(hint_mismatch(root.as_deref(), many)),
-            },
+            ("codex" | "agy", Some(hint)) => {
+                match many.iter().find(|agent| agent.session_id == hint) {
+                    Some(agent) => *agent,
+                    None => return Err(hint_mismatch(harness, root.as_deref(), many)),
+                }
+            }
             _ => {
                 let ids: Vec<&str> = many.iter().map(|agent| agent.id.as_str()).collect();
                 return Err(refuse(format!(
@@ -254,7 +271,7 @@ pub fn resolve(
     if let Some(hint) = hint.as_deref()
         && hint != agent.session_id
     {
-        return Err(hint_mismatch(root.as_deref(), &[agent]));
+        return Err(hint_mismatch(harness, root.as_deref(), &[agent]));
     }
     // Process evidence cannot tell a worker from its controller or siblings, which share the
     // handle: only the worker's own thread selects its row, sole or not. Reaching here with
@@ -719,6 +736,9 @@ mod tests {
         for stored in ["s1", "codex:s1"] {
             assert!(same_session(stored, "codex", "s1"), "{stored}");
         }
+        assert!(same_session("agy:c1", "agy", "c1"));
+        assert!(same_session("c1", "agy", "c1"));
+        assert!(!same_session("codex:c1", "agy", "c1"));
         assert!(!same_session("claude-code:other", "claude-code", "c1"));
         assert!(!same_session("sid:4242", "claude-code", "c1"));
         assert!(!same_session("codex:c1", "claude-code", "c1"));
@@ -954,6 +974,110 @@ mod tests {
     }
 
     #[test]
+    fn an_agy_boundary_requires_its_conversation_before_the_registry() {
+        let error = go(
+            ancestor("agy", 77, 1500),
+            vec![agent("agy", "conv-1", "linux", 77, 1500, BOOT)],
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("ANTIGRAVITY_CONVERSATION_ID") && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+
+        let error = resolve(
+            ancestor("agy", 77, 1500),
+            || panic!("missing agy conversation must precede registry load"),
+            "testhost",
+            Some(BOOT),
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("ANTIGRAVITY_CONVERSATION_ID") && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+
+        let bad = resolve(
+            ancestor("agy", 77, 1500),
+            || panic!("malformed agy conversation must precede registry load"),
+            "testhost",
+            Some(BOOT),
+            &env(&[("ANTIGRAVITY_CONVERSATION_ID", "a\nb")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            bad.contains("ANTIGRAVITY_CONVERSATION_ID") && bad.contains("TASKS_SESSION"),
+            "{bad}"
+        );
+        assert!(!bad.contains("a\nb"), "{bad}");
+    }
+
+    #[test]
+    fn agy_shared_pid_rows_select_by_conversation() {
+        let resolved = go(
+            ancestor("agy", 77, 1500),
+            vec![
+                agent("agy", "conv-1", "linux", 77, 1500, BOOT),
+                agent("agy", "conv-2", "linux", 77, 1500, BOOT),
+            ],
+            &env(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-2")]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.session, "agy:conv-2");
+        assert_eq!(resolved.root_session, None);
+        assert_eq!((resolved.pid, resolved.pid_start), (77, 1500));
+    }
+
+    #[test]
+    fn an_unregistered_agy_conversation_is_refused_not_attributed() {
+        for rows in [
+            vec![agent("agy", "conv-1", "linux", 77, 1500, BOOT)],
+            vec![
+                agent("agy", "conv-1", "linux", 77, 1500, BOOT),
+                agent("agy", "conv-2", "linux", 77, 1500, BOOT),
+            ],
+        ] {
+            let error = go(
+                ancestor("agy", 77, 1500),
+                rows,
+                &env(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-9")]),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("no row for this agy conversation")
+                    && error.contains("TASKS_SESSION"),
+                "{error}"
+            );
+            assert!(
+                !error.contains("conv-1") && !error.contains("conv-2") && !error.contains("conv-9"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_agy_hint_ignores_other_harness_variables() {
+        let resolved = go(
+            ancestor("agy", 77, 1500),
+            vec![agent("agy", "conv-1", "linux", 77, 1500, BOOT)],
+            &env(&[
+                ("CLAUDE_CODE_SESSION_ID", "x"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+            ]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.session, "agy:conv-1");
+    }
+
+    #[test]
     fn an_agy_row_resolves_its_own_session_and_leaves_other_harnesses_working() {
         let rows = || {
             vec![
@@ -970,7 +1094,11 @@ mod tests {
         .unwrap();
         assert_eq!(codex.session, "codex:s1");
 
-        let noisy = env(&[("CLAUDE_CODE_SESSION_ID", "x"), ("CODEX_SESSION_ID", "y")]);
+        let noisy = env(&[
+            ("CLAUDE_CODE_SESSION_ID", "x"),
+            ("CODEX_SESSION_ID", "y"),
+            ("ANTIGRAVITY_CONVERSATION_ID", "conv-1"),
+        ]);
         let agy = go(ancestor("agy", 77, 1500), rows(), &noisy)
             .unwrap()
             .unwrap();
@@ -978,8 +1106,8 @@ mod tests {
         assert_eq!(agy.root_session, None);
         assert_eq!((agy.pid, agy.pid_start), (77, 1500));
 
-        // Two agy conversations sharing one agy process (parent + subagent) refuse as
-        // ambiguous rather than attributing one conversation's claim to the other.
+        // Two agy conversations sharing one agy process (parent + subagent) with no
+        // conversation hint refuse as missing ANTIGRAVITY_CONVERSATION_ID.
         let shared = go(
             ancestor("agy", 77, 1500),
             vec![
@@ -991,9 +1119,9 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(
-            shared.contains("several relay agents match pid 77")
-                && shared.contains("agy:conv-1")
-                && shared.contains("agy:conv-2"),
+            shared.contains("ANTIGRAVITY_CONVERSATION_ID")
+                && shared.contains("TASKS_SESSION")
+                && !shared.contains("several relay agents"),
             "{shared}"
         );
     }

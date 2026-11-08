@@ -19787,23 +19787,36 @@ EOF\n\
     );
 
     // 2. Under an agy ancestor whose tool shells are setsid children:
-    //    - with a single agy:<conv> row in agents.json, tasks resolves agy:<conv> on the
-    //      long-lived agy PID, keeps the claim live after the starting setsid tool shell
-    //      exits, and closes a held claim from a later setsid tool shell via ByIdentity;
+    //    - without ANTIGRAVITY_CONVERSATION_ID, start refuses with ANTIGRAVITY_CONVERSATION_ID
+    //      and TASKS_SESSION;
+    //    - with ANTIGRAVITY_CONVERSATION_ID exported and a matching agy:<conv> row in
+    //      agents.json, tasks resolves agy:<conv> on the long-lived agy PID, keeps the claim
+    //      live after the starting setsid tool shell exits, and closes a held claim from a
+    //      later setsid tool shell via ByIdentity;
     //    - when an invoke_subagent child adds a second agy:<child> row on that shared agy PID,
-    //      or when agents.json is gone, continuation refuses rather than granting shared-PID
-    //      ownership proof, while TASKS_SESSION=<exact held session> recovers owner closure
-    //      and TASKS_SESSION=<other> still refuses as foreign.
+    //      calling done without ANTIGRAVITY_CONVERSATION_ID refuses with ANTIGRAVITY_CONVERSATION_ID,
+    //      calling done with the sibling conversation refuses as foreign, and calling done with
+    //      an unregistered conversation refuses with no row for this agy conversation and tasks show;
+    //    - when agents.json is gone, done without ANTIGRAVITY_CONVERSATION_ID or with a sibling
+    //      conversation fails, start on an unclaimed task fails even with the matching
+    //      conversation, and done with the matching conversation succeeds via proof-only
+    //      continuation (with explicit TASKS_SESSION recovery also supported).
     let agy_script = format!(
         "{}\nwrite_registry\n\
          echo \"SHIM=$$\"\n\
          run_tool() {{\n\
            python3 -c 'import os, sys; os.setsid(); os.execvp(\"sh\", [\"sh\", \"-c\", sys.argv[1]])' \"$1\"\n\
          }}\n\
+         if run_tool '\"$TASKS_BIN\" start {agy_held}' 2>\"$RELAY_STATE_DIR/no-hint.err\"; then exit 68; fi\n\
+         grep -q 'ANTIGRAVITY_CONVERSATION_ID' \"$RELAY_STATE_DIR/no-hint.err\" || exit 69\n\
+         grep -q 'TASKS_SESSION' \"$RELAY_STATE_DIR/no-hint.err\" || exit 70\n\
+         ANTIGRAVITY_CONVERSATION_ID=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\n\
+         export ANTIGRAVITY_CONVERSATION_ID\n\
          run_tool '\"$TASKS_BIN\" start {agy_held}' || exit 71\n\
          run_tool '\"$TASKS_BIN\" start {agy_closed}' || exit 72\n\
          run_tool '\"$TASKS_BIN\" show {agy_held} > \"$RELAY_STATE_DIR/show.json\"' || exit 73\n\
          run_tool '\"$TASKS_BIN\" done {agy_closed} landed' || exit 74\n\
+         unset ANTIGRAVITY_CONVERSATION_ID\n\
          cp \"{store_path}\" \"{store_path}.live\"\n\
          start=$(awk '{{print $22}}' \"/proc/$$/stat\")\n\
          boot=$(cat /proc/sys/kernel/random/boot_id)\n\
@@ -19825,13 +19838,20 @@ EOF\n\
 EOF\n\
          chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
          if run_tool '\"$TASKS_BIN\" done {agy_held} stolen-by-shared-pid' 2>\"$RELAY_STATE_DIR/ambig.err\"; then exit 75; fi\n\
-         grep -q 'several relay agents match' \"$RELAY_STATE_DIR/ambig.err\" || exit 76\n\
+         grep -q 'ANTIGRAVITY_CONVERSATION_ID' \"$RELAY_STATE_DIR/ambig.err\" || exit 76\n\
          grep -q 'tasks show' \"$RELAY_STATE_DIR/ambig.err\" || exit 77\n\
+         if run_tool 'ANTIGRAVITY_CONVERSATION_ID=b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e \"$TASKS_BIN\" done {agy_held} sibling-conv' 2>\"$RELAY_STATE_DIR/sibling.err\"; then exit 82; fi\n\
+         grep -q 'agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d' \"$RELAY_STATE_DIR/sibling.err\" || exit 83\n\
+         if run_tool 'ANTIGRAVITY_CONVERSATION_ID=c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f \"$TASKS_BIN\" done {agy_held} unregistered-conv' 2>\"$RELAY_STATE_DIR/unreg.err\"; then exit 84; fi\n\
+         grep -q 'no row for this agy conversation' \"$RELAY_STATE_DIR/unreg.err\" || exit 85\n\
+         grep -q 'tasks show' \"$RELAY_STATE_DIR/unreg.err\" || exit 86\n\
          if run_tool 'TASKS_SESSION=agy:b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e \"$TASKS_BIN\" done {agy_held} foreign'; then exit 78; fi\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          if run_tool '\"$TASKS_BIN\" done {agy_held} without-registry'; then exit 79; fi\n\
-         if run_tool '\"$TASKS_BIN\" start {agy_unregistered}'; then exit 80; fi\n\
-         run_tool 'TASKS_SESSION=agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d \"$TASKS_BIN\" done {agy_held} recovered' || exit 81\n",
+         if run_tool 'ANTIGRAVITY_CONVERSATION_ID=b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e \"$TASKS_BIN\" done {agy_held} sibling-without-registry'; then exit 87; fi\n\
+         if run_tool 'ANTIGRAVITY_CONVERSATION_ID=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d \"$TASKS_BIN\" start {agy_unregistered}'; then exit 80; fi\n\
+         run_tool 'TASKS_SESSION=agy:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d \"$TASKS_BIN\" start {agy_held}' || exit 88\n\
+         run_tool 'ANTIGRAVITY_CONVERSATION_ID=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d \"$TASKS_BIN\" done {agy_held} recovered' || exit 81\n",
         shim_env(&state, "agy", "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"),
         store_path = env.claim_store("sci").display(),
     );

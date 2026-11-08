@@ -79,9 +79,10 @@ Exact resolved session equality authorizes continuation. Relay proof can also
 continue an existing claim after the registry disappears, using the recorded
 host/boot/start evidence and current nearest boundary. For Codex, proof also
 requires a valid concrete CODEX_THREAD_ID matching the claim: sibling, absent,
-malformed or session-only hints cannot substitute. Proof-only continuation at an
-agy boundary is refused because conversations sharing that process are not yet
-distinguished; resolved registry identity still works. Parentage never authorizes
+malformed or session-only hints cannot substitute. At an agy boundary, relay
+identity and proof-only continuation require a valid `ANTIGRAVITY_CONVERSATION_ID`.
+Rows sharing the agy process are selected by it, and a conversation with no row is
+refused rather than assigned another conversation's row. Parentage never authorizes
 a foreign claim. A mismatched explicit TASKS_SESSION disables proof fallback.
 
 Parking releases ownership, so the next start is a new acquisition and needs
