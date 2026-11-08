@@ -27801,6 +27801,49 @@ fn bad_origin_inputs_are_refused_before_writing() {
 }
 
 #[test]
+fn agy_provenance_from_another_host_reads_and_checks_clean() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Synced"]));
+    let path = dir.join(format!("tasks/{id}.md"));
+    let original = std::fs::read_to_string(&path).unwrap();
+    let synced = format!(
+        "{original}  provenance: {{\"harness_session\":\"agy:c1\",\"harness_session_source\":\"ANTIGRAVITY_CONVERSATION_ID\"}}\n- 2026-11-08T00:00:00Z (note): second\n  provenance: {{\"origin_session\":\"agy:c2\"}}\n"
+    );
+    std::fs::write(&path, synced).unwrap();
+    let task = shown_task(&env, &dir, &id);
+    assert_eq!(task["notes"][0]["harness_session"], "agy:c1");
+    assert_eq!(
+        task["notes"][0]["harness_session_source"],
+        "ANTIGRAVITY_CONVERSATION_ID"
+    );
+    assert_eq!(task["notes"][1]["origin_session"], "agy:c2");
+    env.check(&dir);
+}
+
+#[test]
+fn origin_session_agy_is_refused_until_the_writer_phase() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    assert_eq!(
+        env.fail(&dir, &["add", "T", "--origin-session", "agy:x"]),
+        "validation"
+    );
+    let id = id_of(env.json(&dir, &["add", "Plain"]));
+    add_with_env(
+        &env,
+        &dir,
+        &[("ANTIGRAVITY_CONVERSATION_ID", "c1")],
+        &["note", &id, "x", "--stamp"],
+    );
+    let task = shown_task(&env, &dir, &id);
+    let notes = task["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[1]["text"], "x");
+    assert!(notes[1].get("harness_session").is_none(), "{notes:?}");
+}
+
+#[test]
 fn recurrence_combines_origin_per_rule() {
     let (env, target, reporter) = feedback_env();
     let file = |extra: &[&str]| {

@@ -165,6 +165,9 @@ or a contradictory native-prefixed TASKS_SESSION refuse provenance. Arbitrary
 claim identities do not create native provenance. Occurrence `origin_session`
 accepts these same two key prefixes. Optional `root_session` is a codex key only
 with a CODEX_THREAD_ID harness pair; a differing CODEX_SESSION_ID supplies it.
+Readers also accept `agy:<id>` with `ANTIGRAVITY_CONVERSATION_ID` and `agy:`
+occurrence keys; writers emit them only from the Phase 2 release
+(docs/specs/2026-11-08-agy-session-identity-design.md in the records).
 Relay claim support does not add other provenance source strings to this format.
 
 ## JSON and errors

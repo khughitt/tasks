@@ -5,6 +5,7 @@ pub fn validate(provenance: &HarnessProvenance) -> Result<(), String> {
     let prefix = match provenance.harness_session_source.as_str() {
         "CLAUDE_CODE_SESSION_ID" => "claude-code:",
         "CODEX_SESSION_ID" | "CODEX_THREAD_ID" => "codex:",
+        "ANTIGRAVITY_CONVERSATION_ID" => "agy:",
         _ => return Err("harness_session_source must name a supported native variable".into()),
     };
     match provenance.harness_session.strip_prefix(prefix) {
@@ -16,18 +17,31 @@ pub fn validate(provenance: &HarnessProvenance) -> Result<(), String> {
     }
 }
 
-/// A session key as stored in occurrence keys: a `claude-code:` or `codex:` prefix and a
-/// nonempty, control-free remainder.
+/// A session key as stored in occurrence keys: a `claude-code:`, `codex:` or `agy:` prefix and
+/// a nonempty, control-free remainder.
 pub fn validate_session_key(key: &str) -> Result<(), String> {
     match key
         .strip_prefix("claude-code:")
         .or_else(|| key.strip_prefix("codex:"))
+        .or_else(|| key.strip_prefix("agy:"))
     {
         Some(id) if !id.is_empty() && !id.chars().any(char::is_control) => Ok(()),
         _ => Err(format!(
-            "session key {key:?} must be claude-code: or codex: followed by a nonempty, control-free ID"
+            "session key {key:?} must be claude-code:, codex: or agy: followed by a nonempty, control-free ID"
         )),
     }
+}
+
+/// A session key that writers may record in this release: `validate_session_key`, with
+/// `agy:` keys refused until the writer rollout phase.
+pub fn writable_session_key(key: &str) -> Result<(), String> {
+    validate_session_key(key)?;
+    if key.starts_with("agy:") {
+        return Err(format!(
+            "session key {key:?} is readable, but agy: keys are not yet writable in this release"
+        ));
+    }
+    Ok(())
 }
 
 pub fn resolve_from(
@@ -292,5 +306,43 @@ mod tests {
         );
         assert_eq!(lookup(&[("CODEX_SESSION_ID", "root")]), None);
         assert_eq!(lookup(&[]), None);
+    }
+
+    #[test]
+    fn agy_pairs_and_keys_validate_for_readers() {
+        let pair = |session: &str, source: &str| HarnessProvenance {
+            harness_session: session.into(),
+            harness_session_source: source.into(),
+        };
+        assert!(validate(&pair("agy:c1", "ANTIGRAVITY_CONVERSATION_ID")).is_ok());
+        assert!(validate(&pair("agy:c1", "CODEX_THREAD_ID")).is_err());
+        assert!(validate(&pair("codex:c1", "ANTIGRAVITY_CONVERSATION_ID")).is_err());
+        assert!(validate(&pair("agy:", "ANTIGRAVITY_CONVERSATION_ID")).is_err());
+        assert!(validate_session_key("agy:c1").is_ok());
+        assert!(validate_session_key("agy:").is_err());
+    }
+
+    #[test]
+    fn phase_one_writers_neither_emit_nor_accept_agy() {
+        let lookup = |vars: Vars<'_>| {
+            resolve_from(|name| {
+                vars.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| OsString::from(v))
+            })
+        };
+        assert_eq!(lookup(&[("ANTIGRAVITY_CONVERSATION_ID", "c1")]), Ok(None));
+        assert_eq!(
+            lookup(&[
+                ("CLAUDE_CODE_SESSION_ID", "p"),
+                ("ANTIGRAVITY_CONVERSATION_ID", "c1"),
+            ]),
+            Ok(Some(HarnessProvenance {
+                harness_session: "claude-code:p".into(),
+                harness_session_source: "CLAUDE_CODE_SESSION_ID".into(),
+            }))
+        );
+        assert!(writable_session_key("agy:c1").is_err());
+        assert!(writable_session_key("codex:c1").is_ok());
     }
 }

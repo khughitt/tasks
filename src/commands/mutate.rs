@@ -267,7 +267,7 @@ impl<'a> Attribution<'a> {
     pub fn parse(origin: Option<&str>, session: Option<&'a str>) -> Result<Self> {
         let origin = origin.map(crate::model::Origin::parse).transpose()?;
         if let Some(key) = session {
-            crate::provenance::validate_session_key(key)
+            crate::provenance::writable_session_key(key)
                 .map_err(|reason| Error::Validation(format!("--origin-session: {reason}")))?;
         }
         Ok(Attribution { origin, session })
