@@ -30,12 +30,6 @@ url = "https://github.com/khughitt/familiar"
 label = "Agent pets and the session hook bus"
 
 [[members]]
-name = "familiar-forge"
-prefix = "forge"
-url = "https://github.com/khughitt/familiar-forge"
-label = "Generative art behind familiar's pet themes"
-
-[[members]]
 name = "flows"
 prefix = "flows"
 url = "https://github.com/khughitt/flows"
