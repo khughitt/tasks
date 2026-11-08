@@ -239,6 +239,7 @@ pub fn describe(
         id: task.id.to_string(),
         title: task.title.clone(),
         status: task.status,
+        updated: task.updated.clone(),
     };
     let parent = match &task.parent {
         Some(id) => match all
@@ -368,12 +369,14 @@ fn resolve_row(
             id: id.to_string(),
             title: Some(task.title),
             status: Some(task.status),
+            updated: Some(task.updated),
             resolved: true,
         }),
         None => Ok(DepInfo {
             id: id.to_string(),
             title: None,
             status: None,
+            updated: None,
             resolved: false,
         }),
     }

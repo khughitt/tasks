@@ -52,7 +52,7 @@ optional booleans false, and other optional values absent.
 | `depends`, `parent` | Execution dependency ids (foreign allowed); optional same-project containment parent. |
 | `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. Written by add/edit --related, edit --rm-related and edit --no-related. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
-| `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status; that display reads the record and changes nothing. |
+| `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status and `updated` timestamp; that display reads the record and changes nothing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |
 | `origin` | Current judgment `user`, `agent`, `mixed`; absent means unknown. |
 | `spec`, `plan`, `step` | Working-document paths and optional exact plan heading; step requires plan. |
@@ -174,6 +174,11 @@ archive descriptors. Unset optional fields and empty Task lists are omitted;
 false booleans, zero numbers and empty body remain. Response containers such as
 `tasks` and `warnings` remain arrays, and an empty `next` result is explicit null.
 Summary/park/goal rows are projections, not interchangeable full Task objects.
+Resolved relationship entries on `show` and `next` (`parent`, `children`,
+`depends_on`, `related_to`, `wake_targets` and `source_task`) carry `id`,
+`title`, `status` and `updated` (plus `resolved` on `depends_on`, `related_to`,
+`wake_targets` and `source_task`, where unresolved entries omit `title`,
+`status` and `updated`).
 Additive output fields are allowed; clients should ignore unknown output fields.
 
 JSON success goes to stdout; a clean `tasks check` is silent with exit 0.

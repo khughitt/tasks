@@ -359,17 +359,20 @@ fn show_resolves_related_wake_and_source_rows() {
     relate_by_hand(&dir, &a, &[&b]);
 
     let shown = env.json(&dir, &["show", &a]);
+    let b_updated = env.json(&dir, &["show", &b])["task"]["updated"].clone();
+    let w_updated = env.json(&dir, &["show", &w])["task"]["updated"].clone();
+    let s_updated = env.json(&dir, &["show", &s])["task"]["updated"].clone();
     assert_eq!(
         shown["related_to"],
-        json!([{"id": b, "title": "B", "status": "done", "resolved": true}])
+        json!([{"id": b, "title": "B", "status": "done", "updated": b_updated, "resolved": true}])
     );
     assert_eq!(
         shown["wake_targets"],
-        json!([{"id": w, "title": "W", "status": "todo", "resolved": true}])
+        json!([{"id": w, "title": "W", "status": "todo", "updated": w_updated, "resolved": true}])
     );
     assert_eq!(
         shown["source_task"],
-        json!({"id": s, "title": "S", "status": "todo", "resolved": true})
+        json!({"id": s, "title": "S", "status": "todo", "updated": s_updated, "resolved": true})
     );
 }
 
@@ -380,12 +383,14 @@ fn rows_resolve_across_projects_without_a_full_scan() {
     let bb = env.init("bb");
     let a = id_of(env.json(&aa, &["add", "A"]));
     let x = id_of(env.json(&bb, &["add", "X"]));
+    let x_updated = env.json(&bb, &["show", &x])["task"]["updated"].clone();
     relate_by_hand(&aa, &a, &[&x]);
 
     let shown = env.json(&aa, &["show", &a]);
     assert_eq!(shown["related_to"][0]["id"], x);
     assert_eq!(shown["related_to"][0]["title"], "X");
     assert_eq!(shown["related_to"][0]["status"], "todo");
+    assert_eq!(shown["related_to"][0]["updated"], x_updated);
     assert_eq!(shown["related_to"][0]["resolved"], true);
 }
 
@@ -399,8 +404,10 @@ fn unresolved_rows_warn_once_each() {
     let shown = env.json(&aa, &["show", &a]);
     assert_eq!(shown["related_to"][0]["resolved"], false);
     assert_eq!(shown["related_to"][0]["id"], "aa-ffffff");
+    assert!(shown["related_to"][0].get("updated").is_none());
     assert_eq!(shown["source_task"]["resolved"], false);
     assert_eq!(shown["source_task"]["id"], "aa-eeeeee");
+    assert!(shown["source_task"].get("updated").is_none());
 
     let warnings = shown["warnings"].as_array().unwrap();
     assert_eq!(
@@ -480,16 +487,17 @@ fn moved_rows_show_the_tombstone() {
     relate_by_hand(&aa, &a, &[&b]);
     env.json(&aa, &["move", &b, "--to", "bb"]);
 
+    let b_updated = env.json(&aa, &["show", &b])["task"]["updated"].clone();
     let shown_a = env.json(&aa, &["show", &a]);
     assert_eq!(
         shown_a["related_to"][0],
-        json!({"id": b, "title": "B", "status": "moved", "resolved": true})
+        json!({"id": b, "title": "B", "status": "moved", "updated": b_updated, "resolved": true})
     );
 
     let shown_c = env.json(&aa, &["show", &c]);
     assert_eq!(
         shown_c["depends_on"][0],
-        json!({"id": b, "title": "B", "status": "moved", "resolved": true})
+        json!({"id": b, "title": "B", "status": "moved", "updated": b_updated, "resolved": true})
     );
 }
 
@@ -575,20 +583,23 @@ fn next_embeds_the_same_rows() {
 
     let next_out = env.json(&dir, &["next"]);
     let show_out = env.json(&dir, &["show", &a]);
+    let b_updated = env.json(&dir, &["show", &b])["task"]["updated"].clone();
+    let w_updated = env.json(&dir, &["show", &w])["task"]["updated"].clone();
+    let s_updated = env.json(&dir, &["show", &s])["task"]["updated"].clone();
 
     let next_task = &next_out["next"];
     assert_eq!(next_task["task"]["id"], a);
     assert_eq!(
         next_task["related_to"],
-        json!([{"id": b, "title": "B", "status": "todo", "resolved": true}])
+        json!([{"id": b, "title": "B", "status": "todo", "updated": b_updated, "resolved": true}])
     );
     assert_eq!(
         next_task["wake_targets"],
-        json!([{"id": w, "title": "W", "status": "todo", "resolved": true}])
+        json!([{"id": w, "title": "W", "status": "todo", "updated": w_updated, "resolved": true}])
     );
     assert_eq!(
         next_task["source_task"],
-        json!({"id": s, "title": "S", "status": "todo", "resolved": true})
+        json!({"id": s, "title": "S", "status": "todo", "updated": s_updated, "resolved": true})
     );
 
     assert_eq!(next_task["related_to"], show_out["related_to"]);
@@ -713,6 +724,148 @@ fn pretty_related_section_lists_every_link_in_order() {
             .lines()
             .any(|l| l.starts_with("source:") && l.contains("https://example.com/item")),
         "URL task missing source in overview: {pretty_u}"
+    );
+}
+
+#[test]
+fn pretty_related_shows_target_updated_dates_recency_colors_and_next() {
+    fn set_dates(dir: &Path, id: &str, created: &str, updated: &str) {
+        let path = dir.join("tasks").join(format!("{id}.md"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                if line.starts_with("created: ") {
+                    format!("created: {created}")
+                } else if line.starts_with("updated: ") {
+                    format!("updated: {updated}")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(&path, text).unwrap();
+    }
+
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let p = id_of(env.json(&aa, &["add", "Parent"]));
+    let dep = id_of(env.json(&aa, &["add", "Dep"]));
+    let w = id_of(env.json(&aa, &["add", "W"]));
+    let x = id_of(env.json(&bb, &["add", "Foreign Rel"]));
+    let s = id_of(env.json(&aa, &["add", "S"]));
+    env.json(&aa, &["done", &dep]);
+    let a = id_of(env.json(
+        &aa,
+        &["add", "Subject", "-p", "1", "--parent", &p, "--source", &s],
+    ));
+    env.json(&aa, &["dep", &a, "--on", &dep]);
+    let c = id_of(env.json(&aa, &["add", "Child", "--parent", &a]));
+    relate_by_hand(&aa, &a, &[&x, "bb-ffffff"]);
+    wake_by_hand(&aa, &a, &[&w]);
+
+    let today = env.json(&aa, &["show", &s])["task"]["updated"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
+    set_dates(&aa, &p, "2019-01-01T00:00:00Z", "2026-01-10T00:00:00Z");
+    set_dates(&aa, &dep, "2019-02-02T00:00:00Z", "2026-02-11T00:00:00Z");
+    set_dates(&aa, &w, "2019-03-03T00:00:00Z", "2026-03-12T00:00:00Z");
+    set_dates(&bb, &x, "2019-04-04T00:00:00Z", "2020-01-01T00:00:00Z");
+    set_dates(
+        &aa,
+        &s,
+        "2019-05-05T00:00:00Z",
+        &format!("{today}T12:00:00Z"),
+    );
+    set_dates(&aa, &c, "2019-06-06T00:00:00Z", "2026-04-13T00:00:00Z");
+    set_dates(&aa, &a, "2022-07-07T00:00:00Z", "2026-05-14T00:00:00Z");
+
+    let shown = env.json(&aa, &["show", &a]);
+    assert_eq!(shown["parent"]["updated"], "2026-01-10T00:00:00Z");
+    assert_eq!(shown["depends_on"][0]["updated"], "2026-02-11T00:00:00Z");
+    assert_eq!(shown["wake_targets"][0]["updated"], "2026-03-12T00:00:00Z");
+    assert_eq!(shown["related_to"][0]["updated"], "2020-01-01T00:00:00Z");
+    assert!(shown["related_to"][1].get("updated").is_none());
+    assert_eq!(
+        shown["source_task"]["updated"],
+        format!("{today}T12:00:00Z")
+    );
+    assert_eq!(shown["children"][0]["updated"], "2026-04-13T00:00:00Z");
+
+    let pretty = env.pretty(&aa, &["show", &a]);
+    assert!(
+        !pretty.contains('\x1b'),
+        "color-off output must not contain ANSI escapes: {pretty:?}"
+    );
+    let related_section = pretty
+        .split_once("── related ")
+        .expect("related section present")
+        .1;
+    let lines: Vec<&str> = related_section
+        .lines()
+        .skip(1)
+        .take_while(|l| !l.is_empty())
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            format!("parent      {p}  todo     2026-01-10  Parent"),
+            format!("depends on  {dep}  done     2026-02-11  Dep"),
+            format!("wake on     {w}  todo     2026-03-12  W"),
+            format!("related     {x}  todo     2020-01-01  Foreign Rel"),
+            "related     bb-ffffff  ?                    (unresolved)".to_string(),
+            format!("source      {s}  todo     {today}  S"),
+            format!("child       {c}  todo     2026-04-13  Child"),
+        ],
+        "{related_section}"
+    );
+    for forbidden in [
+        "2019-01-01",
+        "2019-02-02",
+        "2019-03-03",
+        "2019-04-04",
+        "2019-05-05",
+        "2019-06-06",
+        "2026-05-14",
+    ] {
+        assert!(
+            !related_section.contains(forbidden),
+            "related rows must use target updated date, not {forbidden}: {related_section}"
+        );
+    }
+
+    let colored_out = env
+        .cmd(&aa)
+        .args(["--pretty", "--color", "always", "show", &a])
+        .output()
+        .unwrap();
+    assert!(colored_out.status.success());
+    let colored = String::from_utf8(colored_out.stdout).unwrap();
+    assert!(
+        colored.contains(&format!("\x1b[38;2;0;215;255m{today}\x1b[0m  S")),
+        "recent related date should be painted full cyan: {colored:?}"
+    );
+    assert!(
+        colored.contains("\x1b[38;2;125;125;115m2020-01-01\x1b[0m  Foreign Rel"),
+        "old related date should be painted dim: {colored:?}"
+    );
+    assert!(
+        colored
+            .contains("\x1b[2mbb-ffffff\x1b[0m  \x1b[2m?      \x1b[0m              (unresolved)"),
+        "unresolved row keeps chrome styling and blank 10-char date cell: {colored:?}"
+    );
+
+    env.json(&aa, &["edit", &c, "--no-parent"]);
+    let next_pretty = env.pretty(&aa, &["next"]);
+    assert!(
+        next_pretty.contains(&format!(
+            "related     {x}  todo     2020-01-01  Foreign Rel"
+        )) && next_pretty.contains(&format!("source      {s}  todo     {today}  S")),
+        "next --pretty must share related date rendering: {next_pretty}"
     );
 }
 
