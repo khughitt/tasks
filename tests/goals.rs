@@ -755,12 +755,12 @@ fn pretty_row_shows_status_progress_and_flags() {
     let text = pretty(&env, &aa);
     let line = line_of(&text, &g);
     assert!(line.contains(" doing "), "{line}");
-    assert!(line.contains("1/3 +2 ideas"), "{line}");
+    assert!(line.contains("1/3") && line.contains("+2"), "{line}");
     assert!(line.contains(&format!("1 stalled ({leaf}, 4d)")), "{line}");
 }
 
 #[test]
-fn pretty_progress_names_open_dependencies() {
+fn pretty_progress_names_satisfied_dependencies() {
     let mut env = TestEnv::new();
     let aa = env.init("aa");
     let bb = env.init("bb");
@@ -770,14 +770,18 @@ fn pretty_progress_names_open_dependencies() {
     let y = add(&env, &bb, "Y", &[]);
     env.json(&aa, &["dep", &g, "--on", &x, "--on", &y]);
     let text = pretty(&env, &aa);
-    assert!(line_of(&text, &g).contains("1/1 · 2/2 deps open"), "{text}");
+    assert!(
+        line_of(&text, &g).contains("1/1") && line_of(&text, &g).contains("0/2"),
+        "{text}"
+    );
+    assert!(text.contains("deps: satisfied/total"));
     env.json(&bb, &["done", &x]);
     env.json(&bb, &["done", &y]);
     let text = pretty(&env, &aa);
     let line = line_of(&text, &g);
     assert!(
-        !line.contains("deps"),
-        "satisfied dependencies stay quiet: {line}"
+        line.contains("2/2"),
+        "satisfied dependency progress remains visible: {line}"
     );
 }
 
@@ -789,7 +793,7 @@ fn pretty_names_unresolved_dependencies() {
     set_field(&aa, &g, "depends", Some("[aa-ffffff]"));
     let text = pretty(&env, &aa);
     assert!(
-        line_of(&text, &g).contains("0/1 · 0/1 deps open, 1 unresolved"),
+        line_of(&text, &g).contains("0/1") && line_of(&text, &g).contains("?1"),
         "{text}"
     );
 }
@@ -1051,4 +1055,74 @@ fn goals_sort_json_shape() {
         serde_json::json!({"done":0,"total":1})
     );
     assert!(row(&out, &g).get("order").is_none());
+}
+
+#[test]
+fn goals_pretty_contract_closed_intro_names_closure_dates() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, c) = goal_with_child(&env, &aa, "Closed goal");
+    env.json(&aa, &["done", &c]);
+    env.json(&aa, &["done", &g]);
+    let text = env.pretty(&aa, &["goals", "--closed", "--color", "never", "--headers"]);
+    let intro = text.split(&g).next().unwrap();
+    assert!(intro.contains("closure"), "{text}");
+    assert!(intro.contains("sort:"), "{text}");
+    assert_eq!(
+        text.lines()
+            .filter(|l| l.contains("status") && l.contains("title"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn goals_pretty_contract_legend_keeps_relocated_categories() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, _) = goal_with_child(&env, &aa, "A long title for the compact goals report");
+    let idea = add(&env, &aa, "An idea", &["--parent", &g, "--status", "idea"]);
+    set_field(&aa, &g, "depends", Some("[aa-ffffff]"));
+    let run = || {
+        let out = env
+            .cmd(&aa)
+            .env("COLUMNS", "60")
+            .args(["goals", "--pretty", "--color", "never"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let text = run();
+    let intro = text.split(&g).next().unwrap();
+    for category in ["+ideas", "deps:", "?unresolved"] {
+        assert!(intro.contains(category), "{text}");
+    }
+    assert!(text.contains("progress:"), "{text}");
+    env.json(&aa, &["drop", &idea, "not now"]);
+    set_field(&aa, &g, "depends", Some("[]"));
+    let text = run();
+    let intro = text.split(&g).next().unwrap();
+    for category in ["+ideas", "deps:", "?unresolved"] {
+        assert!(!intro.contains(category), "{text}");
+    }
+}
+
+#[test]
+fn goals_pretty_contract_invalid_width_stays_an_error() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    goal_with_child(&env, &aa, "Goal");
+    for width in ["0", "wide"] {
+        env.cmd(&aa)
+            .env("COLUMNS", width)
+            .args(["goals", "--pretty"])
+            .assert()
+            .failure();
+    }
 }

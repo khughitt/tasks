@@ -85,13 +85,22 @@ mean those documents were verified.
    or `--group <name>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
-   `tasks goals` is the person's goals report, not a picker: goals with a `user` or
-   `mixed` origin across every registered project, most recently active first, with
-   progress over each goal's descendants only, its open dependencies outside the subtree
-   counted apart (`8/8 · 26/33 deps open`), and stalled, blocked and waiting-on-you
-   flags. Done goals are left out unless `--closed` adds those closed in the last 14
-   days. When filing a goal the user described, set `--origin user` (or `mixed`) so it
-   appears there.
+   `tasks goals` is the person's goals report, not a picker: user or mixed-origin
+   goals across registered projects, grouped by canonical project prefix A–Z and
+   then newest subtree activity. `--sort activity` gives global newest activity;
+   `--sort priority` gives P0 first, then newest activity. `--reverse` reverses all
+   keys within each section; open goals stay before closed ones. Progress counts
+   descendants only: `work` is done/total, `+N` counts ideas, `deps` is satisfied/total
+   prerequisites outside the subtree, and `?N` counts unresolved targets (never
+   satisfied). Fully satisfied dependency sets remain visible as N/N. These pretty
+   fractions do not change JSON's open/total/unresolved fields; only array order
+   follows the selected sort. A leading legend describes the selected order and
+   present counters, including categories moved to labelled details on narrow
+   terminals. Titles clip with `…` at available width, capped at 80 display cells;
+   JSON and `show` retain full titles. Headers remain optional. `--closed` adds goals
+   closed in the last 14 days in a final section, ordered by closure date within the
+   selected mode; the intro names that date distinction. When filing a goal the
+   user described, set `--origin user` (or `mixed`) so it appears there.
    `tasks blockers` ranks open prerequisites by the open work that depends on them,
    directly and transitively (`-n` defaults to 20; `--project`, `--group` or
    `--all-projects` widen the dependents counted). It is a report, not a picker, and

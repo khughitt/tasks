@@ -1,4 +1,5 @@
 mod contract;
+mod goals;
 mod meta;
 mod project;
 mod tables;

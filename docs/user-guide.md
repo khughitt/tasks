@@ -93,6 +93,34 @@ cross projects. Neither relation implies the other, and cycles are refused.
 left out unless `--closed` adds those closed in the last 14 days); dependency
 counts are reported separately and do not redefine the goal's intended scope.
 
+The default `goals --sort project` groups canonical project prefixes A–Z, then
+shows newest subtree activity (the newest update on the goal or any descendant).
+`--sort activity` instead ranks all goals by activity; `--sort priority` ranks P0
+first, then activity. Open ties use descendant total descending and id ascending.
+`--reverse` reverses every key, including ties, within each open/closed section;
+it never moves closed goals ahead of open ones. Under `--closed`, closed rows use
+closure dates instead of activity and tie on id, without a descendant-total key.
+Sorting applies to JSON array order too; no JSON fields or counts change.
+
+Pretty progress uses separate aligned columns: `work` is done/total committed
+descendants, `+N` counts ideas, `deps` is satisfied/total distinct prerequisites
+outside the subtree, and `?N` counts unresolved prerequisites (`unres` with headers).
+Work includes done, todo, doing and blocked descendants, excluding the goal itself,
+ideas, shelved, dropped and moved tasks. Dependency satisfied count is total minus
+open minus unresolved; unknown targets never count as satisfied. Fully satisfied
+sets remain visible as N/N, and rows without prerequisites show a dash. JSON keeps
+its existing open/total/unresolved fields. Optional counter columns appear only
+when a category exists anywhere in the displayed open and closed report.
+
+The selected sort and counter legend appear before data, including with headers
+off. Long titles end in `…` to fit the available space, capped at 80 display cells.
+Attention, then secondary counters, then core metadata move into labelled row
+details as space tightens; their legend clauses remain present. `COLUMNS` overrides
+the attached terminal width and must be a positive integer. Pipes with no known
+width keep one row per goal with the title cap; JSON and `tasks show <id>` preserve
+full titles. Project colors and `--color always` do not change width budgets.
+
+
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
 `show` collects every task link in the `── related ──` section: rows run in the

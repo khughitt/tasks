@@ -15,6 +15,7 @@ pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Re
     })?;
     let colors = ctx.project_colors();
     let mut out = Output::Goals(GoalsOut {
+        include_closed: closed,
         order,
         observed_at,
         park_evidence: ParkEvidence {

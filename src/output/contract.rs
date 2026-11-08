@@ -829,6 +829,8 @@ pub struct QuietOut {
 #[derive(Serialize)]
 pub struct GoalsOut {
     #[serde(skip)]
+    pub include_closed: bool,
+    #[serde(skip)]
     pub order: crate::goals::GoalOrder,
     pub observed_at: String,
     pub park_evidence: ParkEvidence,
