@@ -66,8 +66,8 @@ detached project; do not append the prefix again. Task commands, this project's
 records and code, and every document write stay in the fixed root; read-only evidence
 from another registered project (its records via `tasks --project <prefix>` / `tasks
 root`, its plans, ledgers, or the tool a feedback idea names) may be read from that
-project's registered checkout, never from a worktree of either project, and nothing is
-ever written there.
+project's registered checkout, never from a worktree of either project. The only writes
+there are the cross-project findings §5 lands ("Land findings owned by another project").
 
 Foreign ids in an unscoped batch, or no local project for an unscoped pass, require a
 corrected invocation before any write.
@@ -87,8 +87,8 @@ Keep this project's task reads in the fixed root, its code evidence in the chose
 checkout, and document reads at their resolved paths; read-only evidence from another
 registered project (its records via `tasks --project <prefix>` / `tasks root`, its
 plans, ledgers, or the tool a feedback idea names) may be read from that project's
-registered checkout, never from a worktree of either project, and nothing is ever
-written there.
+registered checkout, never from a worktree of either project. Keep a finding that
+another project owns for §5's cross-project writes; never only summarize it.
 
 For a mindful source, confirm the local CLI form, strip only the optional `mindful:`
 wrapper, and pass the full typed reference to `mindful --json show`:
@@ -386,6 +386,37 @@ and `dep` edges before writing the members' final scope audit notes.
 The edge puts the wait in the record (`show`'s `depends_on`) and keeps the block when
 the idea is later promoted to `todo`. When the follow-up closes, the edge readmits the idea by itself; the wake note still carries the finding to it.
 
+### Land findings owned by another project
+
+A defect, gap or follow-up that another registered project owns is landed there in the
+same pass. Do not leave it in the summary or in a local body for a later executor to
+file. These are the only writes a pass makes outside its fixed root, one per finding:
+
+1. **Note an existing record.** When an open record in the owner project already covers
+   the finding (the foreign task a member depends on, or a hit from
+   `tasks search "<phrase>" --project <owner>`), append one note:
+   `tasks -C <root> note <foreign-id> --stamp "<finding>; found by a scope pass on <member-id>"`.
+   Immediately before it, run `tasks -C <root> show <foreign-id>`. Skip the note when the
+   record is closed, its claim is live or unverifiable, or its notes already carry this
+   finding from an earlier run. The CLI accepts a note on a record another session holds,
+   so this check is the only guard. A note skipped for a claim or closure falls back to 2,
+   citing the foreign id in the new record's body.
+2. **File a new record.** Otherwise, file it in the owner project. Use
+   `tasks feedback --project <owner> "<one line>" --category <category>` when the finding is
+   about that project's tooling. Otherwise use `tasks -C <root> add "<title>" --project <owner>
+   --status idea --source <member-id> --origin agent -b "<finding, evidence, and the member
+   that found it>"`, with `--origin user` or `mixed` when the user asked for it. The source
+   links the record back, and a rerun with the same source and title reuses it instead of
+   filing a duplicate. When a local member waits on the new record, add the edge locally:
+   `tasks -C <root> dep <member> --on <new-id>`.
+3. **Nothing else.** Never edit another project's records: no field, status, dependency,
+   parent, reference or review-flag changes, and no drop, shelve, start or park.
+
+These writes reach the owner's registered checkout through `--project` and id routing;
+never pass `-C` a worktree of either project. A refused write (`retired_project`,
+`stale_copy`, `task_not_found`) is reported with its error kind and is not retried.
+Follow a `moved` refusal's new id once.
+
 ## 6. Revalidate, write, and record
 
 Immediately before each member's first write, run `tasks -C <root> show <id>` again.
@@ -404,11 +435,14 @@ order:
 2. File or reuse follow-ups with valid `--ref` links to the existing brief, replace
    pending ids in the brief's decomposition with the returned real ids, and record
    `Ideas it wakes` instructions and `dep <idea> --on <follow-up>` edges.
-3. Apply each unskipped member's verdict edits (including `--ref` to the brief and any
+3. Land each cross-project finding (§5): note an existing foreign record after its own
+   `show` check, or file a new one, then add any local `dep` edge on the new id.
+4. Apply each unskipped member's verdict edits (including `--ref` to the brief and any
    `--origin <value>` or `--no-origin` correction planned in §2, in the same `edit` as
    its other field changes when it has them), then write its `--stamp` audit note last,
-   whose `origin:` segment names the stage outcomes and the evidence for the correction.
-4. Commit the pass's writes in the project's records repository: under `[git] commit =
+   whose `origin:` segment names the stage outcomes and the evidence for the correction,
+   and whose `cross-project:` segment names any foreign id noted or filed for it.
+5. Commit the pass's writes in the project's records repository: under `[git] commit =
    true`, the CLI commits each task write as it lands, so read any `commit_deferred:` or
    `commit_failed:` warning and resolve it with `tasks -C <root> commit <id>...` for the
    affected task IDs, then commit any brief or draft spec the pass wrote with
@@ -418,7 +452,9 @@ order:
    `tasks -C <root> commit <id>... -m "chore(tasks): scope pass"` when no documents were
    written), unless that project's profile or own instructions decide commits differently,
    in which case leave them uncommitted and list the uncommitted paths in the summary.
-   Never push.
+   A cross-project write commits in the owner's records when the owner sets `[git] commit
+   = true`; read its commit warnings the same way, and otherwise list it as uncommitted
+   in that project. Never commit by hand in the owner's repository. Never push.
 
 Write task records only through the CLI and handoffs through explicit paths under
 `records`. On a rerun or after a partial failure, reuse the existing brief, goal, and
@@ -437,7 +473,10 @@ and name the project's commit or why none was made (listing any uncommitted path
 the project's profile or instructions). Add one line per lane decision §4 acted on (a goal
 created or marked `--lane`, or parented under an existing lane): the goal id, the action,
 a short reason, and its counts (`<n> open todo, <m> open descendants`), so the user can
-override it.
+override it. Add one line per cross-project write (`- <foreign-id> — **noted** or
+**filed** in <prefix>: <short finding>`), and one per cross-project finding left unlanded,
+with its skip or refusal reason. Never close a finding by saying that a scope pass does
+not write to other projects.
 Then include only nonempty groups that need user action: drops (id and supporting
 commit/id), questions (id and text), and lane candidates §4 left ambiguous (id, the
 unsettled question, and the same counts; flagged without setting `--lane` or changing
