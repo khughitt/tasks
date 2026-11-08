@@ -171,6 +171,19 @@ pub fn run(
             describe_stop(waiting_on, reason, needs, minutes)
         ),
     )?;
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
+    let cited =
+        crate::related::new_citations(&ctx.registry, Some(&task.body), &task.body, &[&next_step]);
+    let change = crate::related::RelatedChange::default();
+    let link_warnings = crate::related::link_citations(
+        &ctx.project,
+        &ctx.registry,
+        &resolver,
+        &mut task,
+        &cited,
+        &change,
+    )?;
+    ctx.warnings.extend(link_warnings);
     let park = Park {
         owner,
         session: me.tagged,

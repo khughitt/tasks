@@ -105,8 +105,9 @@ mean those documents were verified.
    in prose; a declared need is a resource, not an approval. How long a blocker has
    blocked is not measured yet.
 3. Run `tasks show <id>` and read the inventory's `required` rows in order before
-   starting; use **Task references** below to retrieve them. Read the task's `process`
-   and follow **Process and workspace** below before
+   starting; use **Task references** below to retrieve them. `show` lists every related row
+   (parent, dependencies, wake targets, related tasks, task-id source, children) with live status.
+   Read the task's `process` and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
    Before asking the user about a task's intent, read its origin by the reading rule: a
@@ -652,7 +653,8 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   for missing targets. Closed/due evidence takes precedence over repair. Old undated
   shelves remain readable and incidentally editable; renew them deliberately.
   Renew with `shelve` to replace the whole date/target pair, omitting targets whose
-  evidence has already been considered. `edit --no-defer` cannot erase a shelf checkpoint.
+  evidence has already been considered. Targets leaving `wake_on` (at renewal, unshelve,
+  done, or drop) move to `related`. `edit --no-defer` cannot erase a shelf checkpoint.
   Shelved goals, lanes, parents and recurrences may carry checkpoints; a shelf parent's
   date does not prevent a new child. Parsing accepts retained shelf metadata in editor
   drafts; writers and `check` enforce `wake_on` only on shelves and `every` plus `defer`
@@ -823,6 +825,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `doing` list before dispatching. Re-examine a task's marker whenever its scope changes;
   a stale marker is a wrong assertion. `--no-parallel` clears it.
 - Blocking on another project: `tasks dep <id> --on <prefix>-<hex>`; the other project must be registered (`tasks init` there).
+- Informational links: `related` holds non-blocking task ids the record cites; it never gates execution, review, or done. Writers link new citations automatically on write (from body text, notes, park next steps, shelve wake text, and close messages). Use `tasks edit <id> --related <id>` for links the prose does not name, and `--rm-related <id>` to remove one; `--no-related` clears the list.
 - Work spanning projects: a goal in the hub project, then one
   `tasks add "<piece>" --project <prefix>` per affected project and one
   `tasks dep <goal> --on <piece>` each. The goal returns to `ready` when the last piece

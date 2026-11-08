@@ -978,3 +978,471 @@ fn a_target_already_related_is_not_duplicated() {
     let shown2 = env.json(&aa, &["show", &s2]);
     assert_eq!(shown2["task"]["related"], json!([canonical_target]));
 }
+
+#[test]
+fn a_new_note_citation_links_the_task() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let target = id_of(env.json(&dir, &["add", "Target"]));
+    let citer = id_of(env.json(&dir, &["add", "Citer"]));
+
+    // Older prose (a note) mentioning target before it was linked as related
+    let path = dir.join("tasks").join(format!("{citer}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = text.replacen(
+        "\nnotes:",
+        &format!("\nnotes:\n  - 2026-09-09T00:00:00Z (test): older prose mentioning {target}"),
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+
+    // Confirm related is absent initially
+    let shown_before = env.json(&dir, &["show", &citer]);
+    assert!(shown_before["task"].get("related").is_none());
+
+    // A new note citing the target links it
+    env.json(
+        &dir,
+        &["note", &citer, &format!("new note citing {target}")],
+    );
+    let shown_after = env.json(&dir, &["show", &citer]);
+    assert_eq!(shown_after["task"]["related"], json!([target]));
+}
+
+#[test]
+fn held_child_and_own_ids_are_not_linked() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let dep = id_of(env.json(&dir, &["add", "Dep"]));
+    let wake_target = id_of(env.json(&dir, &["add", "Wake Target"]));
+    let source_task = id_of(env.json(&dir, &["add", "Source Task"]));
+    let parent = id_of(env.json(
+        &dir,
+        &["add", "Parent", "--depends", &dep, "--source", &source_task],
+    ));
+    let child = id_of(env.json(&dir, &["add", "Child", "--parent", &parent]));
+    env.json(&dir, &["shelve", &child, "child waiting", "--defer", "30d"]);
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &parent,
+            "waiting",
+            "--defer",
+            "30d",
+            "--wake-on",
+            &wake_target,
+        ],
+    );
+
+    let text = format!("citing {parent}, {child}, {dep}, {wake_target}, {source_task}");
+    env.json(&dir, &["note", &parent, &text]);
+
+    let shown = env.json(&dir, &["show", &parent]);
+    assert!(shown["task"].get("related").is_none());
+}
+
+#[test]
+fn an_unresolvable_citation_warns_and_is_not_linked() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let t = id_of(env.json(&dir, &["add", "Task"]));
+
+    let out = env.json(&dir, &["note", &t, "see aa-ffffff"]);
+    let warnings = out["warnings"].as_array().unwrap();
+    let expected = format!("{t} cites aa-ffffff, which resolves to no task here; not linked");
+    assert!(
+        warnings.iter().any(|w| w.as_str() == Some(&expected)),
+        "expected unresolvable warning, got: {warnings:?}"
+    );
+
+    let shown = env.json(&dir, &["show", &t]);
+    assert!(shown["task"].get("related").is_none());
+}
+
+#[test]
+fn removed_links_stay_removed_until_cited_again() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let target = id_of(env.json(&dir, &["add", "Target"]));
+    let t = id_of(env.json(&dir, &["add", "Task", "--related", &target]));
+    assert_eq!(
+        env.json(&dir, &["show", &t])["task"]["related"],
+        json!([target])
+    );
+
+    env.json(&dir, &["edit", &t, "--rm-related", &target]);
+    assert!(
+        env.json(&dir, &["show", &t])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    env.json(&dir, &["note", &t, "unrelated progress"]);
+    assert!(
+        env.json(&dir, &["show", &t])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    env.json(&dir, &["note", &t, &format!("revisiting {target}")]);
+    assert_eq!(
+        env.json(&dir, &["show", &t])["task"]["related"],
+        json!([target])
+    );
+}
+
+#[test]
+fn explicit_changes_win_over_citations() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let x = id_of(env.json(&dir, &["add", "X"]));
+    let y = id_of(env.json(&dir, &["add", "Y"]));
+    let z = id_of(env.json(&dir, &["add", "Z"]));
+
+    // 1. --rm-related X together with a body citing X
+    let t1 = id_of(env.json(&dir, &["add", "T1", "--related", &x]));
+    env.json(
+        &dir,
+        &[
+            "edit",
+            &t1,
+            "--rm-related",
+            &x,
+            "--body",
+            &format!("body cites {x}"),
+        ],
+    );
+    assert!(
+        env.json(&dir, &["show", &t1])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    // 2. --no-related --body "... X", which leaves related empty
+    let t2 = id_of(env.json(&dir, &["add", "T2", "--related", &x]));
+    env.json(
+        &dir,
+        &[
+            "edit",
+            &t2,
+            "--no-related",
+            "--body",
+            &format!("body cites {x}"),
+        ],
+    );
+    assert!(
+        env.json(&dir, &["show", &t2])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    // 3. Editor save that changes related and adds a body citation, which keeps exactly the saved list
+    let t3 = id_of(env.json(&dir, &["add", "T3", "--related", &x]));
+    let script3 = format!(
+        "sed -i 's/related: \\[{x}\\]/related: \\[{y}\\]/' \"$1\"\n\
+         sed -i 's/^## Notes/cites {z}\\n\\n## Notes/' \"$1\""
+    );
+    let ed3 = editor_script(&dir, &script3);
+    env.cmd(&dir)
+        .env("EDITOR", &ed3)
+        .args(["edit", &t3, "--editor"])
+        .output()
+        .unwrap();
+    let shown3 = env.json(&dir, &["show", &t3]);
+    assert_eq!(shown3["task"]["related"], json!([y]));
+
+    // 4. Editor save that leaves related as stored, which links its new body citation
+    let t4 = id_of(env.json(&dir, &["add", "T4", "--related", &x]));
+    let script4 = format!("sed -i 's/^## Notes/cites {z}\\n\\n## Notes/' \"$1\"");
+    let ed4 = editor_script(&dir, &script4);
+    env.cmd(&dir)
+        .env("EDITOR", &ed4)
+        .args(["edit", &t4, "--editor"])
+        .output()
+        .unwrap();
+    let shown4 = env.json(&dir, &["show", &t4]);
+    assert_eq!(shown4["task"]["related"], json!([x, z]));
+}
+
+#[test]
+fn moved_citations_link_live_destinations_once() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let cc = env.init("cc");
+
+    // Case 1: X moved to Y, with Y already related: nothing appended
+    let x = id_of(env.json(&aa, &["add", "X"]));
+    let y = id_of(env.json(&aa, &["move", &x, "--to", "bb"]));
+    let t1 = id_of(env.json(&aa, &["add", "T1", "--related", &y]));
+    env.json(&aa, &["note", &t1, &format!("see {x}")]);
+    assert_eq!(env.json(&aa, &["show", &t1])["task"]["related"], json!([y]));
+
+    // Case 2: two ids whose chains converge on Y: Y appended once
+    let a_chain = id_of(env.json(&aa, &["add", "Chain A"]));
+    let b_chain = id_of(env.json(&aa, &["move", &a_chain, "--to", "bb"]));
+    let c_chain = id_of(env.json(&bb, &["move", &b_chain, "--to", "cc"]));
+    let t2 = id_of(env.json(&aa, &["add", "T2"]));
+    env.json(&aa, &["note", &t2, &format!("see {a_chain} and {b_chain}")]);
+    assert_eq!(
+        env.json(&aa, &["show", &t2])["task"]["related"],
+        json!([c_chain])
+    );
+
+    // Case 3: A to B to C, with a note on C citing A: nothing appended, exit 0
+    let out3 = env.json(&cc, &["note", &c_chain, &format!("see {a_chain}")]);
+    assert!(out3["warnings"].as_array().unwrap().is_empty());
+    assert!(
+        env.json(&cc, &["show", &c_chain])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    // Case 4: a cited X held in depends as a tombstone, whose successor is not held: nothing appended
+    let x_tomb = id_of(env.json(&aa, &["add", "XTomb"]));
+    let t4 = id_of(env.json(&aa, &["add", "T4", "--depends", &x_tomb]));
+    let y_succ = id_of(env.json(&aa, &["move", &x_tomb, "--to", "bb"]));
+    env.json(&aa, &["note", &t4, &format!("see {x_tomb}")]);
+    assert!(
+        env.json(&aa, &["show", &t4])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    // Case 5: a newly cited moved id with nothing held: the successor appended
+    let t5 = id_of(env.json(&aa, &["add", "T5"]));
+    env.json(&aa, &["note", &t5, &format!("see {x_tomb}")]);
+    assert_eq!(
+        env.json(&aa, &["show", &t5])["task"]["related"],
+        json!([y_succ])
+    );
+}
+
+#[test]
+fn tool_generated_notes_and_unchanged_bodies_link_nothing() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let target = id_of(env.json(&aa, &["add", "Target"]));
+
+    // Move note: moving a task generates a note in the destination with the source id
+    let moved_succ = id_of(env.json(&aa, &["move", &target, "--to", "bb"]));
+    let shown_succ = env.json(&bb, &["show", &moved_succ]);
+    assert!(shown_succ["task"].get("related").is_none());
+
+    // Body reworded with the same ids
+    let t = id_of(env.json(&aa, &["add", "T", "--body", &format!("see {moved_succ}")]));
+    assert_eq!(
+        env.json(&aa, &["show", &t])["task"]["related"],
+        json!([moved_succ])
+    );
+    env.json(&aa, &["edit", &t, "--rm-related", &moved_succ]);
+    assert!(
+        env.json(&aa, &["show", &t])["task"]
+            .get("related")
+            .is_none()
+    );
+    env.json(
+        &aa,
+        &[
+            "edit",
+            &t,
+            "--body",
+            &format!("please see {moved_succ} again"),
+        ],
+    );
+    assert!(
+        env.json(&aa, &["show", &t])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    // Migrate note
+    let mig = id_of(env.json(&bb, &["add", "Migrate Target"]));
+    env.json(&bb, &["rename", "bb", "bx"]);
+    let shown_mig = env.json(&bb, &["show", &mig.replacen("bb-", "bx-", 1)]);
+    assert!(shown_mig["task"].get("related").is_none());
+}
+
+#[test]
+fn citations_are_found_through_punctuation_markdown_and_paths() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let target = id_of(env.json(&dir, &["add", "Target"]));
+    let t = id_of(env.json(&dir, &["add", "Task"]));
+
+    // Own attachment path: tasks/files/{t}/x.png should NOT link {t} (own id skipped)
+    // Wrapped forms: ({target}), {target}., `{target}`, **{target}**, tasks/files/{target}/x.png
+    let text = format!(
+        "own: tasks/files/{t}/x.png, wrapped: ({target}), {target}., `{target}`, **{target}**, tasks/files/{target}/x.png"
+    );
+    env.json(&dir, &["note", &t, &text]);
+
+    let shown = env.json(&dir, &["show", &t]);
+    assert_eq!(shown["task"]["related"], json!([target]));
+}
+
+#[test]
+fn lookalike_tokens_are_not_citations() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let target = id_of(env.json(&dir, &["add", "Target"]));
+    let t = id_of(env.json(&dir, &["add", "Task"]));
+
+    let bare_hex = &target[3..];
+    let upper = target.to_uppercase();
+    let text = format!("foo-{target} {target}-x {upper} {bare_hex} 2026-11-07 zz-123456");
+    let out = env.json(&dir, &["note", &t, &text]);
+
+    let warnings = out["warnings"].as_array().unwrap();
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings for lookalikes, got: {warnings:?}"
+    );
+
+    let shown = env.json(&dir, &["show", &t]);
+    assert!(shown["task"].get("related").is_none());
+}
+
+#[test]
+fn a_stdin_batch_links_each_citation_once_in_order() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let x = id_of(env.json(&dir, &["add", "X"]));
+    let y = id_of(env.json(&dir, &["add", "Y"]));
+    let t = id_of(env.json(&dir, &["add", "Task"]));
+
+    let stdin_input =
+        format!("line 1 cites {x}\nline 2 cites {y} and {x}\nline 3 cites {y} and {x}\n");
+    let out = env
+        .cmd(&dir)
+        .args(["note", &t, "--stdin"])
+        .write_stdin(stdin_input)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+
+    let shown = env.json(&dir, &["show", &t]);
+    assert_eq!(shown["task"]["related"], json!([x, y]));
+}
+
+#[test]
+fn an_unreachable_citation_warns_and_the_note_lands() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let bb_target = id_of(env.json(&bb, &["add", "BB Target"]));
+    let t = id_of(env.json(&aa, &["add", "Task"]));
+
+    std::fs::remove_dir_all(&bb).unwrap();
+
+    let out = env.json(&aa, &["note", &t, &format!("see {bb_target}")]);
+    let warnings = out["warnings"].as_array().unwrap();
+    let expected = format!("{t} cites {bb_target}, which resolves to no task here; not linked");
+    assert!(
+        warnings.iter().any(|w| w.as_str() == Some(&expected)),
+        "expected unresolvable/unreachable warning, got: {warnings:?}"
+    );
+
+    let shown = env.json(&aa, &["show", &t]);
+    assert!(shown["task"].get("related").is_none());
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert!(
+        notes.last().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains(&bb_target)
+    );
+}
+
+#[test]
+fn every_supplied_text_hook_links() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let target = id_of(env.json(&dir, &["add", "Target"]));
+
+    // 1. add -b
+    let t1 = id_of(env.json(&dir, &["add", "T1", "-b", &format!("mentions {target}")]));
+    assert_eq!(
+        env.json(&dir, &["show", &t1])["task"]["related"],
+        json!([target])
+    );
+
+    // 2. edit --body
+    let t2 = id_of(env.json(&dir, &["add", "T2"]));
+    env.json(
+        &dir,
+        &["edit", &t2, "--body", &format!("mentions {target}")],
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &t2])["task"]["related"],
+        json!([target])
+    );
+
+    // 3. note
+    let t3 = id_of(env.json(&dir, &["add", "T3"]));
+    env.json(&dir, &["note", &t3, &format!("mentions {target}")]);
+    assert_eq!(
+        env.json(&dir, &["show", &t3])["task"]["related"],
+        json!([target])
+    );
+
+    // 4. park
+    let t4 = id_of(env.json(&dir, &["add", "T4"]));
+    env.json(
+        &dir,
+        &[
+            "park",
+            &t4,
+            &format!("next: inspect {target}"),
+            "--waiting-on",
+            "user",
+        ],
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &t4])["task"]["related"],
+        json!([target])
+    );
+
+    // 5. done
+    let t5 = id_of(env.json(&dir, &["add", "T5"]));
+    env.json(&dir, &["done", &t5, &format!("done, see {target}")]);
+    assert_eq!(
+        env.json(&dir, &["show", &t5])["task"]["related"],
+        json!([target])
+    );
+
+    // 6. drop
+    let t6 = id_of(env.json(&dir, &["add", "T6"]));
+    env.json(&dir, &["drop", &t6, &format!("drop, see {target}")]);
+    assert_eq!(
+        env.json(&dir, &["show", &t6])["task"]["related"],
+        json!([target])
+    );
+
+    // 7. block
+    let t7 = id_of(env.json(&dir, &["add", "T7"]));
+    env.json(&dir, &["block", &t7, &format!("blocked by {target}")]);
+    assert_eq!(
+        env.json(&dir, &["show", &t7])["task"]["related"],
+        json!([target])
+    );
+
+    // 8. shelve
+    let t8 = id_of(env.json(&dir, &["add", "T8"]));
+    env.json(
+        &dir,
+        &[
+            "shelve",
+            &t8,
+            &format!("wake when {target} arrives"),
+            "--defer",
+            "30d",
+        ],
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &t8])["task"]["related"],
+        json!([target])
+    );
+}

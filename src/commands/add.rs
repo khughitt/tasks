@@ -124,12 +124,23 @@ pub fn run(
     let mut task = blank(&ctx.project, title, status, agent)?;
     task.origin = attribution.origin;
     apply_fields(&mut ctx, &mut task, &fields, None)?;
-    let _related_change = crate::related::RelatedChange {
+    let related_change = crate::related::RelatedChange {
         added: task.related.clone(),
         removed: Vec::new(),
         cleared: false,
         editor_changed: false,
     };
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
+    let cited = crate::related::new_citations(&ctx.registry, None, &task.body, &[]);
+    let warnings = crate::related::link_citations(
+        &ctx.project,
+        &ctx.registry,
+        &resolver,
+        &mut task,
+        &cited,
+        &related_change,
+    )?;
+    ctx.warnings.extend(warnings);
     let stamp = super::occurrence_stamp(&mut ctx.warnings);
     let at = task.created.clone();
     super::append_occurrence_note(

@@ -41,7 +41,7 @@ pub fn pending(task: &Task) -> Result<Option<PendingOperation>> {
             .filter(|n| !matches!(n.phase.as_str(), "completed" | "reconciled")),
     )
 }
-fn pending_here(project: &Project, task: &Task) -> Result<Option<PendingOperation>> {
+pub(crate) fn pending_here(project: &Project, task: &Task) -> Result<Option<PendingOperation>> {
     let mut live = Vec::new();
     for note in latest(task)? {
         if note.phase == "completed" {

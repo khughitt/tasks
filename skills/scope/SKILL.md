@@ -228,8 +228,8 @@ targets and preserves the dependencies and full history; it grants no execution 
 A pending user decision becomes an idea with a synced `--reviewed --awaiting-user`
 note. If the condition remains unmet or unknown, keep the full human condition and
 renew with an explicit future date and only remaining unresolved completion targets.
-Omitted targets are removed; remove already-considered closed targets to acknowledge
-that evidence. For a manual/external event, use prose/date rather than a false closure
+Omitted targets are removed (targets dropped from `wake_on` stay linked as `related`);
+remove already-considered closed targets to acknowledge that evidence. For a manual/external
 trigger. `--no-defer` cannot erase a checkpoint. On a condition met, complete the
 unshelve-to-review handoff in this session or record and renew a concrete remaining
 condition; an acknowledgement note alone is insufficient. Reads do not unshelve.

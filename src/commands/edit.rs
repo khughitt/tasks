@@ -331,12 +331,23 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     }
     let related_before_adds = task.related.len();
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
-    let _related_change = crate::related::RelatedChange {
+    let related_change = crate::related::RelatedChange {
         added: task.related[related_before_adds..].to_vec(),
         removed: related_removals,
         cleared: args.no_related,
         editor_changed: false,
     };
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
+    let cited = crate::related::new_citations(&ctx.registry, Some(&original.body), &task.body, &[]);
+    let warnings = crate::related::link_citations(
+        &ctx.project,
+        &ctx.registry,
+        &resolver,
+        &mut task,
+        &cited,
+        &related_change,
+    )?;
+    ctx.warnings.extend(warnings);
     // Current contract (docs/user-guide.md): needs change under no live claim or the caller's own, and
     // under the caller's own the claim's holds follow in the same save.
     // The target's override notes are appended here and land with its save. The
@@ -516,12 +527,24 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     }
     crate::related::validate_editor_related(&ctx.registry, &resolver, &original, &edited)
         .map_err(keep)?;
-    let _related_change = crate::related::RelatedChange {
+    let related_change = crate::related::RelatedChange {
         added: Vec::new(),
         removed: Vec::new(),
         cleared: false,
         editor_changed: edited.related != original.related,
     };
+    let cited =
+        crate::related::new_citations(&ctx.registry, Some(&original.body), &edited.body, &[]);
+    let warnings = crate::related::link_citations(
+        &ctx.project,
+        &ctx.registry,
+        &resolver,
+        &mut edited,
+        &cited,
+        &related_change,
+    )
+    .map_err(keep)?;
+    ctx.warnings.extend(warnings);
     let from_main = resolver.take_warnings();
     ctx.warnings.extend(from_main);
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;

@@ -1,4 +1,5 @@
 mod common;
+use common::id_of;
 use common::retained::{RetainedEnv, host, transfer, transfer_fixture, transfer_request};
 use common::retained::{
     checkpoint, checkpoint_fixture, checkpoint_request, cross_receiver, declaration,
@@ -9,7 +10,23 @@ fn intent(f: &RetainedEnv) -> serde_json::Value {
     json!({"version":1,"key":{"coordinator":f.id,"operation_id":"a".repeat(32)},"host":"fixture-host","request":{"type":"git","basis":b,"path":"README.md","sha256":"a".repeat(64)},"input_bases":[{"task":f.id,"basis":b}],"phase":"intent","at":"2026-11-03T00:00:00Z","observer":null,"diagnostics":[],"outputs":{}})
 }
 fn pending(f: &RetainedEnv) {
-    f.seed_note(&format!("retention operation: {}", intent(f)));
+    let name = format!("retained-op-{}.request.json", "a".repeat(32));
+    let p = f.dir.join(&name);
+    let b = f.state()["basis"].clone();
+    let req = json!({
+        "version": 1,
+        "operation_id": "a".repeat(32),
+        "host": "fixture-host",
+        "inputs": [{"task": f.id, "basis": b}],
+        "declarations": []
+    });
+    let req_bytes = serde_json::to_vec(&req).unwrap();
+    std::fs::write(&p, &req_bytes).unwrap();
+    f.json(&["attach", &f.id, p.to_str().unwrap(), "--name", &name]);
+    use sha2::{Digest, Sha256};
+    let sha = format!("{:x}", Sha256::digest(&req_bytes));
+    let note = json!({"version":1,"key":{"coordinator":f.id,"operation_id":"a".repeat(32)},"host":"fixture-host","request":{"type":"attachment","task":f.id,"name":name,"sha256":sha},"input_bases":[{"task":f.id,"basis":b}],"phase":"intent","at":"2026-11-03T00:00:00Z","observer":null,"diagnostics":[],"outputs":{}});
+    f.seed_note(&format!("retention operation: {note}"));
 }
 #[test]
 fn retained_pending_guards() {
@@ -27,6 +44,71 @@ fn retained_pending_guards() {
         assert!(!out.status.success(), "{args:?}: {out:?}");
     }
     let out = f.cmd().args(["archive-notes", &f.id]).output().unwrap();
+    assert!(!out.status.success());
+}
+#[test]
+fn pending_operation_defers_citation_links() {
+    let f = RetainedEnv::new("in-tree");
+    pending(&f);
+    let initial_state = f.state();
+
+    let y = id_of(f.json(&["add", "Task Y"]));
+
+    // note <id> "see Y" succeeds
+    let note_out = f.json(&["note", &f.id, &format!("see {y}")]);
+    // start <id> succeeds
+    let start_out = f.json(&["start", &f.id]);
+    // park <id> "next: Y" succeeds
+    let park_out = f.json(&["park", &f.id, &format!("next: {y}")]);
+
+    // related stays absent
+    let shown = f.json(&["show", &f.id]);
+    assert!(shown["task"].get("related").is_none());
+
+    // the warnings of note and park each carry the deferral text naming Y
+    let expected_warning = format!(
+        "{} has a pending retained operation; not linked: {y}; link them with tasks edit {} --related {y} once it completes",
+        f.id, f.id
+    );
+    let note_warnings = note_out["warnings"].as_array().unwrap();
+    assert!(
+        note_warnings
+            .iter()
+            .any(|w| w.as_str() == Some(&expected_warning)),
+        "note warnings missing deferral text: {note_warnings:?}"
+    );
+
+    let park_warnings = park_out["warnings"].as_array().unwrap();
+    assert!(
+        park_warnings
+            .iter()
+            .any(|w| w.as_str() == Some(&expected_warning)),
+        "park warnings missing deferral text: {park_warnings:?}"
+    );
+
+    // start supplies no text, so its warnings carry no deferral and it scans no old prose
+    let start_warnings = start_out["warnings"].as_array().unwrap();
+    assert!(
+        !start_warnings.iter().any(|w| w
+            .as_str()
+            .unwrap_or("")
+            .contains("pending retained operation")),
+        "start warnings should not carry deferral: {start_warnings:?}"
+    );
+
+    // f.state() after the writes reports the same operation phases and diagnostics as before
+    let current_state = f.state();
+    let initial_op = &initial_state["operations"][0]["note"];
+    let current_op = &current_state["operations"][0]["note"];
+    assert_eq!(current_op["phase"], initial_op["phase"]);
+    assert_eq!(current_op["diagnostics"], initial_op["diagnostics"]);
+
+    // done still refuses, as in retained_pending_guards
+    let out = f
+        .cmd()
+        .args(["done", &f.id, "Discard nothing"])
+        .output()
+        .unwrap();
     assert!(!out.status.success());
 }
 #[test]

@@ -223,12 +223,12 @@ pub fn note(
     let owner = owner_name(&ctx.project)?;
     let at = crate::time::now();
     let mut duplicates = Vec::new();
-    for text in texts {
-        let duplicate = crate::growth::first_duplicate(&task.notes, &text);
+    for text in &texts {
+        let duplicate = crate::growth::first_duplicate(&task.notes, text);
         if stamp {
-            append_stamped_note(&mut ctx, &mut task, &owner, &text)?;
+            append_stamped_note(&mut ctx, &mut task, &owner, text)?;
         } else {
-            append_note(&mut task, &owner, &text)?;
+            append_note(&mut task, &owner, text)?;
         }
         let note = task.notes.last_mut().expect("note appended");
         note.at.clone_from(&at);
@@ -250,6 +250,20 @@ pub fn note(
     // does not land; with relay on it carries the failure, and the note lands.
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
+    let note_refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let cited =
+        crate::related::new_citations(&ctx.registry, Some(&task.body), &task.body, &note_refs);
+    let change = crate::related::RelatedChange::default();
+    let link_warnings = crate::related::link_citations(
+        &ctx.project,
+        &ctx.registry,
+        &resolver,
+        &mut task,
+        &cited,
+        &change,
+    )?;
+    ctx.warnings.extend(link_warnings);
     save(&mut ctx, &mut task)?;
     ctx.warnings.extend(duplicates);
 
@@ -291,11 +305,30 @@ pub fn close(
 ) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     transition(&mut ctx, &mut task, to, force)?;
-    if let Some(message) = message
+    if let Some(message) = &message
         && !ctx.recovered
     {
         let owner = owner_name(&ctx.project)?;
-        append_stamped_note(&mut ctx, &mut task, &owner, &message)?;
+        append_stamped_note(&mut ctx, &mut task, &owner, message)?;
+    }
+    if let Some(message) = &message {
+        let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
+        let cited = crate::related::new_citations(
+            &ctx.registry,
+            Some(&task.body),
+            &task.body,
+            &[message.as_str()],
+        );
+        let change = crate::related::RelatedChange::default();
+        let link_warnings = crate::related::link_citations(
+            &ctx.project,
+            &ctx.registry,
+            &resolver,
+            &mut task,
+            &cited,
+            &change,
+        )?;
+        ctx.warnings.extend(link_warnings);
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
@@ -384,6 +417,19 @@ pub fn shelve(
     task.wake_on = targets;
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &format!("shelved: {wake}"))?;
+    let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
+    let cited =
+        crate::related::new_citations(&ctx.registry, Some(&task.body), &task.body, &[&wake]);
+    let change = crate::related::RelatedChange::default();
+    let link_warnings = crate::related::link_citations(
+        &ctx.project,
+        &ctx.registry,
+        &resolver,
+        &mut task,
+        &cited,
+        &change,
+    )?;
+    ctx.warnings.extend(link_warnings);
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }

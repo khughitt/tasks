@@ -121,6 +121,22 @@ event-kind discriminator: a user's identical text is not distinguishable by text
 alone. A creation note is identified structurally at the creation timestamp;
 provenance proves a reported session source, not that a note is a lifecycle event.
 
+Writers link newly cited tasks into `related` automatically on write (decision D1: R1).
+Text read: the body (`add`, `edit --body`, editor saves), plus writer-appended notes (`note`,
+`park` next step, `shelve` wake condition, and closure messages for `done`, `drop`, `block`).
+Tool-generated notes (move, migrate, rename, receipts, start/resume, takeover) and `feedback`
+never link citations. A citation is a maximal token matching `[a-z][a-z0-9]{1,7}-[0-9a-f]{6}`
+whose prefix the registry knows. Only new citations count: every id in an appended note
+counts, and only ids absent from the old body count. Each new citation resolves to its live
+destination across move chains (`tombstone::follow`). Unresolvable citations warn
+`<task> cites <id>, which resolves to no task here; not linked`. Citations are skipped without
+warning if the cited id or its destination matches the record itself, a child, an id already
+in `related`, or an id held in `depends`, `parent`, `wake_on`, `moved_to`, `moved_from`, a
+task-id `source`, or removed in the same write. Explicit related changes (`--rm-related`,
+`--no-related`, editor changes to `related`) take precedence over automatic linking. While a
+retained operation is pending on the record, automatic linking is deferred with a warning
+naming the unlinked ids.
+
 ## Origin and provenance
 
 `origin` is whose ask a record carries, not who typed it: user, agent or both.
