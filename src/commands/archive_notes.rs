@@ -1,11 +1,12 @@
 use super::{Ctx, append_note, append_stamped_note, owner_name};
-use crate::attachments::{self, EntryState};
+use crate::attachments::{self, DirState, EntryState};
 use crate::error::{Error, Result};
 use crate::history::ArchiveDescriptor;
-use crate::model::Task;
-use crate::output::{ArchiveApplyOut, ArchivePreview, Output};
+use crate::model::{Task, TaskId};
+use crate::output::{ArchiveApplyOut, ArchivePreview, ArchiveVerified, Output};
+use crate::repo::Project;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -22,6 +23,11 @@ fn interrupt_at(boundary: &str) {
     if std::env::var("TASKS_ARCHIVE_STOP_AFTER").as_deref() == Ok(boundary) {
         std::process::exit(86);
     }
+}
+
+// Test-only fault injection, beside interrupt_at: proves a failed check refuses the apply.
+fn fault(name: &str) -> bool {
+    std::env::var("TASKS_ARCHIVE_FAULT").as_deref() == Ok(name)
 }
 
 fn note_section(raw: &str) -> &[u8] {
@@ -133,6 +139,89 @@ fn prepare(ctx: &mut Ctx, mut task: Task, raw: &str) -> Result<Prepared> {
     })
 }
 
+fn unverified(id: &TaskId, invariant: &str, detail: &str) -> Error {
+    Error::ArchiveUnverified(format!(
+        "{id}: archive apply failed its {invariant} check: {detail}"
+    ))
+}
+
+/// The logical change apply may make, checked before anything is written: the old notes
+/// unchanged and in order plus the attach note and receipt, one more descriptor, a later
+/// `updated`, and nothing else. The attachment ledger is derived from the notes, so this
+/// also holds it to the old ledger plus the segment.
+fn verify_prepared(before: &Task, prepared: &Prepared) -> Result<Vec<&'static str>> {
+    let after = &prepared.task;
+    let id = &before.id;
+    let refuse = |invariant, detail| Err(unverified(id, invariant, detail));
+    let n = before.notes.len();
+    let receipts = [
+        attachments::attached_note(
+            &prepared.preview.archive_name,
+            prepared.bytes.len() as u64,
+            None,
+        ),
+        format!(
+            "archived-notes: v1 source={} segment={} count={}",
+            prepared.preview.source_sha256, prepared.archive.sha256, prepared.archive.note_count
+        ),
+    ];
+    let added: Vec<&str> = after.notes[n.min(after.notes.len())..]
+        .iter()
+        .map(|note| note.text.as_str())
+        .collect();
+    if after.notes.get(..n) != Some(before.notes.as_slice()) {
+        return refuse("notes_appended", "an existing note changed or moved");
+    }
+    if added != receipts {
+        return refuse(
+            "notes_appended",
+            "the added notes are not exactly the attach note and the receipt",
+        );
+    }
+    let mut descriptors = before.note_archives.clone();
+    descriptors.push(prepared.archive.clone());
+    if after.note_archives != descriptors {
+        return refuse(
+            "fields_unchanged",
+            "the descriptors are not the old ones plus the new segment",
+        );
+    }
+    let mut rest = after.clone();
+    rest.notes = before.notes.clone();
+    rest.note_archives = before.note_archives.clone();
+    rest.updated = before.updated.clone();
+    if &rest != before {
+        return refuse(
+            "fields_unchanged",
+            "a field other than notes, descriptors and updated changed",
+        );
+    }
+    Ok(vec!["notes_appended", "fields_unchanged"])
+}
+
+/// Every entry under the task's attachment directory: a regular file's SHA-256, or the
+/// file type of anything else.
+fn files_snapshot(project: &Project, id: &TaskId) -> Result<BTreeMap<String, String>> {
+    let dir = attachments::task_dir(project, id);
+    let mut files = BTreeMap::new();
+    match attachments::dir_state(&dir)? {
+        DirState::Absent => return Ok(files),
+        DirState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
+        DirState::Directory => {}
+    }
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        let meta = std::fs::symlink_metadata(entry.path())?;
+        let value = if meta.is_file() {
+            digest(&std::fs::read(entry.path())?)
+        } else {
+            format!("{:?}", meta.file_type())
+        };
+        files.insert(entry.file_name().to_string_lossy().into_owned(), value);
+    }
+    Ok(files)
+}
+
 // A receipt is evidence only at its descriptor's exact logical boundary, after its attach.
 fn prior_receipt(ctx: &Ctx, task: &Task, expected: &str) -> Result<Option<String>> {
     let mut sources = BTreeSet::new();
@@ -218,6 +307,10 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
             record_bytes_before: raw.len() as u64,
             record_bytes_after: raw.len() as u64,
             action: "already_archived",
+            verified: ArchiveVerified {
+                invariants: vec!["receipt_bound", "segments_verified"],
+                written: Vec::new(),
+            },
             warnings: ctx.warnings,
         }));
     }
@@ -227,10 +320,20 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
             "source hash differs from preview; preview again".into(),
         ));
     }
-    let prepared = prepare(&mut ctx, task, &raw)?;
+    let before = task.clone();
+    let mut prepared = prepare(&mut ctx, task, &raw)?;
     if !prepared.preview.eligible {
         return Err(Error::Validation(prepared.preview.reasons.join("; ")));
     }
+    if fault("prepared-note") {
+        prepared.task.notes[0].text.push_str(" (altered)");
+    }
+    let mut invariants = verify_prepared(&before, &prepared)?;
+    let mut files = files_snapshot(&ctx.project, &id)?;
+    files.insert(
+        prepared.preview.archive_name.clone(),
+        prepared.archive.sha256.clone(),
+    );
     let target = attachments::task_dir(&ctx.project, &id).join(&prepared.preview.archive_name);
     interrupt_at("before-segment-publish");
     attachments::ensure_task_dir(&ctx.project, &id)?;
@@ -247,6 +350,9 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
     }
     crate::written::record(&ctx.project.records, &target);
     interrupt_at("after-segment-publish");
+    if fault("stray-file") {
+        attachments::write_new(&target.with_file_name("stray.txt"), b"stray")?;
+    }
     // Revalidation uses the published bytes and all existing segments, then checks source last.
     ctx.project
         .write_task_guarded(&ctx.registry, &prepared.task, || {
@@ -254,6 +360,13 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
                 return Err(Error::ConcurrentModification(
                     id.to_string(),
                     "source changed; preserve the orphan archive and preview again".into(),
+                ));
+            }
+            if files_snapshot(&ctx.project, &id)? != files {
+                return Err(unverified(
+                    &id,
+                    "files_unchanged",
+                    "the task's files changed beyond the new segment; nothing switched",
                 ));
             }
             interrupt_at("before-record-switch");
@@ -265,8 +378,22 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
                 target.display()
             ))
         })?;
+    invariants.push("files_unchanged");
     interrupt_at("after-record-switch");
-    let after = std::fs::metadata(ctx.project.task_path(&id))?.len();
+    let record = ctx.project.task_path(&id);
+    if ctx.project.read_task(&id)? != prepared.task {
+        return Err(unverified(
+            &id,
+            "record_reloaded",
+            &format!(
+                "{} switched but reads back differently from the prepared record; \
+                 inspect it against the source preview before any further write",
+                record.display()
+            ),
+        ));
+    }
+    invariants.push("record_reloaded");
+    let after = std::fs::metadata(&record)?.len();
     super::follow_holder(&mut ctx, &id, None, "the note archive landed");
     super::finish(&mut ctx);
     Ok(Output::ArchiveApply(ArchiveApplyOut {
@@ -276,6 +403,100 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
         record_bytes_before: raw.len() as u64,
         record_bytes_after: after,
         action: "archived",
+        verified: ArchiveVerified {
+            invariants,
+            written: vec![record.display().to_string(), target.display().to_string()],
+        },
         warnings: ctx.warnings,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn archived_fixture() -> (Task, Prepared) {
+        let before = crate::history::fixture(
+            "---\nid: arc-a00001\ntitle: T\nstatus: todo\npriority: 2\n\
+             created: 2026-10-30T00:00:00Z\nupdated: 2026-10-30T00:00:00Z\n\
+             depends: []\ntags: []\n---\n\nBody\n\n## Notes\n\n\
+             - 2026-10-30T00:00:00Z (fixture): original evidence\n",
+            "tasks/arc-a00001.md",
+        )
+        .unwrap();
+        let bytes = b"## Notes\n\n- 2026-10-30T00:00:00Z (fixture): original evidence\n".to_vec();
+        let archive = ArchiveDescriptor {
+            sha256: digest(&bytes),
+            note_count: 1,
+        };
+        let source = "a".repeat(64);
+        let mut task = before.clone();
+        let note = |text: String| crate::model::Note {
+            text,
+            ..before.notes[0].clone()
+        };
+        task.notes.push(note(attachments::attached_note(
+            &archive.file_name(),
+            bytes.len() as u64,
+            None,
+        )));
+        task.notes.push(note(format!(
+            "archived-notes: v1 source={source} segment={} count=1",
+            archive.sha256
+        )));
+        task.note_archives.push(archive.clone());
+        task.updated = "2026-10-31T00:00:00Z".into();
+        let preview = ArchivePreview {
+            id: before.id.to_string(),
+            source_sha256: source,
+            archive_name: archive.file_name(),
+            archive_bytes: bytes.len() as u64,
+            note_count: 1,
+            record_bytes_before: 0,
+            record_bytes_after: 0,
+            eligible: true,
+            reasons: Vec::new(),
+        };
+        let prepared = Prepared {
+            preview,
+            task,
+            archive,
+            bytes,
+        };
+        (before, prepared)
+    }
+
+    fn refusal(before: &Task, prepared: &Prepared) -> String {
+        let error = verify_prepared(before, prepared).unwrap_err();
+        assert_eq!(error.kind(), "archive_unverified");
+        error.to_string()
+    }
+
+    #[test]
+    fn verify_accepts_exactly_the_archive_change() {
+        let (before, prepared) = archived_fixture();
+        assert_eq!(
+            verify_prepared(&before, &prepared).unwrap(),
+            ["notes_appended", "fields_unchanged"]
+        );
+    }
+
+    #[test]
+    fn verify_refuses_any_other_change() {
+        let (before, mut prepared) = archived_fixture();
+        prepared.task.title.push('!');
+        assert!(refusal(&before, &prepared).contains("fields_unchanged"));
+
+        let (before, mut prepared) = archived_fixture();
+        prepared.task.note_archives.push(prepared.archive.clone());
+        assert!(refusal(&before, &prepared).contains("fields_unchanged"));
+
+        let (before, mut prepared) = archived_fixture();
+        prepared.task.notes.pop();
+        assert!(refusal(&before, &prepared).contains("notes_appended"));
+
+        let (before, mut prepared) = archived_fixture();
+        prepared.task.notes[0].at = "2026-10-29T00:00:00Z".into();
+        assert!(refusal(&before, &prepared).contains("notes_appended"));
+    }
 }

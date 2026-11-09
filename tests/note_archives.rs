@@ -881,6 +881,25 @@ fn archive_preview_apply_exact() {
     );
     let section = &raw.as_bytes()[raw.find("\n## Notes\r\n").unwrap() + 1..];
     let name = preview["archive_name"].as_str().unwrap();
+    assert_eq!(
+        out["verified"]["invariants"],
+        serde_json::json!([
+            "notes_appended",
+            "fields_unchanged",
+            "files_unchanged",
+            "record_reloaded"
+        ]),
+        "{out}"
+    );
+    assert_eq!(
+        out["verified"]["written"],
+        serde_json::json!([
+            path.display().to_string(),
+            root.join(format!("tasks/files/{id}/{name}"))
+                .display()
+                .to_string()
+        ])
+    );
     assert_eq!(preview["archive_bytes"], section.len());
     assert_eq!(
         std::fs::read(root.join(format!("tasks/files/{id}/{name}"))).unwrap(),
@@ -909,6 +928,13 @@ fn archive_retry_after_append() {
     let raw = std::fs::read(raw_path(&root, &id)).unwrap();
     let out = env.json(&root, &["archive-notes", &id, "--expect", hash]);
     assert_eq!(out["action"], "already_archived");
+    assert_eq!(
+        out["verified"],
+        serde_json::json!({
+            "invariants": ["receipt_bound", "segments_verified"],
+            "written": []
+        })
+    );
     assert_eq!(out["record_bytes_before"], raw.len());
     assert_eq!(out["record_bytes_after"], raw.len());
     assert_eq!(std::fs::read(raw_path(&root, &id)).unwrap(), raw);
@@ -989,6 +1015,40 @@ fn archive_interruption_recovery() {
         );
         let split = raw.windows(9).position(|b| b == b"## Notes\n").unwrap();
         assert_eq!(std::fs::read(&segment).unwrap(), raw[split..]);
+    }
+}
+
+#[test]
+fn archive_apply_refuses_an_unverified_result_before_the_switch() {
+    // prepared-note alters history before any write; stray-file adds a file under the
+    // task's directory after the segment lands, so only the locked directory check sees it.
+    for fault in ["prepared-note", "stray-file"] {
+        let (env, root, id) = archivable();
+        let path = raw_path(&root, &id);
+        let raw = std::fs::read(&path).unwrap();
+        let preview = env.json(&root, &["archive-notes", &id]);
+        let hash = preview["source_sha256"].as_str().unwrap();
+        let name = preview["archive_name"].as_str().unwrap();
+        let segment = root.join(format!("tasks/files/{id}/{name}"));
+        let out = env
+            .cmd(&root)
+            .env("TASKS_ARCHIVE_FAULT", fault)
+            .args(["archive-notes", &id, "--expect", hash])
+            .output()
+            .unwrap();
+        assert_eq!(common::err_kind(&out), "archive_unverified", "{fault}");
+        assert_eq!(std::fs::read(&path).unwrap(), raw, "{fault}");
+        if fault == "prepared-note" {
+            assert!(!root.join("tasks/files").exists(), "{fault}");
+            let out = env.json(&root, &["archive-notes", &id, "--expect", hash]);
+            assert_eq!(out["action"], "archived");
+        } else {
+            assert!(segment.exists(), "the published segment is retained");
+            let stray = segment.with_file_name("stray.txt");
+            std::fs::remove_file(stray).unwrap();
+            let out = env.json(&root, &["archive-notes", &id, "--expect", hash]);
+            assert_eq!(out["action"], "archived");
+        }
     }
 }
 

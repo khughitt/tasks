@@ -717,7 +717,15 @@ pub struct ArchiveApplyOut {
     pub record_bytes_before: u64,
     pub record_bytes_after: u64,
     pub action: &'static str,
+    pub verified: ArchiveVerified,
     pub warnings: Vec<String>,
+}
+
+/// What an apply proved about its own result, and the paths it wrote.
+#[derive(Serialize)]
+pub struct ArchiveVerified {
+    pub invariants: Vec<&'static str>,
+    pub written: Vec<String>,
 }
 
 #[derive(Serialize)]
