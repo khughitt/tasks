@@ -317,10 +317,10 @@ fn artifact_location(
         ArtifactLocator::Git { basis, .. }
         | ArtifactLocator::Attachment {
             basis: Some(basis), ..
-        } => &basis.project,
+        } => super::lineage::historical_id(basis)?,
         _ => return Err(invalid("directory locator has no file payload")),
     };
-    let resolved = resolver.prefix(project, declared)?;
+    let resolved = resolver.task(project, &declared.to_string())?;
     let project = &resolved;
     let (b, path, expected) = match locator {
         ArtifactLocator::Git {
@@ -736,16 +736,7 @@ fn references(
                                 invalid("receiver phase lacks its exact sender input")
                             })?;
                         let source_id = crate::model::TaskId::parse(&source.task)?;
-                        let source_project =
-                            if super::lineage::owns_prefix(project, &source.basis.project) {
-                                project.clone()
-                            } else {
-                                crate::scope::open_registered(
-                                    &crate::registry::Registry::load()?,
-                                    &source.basis.project,
-                                    crate::scope::Origin::Id(&source_id),
-                                )?
-                            };
+                        let source_project = super::proof::project_for(project, &source.task)?;
                         let source = basis::read_exact(&source_project, &source_id, &source.basis)?;
                         metrics.history_bytes_read += source.history_bytes_read;
                         versions.extend(references(

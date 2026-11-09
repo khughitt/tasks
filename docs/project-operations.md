@@ -247,6 +247,15 @@ conflicting ownership must be resolved first.
 Current limit: later renames of either generation participating in a handoff also refuse before
 mutation, because this single-predecessor format cannot preserve every historical
 literal prefix after another rename.
+A retired project's declared successor must remain registered and reachable to
+check that bound against shared configuration. Register and pair the successor
+before attempting an initial retirement rename; registering only the predecessor
+or unregistering the successor does not permit later participant renames.
+`unretire` also refuses for a handoff participant: clearing retirement would erase
+shared successor evidence and permit a later rename to break historical routing.
+For an ordinary retirement, `unretire` remains available once its declared
+successor is registered and reachable; on an already active project it remains a
+no-op.
 
 ### Prefix rollback
 
@@ -329,7 +338,9 @@ commits, prefix renames and rename adoption remain available. `init --force` may
 preserving its exact retired date, reason and successor. If its old in-tree
 checkout was moved away, init adopts the config at the destination; a reachable
 retired authority cannot be replaced with an active or differently retired config.
-Unretire removes the table; commit config separately. Unregister removes host registration/aliases/history,
+Unretire removes the table for a project outside a handoff, after checking its
+declared successor is reachable; commit config separately. A handoff participant
+keeps its retirement and shared successor evidence. Unregister removes host registration/aliases/history,
 not shared task history. Broader project lifecycle coordination belongs to ops.
 
 `tools/review-backfill` and `tools/wait-backfill` are one-time migration helpers,

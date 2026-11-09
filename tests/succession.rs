@@ -1760,3 +1760,156 @@ fn prefix_handoff_requires_bound_source_config_proof() {
         );
     }
 }
+
+#[test]
+fn prefix_handoff_later_predecessor_rename_refuses_without_registered_successor() {
+    for registration in ["fresh", "unregister", "missing-map"] {
+        let f = Handoff::new();
+        f.step1();
+        f.env.json(&f.new, &["rename", "forge2", "forge"]);
+        f.env.json(&f.new, &["commit", "--project", "forge"]);
+        let second = TestEnv::new();
+        let env = if registration == "fresh" {
+            second.json(
+                &f.old,
+                &[
+                    "init",
+                    "--prefix",
+                    "forge1",
+                    "--records",
+                    f.records.to_str().unwrap(),
+                ],
+            );
+            &second
+        } else {
+            if registration == "unregister" {
+                f.env.json(&f.new, &["unregister", "forge"]);
+            } else {
+                let mut reg = registry(&f.env);
+                reg.as_table_mut().unwrap().remove("predecessors");
+                std::fs::write(
+                    f.env.home.path().join(".config/tasks/projects.toml"),
+                    toml::to_string(&reg).unwrap(),
+                )
+                .unwrap();
+            }
+            &f.env
+        };
+        let paths = [
+            f.records.join("forge1/tasks/.config.toml"),
+            f.records.join("forge/tasks/.config.toml"),
+            f.records.join("forge1/tasks/forge1-0e720e.md"),
+            env.home.path().join(".config/tasks/projects.toml"),
+        ];
+        let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        let out = env
+            .cmd(&f.old)
+            .args(["rename", "forge1", "archive"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{registration}: {out:?}");
+        let detail = String::from_utf8_lossy(&out.stderr);
+        if registration == "missing-map" {
+            assert!(
+                detail.contains("participates in a predecessor handoff"),
+                "{detail}"
+            );
+        } else {
+            assert!(
+                detail.contains("successor") && detail.contains("register"),
+                "{detail}"
+            );
+        }
+        assert_eq!(
+            paths
+                .iter()
+                .map(|p| std::fs::read(p).unwrap())
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert!(
+            !env.home
+                .path()
+                .join(".local/state/tasks/rename/forge1.toml")
+                .exists()
+        );
+        assert!(!f.records.join("archive").exists());
+    }
+}
+
+#[test]
+fn prefix_handoff_unretire_cannot_erase_predecessor_identity() {
+    for registration in ["predecessor-only", "unregistered-successor", "both"] {
+        let f = Handoff::new();
+        f.step1();
+        f.env.json(&f.new, &["rename", "forge2", "forge"]);
+        f.env.json(&f.new, &["commit", "--project", "forge"]);
+        let active_config = f.records.join("forge/tasks/.config.toml");
+        let active_before = std::fs::read(&active_config).unwrap();
+        f.env.json(&f.new, &["unretire"]);
+        assert_eq!(std::fs::read(active_config).unwrap(), active_before);
+        let second = TestEnv::new();
+        let env = match registration {
+            "predecessor-only" => {
+                second.json(
+                    &f.old,
+                    &[
+                        "init",
+                        "--prefix",
+                        "forge1",
+                        "--records",
+                        f.records.to_str().unwrap(),
+                    ],
+                );
+                &second
+            }
+            "unregistered-successor" => {
+                f.env.json(&f.new, &["unregister", "forge"]);
+                &f.env
+            }
+            _ => &f.env,
+        };
+        let paths = [
+            f.records.join("forge1/tasks/.config.toml"),
+            f.records.join("forge/tasks/.config.toml"),
+            env.home.path().join(".config/tasks/projects.toml"),
+        ];
+        let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        assert_eq!(
+            env.fail(&f.old, &["unretire"]),
+            "validation",
+            "{registration}"
+        );
+        assert_eq!(
+            env.fail(&f.old, &["rename", "forge1", "archive"]),
+            "validation"
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .map(|p| std::fs::read(p).unwrap())
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert!(
+            !env.home
+                .path()
+                .join(".local/state/tasks/rename/forge1.toml")
+                .exists()
+        );
+    }
+}
+
+#[test]
+fn pre_handoff_unretire_and_unrelated_rename_remain_supported() {
+    let f = Handoff::new();
+    f.env.json(&f.old, &["unretire"]);
+    assert!(config(&f.records.join("forge")).get("retired").is_none());
+    let path = f.records.join("forge/tasks/.config.toml");
+    let before = std::fs::read(&path).unwrap();
+    f.env.json(&f.old, &["unretire"]);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+    f.env
+        .json(&f.old, &["commit", "tasks/.config.toml", "-m", "unretire"]);
+    f.env.json(&f.old, &["rename", "forge", "ordinary"]);
+}

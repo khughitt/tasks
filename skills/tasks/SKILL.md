@@ -921,7 +921,10 @@ Missing host aliases are diagnosed by `check` and repaired with `init --force`
 is never stolen. Literal `<pred>-<old-suffix>` routes to `<pred1>`, while alias
 `<succ>-<old-suffix>` and bare old suffixes remain not found in the new project.
 Further renames of either handoff participant refuse under the single-handoff
-limit. See the [two-step handoff](../../docs/project-operations.md#reclaiming-a-retired-predecessors-prefix).
+limit. A retired rename also requires its declared successor registered and
+reachable so shared configuration can establish whether the bound applies.
+`unretire` enforces the same bound for retired projects, preserving the shared
+successor evidence. Ordinary pre-handoff unretire remains available. See the [two-step handoff](../../docs/project-operations.md#reclaiming-a-retired-predecessors-prefix).
 
 ## Retiring a project
 
@@ -945,8 +948,9 @@ or remove them. Without a successor, settle each task (close or drop it, or move
 `tasks retire --reason "<one line>"`
 in its registered checkout. Ordinary task writes are refused afterwards with
 `retired_project` from every checkout; lifecycle rename/adoption, verified completed
-rename-receipt commits, explicit config commits and `unretire` remain available.
-Its ids keep resolving, `--all-projects` and `--group` reads leave it out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle
+rename-receipt commits and explicit config commits remain available. `unretire`
+removes ordinary retirement subject to the handoff bound above.
+Its ids keep resolving, `--all-projects` and `--group` reads leave it out, and `--project` reads warn. The project lifecycle
 runbook in ops has the whole procedure.
 
 ## Task references

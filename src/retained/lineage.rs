@@ -188,6 +188,23 @@ pub fn owns_prefix(project: &Project, prefix: &str) -> bool {
             .iter()
             .any(|e| e.from_prefix == prefix)
 }
+// Select an owner by the complete identity. Historical membership is checked at
+// its frozen rename source; callers still validate the full basis and lineage.
+pub(super) fn owns_task(project: &Project, id: &TaskId) -> Result<bool> {
+    if id.prefix == project.prefix {
+        return Ok(!project.is_reserved_suffix(&id.hex));
+    }
+    let Some(edge) = project
+        .retention_lineage
+        .iter()
+        .find(|e| e.from_prefix == id.prefix)
+    else {
+        return Ok(false);
+    };
+    let path = task_path(&edge.from_subdir, id);
+    Ok(!basis::git(project, &["ls-tree", "-z", &edge.commit, "--", &path])?.is_empty())
+}
+
 pub fn epoch_at(project: &Project, id: &TaskId, commit: &str) -> Result<Basis> {
     validate(project)?;
     let mut epochs = project
@@ -211,6 +228,13 @@ pub fn epoch_at(project: &Project, id: &TaskId, commit: &str) -> Result<Basis> {
         if config.get("prefix").and_then(|v| v.as_str()) != Some(prefix.as_str()) {
             continue;
         }
+        // A shared records tree may reuse this config path for another generation.
+        // Only an epoch containing this task can describe its history.
+        let original = TaskId::parse(&format!("{prefix}-{}", id.hex))?;
+        let original_path = task_path(&sub, &original);
+        if basis::git(project, &["ls-tree", "-z", commit, "--", &original_path])?.is_empty() {
+            continue;
+        }
         let (_, kind, prior) =
             Project::retention_config(std::str::from_utf8(&raw).map_err(invalid)?)?;
         if kind != project.kind || prior != project.retention_lineage[..index] {
@@ -218,7 +242,6 @@ pub fn epoch_at(project: &Project, id: &TaskId, commit: &str) -> Result<Basis> {
                 "historical configuration differs from the declared epoch",
             ));
         }
-        let original = TaskId::parse(&format!("{prefix}-{}", id.hex))?;
         let refs = String::from_utf8(basis::git(
             project,
             &[
@@ -240,7 +263,7 @@ pub fn epoch_at(project: &Project, id: &TaskId, commit: &str) -> Result<Basis> {
             layout: project.kind.as_str().into(),
             records_subdir: sub.clone(),
             commit: commit.into(),
-            task_path: task_path(&sub, &original),
+            task_path: original_path,
             retained_ref,
         });
     }

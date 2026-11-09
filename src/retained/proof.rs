@@ -11,23 +11,87 @@ impl<'a> Resolver<'a> {
     pub fn new(candidate: &'a Project) -> Self {
         Self { candidate }
     }
-    pub fn prefix(&self, project: &Project, prefix: &str) -> Result<Project> {
-        if super::lineage::owns_prefix(project, prefix) {
-            Ok(project.clone())
-        } else if super::lineage::owns_prefix(self.candidate, prefix) {
-            Ok(self.candidate.clone())
-        } else {
-            crate::scope::open_registered(
-                &crate::registry::Registry::load()?,
-                prefix,
-                crate::scope::Origin::Prefix,
-            )
+    pub fn task(&self, project: &Project, task: &str) -> Result<Project> {
+        let id = TaskId::parse(task)?;
+        if super::lineage::owns_task(project, &id)? {
+            return Ok(project.clone());
+        }
+        if super::lineage::owns_task(self.candidate, &id)? {
+            return Ok(self.candidate.clone());
+        }
+        let registry = crate::registry::Registry::load()?;
+        let resolved = registry.canonical_id(&id);
+        match crate::scope::open_registered(
+            &registry,
+            &resolved.prefix,
+            crate::scope::Origin::Id(&id),
+        ) {
+            Ok(registered) => Ok(registered),
+            Err(error) => {
+                if let Some(peer) = successor_candidate(project, &registry, &id)? {
+                    return Ok(peer);
+                }
+                if project.root != self.candidate.root
+                    && let Some(peer) = successor_candidate(self.candidate, &registry, &id)?
+                {
+                    return Ok(peer);
+                }
+                Err(error)
+            }
         }
     }
-    pub fn task(&self, project: &Project, task: &str) -> Result<Project> {
-        self.prefix(project, &TaskId::parse(task)?.prefix)
-    }
 }
+// Both steps may be synced before either is adopted. The verified predecessor
+// candidate and the successor's reciprocal shared metadata establish that pairing
+// without editing the host registry or weakening immutable-basis validation.
+fn successor_candidate(
+    predecessor: &Project,
+    registry: &crate::registry::Registry,
+    id: &TaskId,
+) -> Result<Option<Project>> {
+    let Some(successor) = predecessor
+        .retired
+        .as_ref()
+        .and_then(|r| r.successor.as_deref())
+    else {
+        return Ok(None);
+    };
+    let former = registry.canonical_prefix(&id.prefix);
+    let Some(root) = registry.project_root(former) else {
+        return Ok(None);
+    };
+    let records = match registry.records_dir(former) {
+        Some(records) => records
+            .parent()
+            .ok_or_else(|| invalid("successor records parent"))?
+            .join(successor),
+        None => root.to_path_buf(),
+    };
+    if !crate::scope::has_config(&records)? {
+        return Ok(None);
+    }
+    let peer = Project::open(&records)?;
+    if peer.prefix != successor
+        || !peer
+            .predecessor
+            .as_ref()
+            .is_some_and(|p| p.prefix == predecessor.prefix && p.successor_alias == former)
+    {
+        return Ok(None);
+    }
+    if crate::rename::root_identity(&peer.root)? != crate::rename::root_identity(root)? {
+        return Err(invalid(
+            "successor handoff candidate disagrees with its registered checkout",
+        ));
+    }
+    if !super::lineage::owns_task(&peer, id)? {
+        return Err(invalid(
+            "successor handoff candidate does not own the historical task",
+        ));
+    }
+    Ok(Some(peer))
+}
+
 pub(crate) fn project_for(project: &Project, task: &str) -> Result<Project> {
     Resolver::new(project).task(project, task)
 }

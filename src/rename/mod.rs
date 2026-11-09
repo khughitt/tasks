@@ -1,6 +1,7 @@
 pub mod adopt;
 pub mod classify;
 mod handoff;
+pub(crate) use handoff::check_handoff_bound;
 pub mod inventory;
 pub mod rewrite;
 pub mod snapshot;
@@ -62,7 +63,9 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             Err(error) => (None, Some(error)),
         };
     let bound_error = if snapshot.inventory.is_none() && classify::registry_old(&snapshot) {
-        registry.check_rename_bound(&invocation.source).err()
+        Project::open(&invocation.records)
+            .and_then(|project| check_handoff_bound(registry, &project))
+            .err()
     } else {
         None
     };

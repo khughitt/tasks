@@ -344,7 +344,7 @@ impl Registry {
             || self.predecessors.values().any(|p| p.prefix == source)
         {
             return Err(Error::Validation(format!(
-                "{source} participates in a predecessor handoff; later generation renames are unsupported because historical ID routing must be preserved"
+                "{source} participates in a predecessor handoff; later generation renames or unretire are unsupported because historical ID routing must be preserved"
             )));
         }
         Ok(())

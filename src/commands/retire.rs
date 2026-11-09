@@ -61,6 +61,7 @@ pub fn unretire(here: Project) -> Result<()> {
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
     if project.retired.is_some() {
+        crate::rename::check_handoff_bound(&registry, &project)?;
         write_table(&project, None)?;
     }
     Ok(())

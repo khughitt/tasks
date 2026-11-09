@@ -1670,3 +1670,112 @@ fn retention_handoff_missing_or_malformed_lineage_refuses_before_mutation() {
         }
     }
 }
+
+fn transfer_handoff_adoption(shared: bool, early_adoption: bool) {
+    use common::retained::{cross_receiver, transfer, transfer_request};
+    eprintln!("retained transfer handoff: shared={shared}, early_adoption={early_adoption}");
+    let mut f = observed(if shared { "detached" } else { "in-tree" });
+    f.json(&["start", &f.id]);
+    let source_records = f.records.clone();
+    if shared {
+        f.records = source_records.parent().unwrap().to_path_buf();
+    }
+    let (other, to) = cross_receiver(&f, shared);
+    f.records = source_records.clone();
+    transfer(&f, &to, &transfer_request(&f, &to));
+    f.json(&["done", &f.id, "transferred"]);
+    f.json(&["park", &to, "succession"]);
+    f.json(&["retire", "--successor", "fam", "--reason", "superseded"]);
+    f.json(&["commit", "tasks/.config.toml", "-m", "retire sender"]);
+    let second = common::TestEnv::new();
+    let registry = second.home.path().join(".config/tasks/projects.toml");
+    std::fs::create_dir_all(registry.parent().unwrap()).unwrap();
+    std::fs::copy(
+        f.env.home.path().join(".config/tasks/projects.toml"),
+        &registry,
+    )
+    .unwrap();
+    let old = f.id.clone();
+    f.json(&["rename", "sci", "sci1"]);
+    f.id = format!("sci1-{}", old.split_once('-').unwrap().1);
+    if shared {
+        f.records = source_records.with_file_name("sci1");
+    }
+    f.json(&["commit", "--project", "sci1"]);
+    if early_adoption {
+        second.json(&f.dir, &["rename", "sci", "sci1", "--adopt"]);
+    }
+    f.json(&["-C", other.to_str().unwrap(), "rename", "fam", "sci"]);
+    f.json(&["-C", other.to_str().unwrap(), "commit", "--project", "sci"]);
+    if !shared {
+        f.json(&[
+            "commit",
+            "--project",
+            "sci1",
+            "tasks/.config.toml",
+            "-m",
+            "update successor",
+        ]);
+    }
+    let current = format!("sci-{}", to.split_once('-').unwrap().1);
+    // Refresh the receiver after prefix reuse: artifact-version tracing must
+    // still follow its original sender, and new publications use the reused prefix.
+    let saved = (f.dir.clone(), f.records.clone(), f.id.clone());
+    let payload = f.dir.join("payload");
+    f.dir = other.clone();
+    f.records = if shared {
+        source_records.clone()
+    } else {
+        other.clone()
+    };
+    f.id = current.clone();
+    f.json(&["start", &f.id]);
+    checkpoint(
+        &f,
+        &checkpoint_request(&f, 2, json!([declaration(&payload, "evidence")])),
+    );
+    f.json(&["park", &f.id, "succession complete"]);
+    (f.dir, f.records, f.id) = saved;
+    for id in [&old, &current] {
+        assert_eq!(
+            f.json(&["retained", "state", id])["complete"],
+            true,
+            "{shared}/{early_adoption}/{id}"
+        );
+    }
+    f.env.check(&f.dir);
+    f.env.check(&other);
+    if !early_adoption {
+        second.json(&f.dir, &["rename", "sci", "sci1", "--adopt"]);
+    }
+    second.json(&other, &["rename", "fam", "sci", "--adopt"]);
+    for id in [&old, &current] {
+        assert_eq!(
+            second.json(&other, &["retained", "state", id])["complete"],
+            true,
+            "second/{shared}/{early_adoption}/{id}"
+        );
+    }
+    second.check(&f.dir);
+    second.check(&other);
+}
+
+#[test]
+fn retention_transfer_handoff_separate_late() {
+    transfer_handoff_adoption(false, false);
+}
+
+#[test]
+fn retention_transfer_handoff_separate_early() {
+    transfer_handoff_adoption(false, true);
+}
+
+#[test]
+fn retention_transfer_handoff_shared_late() {
+    transfer_handoff_adoption(true, false);
+}
+
+#[test]
+fn retention_transfer_handoff_shared_early() {
+    transfer_handoff_adoption(true, true);
+}

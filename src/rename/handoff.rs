@@ -8,6 +8,37 @@ use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project};
 use std::collections::BTreeSet;
 
+pub(crate) fn check_handoff_bound(registry: &Registry, project: &Project) -> Result<()> {
+    registry.check_rename_bound(&project.prefix)?;
+    let participates = || {
+        Error::Validation(format!(
+            "{} participates in a predecessor handoff; later generation renames or unretire are unsupported because historical ID routing must be preserved",
+            project.prefix
+        ))
+    };
+    if project.predecessor.is_some() {
+        return Err(participates());
+    }
+    if let Some(successor) = project
+        .retired
+        .as_ref()
+        .and_then(|r| r.successor.as_deref())
+    {
+        let successor_project = crate::scope::open_registered_config(registry, successor, crate::scope::Origin::Prefix)
+            .map_err(|error| Error::Validation(format!(
+                "cannot verify the handoff bound for {}: register and pair declared successor {successor:?} before changing this retired project ({error})", project.prefix
+            )))?;
+        if successor_project
+            .predecessor
+            .as_ref()
+            .is_some_and(|p| p.prefix == project.prefix)
+        {
+            return Err(participates());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn validate(
     registry: &Registry,
     invocation: &Invocation,
