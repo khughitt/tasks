@@ -122,6 +122,8 @@ pub struct GoalRow {
     /// `color` , unlike task rows.
     #[serde(rename = "color", skip_serializing_if = "Option::is_none")]
     pub project_color: Option<Rgb>,
+    #[serde(skip)]
+    pub activity: Option<crate::style::Activity>,
     pub last_activity: String,
     pub pieces: Pieces,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -389,6 +391,7 @@ pub fn goal_rows(
                 priority: task.priority,
                 lane: task.lane,
                 project_color: None,
+                activity: None,
                 last_activity: last_activity(task, &descendants)?,
                 pieces: pieces(&descendants),
                 dependencies,

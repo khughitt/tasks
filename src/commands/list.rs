@@ -175,7 +175,9 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             sort.date_column()
         },
     });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -231,7 +233,9 @@ fn list_parked(
         })
         .collect();
     let mut out = Output::Parked(ParkedOut { tasks, warnings });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&ctx.project_colors());
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -623,7 +627,9 @@ pub fn ready(
         warnings: ctx.warnings,
         date: DateColumn::Updated,
     });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -1011,7 +1017,12 @@ pub fn prime(
     {
         crate::prime_summary::bound(prime, full)?;
     }
+    let mut activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
+    for (_, _, scan) in &elsewhere {
+        activity.extend_scan(scan, &ctx.registry, now);
+    }
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 

@@ -14,21 +14,25 @@ pub fn run(mut ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
         .transpose()?;
     let now = crate::time::parse(&crate::time::now())?;
     let mut nodes = Vec::new();
-    let scans: Vec<_> = ctx
-        .scope
-        .scan_each()?
-        .into_iter()
-        .map(|(_, tasks)| tasks)
-        .collect();
-    for tasks in scans {
+    let mut captured = Vec::new();
+    let mut projects = Vec::new();
+    for (_, tasks) in ctx.scope.scan_each()? {
+        let start = captured.len();
+        captured.extend(tasks);
+        projects.push(start..captured.len());
+    }
+    // Activity sees cross-project edges, while each forest keeps its project ordering.
+    let activity = crate::activity::ActivityIndex::of_scan(&captured, &ctx.registry, now);
+    for project in projects {
+        let tasks = &captured[project];
         if let Some(root) = &root
             && !tasks.iter().any(|task| &task.id == root)
         {
             return Err(Error::TaskNotFound(root.to_string()));
         }
-        let deps = super::list::review_deps(&mut ctx, &tasks)?;
+        let deps = super::list::review_deps(&mut ctx, tasks)?;
         nodes.extend(crate::hierarchy::forest(
-            &tasks,
+            tasks,
             &deps,
             root.as_ref(),
             all,
@@ -44,5 +48,6 @@ pub fn run(mut ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
         warnings: ctx.warnings,
     });
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }

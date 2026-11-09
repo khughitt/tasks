@@ -519,6 +519,8 @@ pub struct TaskSummary {
     pub title: String,
     #[serde(skip)]
     pub project_color: Option<crate::palette::Rgb>,
+    #[serde(skip)]
+    pub activity: Option<crate::style::Activity>,
     pub status: Status,
     pub priority: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -744,6 +746,8 @@ pub struct ParkedRow {
     pub title: String,
     #[serde(skip)]
     pub project_color: Option<crate::palette::Rgb>,
+    #[serde(skip)]
+    pub activity: Option<crate::style::Activity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1078,6 +1082,8 @@ pub struct BlockerRow {
     pub title: String,
     #[serde(skip)]
     pub project_color: Option<crate::palette::Rgb>,
+    #[serde(skip)]
+    pub activity: Option<crate::style::Activity>,
     pub status: Status,
     pub priority: u8,
     /// Null for an out-of-scope target that is not a lane: its children were not scanned.

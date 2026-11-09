@@ -824,7 +824,7 @@ fn lane_table(
         format!(
             "{} {}",
             present::id(&row.id, row.project_color).paint(painter),
-            present::title(&row.title, row.project_color, None).paint(painter)
+            present::title(&row.title, row.project_color, row.activity).paint(painter)
         )
     };
     let built: Vec<Row> = rows
@@ -860,7 +860,8 @@ fn lane_table(
                     present::id(&row.lane.id, row.lane.project_color).paint(painter)
                 ),
                 present::priority(row.lane.priority).paint(painter),
-                present::title(&row.lane.title, row.lane.project_color, None).paint(painter),
+                present::title(&row.lane.title, row.lane.project_color, row.lane.activity)
+                    .paint(painter),
                 state,
             ]);
             if detail {
@@ -1061,7 +1062,7 @@ fn task_row(
 /// The title and the suffixes that ride with it: tags, a due cadence, a deferral, a quiet
 /// recipe, the owner.
 fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
-    let mut cell = present::title(&row.title, row.project_color, None).paint(painter);
+    let mut cell = present::title(&row.title, row.project_color, row.activity).paint(painter);
     if !row.tags.is_empty() {
         let tags = present::tags(&row.tags);
         cell.push(' ');
@@ -1184,7 +1185,7 @@ fn parked_row(row: &ParkedRow, painter: &Painter, review: bool) -> crate::table:
             .to_string(),
         crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes),
         present::date(&park.at).paint(painter),
-        present::title(&row.title, row.project_color, None).paint(painter),
+        present::title(&row.title, row.project_color, row.activity).paint(painter),
         painter.paint(Style::Chrome, &park.next_step),
     ])
 }
@@ -1232,7 +1233,7 @@ fn quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &crate::table::Lay
                 park.minutes
                     .map_or_else(|| "-".into(), |minutes| format!("{minutes} min")),
                 present::date(&park.at).paint(painter),
-                present::title(&row.title, row.project_color, None).paint(painter),
+                present::title(&row.title, row.project_color, row.activity).paint(painter),
                 painter.paint(Style::Chrome, &park.next_step),
             ]);
             built
@@ -1256,6 +1257,7 @@ mod tests {
             id: id.into(),
             title: format!("title {id}"),
             project_color: None,
+            activity: None,
             status: Status::Todo,
             priority: 2,
             size: None,

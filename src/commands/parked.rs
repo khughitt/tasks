@@ -186,10 +186,10 @@ fn resolve_recorded(
         return Ok(None);
     };
     let deps = super::list::recorded_review_deps(ctx, &project, &scan)?;
-    let row = ParkedRow::resolved(
-        TaskSummary::of(&task, &scan, &deps, Some(claims), &ctx.registry, now),
-        Phase::of(&task),
-    );
+    let mut summary = TaskSummary::of(&task, &scan, &deps, Some(claims), &ctx.registry, now);
+    summary.activity =
+        crate::activity::ActivityIndex::of_scan(&scan, &ctx.registry, now).get(&task.id);
+    let row = ParkedRow::resolved(summary, Phase::of(&task));
     Ok(Some((row, task)))
 }
 

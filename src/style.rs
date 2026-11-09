@@ -210,6 +210,9 @@ impl TitleScale {
     }
 
     pub fn color(&self, base: Rgb, activity: Activity) -> Rgb {
+        if activity == Activity::HOT {
+            return base;
+        }
         let fade = self.max_fade(base) * (1.0 - activity.unit());
         base.mix(self.bg, fade)
     }

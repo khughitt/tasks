@@ -289,7 +289,7 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
         values[Field::Title as usize] = if goal.closed.is_some() {
             painter.paint(Style::Chrome, &title)
         } else {
-            present::title(&title, goal.project_color, None).paint(painter)
+            present::title(&title, goal.project_color, goal.activity).paint(painter)
         };
         let mut row = Row::new(fields.iter().map(|f| values[*f as usize].clone()).collect());
         let mut progress = Vec::new();
@@ -456,6 +456,7 @@ mod tests {
                 priority: 1,
                 lane: false,
                 project_color: crate::palette::Rgb::parse_hex("#aa8c0e"),
+                activity: None,
                 last_activity: "2026-11-08T10:00:00Z".into(),
                 pieces: Pieces { done, total, ideas },
                 dependencies: deps,

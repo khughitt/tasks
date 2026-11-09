@@ -156,7 +156,14 @@ Color precedence is explicit `--color`, then nonempty NO_COLOR, then TASKS_COLOR
 then off. Flags and TASKS_COLOR are validated before precedence; an invalid
 environment setting is not hidden by a valid flag. Auto needs a terminal and
 only styles pretty output. JSON never contains ANSI escapes. Project color is
-used for prefixes; task ids use its lighter variant. Recency fades over two
+used for prefixes and `show`; task ids use its fixed lighter variant. In multi-task
+views, titles fade toward the theme background as recent activity decreases.
+Activity combines meaningful lifecycle and work events with bounded attention from
+immediate recorded neighbors; it does not change priority or picker order. Direct
+activity has a five-day half-life, with daily burst damping and bookkeeping notes
+excluded. Title fading is at most 35% in OKLab and preserves a 3.5:1 contrast floor;
+project colors already at or below that floor stay unchanged. Unassigned project
+titles stay plain, and activity is absent from JSON. Date recency fades over two
 years; priorities use bold/color scales where available. Missing terminal colors
 produce a warning and plain fallback; a palette without magenta disables only
 priority colors. These presentation choices do not alter task values.

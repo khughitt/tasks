@@ -131,7 +131,7 @@ fn table_row(row: &BlockerRow, painter: &Painter) -> Row {
             "{}/{}",
             row.unmet_dependency_count, row.unresolved_dependency_count
         ),
-        present::title(&row.title, row.project_color, None).paint(painter),
+        present::title(&row.title, row.project_color, row.activity).paint(painter),
     ]);
     let attention = match row.attention {
         Attention::User => "user",

@@ -113,7 +113,9 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
         cycles: analysis.cycles,
         warnings,
     }));
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -134,6 +136,7 @@ fn row(rank: usize, impact: &Impact, claims: &ClaimSnapshot, now: OffsetDateTime
         id: task.id.to_string(),
         title: task.title.clone(),
         project_color: None,
+        activity: None,
         status: task.status,
         priority: task.priority,
         goal: impact.goal,

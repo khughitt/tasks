@@ -247,3 +247,7 @@ Color is opt-in for pretty output and absent from JSON. Set `--color`,
 `TASKS_COLOR`, `TASKS_THEME` and optional `TASKS_PALETTE` as described in
 [configuration](configuration.md#environment-and-precedence). Pretty `show`
 wraps at the terminal width up to 100 columns; piped output is unwrapped.
+In multi-task views, colored titles with more recent direct or neighboring activity
+fade less toward the theme background; IDs keep their fixed project shade. Fading
+is bounded by contrast, so some project colors remain unchanged even when cold.
+Activity affects presentation only; priorities and work selection keep their order.

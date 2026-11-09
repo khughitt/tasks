@@ -48,6 +48,8 @@ pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
         tasks,
         warnings: ctx.warnings,
     });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
