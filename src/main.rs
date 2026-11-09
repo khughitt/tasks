@@ -2,6 +2,7 @@ mod activity;
 mod attachments;
 mod blockers;
 mod blockers_text;
+mod catalogue;
 mod claims;
 mod cli;
 mod clipboard;

@@ -19,6 +19,9 @@ The accepted top-level keys/tables are exactly those below.
 | `[[retention_lineage]]` | Rename-managed, ordered Git-anchored edges; omitted when empty. Fields and validation below. |
 | `prefix` | Required `[a-z][a-z0-9]{1,7}` project id; agrees with registration and records. |
 | `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON. |
+| `profile` | Optional single profile name using lowercase letters, digits and hyphens, with no leading hyphen. Absent means unassigned; tasks validates the grammar, not whether the profile exists. |
+| `shorthand` | Optional list of private aliases, each nonempty single-line text; defaults to empty. Uniqueness across projects is checked by consumers when routing, not by `tasks check`. |
+| `[identity]` | Optional snapshot of public identity, written only by tasks; fields described below. |
 | `spec_dirs` | Optional list; defaults to `docs/specs`, `docs/designs`, `docs/superpowers/specs`, `docs/superpowers/designs`. |
 | `plan_dirs` | Optional list; defaults to `docs/plans`, `docs/superpowers/plans`. |
 | `[tags]` | Optional label-to-single-line-meaning dictionary; unknown labels warn, vocabulary is advisory. |
@@ -30,6 +33,13 @@ The accepted top-level keys/tables are exactly those below.
 | `[retired]` | Required `date` (real `YYYY-MM-DD` from year 1) and `reason` (nonblank single line without control characters); optional `successor` (well-formed prefix). Lifecycle metadata managed by retire/migrate. |
 | `[predecessor]` | One retired generation: required `prefix`, `successor_alias` (the successor's former prefix), and a frozen `suffixes` array of six lowercase hex digits. Created by a two-step prefix handoff; reserves those suffixes for new task IDs and lets literal reclaimed-prefix IDs route to that generation. Unknown fields and invalid/self prefixes or suffixes refuse. |
 | `[git]` | Only `commit`, boolean default false; opt-in scoped automatic record commits. |
+
+`[identity]` requires `name`, `purpose`, `source` and `refreshed` strings, with an
+optional `aliases` list defaulting to empty. Name, purpose and each alias are
+nonempty single-line text. `source = "head"` requires `commit` and `blob`, recording
+the root repository's HEAD commit and identity blob at refresh; `source = "seeded"`
+accepts neither. `refreshed` records the refresh time in UTC (RFC 3339). Unknown
+identity fields or sources are config errors. Never hand-edit the snapshot.
 
 A retention lineage edge has exactly `version` (integer 1), `from_prefix`,
 `to_prefix`, `layout`, `from_subdir`, `to_subdir`, `commit` and `retained_ref`

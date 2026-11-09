@@ -144,6 +144,9 @@ pub struct Project {
     pub prefix: String,
     pub retention_lineage: Vec<crate::retained::lineage::RenameEdge>,
     pub color: Option<crate::palette::Rgb>,
+    pub profile: Option<String>,
+    pub shorthand: Vec<String>,
+    pub identity: Option<crate::catalogue::snapshot::Snapshot>,
     /// Roots a `spec` link may live under; also the search path for bare spec names.
     pub spec_dirs: Vec<String>,
     /// Roots a `plan` link may live under; also the search path for bare plan names.
@@ -205,6 +208,12 @@ struct Config {
     retention_lineage: Vec<crate::retained::lineage::RenameEdge>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shorthand: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    identity: Option<crate::catalogue::snapshot::IdentityConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spec_dirs: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -716,6 +725,9 @@ impl Project {
                 prefix: prefix.into(),
                 retention_lineage: Vec::new(),
                 color: None,
+                profile: None,
+                shorthand: Vec::new(),
+                identity: None,
                 spec_dirs: None,
                 plan_dirs: None,
                 tags: None,
@@ -837,6 +849,9 @@ impl Project {
                 prefix: prefix.into(),
                 retention_lineage: Vec::new(),
                 color: None,
+                profile: None,
+                shorthand: Vec::new(),
+                identity: None,
                 spec_dirs: None,
                 plan_dirs: None,
                 tags: None,
@@ -912,6 +927,14 @@ impl Project {
             predecessor.validate(&config.prefix)?;
         }
         let (spec_dirs, plan_dirs, commit_records) = doc_layout(&config)?;
+        if let Some(profile) = &config.profile {
+            crate::needs::validate_name(profile)
+                .map_err(|error| Error::Config(format!("{CONFIG_REL}: profile: {error}")))?;
+        }
+        for shorthand in &config.shorthand {
+            crate::format::validate_line("shorthand", shorthand)
+                .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
+        }
         let (kind, root, checkout) = match checkout_path(&records, config.checkout)? {
             None => (Kind::InTree, records.clone(), records.clone()),
             Some((Kind::Detached, code)) => (Kind::Detached, code.clone(), code),
@@ -928,6 +951,12 @@ impl Project {
             commit_records,
             prefix: config.prefix,
             retention_lineage: config.retention_lineage,
+            profile: config.profile,
+            shorthand: config.shorthand,
+            identity: config
+                .identity
+                .map(crate::catalogue::snapshot::Snapshot::from_config)
+                .transpose()?,
             color: config
                 .color
                 .map(|color| {
