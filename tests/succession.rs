@@ -900,10 +900,13 @@ fn prefix_handoff_resumes_after_stopping_at_each_stage() {
         ] {
             let f = Handoff::new();
             if empty_lineage {
+                f.env
+                    .json(&f.new, &["note", "forge2-18dae2", "ordinary archived note"]);
+                common::archive_inline(&f.records.join("forge2"), "forge2-18dae2", false);
                 let path = f.records.join("forge2/tasks/.config.toml");
                 let source = std::fs::read_to_string(&path).unwrap();
                 std::fs::write(&path, format!("retention_lineage = []\n{source}")).unwrap();
-                git(&f.env, &f.records, &["add", "forge2/tasks/.config.toml"]);
+                git(&f.env, &f.records, &["add", "forge2/tasks"]);
                 git(
                     &f.env,
                     &f.records,
@@ -1692,5 +1695,68 @@ fn prefix_handoff_refuses_prior_successor_alias_history_without_mutation() {
         );
         assert!(!journal.exists());
         assert_eq!(git(&f.env, &f.records, &["status", "--porcelain"]), "");
+    }
+}
+
+#[test]
+fn prefix_handoff_requires_bound_source_config_proof() {
+    use sha2::{Digest, Sha256};
+    for mutation in ["missing", "digest", "prefix"] {
+        let f = Handoff::new();
+        f.step1();
+        f.env
+            .cmd(&f.new)
+            .env("TASKS_RENAME_STOP_AFTER", "inventory")
+            .args(["rename", "forge2", "forge"])
+            .assert()
+            .success();
+        let journal = f
+            .env
+            .home
+            .path()
+            .join(".local/state/tasks/rename/forge2.toml");
+        let mut inventory: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&journal).unwrap()).unwrap();
+        match mutation {
+            "missing" => {
+                inventory["predecessor_handoff"]
+                    .as_table_mut()
+                    .unwrap()
+                    .remove("source_config");
+            }
+            "digest" => {
+                inventory["predecessor_handoff"]["source_config"] = "prefix = 'forge2'\n".into();
+            }
+            _ => {
+                let source = inventory["predecessor_handoff"]["source_config"]
+                    .as_str()
+                    .unwrap()
+                    .replace("forge2", "other");
+                inventory["config_from"] =
+                    format!("{:x}", Sha256::digest(source.as_bytes())).into();
+                inventory["predecessor_handoff"]["source_config"] = source.into();
+            }
+        }
+        std::fs::write(&journal, toml::to_string(&inventory).unwrap()).unwrap();
+        let paths = [
+            journal,
+            f.records.join("forge2/tasks/.config.toml"),
+            f.records.join("forge2/tasks/forge2-18dae2.md"),
+            f.records.join("forge1/tasks/.config.toml"),
+            f.env.home.path().join(".config/tasks/projects.toml"),
+        ];
+        let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        assert_eq!(
+            f.env.fail(&f.new, &["rename", "forge2", "forge"]),
+            "config",
+            "{mutation}"
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .map(|p| std::fs::read(p).unwrap())
+                .collect::<Vec<_>>(),
+            before
+        );
     }
 }

@@ -118,6 +118,7 @@ pub(super) fn validate(
     config["retired"]["successor"] = invocation.target.clone().into();
     let config_payload = toml::to_string(&config).map_err(|e| Error::Config(e.to_string()))?;
     Ok(Some(PredecessorHandoff {
+        source_config: std::fs::read_to_string(invocation.records.join(CONFIG_REL))?,
         prefix: prefix.clone(),
         suffixes,
         config_path,

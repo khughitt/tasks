@@ -24,6 +24,9 @@ pub struct InventoryEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PredecessorHandoff {
+    /// Exact pre-rename source config, bound by Inventory::config_from even after
+    /// the config and detached records stages have replaced its original path.
+    pub source_config: String,
     pub prefix: String,
     pub suffixes: BTreeSet<String>,
     pub config_path: PathBuf,
@@ -243,6 +246,74 @@ impl Inventory {
         Ok(self)
     }
 
+    fn validate_edge_free_handoff(
+        &self,
+        source: &Project,
+        handoff: &PredecessorHandoff,
+        payload: &str,
+    ) -> Result<()> {
+        let missing =
+            || Error::Config("handoff payload lacks required frozen retention lineage".into());
+        if !source.retention_lineage.is_empty()
+            || with_predecessor(
+                &rewrite_config_prefix(&handoff.source_config, &self.target)?,
+                &handoff.predecessor(&self.source),
+            )? != payload
+        {
+            return Err(missing());
+        }
+        for entry in &self.entries {
+            let old = TaskId::parse(&format!("{}-{}", self.source, entry.hex))?;
+            let new = TaskId::parse(&format!("{}-{}", self.target, entry.hex))?;
+            let mut found = false;
+            for (id, expected) in [(&old, &entry.from), (&new, &entry.to)] {
+                let path = source.tasks_dir().join(format!("{id}.md"));
+                let raw = match std::fs::read_to_string(&path) {
+                    Ok(raw) => raw,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                if digest(raw.as_bytes()) != *expected {
+                    return Err(Error::Config(format!(
+                        "handoff task differs from frozen inventory: {}",
+                        path.display()
+                    )));
+                }
+                found = true;
+                let physical = crate::format::parse_physical(&raw, &path.display().to_string())?;
+                if physical.id() != id {
+                    return Err(Error::Config("handoff task identity mismatch".into()));
+                }
+                let task = crate::history::load_logical(physical, |archive| {
+                    use crate::attachments::{DirState, dir_state, task_dir};
+                    let archive_id = match (
+                        dir_state(&task_dir(source, &old))?,
+                        dir_state(&task_dir(source, &new))?,
+                    ) {
+                        (DirState::Directory, DirState::Absent) => &old,
+                        (DirState::Absent, DirState::Directory) => &new,
+                        _ => {
+                            return Err(Error::Config(
+                                "handoff archive location is missing or ambiguous".into(),
+                            ));
+                        }
+                    };
+                    source.read_archive(archive_id, archive)
+                })?;
+                if crate::retained::lineage::relevant(&task) {
+                    return Err(missing());
+                }
+            }
+            if !found {
+                return Err(Error::Config(format!(
+                    "handoff task {} is missing from frozen inventory paths",
+                    entry.hex
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub fn target_config(&self, source: &str) -> Result<String> {
         if digest(source.as_bytes()) != self.config_from {
             return Err(Error::Validation(
@@ -337,6 +408,9 @@ impl Inventory {
         }
         validate_digest(path, "config_from", &self.config_from)?;
         validate_digest(path, "config_to", &self.config_to)?;
+        if self.predecessor_handoff.is_some() && self.config_payload.is_none() {
+            return Err(Error::Config("handoff lacks frozen target config".into()));
+        }
         if let Some(payload) = &self.config_payload {
             if digest(payload.as_bytes()) != self.config_to {
                 return Err(Error::Config(
@@ -349,6 +423,22 @@ impl Inventory {
                 .filter(|p| p.is_dir())
                 .or_else(|| self.records_to.as_ref().filter(|p| p.is_dir()))
                 .unwrap_or(&self.root);
+            let source_project = if let Some(handoff) = &self.predecessor_handoff {
+                if digest(handoff.source_config.as_bytes()) != self.config_from {
+                    return Err(Error::Config(
+                        "handoff source config digest mismatch".into(),
+                    ));
+                }
+                let source = Project::from_config(records.canonicalize()?, &handoff.source_config)?;
+                if source.prefix != self.source {
+                    return Err(Error::Config(
+                        "handoff source config prefix mismatch".into(),
+                    ));
+                }
+                Some(source)
+            } else {
+                None
+            };
             let project = Project::from_config(records.canonicalize()?, payload)?;
             if project.prefix != self.target
                 || self
@@ -425,7 +515,11 @@ impl Inventory {
                         "retention payload differs from anchored source config".into(),
                     ));
                 }
-            } else if self.predecessor_handoff.is_none() {
+            } else if let (Some(handoff), Some(source)) =
+                (&self.predecessor_handoff, source_project)
+            {
+                self.validate_edge_free_handoff(&source, handoff, payload)?;
+            } else {
                 return Err(Error::Config(
                     "rename payload lacks retention lineage or predecessor handoff".into(),
                 ));

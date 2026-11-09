@@ -401,7 +401,7 @@ fn check_protected_storage(project: &Project, task: &Task) -> Result<()> {
     }
     Ok(())
 }
-fn relevant(task: &Task) -> bool {
+pub(crate) fn relevant(task: &Task) -> bool {
     task.notes.iter().any(|n| {
         ["retained:", "retention operation:", "retention checkpoint:"]
             .iter()

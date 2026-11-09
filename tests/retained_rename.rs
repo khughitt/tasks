@@ -1517,3 +1517,156 @@ fn retention_rename_review_ready_manifest_other_root() {
         "missing original ready manifest cannot be replaced by the working attachment"
     );
 }
+
+fn retained_handoff(layout: &str) -> (RetainedEnv, std::path::PathBuf) {
+    let mut f = observed(layout);
+    let predecessor = f.env.init("old");
+    git(&predecessor, &["init", "-q", "-b", "main"]);
+    common::git_fixture::assert_repo(f.env.home.path(), &predecessor);
+    f.env.json(
+        &predecessor,
+        &["retire", "--successor", "sci", "--reason", "superseded"],
+    );
+    git(&predecessor, &["add", "tasks"]);
+    git(&predecessor, &["commit", "-qm", "retired predecessor"]);
+    f.env.json(&predecessor, &["rename", "old", "old1"]);
+    f.env.json(&predecessor, &["commit", "--project", "old1"]);
+    (f, predecessor)
+}
+
+#[test]
+fn retention_handoff_recovers_with_frozen_lineage() {
+    for (layout, stage) in [
+        ("in-tree", "inventory"),
+        ("detached", "files"),
+        ("detached", "config"),
+        ("detached", "records"),
+        ("detached", "registry"),
+    ] {
+        let (mut f, predecessor) = retained_handoff(layout);
+        let source = f.id.clone();
+        let basis = f.basis();
+        f.cmd()
+            .env("TASKS_RENAME_STOP_AFTER", stage)
+            .args(["rename", "sci", "old"])
+            .assert()
+            .success();
+        f.json(&["rename", "sci", "old"]);
+        f.id = format!("old-{}", source.split_once('-').unwrap().1);
+        if layout == "detached" {
+            f.records = f.records.with_file_name("old");
+        }
+        let config: toml::Value =
+            toml::from_str(&std::fs::read_to_string(f.records.join("tasks/.config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(config["retention_lineage"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            config["retention_lineage"][0]["commit"].as_str(),
+            Some(basis.as_str())
+        );
+        assert_eq!(config["predecessor"]["prefix"].as_str(), Some("old1"));
+        f.json(&["commit", "--project", "old"]);
+        f.env.json(
+            &predecessor,
+            &[
+                "commit",
+                "--project",
+                "old1",
+                "tasks/.config.toml",
+                "-m",
+                "update successor",
+            ],
+        );
+        assert_eq!(f.state()["complete"], true);
+        assert_eq!(
+            f.json(&["retained", "state", &f.id, "--at", &basis])["task"],
+            source
+        );
+        f.json(&["check"]);
+    }
+}
+
+#[test]
+fn retention_handoff_missing_or_malformed_lineage_refuses_before_mutation() {
+    use sha2::{Digest, Sha256};
+    for stage in ["inventory", "files", "config", "records", "registry"] {
+        for mutation in ["empty", "missing", "malformed", "erased_notes"] {
+            let (f, predecessor) = retained_handoff("detached");
+            f.cmd()
+                .env("TASKS_RENAME_STOP_AFTER", stage)
+                .args(["rename", "sci", "old"])
+                .assert()
+                .success();
+            let journal = f.env.home.path().join(".local/state/tasks/rename/sci.toml");
+            let mut inventory: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&journal).unwrap()).unwrap();
+            let mut config: toml::Value =
+                toml::from_str(inventory["config_payload"].as_str().unwrap()).unwrap();
+            assert_eq!(config["retention_lineage"].as_array().unwrap().len(), 1);
+            assert!(inventory.get("predecessor_handoff").is_some());
+            match mutation {
+                "missing" => {
+                    config.as_table_mut().unwrap().remove("retention_lineage");
+                }
+                "empty" => {
+                    config["retention_lineage"] = toml::Value::Array(vec![]);
+                }
+                "malformed" => {
+                    config["retention_lineage"] = "malformed".into();
+                }
+                _ => {
+                    config.as_table_mut().unwrap().remove("retention_lineage");
+                }
+            }
+            let payload = toml::to_string(&config).unwrap();
+            inventory["config_to"] = format!("{:x}", Sha256::digest(payload.as_bytes())).into();
+            inventory["config_payload"] = payload.into();
+            std::fs::write(&journal, toml::to_string(&inventory).unwrap()).unwrap();
+            let records = if f.records.is_dir() {
+                f.records.clone()
+            } else {
+                f.records.with_file_name("old")
+            };
+            let target_id = format!("old-{}", f.id.split_once('-').unwrap().1);
+            let task = if records.join(format!("tasks/{}.md", f.id)).is_file() {
+                f.id.clone()
+            } else {
+                target_id
+            };
+            if mutation == "erased_notes" {
+                let path = records.join(format!("tasks/{task}.md"));
+                let raw = std::fs::read_to_string(&path).unwrap();
+                let erased = raw
+                    .replace("retention", "erased")
+                    .replace("retained", "erased");
+                assert_ne!(raw, erased);
+                std::fs::write(path, erased).unwrap();
+            }
+            let paths = [
+                journal,
+                records.join("tasks/.config.toml"),
+                records.join(format!("tasks/{task}.md")),
+                predecessor.join("tasks/.config.toml"),
+                f.env.home.path().join(".config/tasks/projects.toml"),
+            ];
+            let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+            let out = f.cmd().args(["rename", "sci", "old"]).output().unwrap();
+            assert!(!out.status.success(), "{stage}/{mutation}: {out:?}");
+            if mutation == "erased_notes" {
+                assert!(
+                    String::from_utf8_lossy(&out.stderr)
+                        .contains("handoff task differs from frozen inventory"),
+                    "{out:?}"
+                );
+            }
+            assert_eq!(
+                paths
+                    .iter()
+                    .map(|p| std::fs::read(p).unwrap())
+                    .collect::<Vec<_>>(),
+                before,
+                "{stage}/{mutation}"
+            );
+        }
+    }
+}
