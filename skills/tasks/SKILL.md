@@ -331,14 +331,16 @@ registry-wide enumeration nor bare suffixes. Completion errors remain silent.
 ## Project locations
 
 `tasks resolve --all` lists registered and discovered records-entry prefixes in
-prefix order; discovered-only entries keep status `unregistered`. A readable
+prefix order; discovered-only entries keep status `unregistered`. Enumeration keeps
+literal keys while explicit inputs still follow rename aliases. A readable
 `entry` adds config/records/checkout paths, layout, snapshot identity and optional
 private fields without changing existing row fields. Unreadable entries produce
 `entry_error` and a warning. `--all` conflicts with inputs and `--stdin`;
 `--freshness` adds `entry.freshness` (`current`, `behind`, `unknown`) against the
-committed identity. Path rows inside a known records store add `records_store`,
-including the store root and symlinked paths. Resolve reads no task records and
-never writes or locks; git runs only for requested freshness or the existing
+root's committed identity (the overlay for linked projects). Path rows inside a
+known records store add `records_store`, including the store root, missing suffixes
+and symlinked ancestors. Resolve reads no task records and never writes or locks;
+git runs only for requested freshness or the existing
 unregistered-path fallback.
 
 Use `tasks where [PATH]` to find the project a path opens, including from a code

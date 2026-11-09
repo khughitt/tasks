@@ -126,7 +126,12 @@ impl Catalogue {
     }
 
     pub fn store_of(&self, path: &Path) -> Option<&Path> {
-        let path = path.canonicalize().ok()?;
+        let base = if path.is_absolute() {
+            PathBuf::from("/")
+        } else {
+            std::env::current_dir().ok()?
+        };
+        let path = crate::locations::normalize(path, &base).ok()?;
         self.stores
             .iter()
             .find(|store| path.starts_with(store))
@@ -309,7 +314,18 @@ mod tests {
         );
         assert_eq!(catalogue.store_of(&alias), Some(store.as_path()));
         assert_eq!(catalogue.store_of(temp.path()), None);
-        assert_eq!(catalogue.store_of(&alias.join("missing")), None);
+        assert_eq!(
+            catalogue.store_of(&alias.join("missing")),
+            Some(store.as_path())
+        );
+        assert_eq!(
+            catalogue.store_of(&alias.join("aa/tasks/new/file")),
+            Some(store.as_path())
+        );
+        assert_eq!(
+            catalogue.store_of(&store.join("new/file")),
+            Some(store.as_path())
+        );
     }
 
     #[test]

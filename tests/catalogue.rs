@@ -440,6 +440,156 @@ fn no_git_runs_without_freshness() {
     }
 }
 
+fn git_text(env: &TestEnv, root: &Path, args: &[&str]) -> String {
+    let out = common::git_fixture::command(env.home.path(), root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout).unwrap().trim().into()
+}
+
+fn linked_snapshot(env: &TestEnv, layout: &StoreLayout) {
+    let overlay = layout.store.join("aa");
+    let checkout = layout.code.join("aa");
+    fs::write(
+        overlay.join("identity.toml"),
+        "name = 'Overlay'\npurpose = 'Owns records'\n",
+    )
+    .unwrap();
+    git(&layout.store, &["add", "-A"]);
+    git(&layout.store, &["commit", "-qm", "overlay identity"]);
+    let commit = git_text(env, &overlay, &["rev-parse", "HEAD"]);
+    let blob = git_text(env, &overlay, &["rev-parse", "HEAD:./identity.toml"]);
+    fs::write(overlay.join("tasks/.config.toml"), format!(
+        "prefix = 'aa'\n[identity]\nname = 'Overlay'\npurpose = 'Owns records'\nsource = 'head'\ncommit = {commit:?}\nblob = {blob:?}\nrefreshed = '2026-11-09T16:00:00Z'\n[checkout]\npath = {:?}\n", checkout.to_str().unwrap()
+    )).unwrap();
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["projects"]["aa"] = overlay.to_str().unwrap().into();
+    registry["records"].as_table_mut().unwrap().remove("aa");
+    fs::write(registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    git(&checkout, &["init", "-q", "-b", "main"]);
+    fs::write(
+        checkout.join("identity.toml"),
+        "name = 'Foreign'\npurpose = 'Other code'\n",
+    )
+    .unwrap();
+    git(&checkout, &["add", "-A"]);
+    git(&checkout, &["commit", "-qm", "foreign identity"]);
+}
+
+#[test]
+fn linked_freshness_compares_the_overlay_identity_not_the_foreign_checkout() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    linked_snapshot(&env, &layout);
+    let out = resolve(&env, &layout.code, &["aa", "--freshness"]);
+    assert_eq!(
+        out["results"][0]["entry"]["checkout"],
+        layout.code.join("aa").to_str().unwrap()
+    );
+    assert_eq!(out["results"][0]["entry"]["freshness"], "current");
+}
+
+#[test]
+fn linked_freshness_stays_current_when_the_foreign_checkout_is_missing() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    linked_snapshot(&env, &layout);
+    fs::remove_dir_all(layout.code.join("aa")).unwrap();
+    let out = resolve(&env, &layout.code, &["aa", "--freshness"]);
+    assert_eq!(out["results"][0]["entry"]["freshness"], "current");
+}
+
+#[test]
+fn resolve_all_keeps_discovered_alias_entries_and_their_errors_separate() {
+    let env = TestEnv::new();
+    let layout = store_env(
+        &env,
+        &[
+            (
+                "aa",
+                EntrySpec {
+                    registered: false,
+                    extra: IDENTITY,
+                },
+            ),
+            ("bb", registered()),
+        ],
+    );
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry.as_table_mut().unwrap().insert(
+        "aliases".into(),
+        toml::Value::Table(
+            [(String::from("aa"), toml::Value::String("bb".into()))]
+                .into_iter()
+                .collect(),
+        ),
+    );
+    fs::write(registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    for malformed in [false, true] {
+        if malformed {
+            fs::write(layout.store.join("aa/tasks/.config.toml"), "prefix = 1").unwrap();
+        }
+        let out = resolve(&env, &layout.code, &["--all"]);
+        let rows = out["results"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["input"], "aa");
+        assert_eq!(rows[0]["prefix"], "aa");
+        assert_eq!(rows[0]["status"], "unregistered");
+        assert!(rows[0].get("alias").is_none());
+        if malformed {
+            assert!(rows[0]["entry_error"].is_string());
+            assert!(rows[0].get("entry").is_none());
+        } else {
+            assert_eq!(
+                rows[0]["entry"]["records"],
+                layout.store.join("aa").to_str().unwrap()
+            );
+        }
+        assert_eq!(rows[1]["prefix"], "bb");
+        assert_eq!(
+            rows[1]["entry"]["records"],
+            layout.store.join("bb").to_str().unwrap()
+        );
+        let explicit = resolve(&env, &layout.code, &["aa"]);
+        assert_eq!(explicit["results"][0]["prefix"], "bb");
+        assert_eq!(explicit["results"][0]["alias"], "aa");
+        assert_eq!(
+            explicit["results"][0]["entry"]["records"],
+            layout.store.join("bb").to_str().unwrap()
+        );
+    }
+}
+
+#[test]
+fn records_store_identifies_missing_tails_under_entries_stores_and_symlinks() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let alias = layout._temp.path().join("alias");
+    std::os::unix::fs::symlink(&layout.store, &alias).unwrap();
+    for (path, status) in [
+        (layout.store.join("aa/tasks/new-file.md"), "resolved"),
+        (
+            layout.store.join("new-entry/tasks/new-file.md"),
+            "unregistered",
+        ),
+        (alias.join("aa/tasks/new-file.md"), "resolved"),
+        (alias.join("new-entry/tasks/new-file.md"), "unregistered"),
+    ] {
+        let out = resolve(&env, &layout.code, &[path.to_str().unwrap()]);
+        assert_eq!(out["results"][0]["status"], status);
+        assert_eq!(
+            out["results"][0]["records_store"],
+            layout.store.to_str().unwrap()
+        );
+    }
+}
+
 #[test]
 fn check_reports_a_malformed_identity_table_as_a_config_error() {
     let mut env = TestEnv::new();

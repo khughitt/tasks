@@ -46,19 +46,21 @@ optional worktree/relpath; retired prefix aliases resolve while registered.
 discovered under a records store that this host has not registered. It conflicts
 with positional inputs and `--stdin`. Registered projects retain their existing
 resolution statuses and fields; discovered-only prefixes stay `unregistered`.
+Enumeration keeps literal catalogue keys; explicit inputs still follow rename aliases.
 Each readable records entry adds `entry`: config, records and declared checkout
 paths, layout kind, shorthand and optional profile, color, retirement and feedback
 scope. A snapshot adds name, public aliases, purpose and source/refreshed metadata
 (plus commit/blob for a HEAD snapshot). Unset optional fields are omitted.
 An unreadable or malformed entry adds `entry_error` and a warning while other rows
 continue. Path rows within a known records store add its root as `records_store`,
-including the store root itself and symlinked paths. An in-tree project's own
-repository is not a records store.
+including the store root itself, missing suffixes and symlinked ancestors. An
+in-tree project's own repository is not a records store.
 
-`resolve --freshness` adds `entry.freshness`: `current` when the committed identity
-blob matches (or a seeded snapshot still has no committed identity), `behind` when
+`resolve --freshness` compares the registered root's committed identity (the
+overlay root for a linked project). It adds `entry.freshness`: `current` when the
+identity blob matches (or a seeded snapshot still has no committed identity), `behind` when
 the committed identity differs, and `unknown` without a snapshot or accessible
-checkout, or when git fails. Git failures also warn. Resolve reads configs and
+root, or when git fails. Git failures also warn. Resolve reads configs and
 registry metadata only: it never reads task records, writes or takes mutation
 locks. Without `--freshness`, it runs no git except the existing fallback for an
 unregistered path.

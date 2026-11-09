@@ -39,7 +39,7 @@ pub fn run(
         .map(|input| match input {
             Ok(input) => {
                 let mut result = if all {
-                    prefix_row(&registry, &index, input)
+                    prefix_row(&registry, &index, input.clone(), input)
                 } else {
                     row(&registry, &index, &catalogue, dir, input, &mut warnings)
                 };
@@ -65,10 +65,10 @@ pub fn run(
 fn entry_row(project: &Project, with_freshness: bool, warnings: &mut Vec<String>) -> EntryRow {
     let snapshot = project.identity.as_ref();
     let freshness = with_freshness.then(|| {
-        if !project.checkout.is_dir() {
+        if !project.root.is_dir() {
             return crate::catalogue::source::Freshness::Unknown;
         }
-        let (freshness, warning) = crate::catalogue::source::freshness(&project.checkout, snapshot);
+        let (freshness, warning) = crate::catalogue::source::freshness(&project.root, snapshot);
         warnings.extend(warning);
         freshness
     });
@@ -134,7 +134,8 @@ fn row(
         };
     }
     if is_valid_prefix(&input) {
-        return prefix_row(registry, index, input);
+        let prefix = registry.canonical_prefix(&input).to_string();
+        return prefix_row(registry, index, input, prefix);
     }
     ResolveRow {
         detail: Some("expected an id <prefix>-<hex6>, a prefix, or a path".into()),
@@ -142,15 +143,14 @@ fn row(
     }
 }
 
-fn prefix_row(registry: &Registry, index: &Index, input: String) -> ResolveRow {
-    let live = registry.canonical_prefix(&input).to_string();
-    match registry.project_root(&live) {
+fn prefix_row(registry: &Registry, index: &Index, input: String, prefix: String) -> ResolveRow {
+    match registry.project_root(&prefix) {
         Some(root) => ResolveRow {
-            alias: (live != input).then(|| input.clone()),
-            color: index.color(&live),
+            alias: (prefix != input).then(|| input.clone()),
+            color: index.color(&prefix),
             root: Some(root.display().to_string()),
-            records: Some(records_of(registry, &live, root)),
-            prefix: Some(live),
+            records: Some(records_of(registry, &prefix, root)),
+            prefix: Some(prefix),
             ..row_of(input, "prefix", "resolved")
         },
         None => ResolveRow {

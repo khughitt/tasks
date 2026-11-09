@@ -591,7 +591,7 @@ pub enum Command {
         /// List every catalogued prefix, including unregistered records entries.
         #[arg(long, conflicts_with_all = ["inputs", "stdin"])]
         all: bool,
-        /// Compare each entry's snapshot with its checkout's committed identity.
+        /// Compare each entry's snapshot with its root's committed identity.
         #[arg(long)]
         freshness: bool,
     },
