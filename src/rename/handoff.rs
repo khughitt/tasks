@@ -123,12 +123,12 @@ pub(super) fn validate(
         }
     }
     let suffixes = scan_suffixes(&pred.tasks_dir(), prefix)?;
-    if let Some(h) = existing {
-        if suffixes != h.suffixes {
-            return Err(Error::Validation(format!(
-                "predecessor {prefix} task suffixes differ from inventory"
-            )));
-        }
+    if let Some(h) = existing
+        && suffixes != h.suffixes
+    {
+        return Err(Error::Validation(format!(
+            "predecessor {prefix} task suffixes differ from inventory"
+        )));
     }
     let source_suffixes = match inventory {
         Some(i) => i.entries.iter().map(|e| e.hex.clone()).collect(),

@@ -66,21 +66,19 @@ impl ActivityIndex {
             for dep_id in &task.depends {
                 if let Some(d) = resolve_idx(dep_id)
                     && d != u
+                    && dependency_edges.insert((u, d))
                 {
-                    if dependency_edges.insert((u, d)) {
-                        depends_of[u].push(d);
-                        dependents_of[d].push(u);
-                    }
+                    depends_of[u].push(d);
+                    dependents_of[d].push(u);
                 }
             }
             for link_id in task.related.iter().chain(task.wake_on.iter()) {
                 if let Some(r) = resolve_idx(link_id)
                     && r != u
+                    && related_edges.insert((u.min(r), u.max(r)))
                 {
-                    if related_edges.insert((u.min(r), u.max(r))) {
-                        related_of[u].push(r);
-                        related_of[r].push(u);
-                    }
+                    related_of[u].push(r);
+                    related_of[r].push(u);
                 }
             }
         }
