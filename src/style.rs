@@ -62,7 +62,7 @@ impl Activity {
     }
 
     pub fn unit(self) -> f64 {
-        f64::from(self.0) / 255.0
+        f64::from(self.0) / f64::from(Self::HOT.0)
     }
 }
 
