@@ -161,6 +161,31 @@ Uncertain save preserves bytes. After switch commit warnings leave landed state;
 retry can finish publication. Ordinary saves/editors use the compact record while
 logical show still exposes all notes.
 
+Apply proves its own result and reports it as `verified`: `invariants` names each
+check that held, in order, and `written` gives the absolute record and segment
+paths. A failed check refuses with `archive_unverified`. The checks are:
+
+- `notes_appended`: the new logical notes are the old notes, unchanged and in
+  order, plus exactly the `attached:` note and the `archived-notes:` receipt by
+  one author (so the attachment ledger gains only the segment).
+- `fields_unchanged`: every other field is equal except `updated` and the one
+  added descriptor.
+- `files_unchanged`: just before the switch, the task's attachment directory
+  holds the same entries as before (regular files by content hash, symlinks by
+  target, other entries by type) plus the segment. Apply holds the project
+  mutation lock throughout, so this catches writers that bypass it.
+- `record_reloaded`: after the switch, the record read back through the normal
+  loader equals the prepared record and binds its receipt.
+
+The first two run before anything is written. A `files_unchanged` failure keeps
+the published segment for an exact-bytes retry, and the record is not switched.
+`written` names the segment even when a retry reused a byte-identical one. A
+`record_reloaded` failure leaves the record switched and uncommitted; a retry would
+report `already_archived`, so inspect the record against the source preview first. `already_archived` reports
+`receipt_bound` (the receipt sits at its descriptor's exact boundary after its
+attach note) and `segments_verified` (each segment matched its hash and note count
+on load), and `written` is empty.
+
 ## Failure and recovery limits
 
 Missing/unsafe/hash-mismatched archives fail reads/saves: restore descriptor-exact
