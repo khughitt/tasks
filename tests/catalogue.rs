@@ -681,6 +681,307 @@ fn snapshot(layout: &StoreLayout, prefix: &str) -> toml::Value {
 }
 
 #[test]
+fn freshness_current_behind_unknown() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'A'\npurpose = 'First'\n");
+    let root = layout.code.join("aa");
+    refresh(&env, &root, &[], 0);
+    assert_eq!(
+        resolve(&env, &root, &["aa", "--freshness"])["results"][0]["entry"]["freshness"],
+        "current"
+    );
+    fs::write(
+        root.join("identity.toml"),
+        "name = 'B'\npurpose = 'Second'\n",
+    )
+    .unwrap();
+    git(&root, &["add", "identity.toml"]);
+    git(&root, &["commit", "-qm", "new identity"]);
+    assert_eq!(
+        resolve(&env, &root, &["aa", "--freshness"])["results"][0]["entry"]["freshness"],
+        "behind"
+    );
+    fs::remove_dir_all(&root).unwrap();
+    assert_eq!(
+        resolve(&env, &layout.code, &["aa", "--freshness"])["results"][0]["entry"]["freshness"],
+        "unknown"
+    );
+}
+
+#[test]
+fn a_stale_snapshot_warns_and_never_refuses() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'A'\npurpose = 'First'\n");
+    let root = layout.code.join("aa");
+    refresh(&env, &root, &[], 0);
+    assert!(
+        !env.check(&root)["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "identity_behind")
+    );
+    fs::write(
+        root.join("identity.toml"),
+        "name = 'B'\npurpose = 'Second'\n",
+    )
+    .unwrap();
+    git(&root, &["add", "identity.toml"]);
+    git(&root, &["commit", "-qm", "new identity"]);
+    let before = inventory(&layout.store);
+    let out = env.check(&root);
+    assert_eq!(out["errors"], json!([]));
+    let warning = out["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["kind"] == "identity_behind")
+        .expect("missing stale-snapshot warning");
+    assert!(
+        warning["detail"]
+            .as_str()
+            .unwrap()
+            .contains("tasks identity refresh aa")
+    );
+    assert_eq!(inventory(&layout.store), before);
+}
+
+#[test]
+fn check_freshness_uses_the_registered_overlay_even_from_foreign_code() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    linked_snapshot(&env, &layout);
+    let checkout = layout.code.join("aa");
+    assert!(
+        !env.check(&checkout)["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "identity_behind")
+    );
+    fs::write(
+        layout.store.join("aa/identity.toml"),
+        "name = 'Changed overlay'\npurpose = 'Owns records'\n",
+    )
+    .unwrap();
+    git(&layout.store, &["add", "aa/identity.toml"]);
+    git(&layout.store, &["commit", "-qm", "changed overlay"]);
+    assert!(
+        env.check(&checkout)["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "identity_behind")
+    );
+    fs::remove_dir_all(&checkout).unwrap();
+    let out = env.check(&layout.store.join("aa"));
+    for kind in ["identity_behind", "checkout_missing"] {
+        assert!(
+            out["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["kind"] == kind),
+            "{out}"
+        );
+    }
+}
+
+#[test]
+fn projects_rows_carry_name_and_purpose() {
+    let env = TestEnv::new();
+    let layout = store_env(
+        &env,
+        &[
+            ("aa", registered()),
+            (
+                "bb",
+                EntrySpec {
+                    registered: true,
+                    extra: "",
+                },
+            ),
+            ("cc", registered()),
+        ],
+    );
+    fs::remove_dir_all(layout.store.join("cc")).unwrap();
+    let out = env.json(&layout.code, &["projects"]);
+    let rows = out["projects"].as_array().unwrap();
+    assert_eq!(rows[0]["name"], "Catalogue");
+    assert_eq!(rows[0]["purpose"], "Keeps identities");
+    assert!(rows[0].get("aliases").is_none());
+    for row in &rows[1..] {
+        assert!(row.get("name").is_none());
+        assert!(row.get("purpose").is_none());
+    }
+}
+
+#[test]
+fn init_refreshes_the_snapshot() {
+    for kind in ["in-tree", "detached", "linked"] {
+        let env = TestEnv::new();
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let root = base.join("root");
+        let records = base.join("records");
+        let foreign = base.join("foreign");
+        for dir in [&root, &records, &foreign] {
+            fs::create_dir(dir).unwrap();
+            git(dir, &["init", "-q", "-b", "main"]);
+            git(dir, &["commit", "--allow-empty", "-qm", "initial"]);
+        }
+        fs::write(
+            root.join("identity.toml"),
+            "prefix = 'aa'\nname = 'Root'\npurpose = 'Registered authority'\n",
+        )
+        .unwrap();
+        git(&root, &["add", "identity.toml"]);
+        git(&root, &["commit", "-qm", "identity"]);
+        fs::write(
+            foreign.join("identity.toml"),
+            "prefix = 'bb'\nname = 'Foreign'\npurpose = 'Other code'\n",
+        )
+        .unwrap();
+        git(&foreign, &["add", "identity.toml"]);
+        git(&foreign, &["commit", "-qm", "foreign"]);
+        let mut args = vec!["init", "--prefix", "aa"];
+        match kind {
+            "detached" => args.extend(["--records", records.to_str().unwrap()]),
+            "linked" => args.extend(["--checkout", foreign.to_str().unwrap()]),
+            _ => {}
+        }
+        let config = if kind == "detached" {
+            records.join("aa/tasks/.config.toml")
+        } else {
+            root.join("tasks/.config.toml")
+        };
+        for force in [false, true] {
+            let head = git_text(&env, &root, &["rev-parse", "HEAD"]);
+            let records_head = git_text(&env, &records, &["rev-parse", "HEAD"]);
+            let out = env.json(&root, &args);
+            let doc: toml::Value = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+            assert_eq!(
+                doc["identity"]["name"].as_str(),
+                Some(if force { "Changed" } else { "Root" }),
+                "{kind}: {out}"
+            );
+            assert_eq!(doc["identity"]["commit"].as_str(), Some(head.as_str()));
+            assert_eq!(git_text(&env, &root, &["rev-parse", "HEAD"]), head);
+            assert_eq!(
+                git_text(&env, &records, &["rev-parse", "HEAD"]),
+                records_head
+            );
+            if !force {
+                args.push("--force");
+                fs::write(
+                    root.join("identity.toml"),
+                    "prefix = 'aa'\nname = 'Changed'\npurpose = 'Registered authority'\n",
+                )
+                .unwrap();
+                git(&root, &["add", "identity.toml"]);
+                git(&root, &["commit", "-qm", "changed identity"]);
+            }
+        }
+    }
+}
+
+#[test]
+fn init_over_a_mismatched_prefix_pairs_warns_and_writes_no_snapshot() {
+    let env = TestEnv::new();
+    let layout = store_env(
+        &env,
+        &[(
+            "aa",
+            EntrySpec {
+                registered: false,
+                extra: "",
+            },
+        )],
+    );
+    root_identity(
+        &env,
+        &layout,
+        "aa",
+        "prefix = 'bb'\nname = 'Other'\npurpose = 'Mismatch'\n",
+    );
+    let root = layout.code.join("aa");
+    let out = env.json(
+        &root,
+        &[
+            "init",
+            "--prefix",
+            "aa",
+            "--records",
+            layout.store.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out["warnings"].as_array().unwrap().iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .contains("identity_prefix_mismatch")
+            && w.as_str().unwrap().contains("tasks identity refresh aa")),
+        "{out}"
+    );
+    let doc: toml::Value =
+        toml::from_str(&fs::read_to_string(config(&layout, "aa")).unwrap()).unwrap();
+    assert!(doc.get("identity").is_none());
+    assert_eq!(
+        resolve(&env, &root, &["aa"])["results"][0]["status"],
+        "resolved"
+    );
+}
+
+#[test]
+fn init_refresh_failures_warn_and_preserve_the_previous_snapshot() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let root = layout.code.join("aa");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["commit", "--allow-empty", "-qm", "no identity"]);
+    let before = snapshot(&layout, "aa");
+    let args = [
+        "init",
+        "--prefix",
+        "aa",
+        "--records",
+        layout.store.to_str().unwrap(),
+        "--force",
+    ];
+    let out = env.json(&root, &args);
+    assert!(
+        !out["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("tasks identity refresh")),
+        "{out}"
+    );
+    assert_eq!(snapshot(&layout, "aa"), before);
+    fs::write(root.join("identity.toml"), "name = 1\n").unwrap();
+    git(&root, &["add", "identity.toml"]);
+    git(&root, &["commit", "-qm", "invalid identity"]);
+    for kind in ["identity_invalid", "root_detached"] {
+        if kind == "root_detached" {
+            git(&root, &["checkout", "-q", "--detach"]);
+        }
+        let out = env.json(&root, &args);
+        assert!(
+            out["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w.as_str().unwrap().contains(kind)
+                    && w.as_str().unwrap().contains("tasks identity refresh aa")),
+            "{out}"
+        );
+        assert_eq!(snapshot(&layout, "aa"), before);
+    }
+}
+
+#[test]
 fn refresh_reads_the_registered_roots_head() {
     let env = TestEnv::new();
     let layout = store_env(&env, &[("aa", registered())]);

@@ -62,7 +62,10 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             Ok(handoff) => (handoff, None),
             Err(error) => (None, Some(error)),
         };
-    let bound_error = if snapshot.inventory.is_none() && classify::registry_old(&snapshot) {
+    let bound_error = if snapshot.inventory.is_none()
+        && snapshot.records == snapshot::RecordsDir::Old
+        && classify::registry_old(&snapshot)
+    {
         Project::open(&invocation.records)
             .and_then(|project| check_handoff_bound(registry, &project))
             .err()

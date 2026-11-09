@@ -21,7 +21,6 @@ pub enum RefreshKind {
 
 /// Refresh one entry without committing it (init's configuration-write contract).
 /// The command holds one records lock across a repository's entire batch instead.
-#[allow(dead_code)] // Init adopts this API in the next plan task.
 pub fn refresh(registry: &Registry, project: &Project, now: &str) -> Result<RefreshReport> {
     let _lock = crate::record_commit::try_lock(&project.records).map_err(Error::Io)?;
     refresh_locked(registry, project, now, None)

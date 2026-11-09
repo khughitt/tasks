@@ -318,6 +318,10 @@ pub struct EntrySnapshotRow {
 #[derive(Serialize)]
 pub struct ProjectRow {
     pub prefix: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
     /// The project's identity color. Absent when it sets none or was not read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,

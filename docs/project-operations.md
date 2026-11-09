@@ -25,6 +25,11 @@ records at `<records-root>/<p>`. --checkout and --records conflict. Detached ini
 writes prefix, checkout path/kind and git.commit=true in records, creates spec/
 plan roots and pairs the host registry; nothing is written into code. Existing
 config/comments are retained. Commit configuration changes separately.
+After pairing, init (including `--force` and `--records`) refreshes the identity
+snapshot from the registered root's committed `identity.toml`, without committing
+configuration. No committed identity is silent; any refresh failure keeps the
+previous snapshot and warns with the error and `tasks identity refresh <prefix>`.
+Pairing still succeeds and init exits 0.
 
 For existing records, declare custom spec/plan roots before init if needed;
 configured lists replace defaults. Install the shipped tasks skill, adopt its
@@ -36,6 +41,9 @@ do not silently skip a missing tool. [Configuration](configuration.md) lists key
 it stays in that repository; outside git it walks configs. holds_records also
 recognizes tracked config in HEAD even when deleted locally. `root <full-id>`
 prints the registered root. `projects --paths` displays detached record locations.
+`projects` JSON rows add `name` and `purpose` from the snapshot when present and
+reachable. Its pretty table stays unchanged; discovered-only entries appear in
+`resolve --all`, not `projects`.
 `resolve` is read-only: path classification precedes full ids and prefixes, and
 id resolution does not prove a task exists. Each batch item can be resolved,
 unregistered, ambiguous or invalid without failing other rows; registry errors
@@ -94,6 +102,11 @@ snapshot metadata, changed fields and error detail when applicable. Every row th
 read HEAD carries `branch` and `commit`, including later failures; `seeded`,
 `unreachable` and failures before HEAD omit them. All requested projects are attempted,
 and any `error` row makes the command exit 1.
+
+`tasks check` compares its snapshot with the registered root's committed identity
+(the overlay for linked records). A stale snapshot adds an `identity_behind`
+warning naming `tasks identity refresh <prefix>`. Freshness never adds an error
+or refuses a commit, and check does not refresh or write the snapshot.
 
 ## Detached pairing and relocation
 

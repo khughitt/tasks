@@ -183,6 +183,15 @@ pub fn run(
             (project.root, None)
         }
     };
+    let refreshed = Project::open(records.as_deref().unwrap_or(&project_root))
+        .and_then(|project| super::identity::refresh(&registry, &project, &crate::time::now()))
+        .and_then(|report| report.result);
+    if let Err(error) = refreshed {
+        warnings.push(format!(
+            "{}: {error}; run `tasks identity refresh {prefix}` after resolving the cause",
+            error.kind()
+        ));
+    }
     if !skill_installed(&project_root) {
         warnings.push(
             "no tasks skill found at user or project level; install skills/tasks (see README)"

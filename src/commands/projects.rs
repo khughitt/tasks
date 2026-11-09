@@ -73,7 +73,7 @@ pub fn run(
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
         let reachable = is_reachable(&registry, prefix)?;
-        let (counts, total, last_activity, color, retired, located) = if reachable {
+        let (counts, total, last_activity, color, retired, located, identity) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
             let tasks = project.scan().map_err(|error| error.in_project(prefix))?;
             // Timestamps are fixed-width UTC with no fractional part, so the lexical max
@@ -86,12 +86,15 @@ pub fn run(
                 project.color,
                 project.retired,
                 Some((project.checkout.display().to_string(), project.kind)),
+                project.identity,
             )
         } else {
-            (None, None, None, None, None, None)
+            (None, None, None, None, None, None, None)
         };
         rows.push(ProjectRow {
             prefix: prefix.clone(),
+            name: identity.as_ref().map(|snapshot| snapshot.name.clone()),
+            purpose: identity.map(|snapshot| snapshot.purpose),
             color,
             root: root.display().to_string(),
             records: registry
@@ -125,6 +128,8 @@ mod tests {
     fn row(prefix: &str, total: Option<usize>, activity: Option<&str>) -> ProjectRow {
         ProjectRow {
             prefix: prefix.into(),
+            name: None,
+            purpose: None,
             color: None,
             root: format!("/tmp/{prefix}"),
             records: format!("/tmp/{prefix}"),

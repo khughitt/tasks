@@ -311,6 +311,24 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             ),
         ));
     }
+    let root = ctx
+        .registry
+        .project_root(&ctx.project.prefix)
+        .unwrap_or(&ctx.project.root);
+    if crate::catalogue::source::freshness(root, ctx.project.identity.as_ref()).0
+        == crate::catalogue::source::Freshness::Behind
+    {
+        warnings.push(finding(
+            None,
+            crate::repo::CONFIG_REL.into(),
+            "identity_behind",
+            format!(
+                "identity snapshot is behind {}; run `tasks identity refresh {}`",
+                root.display(),
+                ctx.project.prefix
+            ),
+        ));
+    }
 
     let mut resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     resolver.set_fetch_budget(crate::doc_fetch::OPTIONAL_BUDGET);
