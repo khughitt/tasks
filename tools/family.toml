@@ -37,7 +37,7 @@ label = "Task states, gates, evidence and the tools that judge them"
 
 [[members]]
 name = "forge"
-prefix = "forge2"
+prefix = "forge"
 url = "https://github.com/khughitt/forge"
 label = "Pet themes from picked images"
 
