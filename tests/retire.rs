@@ -226,7 +226,7 @@ fn retired_lock_init_waits_for_the_project_lock() {
 }
 
 #[test]
-fn retired_lock_init_force_preserves_retirement_and_rename_refuses() {
+fn retired_lock_init_force_and_rename_preserve_retirement() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     declare_retired(&old, None);
@@ -237,10 +237,8 @@ fn retired_lock_init_force_preserves_retirement_and_rename_refuses() {
         env.fail(elsewhere.path(), &["init", "--prefix", "old", "--force"]),
         "retired_project"
     );
-    assert_eq!(
-        env.fail(&old, &["rename", "old", "older"]),
-        "retired_project"
-    );
+    env.json(&old, &["rename", "old", "older"]);
+    assert_eq!(env.fail(&old, &["add", "forbidden"]), "retired_project");
 }
 
 #[test]

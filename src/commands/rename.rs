@@ -83,12 +83,15 @@ fn adopt_project(
     new: &str,
 ) -> Result<crate::repo::Project> {
     if let Some(dir) = registry.records_dir(old)
-        && !crate::rename::snapshot::present(dir)?
         && let Some(renamed) = dir.parent().map(|parent| parent.join(new))
         && crate::rename::snapshot::present(&renamed.join(crate::repo::CONFIG_REL))?
     {
         let project = crate::repo::Project::open(&renamed)?;
-        if project.prefix == new {
+        if project.prefix == new
+            && (!crate::rename::snapshot::present(dir)?
+                || crate::rename::root_identity(&project.root)?
+                    == crate::rename::root_identity(start)?)
+        {
             return Ok(project);
         }
     }
@@ -119,44 +122,48 @@ pub fn run(
         if explain {
             let mut registry = Registry::load()?;
             let project = adopt_project(&registry, &start, &old, &new)?;
-            reject_adopting_a_retired_project(&project)?;
             return crate::rename::adopt::run(&mut registry, &project, &old, &new, true)
                 .map(Output::Rename);
         }
         // A checkout that holds no project fails before the locks are taken.
         adopt_project(&Registry::load()?, &start, &old, &new)?;
-        let mut prefixes = [&old, &new];
-        prefixes.sort();
-        let _first = MutationLock::acquire(prefixes[0])?;
-        let _second = MutationLock::acquire(prefixes[1])?;
-        let _registry_lock = Registry::lock()?;
-        let mut registry = Registry::load()?;
-        let project = adopt_project(&registry, &start, &old, &new)?;
-        reject_adopting_a_retired_project(&project)?;
-        return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
-            .map(Output::Rename);
+        for _ in 0..4 {
+            let prefixes = rename_lock_prefixes(&Registry::load()?, &old, &new)?;
+            let _locks = prefixes
+                .iter()
+                .map(|p| MutationLock::acquire(p))
+                .collect::<Result<Vec<_>>>()?;
+            let _registry_lock = Registry::lock()?;
+            let mut registry = Registry::load()?;
+            if prefixes != rename_lock_prefixes(&registry, &old, &new)? {
+                continue;
+            }
+            let project = adopt_project(&registry, &start, &old, &new)?;
+            return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
+                .map(Output::Rename);
+        }
+        return Err(Error::Io(
+            "the predecessor changed while acquiring adoption locks; retry".into(),
+        ));
     }
     let mut registry = Registry::load()?;
     let mut requested = invocation(&registry, &old, &new)?;
     if explain {
         // As the run refuses, so explain never reports a stage it would not reach.
-        reject_renaming_a_retired_project(&registry, &requested.source)?;
         return crate::rename::run(&mut registry, &requested, true).map(Output::Rename);
     }
     for _ in 0..4 {
-        let mut prefixes = [&requested.source, &requested.target];
-        prefixes.sort();
-        let _first = MutationLock::acquire(prefixes[0])?;
-        let _second = if prefixes[0] != prefixes[1] {
-            Some(MutationLock::acquire(prefixes[1])?)
-        } else {
-            None
-        };
+        let prefixes = rename_lock_prefixes(&registry, &requested.source, &requested.target)?;
+        let _locks = prefixes
+            .iter()
+            .map(|p| MutationLock::acquire(p))
+            .collect::<Result<Vec<_>>>()?;
         let _registry_lock = Registry::lock()?;
         registry = Registry::load()?;
         let refreshed = invocation(&registry, &old, &new)?;
-        if refreshed == requested {
-            reject_renaming_a_retired_project(&registry, &requested.source)?;
+        if refreshed == requested
+            && prefixes == rename_lock_prefixes(&registry, &refreshed.source, &refreshed.target)?
+        {
             return crate::rename::run(&mut registry, &requested, false).map(Output::Rename);
         }
         requested = refreshed;
@@ -166,30 +173,17 @@ pub fn run(
     ))
 }
 
-/// `--adopt` and its `--explain` refuse alike, so explain never reports a stage the run
-/// would refuse.
-fn reject_adopting_a_retired_project(project: &crate::repo::Project) -> Result<()> {
-    if project.retired.is_some() {
-        return Err(Error::RetiredProject(format!(
-            "{} is retired; a retired project is not renamed",
-            project.prefix
-        )));
+fn rename_lock_prefixes(registry: &Registry, source: &str, target: &str) -> Result<Vec<String>> {
+    let mut prefixes = vec![source.to_string(), target.to_string()];
+    if let Some(pred) = registry.aliases.get(target) {
+        prefixes.push(pred.clone());
     }
-    Ok(())
-}
-
-/// A retired project is not renamed (docs/project-operations.md). Read without the prefix
-/// check, so a pending rename whose config already carries the new prefix still resumes;
-/// a config that does not parse fails here as it would in the rename itself.
-fn reject_renaming_a_retired_project(registry: &Registry, source: &str) -> Result<()> {
-    if let Some(dir) = crate::scope::config_dir(registry, source)
-        && dir.join(crate::repo::CONFIG_REL).exists()
-        && crate::repo::Project::open(&dir)?.retired.is_some()
+    if let Some(inventory) = Inventory::load(source)?
+        && let Some(handoff) = inventory.predecessor_handoff
     {
-        return Err(Error::RetiredProject(format!(
-            "{source} is retired; a retired project is not renamed (`tasks unretire` in {} first)",
-            dir.display()
-        )));
+        prefixes.push(handoff.prefix);
     }
-    Ok(())
+    prefixes.sort();
+    prefixes.dedup();
+    Ok(prefixes)
 }

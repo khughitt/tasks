@@ -23,6 +23,25 @@ pub struct InventoryEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PredecessorHandoff {
+    pub prefix: String,
+    pub suffixes: BTreeSet<String>,
+    pub config_path: PathBuf,
+    pub config_from: String,
+    pub config_to: String,
+    pub config_payload: String,
+}
+
+impl PredecessorHandoff {
+    pub fn predecessor(&self) -> crate::repo::Predecessor {
+        crate::repo::Predecessor {
+            prefix: self.prefix.clone(),
+            suffixes: self.suffixes.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inventory {
     pub source: String,
     pub target: String,
@@ -31,6 +50,8 @@ pub struct Inventory {
     pub root: PathBuf,
     pub config_from: String,
     pub config_to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predecessor_handoff: Option<PredecessorHandoff>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_payload: Option<String>,
     pub entries: Vec<InventoryEntry>,
@@ -194,12 +215,28 @@ impl Inventory {
             config_from: digest(&config_bytes),
             config_to: digest(config_to.as_bytes()),
             config_payload,
+            predecessor_handoff: None,
             entries,
             parks_store,
             store_to,
             records_from,
             records_to,
         })
+    }
+
+    pub fn with_handoff(
+        mut self,
+        project: &Project,
+        handoff: Option<PredecessorHandoff>,
+    ) -> Result<Self> {
+        if let Some(handoff) = handoff {
+            let source = std::fs::read_to_string(project.records.join(CONFIG_REL))?;
+            let payload = with_predecessor(&self.target_config(&source)?, &handoff.predecessor())?;
+            self.config_to = digest(payload.as_bytes());
+            self.config_payload = Some(payload);
+            self.predecessor_handoff = Some(handoff);
+        }
+        Ok(self)
     }
 
     pub fn target_config(&self, source: &str) -> Result<String> {
@@ -309,59 +346,113 @@ impl Inventory {
                 .or_else(|| self.records_to.as_ref().filter(|p| p.is_dir()))
                 .unwrap_or(&self.root);
             let project = Project::from_config(records.canonicalize()?, payload)?;
-            let edge = project
-                .retention_lineage
-                .last()
-                .ok_or_else(|| Error::Config("retention inventory lacks an edge".into()))?;
             if project.prefix != self.target
-                || edge.from_prefix != self.source
-                || edge.to_prefix != self.target
+                || self
+                    .predecessor_handoff
+                    .as_ref()
+                    .is_some_and(|h| project.predecessor != Some(h.predecessor()))
             {
                 return Err(Error::Config(
-                    "retention inventory edge disagrees with its endpoints".into(),
+                    "rename payload disagrees with target or predecessor".into(),
                 ));
             }
-            let id = TaskId::parse(&format!("{}-000001", edge.from_prefix))?;
-            crate::retained::model::Basis {
-                project: edge.from_prefix.clone(),
-                layout: edge.layout.clone(),
-                records_subdir: edge.from_subdir.clone(),
-                commit: edge.commit.clone(),
-                task_path: crate::retained::lineage::task_path(&edge.from_subdir, &id),
-                retained_ref: edge.retained_ref.clone(),
-            }
-            .validate()?;
-            if edge.version != 1
-                || edge.layout != project.kind.as_str()
-                || !(edge.to_subdir == "." || crate::retained::model::member_path(&edge.to_subdir))
-            {
-                return Err(Error::Config("invalid frozen retention edge".into()));
-            }
-            crate::retained::basis::git(&project, &["show-ref", "--verify", &edge.retained_ref])?;
-            crate::retained::basis::git(
-                &project,
-                &[
-                    "merge-base",
-                    "--is-ancestor",
+            if let Some(edge) = project.retention_lineage.last() {
+                if project.prefix != self.target
+                    || edge.from_prefix != self.source
+                    || edge.to_prefix != self.target
+                {
+                    return Err(Error::Config(
+                        "retention inventory edge disagrees with its endpoints".into(),
+                    ));
+                }
+                let id = TaskId::parse(&format!("{}-000001", edge.from_prefix))?;
+                crate::retained::model::Basis {
+                    project: edge.from_prefix.clone(),
+                    layout: edge.layout.clone(),
+                    records_subdir: edge.from_subdir.clone(),
+                    commit: edge.commit.clone(),
+                    task_path: crate::retained::lineage::task_path(&edge.from_subdir, &id),
+                    retained_ref: edge.retained_ref.clone(),
+                }
+                .validate()?;
+                if edge.version != 1
+                    || edge.layout != project.kind.as_str()
+                    || !(edge.to_subdir == "."
+                        || crate::retained::model::member_path(&edge.to_subdir))
+                {
+                    return Err(Error::Config("invalid frozen retention edge".into()));
+                }
+                crate::retained::basis::git(
+                    &project,
+                    &["show-ref", "--verify", &edge.retained_ref],
+                )?;
+                crate::retained::basis::git(
+                    &project,
+                    &[
+                        "merge-base",
+                        "--is-ancestor",
+                        &edge.commit,
+                        &edge.retained_ref,
+                    ],
+                )?;
+                let source_path = format!("{}/tasks/.config.toml", edge.from_subdir)
+                    .trim_start_matches("./")
+                    .to_string();
+                let source = crate::retained::basis::blob(
+                    &project,
                     &edge.commit,
-                    &edge.retained_ref,
-                ],
-            )?;
-            let source_path = format!("{}/tasks/.config.toml", edge.from_subdir)
-                .trim_start_matches("./")
-                .to_string();
-            let source =
-                crate::retained::basis::blob(&project, &edge.commit, &source_path, None, &mut 0)?;
-            if digest(&source) != self.config_from
-                || rewrite_config_lineage(
-                    std::str::from_utf8(&source).map_err(|e| Error::Config(e.to_string()))?,
-                    &self.target,
-                    edge,
-                )? != *payload
+                    &source_path,
+                    None,
+                    &mut 0,
+                )?;
+                if digest(&source) != self.config_from || {
+                    let rewritten = rewrite_config_lineage(
+                        std::str::from_utf8(&source).map_err(|e| Error::Config(e.to_string()))?,
+                        &self.target,
+                        edge,
+                    )?;
+                    match &self.predecessor_handoff {
+                        Some(h) => with_predecessor(&rewritten, &h.predecessor())?,
+                        None => rewritten,
+                    }
+                } != *payload
+                {
+                    return Err(Error::Config(
+                        "retention payload differs from anchored source config".into(),
+                    ));
+                }
+            } else if self.predecessor_handoff.is_none() {
+                return Err(Error::Config(
+                    "rename payload lacks retention lineage or predecessor handoff".into(),
+                ));
+            }
+        }
+        if let Some(h) = &self.predecessor_handoff {
+            h.predecessor().validate(&self.target)?;
+            validate_digest(path, "predecessor config_from", &h.config_from)?;
+            validate_digest(path, "predecessor config_to", &h.config_to)?;
+            if !h.config_path.is_absolute()
+                || !h.config_path.ends_with(CONFIG_REL)
+                || digest(h.config_payload.as_bytes()) != h.config_to
             {
                 return Err(Error::Config(
-                    "retention payload differs from anchored source config".into(),
+                    "invalid predecessor handoff config path or digest".into(),
                 ));
+            }
+            let pred = Project::from_config(
+                h.config_path
+                    .parent()
+                    .and_then(Path::parent)
+                    .expect("absolute config root")
+                    .to_path_buf(),
+                &h.config_payload,
+            )?;
+            if pred.prefix != h.prefix
+                || pred.predecessor.is_some()
+                || pred.retired.as_ref().and_then(|r| r.successor.as_deref())
+                    != Some(self.target.as_str())
+            {
+                return Err(Error::Config("invalid predecessor handoff payload".into()));
             }
         }
 
@@ -498,4 +589,13 @@ fn rewrite_config_lineage(
         .ok_or_else(|| Error::Config("retention lineage must be an array".into()))?;
     lineage.push(toml::Value::try_from(edge).map_err(|e| Error::Config(e.to_string()))?);
     toml::to_string(&v).map_err(|e| Error::Config(e.to_string()))
+}
+
+fn with_predecessor(text: &str, predecessor: &crate::repo::Predecessor) -> Result<String> {
+    let mut config: toml::Value = toml::from_str(text).map_err(|e| Error::Config(e.to_string()))?;
+    config.as_table_mut().expect("config table").insert(
+        "predecessor".into(),
+        toml::Value::try_from(predecessor).map_err(|e| Error::Config(e.to_string()))?,
+    );
+    toml::to_string(&config).map_err(|e| Error::Config(e.to_string()))
 }

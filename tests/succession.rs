@@ -741,3 +741,495 @@ fn succession_halt_exception_requires_a_genuine_predecessor_edge() {
         "forge-18dae2"
     );
 }
+
+struct Handoff {
+    env: TestEnv,
+    _base: tempfile::TempDir,
+    old: PathBuf,
+    new: PathBuf,
+    records: PathBuf,
+}
+
+impl Handoff {
+    fn new() -> Self {
+        let env = TestEnv::new();
+        let base = tempfile::tempdir().unwrap();
+        let old = base.path().join("forge");
+        let new = base.path().join("forge2");
+        let records = base.path().join("records");
+        for path in [&old, &new, &records] {
+            repo(&env, path);
+        }
+        for (path, prefix) in [(&old, "forge"), (&new, "forge2")] {
+            env.json(
+                path,
+                &[
+                    "init",
+                    "--prefix",
+                    prefix,
+                    "--records",
+                    records.to_str().unwrap(),
+                ],
+            );
+        }
+        write_task(&records.join("forge"), "forge-0e720e", "");
+        write_task(&records.join("forge2"), "forge2-18dae2", "");
+        env.json(
+            &old,
+            &["retire", "--reason", "superseded", "--successor", "forge2"],
+        );
+        git(&env, &records, &["add", "-A"]);
+        git(&env, &records, &["commit", "-qm", "seed records"]);
+        Self {
+            env,
+            _base: base,
+            old,
+            new,
+            records,
+        }
+    }
+    fn step1(&self) {
+        self.env.json(&self.old, &["rename", "forge", "forge1"]);
+        self.env.json(&self.old, &["commit", "--project", "forge1"]);
+    }
+}
+
+#[test]
+fn retired_project_can_be_renamed_and_preserves_retirement() {
+    let f = Handoff::new();
+    let retired = config(&f.records.join("forge"))["retired"].clone();
+    f.step1();
+    assert_eq!(config(&f.records.join("forge1"))["retired"], retired);
+    assert_eq!(git(&f.env, &f.records, &["status", "--porcelain"]), "");
+    assert_eq!(f.env.fail(&f.old, &["add", "forbidden"]), "retired_project");
+}
+
+#[test]
+fn prefix_handoff_refuses_uncommitted_step1_non_retired_wrong_successor_or_colliding_suffix() {
+    for case in [
+        "receipt",
+        "dirty",
+        "deleted-source",
+        "not-retired",
+        "wrong-successor",
+        "collision",
+        "predecessor",
+        "park",
+    ] {
+        let f = Handoff::new();
+        f.env.json(&f.old, &["rename", "forge", "forge1"]);
+        if case != "receipt" {
+            f.env.json(&f.old, &["commit", "--project", "forge1"]);
+        }
+        let pred = f.records.join("forge1");
+        match case {
+            "dirty" => std::fs::write(pred.join("tasks/uncommitted"), "dirty").unwrap(),
+            "deleted-source" => {
+                std::fs::create_dir_all(f.records.join("forge")).unwrap();
+                std::fs::write(f.records.join("forge/uncommitted"), "dirty").unwrap();
+            }
+            "not-retired" | "wrong-successor" | "predecessor" => {
+                let mut cfg = config(&pred);
+                if case == "not-retired" {
+                    cfg.as_table_mut().unwrap().remove("retired");
+                } else if case == "wrong-successor" {
+                    cfg["retired"]["successor"] = "other".into();
+                } else {
+                    cfg.as_table_mut().unwrap().insert(
+                        "predecessor".into(),
+                        toml::toml! { prefix = "older" suffixes = [] }.into(),
+                    );
+                }
+                std::fs::write(
+                    pred.join("tasks/.config.toml"),
+                    toml::to_string(&cfg).unwrap(),
+                )
+                .unwrap();
+                git(&f.env, &f.records, &["add", "-A"]);
+                git(&f.env, &f.records, &["commit", "-qm", "alter predecessor"]);
+            }
+            "collision" => {
+                write_task(&f.records.join("forge2"), "forge2-0e720e", "");
+                git(&f.env, &f.records, &["add", "-A"]);
+                git(&f.env, &f.records, &["commit", "-qm", "collision"]);
+            }
+            "park" => common::write_park(
+                &f.env,
+                "forge1",
+                "forge1-0e720e",
+                "test",
+                "agent",
+                f.old.to_str().unwrap(),
+            ),
+            _ => (),
+        }
+        let before = registry(&f.env);
+        let out = f
+            .env
+            .cmd(&f.new)
+            .args(["rename", "forge2", "forge"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{case}: {out:?}");
+        let detail = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            detail.contains("forge1") || detail.contains("forge"),
+            "{case}: {out:?}"
+        );
+        assert_eq!(registry(&f.env), before);
+        assert!(f.records.join("forge2/tasks/forge2-18dae2.md").exists());
+    }
+}
+
+#[test]
+fn prefix_handoff_resumes_after_stopping_at_each_stage() {
+    for (stage, recovery) in [
+        ("inventory", "resume_files"),
+        ("files", "resume_files"),
+        ("config", "resume_registry"),
+        ("records", "resume_registry"),
+        ("registry", "resume_cleanup"),
+        ("store", "resume_cleanup"),
+        ("claims", "resume_cleanup"),
+    ] {
+        let f = Handoff::new();
+        f.step1();
+        common::write_park(
+            &f.env,
+            "forge2",
+            "forge2-18dae2",
+            "test",
+            "agent",
+            f.new.to_str().unwrap(),
+        );
+        f.env
+            .cmd(&f.new)
+            .env("TASKS_RENAME_STOP_AFTER", stage)
+            .args(["rename", "forge2", "forge"])
+            .assert()
+            .success();
+        assert_eq!(
+            f.env
+                .json(&f.new, &["rename", "forge2", "forge", "--explain"])["recovery"],
+            recovery,
+            "{stage}"
+        );
+        f.env.json(&f.new, &["rename", "forge2", "forge"]);
+        assert_eq!(
+            config(&f.records.join("forge1"))["retired"]["successor"].as_str(),
+            Some("forge")
+        );
+        assert_eq!(
+            config(&f.records.join("forge"))["predecessor"]["prefix"].as_str(),
+            Some("forge1")
+        );
+        f.env.json(&f.new, &["commit", "--project", "forge"]);
+        assert_eq!(
+            git(&f.env, &f.records, &["status", "--porcelain"]),
+            "",
+            "{stage}"
+        );
+        assert_eq!(
+            f.env.json(&f.new, &["show", "forge-0e720e"])["task"]["id"],
+            "forge1-0e720e"
+        );
+        assert_eq!(
+            f.env.json(&f.new, &["show", "forge2-18dae2"])["task"]["id"],
+            "forge-18dae2"
+        );
+        assert_eq!(
+            f.env.fail(&f.new, &["show", "forge2-0e720e"]),
+            "task_not_found"
+        );
+        assert_eq!(f.env.fail(&f.new, &["show", "0e720e"]), "task_not_found");
+    }
+}
+
+#[test]
+fn prefix_handoff_commit_verifies_predecessor_config_and_retains_failed_receipt() {
+    let f = Handoff::new();
+    f.step1();
+    f.env.json(&f.new, &["rename", "forge2", "forge"]);
+    let path = f.records.join("forge1/tasks/.config.toml");
+    let original = std::fs::read(&path).unwrap();
+    std::fs::write(&path, [original.as_slice(), b"\n"].concat()).unwrap();
+    assert_eq!(
+        f.env.fail(&f.new, &["commit", "--project", "forge"]),
+        "validation"
+    );
+    assert!(
+        f.env
+            .home
+            .path()
+            .join(".local/state/tasks/rename-commit/forge.toml")
+            .exists()
+    );
+    std::fs::write(path, original).unwrap();
+    f.env.json(&f.new, &["commit", "--project", "forge"]);
+    assert_eq!(git(&f.env, &f.records, &["status", "--porcelain"]), "");
+}
+
+fn assert_handoff_routing(env: &TestEnv, current: &Path, archived: &Path) {
+    assert_eq!(
+        env.json(current, &["show", "forge-0e720e"])["task"]["id"],
+        "forge1-0e720e"
+    );
+    assert_eq!(
+        env.json(current, &["show", "forge2-18dae2"])["task"]["id"],
+        "forge-18dae2"
+    );
+    assert_eq!(
+        env.fail(current, &["show", "forge2-0e720e"]),
+        "task_not_found"
+    );
+    assert_eq!(env.fail(current, &["show", "0e720e"]), "task_not_found");
+    assert_eq!(env.fail(archived, &["add", "forbidden"]), "retired_project");
+    env.check(current);
+    env.check(archived);
+}
+
+#[test]
+fn multi_host_succession_rehearsal_primary_secondary_and_fresh_init() {
+    for early_adoption in [true, false] {
+        let a = TestEnv::new();
+        let b = TestEnv::new();
+        let c = TestEnv::new();
+        let base = tempfile::tempdir().unwrap();
+        let old = base.path().join("forge");
+        let new = base.path().join("forge2");
+        let records = base.path().join("records");
+        for path in [&old, &new, &records] {
+            repo(&a, path);
+        }
+        for host in [&a, &b] {
+            for (path, prefix) in [(&old, "forge"), (&new, "forge2")] {
+                host.json(
+                    path,
+                    &[
+                        "init",
+                        "--prefix",
+                        prefix,
+                        "--records",
+                        records.to_str().unwrap(),
+                    ],
+                );
+            }
+        }
+        write_task(&records.join("forge"), "forge-0e720e", "");
+        write_task(&records.join("forge2"), "forge2-18dae2", "");
+        git(&a, &records, &["add", "-A"]);
+        git(&a, &records, &["commit", "-qm", "seed records"]);
+        let carried = id_of(a.json(&old, &["add", "carry this work"]));
+        let list = base.path().join("migration.toml");
+        a.json(
+            &old,
+            &[
+                "migrate",
+                "--to",
+                "forge2",
+                "--draft",
+                list.to_str().unwrap(),
+            ],
+        );
+        let text = std::fs::read_to_string(&list)
+            .unwrap()
+            .replace("decision = \"\"", "decision = \"carry\"");
+        std::fs::write(&list, text).unwrap();
+        a.json(&old, &["migrate", list.to_str().unwrap()]);
+        a.json(
+            &old,
+            &["retire", "--successor", "forge2", "--reason", "superseded"],
+        );
+        let archived = base.path().join("archive/forge-v1");
+        std::fs::create_dir_all(archived.parent().unwrap()).unwrap();
+        std::fs::rename(&old, &archived).unwrap();
+        a.json(
+            &archived,
+            &[
+                "init",
+                "--prefix",
+                "forge",
+                "--records",
+                records.to_str().unwrap(),
+                "--force",
+            ],
+        );
+        a.json(
+            &archived,
+            &["commit", "tasks/.config.toml", "-m", "chore: archive"],
+        );
+        a.json(&new, &["commit"]);
+        a.json(&archived, &["rename", "forge", "forge1"]);
+        a.json(&archived, &["commit", "--project", "forge1"]);
+        if early_adoption {
+            b.json(&archived, &["rename", "forge", "forge1", "--adopt"]);
+        }
+        a.json(&new, &["rename", "forge2", "forge"]);
+        a.json(&new, &["commit", "--project", "forge"]);
+        std::fs::rename(&new, &old).unwrap();
+        a.json(
+            &old,
+            &[
+                "init",
+                "--prefix",
+                "forge",
+                "--records",
+                records.to_str().unwrap(),
+                "--force",
+            ],
+        );
+        a.json(
+            &old,
+            &["commit", "tasks/.config.toml", "-m", "chore: repoint"],
+        );
+        eprintln!("checking primary");
+        assert_handoff_routing(&a, &old, &archived);
+        assert_eq!(
+            a.json(&archived, &["show", &carried])["task"]["status"],
+            "moved"
+        );
+        if !early_adoption {
+            let out = b
+                .cmd(&old)
+                .args(["rename", "forge2", "forge", "--adopt"])
+                .output()
+                .unwrap();
+            assert!(!out.status.success());
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("forge -> forge1"),
+                "{out:?}"
+            );
+            b.json(&archived, &["rename", "forge", "forge1", "--adopt"]);
+        }
+        b.json(&old, &["rename", "forge2", "forge", "--adopt"]);
+        b.json(
+            &old,
+            &[
+                "init",
+                "--prefix",
+                "forge",
+                "--records",
+                records.to_str().unwrap(),
+                "--force",
+            ],
+        );
+        eprintln!("checking secondary");
+        assert_handoff_routing(&b, &old, &archived);
+        if early_adoption {
+            continue;
+        }
+        c.json(
+            &old,
+            &[
+                "init",
+                "--prefix",
+                "forge",
+                "--records",
+                records.to_str().unwrap(),
+            ],
+        );
+        let out = c.cmd(&old).args(["show", "forge-0e720e"]).output().unwrap();
+        assert!(!out.status.success());
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_ne!(err["error"]["kind"], "task_not_found");
+        assert!(err["error"]["detail"].as_str().unwrap().contains("forge1"));
+        let added = id_of(c.json(&old, &["add", "new host work"]));
+        let reserved = config(&records.join("forge"))["predecessor"]["suffixes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert!(
+            !reserved
+                .iter()
+                .any(|s| added.ends_with(s.as_str().unwrap()))
+        );
+        c.json(
+            &archived,
+            &[
+                "init",
+                "--prefix",
+                "forge1",
+                "--records",
+                records.to_str().unwrap(),
+            ],
+        );
+        // A fresh host has no historical forge2 alias until that generation is adopted.
+        assert_eq!(
+            c.json(&old, &["show", "forge-0e720e"])["task"]["id"],
+            "forge1-0e720e"
+        );
+        eprintln!("checking fresh host");
+        c.check(&old);
+        c.check(&archived);
+    }
+}
+
+#[test]
+fn prefix_handoff_separate_repositories_name_the_required_predecessor_commit() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge");
+    let new = env.init("forge2");
+    for path in [&old, &new] {
+        repo(&env, path);
+    }
+    write_task(&old, "forge-0e720e", "");
+    write_task(&new, "forge2-18dae2", "");
+    env.json(
+        &old,
+        &["retire", "--successor", "forge2", "--reason", "superseded"],
+    );
+    for path in [&old, &new] {
+        git(&env, path, &["add", "-A"]);
+        git(&env, path, &["commit", "-qm", "seed records"]);
+    }
+    env.json(&old, &["rename", "forge", "forge1"]);
+    env.json(&old, &["commit", "--project", "forge1"]);
+    env.json(&new, &["rename", "forge2", "forge"]);
+    let out = env.json(&new, &["commit", "--project", "forge"]);
+    assert!(
+        out["warnings"].as_array().unwrap().iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .contains("tasks commit --project forge1 tasks/.config.toml")),
+        "{out}"
+    );
+    assert_eq!(git(&env, &new, &["status", "--porcelain"]), "");
+    assert!(!git(&env, &old, &["status", "--porcelain"]).is_empty());
+    env.json(
+        &old,
+        &[
+            "commit",
+            "--project",
+            "forge1",
+            "tasks/.config.toml",
+            "-m",
+            "chore: update successor",
+        ],
+    );
+    assert_eq!(git(&env, &old, &["status", "--porcelain"]), "");
+    assert_handoff_routing(&env, &new, &old);
+}
+
+#[test]
+fn prefix_handoff_refuses_a_later_generation_rename_without_losing_historical_routing() {
+    let f = Handoff::new();
+    f.step1();
+    f.env.json(&f.new, &["rename", "forge2", "forge"]);
+    f.env.json(&f.new, &["commit", "--project", "forge"]);
+    let before = registry(&f.env);
+    for (path, source, target) in [(&f.new, "forge", "newname"), (&f.old, "forge1", "archive")] {
+        let out = f
+            .env
+            .cmd(path)
+            .args(["rename", source, target])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("predecessor"),
+            "{out:?}"
+        );
+        assert_eq!(registry(&f.env), before);
+    }
+    assert_handoff_routing(&f.env, &f.new, &f.old);
+}

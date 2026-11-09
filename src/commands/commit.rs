@@ -220,6 +220,11 @@ pub fn open_and_run(
 
     let (expanded_paths, subject) = if let Some(inventory) = &receipt {
         let files = rename_commit_paths(&ctx.project, inventory, &commit_dir)?;
+        if let Some(handoff) = &inventory.predecessor_handoff
+            && !handoff.config_path.starts_with(&commit_dir)
+        {
+            ctx.warnings.push(format!("predecessor config is in a separate repository; run `tasks commit --project {} tasks/.config.toml -m \"chore(tasks): update successor\"` there", handoff.prefix));
+        }
         let subject = message.unwrap_or_else(|| {
             format!(
                 "chore(tasks): rename {} -> {}",
@@ -383,6 +388,9 @@ fn validate_rename_receipt(project: &Project, inventory: &Inventory) -> Result<(
         ));
     }
     verify_receipt_digest(&project.records.join(CONFIG_REL), &inventory.config_to)?;
+    if let Some(handoff) = &inventory.predecessor_handoff {
+        verify_receipt_digest(&handoff.config_path, &handoff.config_to)?;
+    }
     for entry in &inventory.entries {
         let target = project
             .tasks_dir()
@@ -431,10 +439,15 @@ fn rename_commit_paths(
     inventory: &Inventory,
     toplevel: &Path,
 ) -> Result<Vec<String>> {
-    let roots = match (&inventory.records_from, &inventory.records_to) {
+    let mut roots = match (&inventory.records_from, &inventory.records_to) {
         (Some(from), Some(to)) => vec![from.clone(), to.clone()],
         _ => vec![project.tasks_dir()],
     };
+    if let Some(handoff) = &inventory.predecessor_handoff
+        && handoff.config_path.starts_with(toplevel)
+    {
+        roots.push(handoff.config_path.clone());
+    }
     let pathspecs: Vec<String> = roots
         .iter()
         .map(|path| {

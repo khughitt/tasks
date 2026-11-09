@@ -355,6 +355,7 @@ mod tests {
             config_from: "config before".into(),
             config_to: "config after".into(),
             config_payload: None,
+            predecessor_handoff: None,
             entries: (0..count)
                 .map(|index| InventoryEntry {
                     hex: format!("{index:06x}"),

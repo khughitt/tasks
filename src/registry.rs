@@ -320,9 +320,33 @@ impl Registry {
         })
     }
 
+    pub(crate) fn check_rename_bound(&self, source: &str) -> Result<()> {
+        if self.predecessors.contains_key(source)
+            || self.predecessors.values().any(|p| p.prefix == source)
+        {
+            return Err(Error::Validation(format!(
+                "{source} participates in a predecessor handoff; later generation renames are unsupported because historical ID routing must be preserved"
+            )));
+        }
+        Ok(())
+    }
+
     /// Move the live key and flatten every retired name directly to the new key.
     pub fn rename(&mut self, source: &str, target: &str) -> Result<()> {
-        if !crate::model::is_valid_prefix(target) || self.is_taken(target) {
+        self.rename_with_predecessor(source, target, None)
+    }
+
+    pub fn rename_with_predecessor(
+        &mut self,
+        source: &str,
+        target: &str,
+        predecessor: Option<Predecessor>,
+    ) -> Result<()> {
+        self.check_rename_bound(source)?;
+        let handoff = predecessor
+            .as_ref()
+            .is_some_and(|p| self.aliases.get(target) == Some(&p.prefix));
+        if !crate::model::is_valid_prefix(target) || (self.is_taken(target) && !handoff) {
             return Err(Error::Config(format!(
                 "target prefix {target:?} is invalid or taken"
             )));
@@ -331,7 +355,19 @@ impl Registry {
             .projects
             .remove(source)
             .ok_or_else(|| Error::Config(format!("no project registered as {source:?}")))?;
+        if handoff {
+            self.aliases.remove(target);
+        }
         self.projects.insert(target.into(), root);
+        let inherited = self.predecessors.remove(source);
+        if let Some(pred) = predecessor.or(inherited) {
+            self.predecessors.insert(target.into(), pred);
+        }
+        for pred in self.predecessors.values_mut() {
+            if pred.prefix == source {
+                pred.prefix = target.into();
+            }
+        }
         for live in self.aliases.values_mut() {
             if live == source {
                 *live = target.into();
@@ -344,6 +380,7 @@ impl Registry {
         self.move_records(source, target);
 
         self.aliases.insert(source.into(), target.into());
+        self.rebuild_displaced()?;
         Ok(())
     }
 
@@ -353,7 +390,9 @@ impl Registry {
         source: &str,
         target: &str,
         root: &Path,
+        predecessor: Option<Predecessor>,
     ) -> Result<crate::locations::Displaced> {
+        self.check_rename_bound(source)?;
         if source == target || !crate::model::is_valid_prefix(target) {
             return Err(Error::Config(format!("invalid adoption target {target:?}")));
         }
@@ -362,7 +401,11 @@ impl Registry {
                 "no project registered as {source:?}"
             )));
         }
-        if self.aliases.contains_key(target) {
+        if self.aliases.contains_key(target)
+            && !predecessor
+                .as_ref()
+                .is_some_and(|p| self.aliases.get(target) == Some(&p.prefix))
+        {
             return Err(Error::Config(format!(
                 "target prefix {target:?} is retired"
             )));
@@ -399,8 +442,18 @@ impl Registry {
             self.move_records(source, target);
             self.aliases.insert(source.into(), target.into());
         } else {
-            self.rename(source, target)?;
+            self.rename_with_predecessor(source, target, predecessor.clone())?;
         }
+        let inherited = self.predecessors.remove(source);
+        if let Some(pred) = predecessor.or(inherited) {
+            self.predecessors.insert(target.into(), pred);
+        }
+        for pred in self.predecessors.values_mut() {
+            if pred.prefix == source {
+                pred.prefix = target.into();
+            }
+        }
+        self.rebuild_displaced()?;
         self.repoint(target, &root)?;
         // In the rename branch the source's table already moved to the target, and the
         // merge collapses its own pairs. In the registered-target branch it joins the
@@ -754,7 +807,7 @@ suffixes = ["0e720e"]
             if partial_init {
                 registry.register("new", &root.join(".")).unwrap();
             }
-            registry.adopt("old", "new", &root).unwrap();
+            registry.adopt("old", "new", &root, None).unwrap();
             assert_eq!(registry.projects.len(), 1);
             assert_eq!(registry.project_root("new"), Some(root.as_path()));
             assert!(registry.project_root("old").is_none());
@@ -777,7 +830,7 @@ suffixes = ["0e720e"]
                 .register("old", &home.path().join("missing"))
                 .unwrap();
             registry.register(key, &path).unwrap();
-            assert!(registry.adopt("old", "new", &root).is_err());
+            assert!(registry.adopt("old", "new", &root, None).is_err());
             assert!(registry.project_root("old").is_some());
             assert!(registry.aliases.is_empty());
         }
@@ -1042,14 +1095,17 @@ suffixes = ["0e720e"]
                 members.push("new".into());
             }
             r.set_group("vf", &members).unwrap();
-            r.adopt("old", "new", &root).unwrap();
+            r.adopt("old", "new", &root, None).unwrap();
             assert_eq!(r.groups["vf"], ["new"], "partial_init={partial_init}");
         }
 
         let mut r = Registry::default();
         r.register("old", &home.path().join("missing")).unwrap();
         r.set_group("new", &["old".into()]).unwrap();
-        assert_eq!(r.adopt("old", "new", &root).unwrap_err().kind(), "config");
+        assert_eq!(
+            r.adopt("old", "new", &root, None).unwrap_err().kind(),
+            "config"
+        );
         assert!(
             r.project_root("old").is_some(),
             "a refused adopt changes nothing"
@@ -1261,7 +1317,7 @@ suffixes = ["0e720e"]
                 );
             }
             assert_eq!(
-                r.adopt("old", "new", &root).unwrap(),
+                r.adopt("old", "new", &root, None).unwrap(),
                 crate::locations::Displaced {
                     root: old_root.clone(),
                     storage: Some(PathBuf::from("/w/old")),

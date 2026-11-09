@@ -205,7 +205,7 @@ pub fn run(
         }
     }
     if recovery == "fresh" || recovery == "resume_registry" {
-        let displaced = registry.adopt(old, new, &project.root)?;
+        let displaced = registry.adopt(old, new, &project.root, project.predecessor.clone())?;
         // `adopt` moved the `[records]` key with its old value; a detached project's
         // records arrived under the new name, and the pairing follows them.
         if project.kind == crate::repo::Kind::Detached {
@@ -234,6 +234,11 @@ fn classify_registry(
     old: &str,
     new: &str,
 ) -> Result<Stage> {
+    if registry.projects.contains_key(old)
+        && let Err(error) = registry.check_rename_bound(old)
+    {
+        return Ok(Stage::Refuse(error.to_string()));
+    }
     if project.prefix != new || old == new {
         return Ok(Stage::Refuse(format!(
             "checkout prefix must be {new:?}, and source must differ"
@@ -246,7 +251,21 @@ fn classify_registry(
             "{old:?} is an alias of {live:?}; use the live key"
         )));
     }
-    if registry.aliases.contains_key(new) {
+    if let Some(pred) = &project.predecessor
+        && registry.projects.contains_key(new)
+        && registry.projects.contains_key(old)
+    {
+        return Ok(Stage::Refuse(format!(
+            "predecessor rename {new} -> {} has not been adopted on this host; run `tasks rename {new} {} --adopt` first",
+            pred.prefix, pred.prefix
+        )));
+    }
+    if registry.aliases.contains_key(new)
+        && !project
+            .predecessor
+            .as_ref()
+            .is_some_and(|p| registry.aliases.get(new) == Some(&p.prefix))
+    {
         return Ok(Stage::Refuse(format!("target prefix {new:?} is retired")));
     }
     if registry.groups.contains_key(new) {

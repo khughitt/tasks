@@ -2641,7 +2641,7 @@ fn adopt_refuses_a_target_registered_at_a_retired_root_elsewhere() {
 }
 
 #[test]
-fn adopt_explain_refuses_a_retired_checkout_as_the_run_does() {
+fn adopt_explain_accepts_a_retired_checkout_as_the_run_does() {
     let env = TestEnv::new();
     let (dir, _old_id) = adopt_fixture(&env);
     declare_retired(&dir, None);
@@ -2650,12 +2650,12 @@ fn adopt_explain_refuses_a_retired_checkout_as_the_run_does() {
         &["rename", "old", "new", "--adopt"][..],
     ] {
         let out = adopt_cmd(&env, &dir).args(args).output().unwrap();
-        assert_eq!(err_kind(&out), "retired_project", "{args:?}");
+        assert!(out.status.success(), "{args:?}: {out:?}");
     }
 }
 
 #[test]
-fn rename_explain_refuses_a_retired_project_as_the_run_does() {
+fn rename_explain_accepts_a_retired_project_as_the_run_does() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     declare_retired(&old, None);
@@ -2664,7 +2664,7 @@ fn rename_explain_refuses_a_retired_project_as_the_run_does() {
         &["rename", "old", "neu"][..],
     ] {
         let out = env.cmd(&old).args(args).output().unwrap();
-        assert_eq!(err_kind(&out), "retired_project", "{args:?}");
+        assert!(out.status.success(), "{args:?}: {out:?}");
     }
 }
 

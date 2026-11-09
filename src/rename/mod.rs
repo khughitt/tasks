@@ -1,5 +1,6 @@
 pub mod adopt;
 pub mod classify;
+mod handoff;
 pub mod inventory;
 pub mod rewrite;
 pub mod snapshot;
@@ -55,6 +56,17 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             .or(crate::migrating::journal::pending_naming(&target, None)?)
             .map(|journal| journal.pending_error()),
     };
+    let (handoff, handoff_error) =
+        match handoff::validate(registry, invocation, snapshot.inventory.as_ref()) {
+            Ok(handoff) => (handoff, None),
+            Err(error) => (None, Some(error)),
+        };
+    let bound_error = if snapshot.inventory.is_none() && classify::registry_old(&snapshot) {
+        registry.check_rename_bound(&invocation.source).err()
+    } else {
+        None
+    };
+    let pending = pending.or(handoff_error).or(bound_error);
     let recovery = if let Some(error) = pending {
         if !explain {
             return Err(error);
@@ -176,7 +188,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         crate::retained::publish::project_permission(&project, false)?;
         crate::commands::reject_pending_operations(Some(&project.root), &invocation.source)?;
         crate::commands::reject_pending_operations(None, &invocation.target)?;
-        if registry.is_taken(&invocation.target) {
+        if registry.is_taken(&invocation.target) && handoff.is_none() {
             return Err(Error::Config(format!(
                 "prefix {:?} is already taken",
                 invocation.target
@@ -206,7 +218,8 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 dirty.join(", ")
             )));
         }
-        let inventory = Inventory::build(&project, &invocation.target)?;
+        let inventory =
+            Inventory::build(&project, &invocation.target)?.with_handoff(&project, handoff)?;
         inventory.save()?; // P2 is the first project/state mutation.
         if stop_after("inventory") {
             return Ok(out);
@@ -220,6 +233,10 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
 
     if recovery != Recovery::Fresh
         && let Some(payload) = &inventory.config_payload
+        && toml::from_str::<toml::Value>(payload)
+            .map_err(|e| Error::Config(e.to_string()))?
+            .get("retention_lineage")
+            .is_some()
     {
         let config: toml::Value =
             toml::from_str(payload).map_err(|e| Error::Config(e.to_string()))?;
@@ -310,9 +327,20 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             )));
         }
         atomic_write(&config, rewritten.as_bytes())?;
-        if stop_after("config") {
-            return Ok(out);
+    }
+    // Both config writes are digest-guarded and replayable if interrupted between them.
+    if let Some(handoff) = &inventory.predecessor_handoff {
+        let current = digest(&std::fs::read(&handoff.config_path)?);
+        if current == handoff.config_from {
+            atomic_write(&handoff.config_path, handoff.config_payload.as_bytes())?;
+        } else if current != handoff.config_to {
+            return Err(Error::Validation(
+                "predecessor config changed during handoff".into(),
+            ));
         }
+    }
+    if stop_after("config") {
+        return Ok(out);
     }
     // The `records` stage (docs/project-operations.md): a plain rename, as every other stage is; git
     // records it at the user's commit. From here on nothing opens `records_from`.
@@ -339,7 +367,19 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         }
     }
     if recovery != Recovery::ResumeCleanup {
-        registry.rename(&invocation.source, &invocation.target)?;
+        let pred = inventory
+            .predecessor_handoff
+            .as_ref()
+            .map(|h| h.predecessor())
+            .or_else(|| project.predecessor.clone());
+        match pred {
+            Some(pred) => registry.rename_with_predecessor(
+                &invocation.source,
+                &invocation.target,
+                Some(pred),
+            )?,
+            None => registry.rename(&invocation.source, &invocation.target)?,
+        }
         // The key moved with `rename`; the value follows the directory, in the same save.
         if let Some(to) = &inventory.records_to {
             registry.pair_records(&invocation.target, to);

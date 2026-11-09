@@ -28,6 +28,7 @@ The accepted top-level keys/tables are exactly those below.
 | `[growth]` | Optional positive `warn_bytes`; default min(65,536, floor(max_bytes/4)), at least 1. An explicit larger threshold is accepted with a warning, not clamped. |
 | `[checkout]` | Required `path` when present; relative to records or absolute. Missing `kind` means linked; the other accepted kind is `detached`. Managed by init/relocation. |
 | `[retired]` | Required `date` (real `YYYY-MM-DD` from year 1) and `reason` (nonblank single line without control characters); optional `successor` (well-formed prefix). Lifecycle metadata managed by retire/migrate. |
+| `[predecessor]` | One retired generation: `prefix` and a frozen `suffixes` array of six lowercase hex digits. Created by a two-step prefix handoff; reserves those suffixes for new task IDs and lets literal reclaimed-prefix IDs route to that generation. Unknown fields and invalid/self prefixes or suffixes refuse. |
 | `[git]` | Only `commit`, boolean default false; opt-in scoped automatic record commits. |
 
 A retention lineage edge has exactly `version` (integer 1), `from_prefix`,
@@ -71,6 +72,7 @@ are host paths, with leading `~/` expansion supported.
 | `[projects]` | Live prefix to registered main checkout path. |
 | `[records]` | Detached prefix to its actual records directory, already including the project directory. |
 | `[aliases]` | Retired prefix to canonical live prefix, flattened to one hop. |
+| `[predecessors.<live>]` | Host copy of the live project's `[predecessor]`, populated by init and rename/adoption. The displaced-ID index is derived only from these tables, without scanning project directories. Each predecessor is distinct and cannot itself be an alias. |
 | `[groups]` | Group name to sorted unique live-prefix array. |
 | `[locations.<prefix>]` | Optional current `.worktrees` `storage` path and `former` array. Each former entry records `root`, optional `storage` and UTC `until` date. |
 
@@ -174,3 +176,12 @@ and unsafe storage fail. Configuration changes that affect synced records need
 compatible readers on every host before new writers run. Moving storage or
 changing a prefix needs the explicit journal/recovery workflow; editing registry
 text is not a substitute for reconciling record and checkout identities.
+
+The predecessor configuration is synced with records; its registry copy is host-local.
+For example, `[predecessor]` with `prefix = "forge1"` and
+`suffixes = ["0e720e"]` in the current `forge` project is paired with
+`[predecessors.forge]` carrying the same values in `projects.toml`. A mismatch
+refuses normal writes and is reported by `check`; re-pair through `init --force`.
+An absent predecessor registration does not remove the reservation or redirect an
+old ID into the current project. See the
+[two-step handoff and its current limits](project-operations.md#reclaiming-a-retired-predecessors-prefix).

@@ -179,6 +179,60 @@ a failed Git commit also keeps it. The default subject is
 same receipt route for `tasks/`. Rehearse with isolated XDG_CONFIG_HOME and
 XDG_STATE_HOME, never against live host stores.
 
+### Reclaiming a retired predecessor's prefix
+
+A retired project's records can be renamed and adopted without unretiring it.
+The retirement date, reason and successor stay intact, and task edits remain
+blocked. Move its checkout separately, using `init --force` with the existing
+records pairing to record the new location.
+
+For one retired predecessor and one fresh successor, reclaim the predecessor's
+old prefix in two committed steps. For example, with `forge` retired in favor of
+`forge2`:
+
+1. Run `tasks rename forge forge1`, then `tasks commit --project forge1`.
+   Sync the committed records before proceeding.
+2. Run `tasks rename forge2 forge --explain`, then `tasks rename forge2 forge`
+   and `tasks commit --project forge`.
+
+Step 2 requires a reachable, retired `forge1` whose successor names `forge2`,
+with no predecessor of its own, unfinished operation, claim, park or escalation.
+Its completed Step 1 receipt must be cleared, its tasks must be committed, and
+its former detached records path must have no uncommitted deletions or additions.
+The two generations' six-hex suffixes must be disjoint; a collision refuses with
+both IDs before any files change.
+
+Step 2 freezes the predecessor suffixes in the successor's `[predecessor]` config
+and the host registry's `[predecessors.forge]`, and updates the retired config's
+successor to `forge`. The rename inventory pins both configs' old/new digests;
+rerunning the same rename completes interrupted stages. The receipt verifies the
+predecessor config as well as the renamed task files. In a shared records Git
+repository, the receipt commit includes that config. With separate in-tree
+repositories it commits the successor and warns to run
+`tasks commit --project forge1 tasks/.config.toml -m "chore(tasks): update successor"`
+for the predecessor separately.
+
+A host registered before cutover adopts `forge -> forge1` before
+`forge2 -> forge`, even if both directory changes arrive in one sync. Run the
+first adoption from the archived predecessor checkout and the second from the
+successor checkout. After a checkout move, repeat
+`tasks init --prefix forge --records <records-root> --force` there. A reversed
+adoption order refuses with the missing first step.
+
+Literal `forge-<old-suffix>` IDs route to `forge1`; `forge2-<new-suffix>` routes
+through the host's alias to the current `forge`. `forge2-<old-suffix>` and a bare
+old suffix in the new project remain not found. New task IDs reserve the frozen
+predecessor suffixes, even when `forge1` is unregistered. A fresh host imports the
+predecessor table when pairing the successor; reads of old IDs name the missing
+predecessor until that project is registered.
+
+Current limit: a fresh host does not reconstruct the historical `forge2` alias
+from those two final configs. Carried migration links can therefore fail
+`tasks check` there; a full fresh-host carry cutover is not yet supported.
+Later renames of either generation participating in a handoff also refuse before
+mutation, because this single-predecessor format cannot preserve every historical
+literal prefix after another rename.
+
 ### Prefix rollback
 
 Prerequisite: surviving inventory and recoverable pre-rename bytes. There is no
@@ -256,7 +310,7 @@ refuses open work in any checkout, live claims or unreadable linked worktrees.
 It writes retired date/reason/canonical successor. Writes from old worktrees then
 refuse retired_project. Explicit reads warn; group/all-project reads omit it,
 projects keeps the row and old ids still resolve. Explicit config and document
-commits remain available. `init --force` may repoint a retired project while
+commits, prefix renames and rename adoption remain available. `init --force` may repoint a retired project while
 preserving its exact retired date, reason and successor. If its old in-tree
 checkout was moved away, init adopts the config at the destination; a reachable
 retired authority cannot be replaced with an active or differently retired config.
