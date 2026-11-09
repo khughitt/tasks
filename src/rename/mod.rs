@@ -250,28 +250,25 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
 
     if recovery != Recovery::Fresh
         && let Some(payload) = &inventory.config_payload
-        && toml::from_str::<toml::Value>(payload)
-            .map_err(|e| Error::Config(e.to_string()))?
-            .get("retention_lineage")
-            .is_some()
     {
         let config: toml::Value =
             toml::from_str(payload).map_err(|e| Error::Config(e.to_string()))?;
         let edges: Vec<crate::retained::lineage::RenameEdge> = config
             .get("retention_lineage")
-            .ok_or_else(|| Error::Config("missing frozen retention edge".into()))?
-            .clone()
-            .try_into()
-            .map_err(|e: toml::de::Error| Error::Config(e.to_string()))?;
-        let edge = edges
-            .last()
-            .ok_or_else(|| Error::Config("missing frozen retention edge".into()))?;
-        let ids = inventory
-            .entries
-            .iter()
-            .map(|e| crate::model::TaskId::parse(&format!("{}-{}", inventory.source, e.hex)))
-            .collect::<Result<Vec<_>>>()?;
-        crate::retained::lineage::check_staged(&project, edge, &ids)?;
+            .map(|value| value.clone().try_into())
+            .transpose()
+            .map_err(|e: toml::de::Error| Error::Config(e.to_string()))?
+            .unwrap_or_default();
+        // Inventory validation checks proof completeness. A handoff-only payload may
+        // have no lineage or an explicit empty list; only an actual edge is staged.
+        if let Some(edge) = edges.last() {
+            let ids = inventory
+                .entries
+                .iter()
+                .map(|e| crate::model::TaskId::parse(&format!("{}-{}", inventory.source, e.hex)))
+                .collect::<Result<Vec<_>>>()?;
+            crate::retained::lineage::check_staged(&project, edge, &ids)?;
+        }
     }
     if matches!(recovery, Recovery::Fresh | Recovery::ResumeFiles) {
         for entry in &inventory.entries {

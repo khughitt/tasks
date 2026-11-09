@@ -202,6 +202,12 @@ its former detached records path must have no uncommitted deletions or additions
 The two generations' six-hex suffixes must be disjoint; a collision refuses with
 both IDs before any files change.
 
+The predecessor must name the successor's immediate current prefix. If it names
+an older alias of a successor renamed before handoff, the operation refuses with
+an unsupported prior-successor-alias-history diagnostic. That alias still
+identifies the successor on this host, but the single `successor_alias` field
+cannot preserve additional earlier aliases and carried pointers on a fresh host.
+
 Step 2 freezes the predecessor prefix `forge1`, successor alias `forge2`, and
 predecessor suffixes in the successor's `[predecessor]` config and the host
 registry's `[predecessors.forge]`, installs `forge2 -> forge`, and updates the retired config's

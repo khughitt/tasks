@@ -909,8 +909,10 @@ To reclaim a retired predecessor's prefix, first rename the retired project
 `<pred> -> <pred1>` and commit its receipt, then rename its live successor
 `<succ> -> <pred>` and commit that receipt. Use `--explain` before Step 2. The
 predecessor must be reachable, settled and committed, with disjoint task suffixes;
-keep retired provenance and task records intact. Existing hosts adopt Step 1 before
-Step 2, including when both changes arrive in one sync. Fresh hosts register the
+keep retired provenance and task records intact. If its retired successor names
+an older alias of a successor renamed again before handoff, the operation refuses:
+only the immediate former successor prefix is shared with fresh hosts. Existing
+hosts adopt Step 1 before Step 2, including when both changes arrive in one sync. Fresh hosts register the
 two final projects in either order: init imports required `[predecessor]` fields
 `prefix`, `successor_alias` and `suffixes`, installing the former successor alias.
 A conflicting alias, live key, group or predecessor owner refuses without mutation.

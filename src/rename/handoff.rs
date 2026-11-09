@@ -41,6 +41,15 @@ pub(super) fn validate(
     let bytes = std::fs::read(&config_path)?;
     let current = digest(&bytes);
     let successor = pred.retired.as_ref().and_then(|r| r.successor.as_deref());
+    if let Some(successor) = successor
+        && successor != invocation.source
+        && registry.canonical_prefix(successor) == invocation.source
+    {
+        return Err(Error::Validation(format!(
+            "handoff with prior successor alias history is unsupported: predecessor {prefix} names {successor}, which resolves to {}; fresh-host handoff preserves only the immediate successor prefix",
+            invocation.source
+        )));
+    }
     if pred.predecessor.is_some()
         || !(successor == Some(invocation.source.as_str())
             || existing.is_some_and(|h| {

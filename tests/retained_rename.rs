@@ -764,6 +764,46 @@ fn retention_rename_command_corrupt_payload_refuses() {
 }
 
 #[test]
+fn retention_rename_command_missing_or_malformed_lineage_refuses() {
+    use sha2::{Digest, Sha256};
+    for mutation in ["missing", "empty", "malformed"] {
+        let f = observed("in-tree");
+        f.cmd()
+            .env("TASKS_RENAME_STOP_AFTER", "inventory")
+            .args(["rename", "sci", "new"])
+            .assert()
+            .success();
+        let path = f.env.home.path().join(".local/state/tasks/rename/sci.toml");
+        let mut inventory: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let mut config: toml::Value =
+            toml::from_str(inventory["config_payload"].as_str().unwrap()).unwrap();
+        match mutation {
+            "missing" => {
+                config.as_table_mut().unwrap().remove("retention_lineage");
+            }
+            "empty" => {
+                config["retention_lineage"] = toml::Value::Array(vec![]);
+            }
+            _ => {
+                config["retention_lineage"] = "malformed".into();
+            }
+        }
+        let payload = toml::to_string(&config).unwrap();
+        inventory["config_to"] = format!("{:x}", Sha256::digest(payload.as_bytes())).into();
+        inventory["config_payload"] = payload.into();
+        let tampered = toml::to_string(&inventory).unwrap();
+        std::fs::write(&path, &tampered).unwrap();
+        let task_path = f.records.join(format!("tasks/{}.md", f.id));
+        let before = std::fs::read(&task_path).unwrap();
+        let out = f.cmd().args(["rename", "sci", "new"]).output().unwrap();
+        assert!(!out.status.success(), "{mutation}: {out:?}");
+        assert_eq!(std::fs::read(task_path).unwrap(), before);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), tampered);
+    }
+}
+
+#[test]
 fn retention_rename_command_adopt() {
     for layout in ["in-tree", "detached"] {
         let mut f = observed(layout);
