@@ -7,6 +7,8 @@ use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::output::{CommitOut, Output};
+use crate::rename::inventory::{Inventory, digest};
+use crate::repo::{CONFIG_REL, Project};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -149,7 +151,12 @@ pub fn open_and_run(
             .iter()
             .all(|kind| matches!(kind, TargetKind::FullId(_)));
 
-    let mut ctx = if project.is_some() {
+    let paths_only = classified
+        .iter()
+        .all(|kind| matches!(kind, TargetKind::Path(_)));
+    let mut ctx = if paths_only {
+        super::open_project_write_ctx_allow_retired(dir, project, host)?
+    } else if project.is_some() {
         super::open_project_write_ctx(dir, project, host)?
     } else if all_full_ids {
         let registry = crate::registry::Registry::load()?;
@@ -171,8 +178,35 @@ pub fn open_and_run(
         super::open_project_write_ctx(dir, None, host)?
     };
 
+    // Normalize before granting the retired exception: directory targets and absolute
+    // task paths must not bypass the same guard as IDs.
+    for kind in &classified {
+        if let TargetKind::Path(raw) = kind {
+            let path = normalize_records_relpath(&ctx.project.records, raw)?;
+            if path.starts_with("tasks") && path != Path::new(CONFIG_REL) {
+                super::reject_retired(&ctx.registry, &ctx.project)?;
+            }
+        }
+    }
+    let receipt = if classified.is_empty() {
+        Inventory::load_commit_receipt(&ctx.project.prefix)?
+    } else {
+        None
+    };
+    if classified.is_empty() && receipt.is_none() {
+        super::reject_retired(&ctx.registry, &ctx.project)?;
+    }
+    let commit_dir = if let Some(inventory) = &receipt {
+        validate_rename_receipt(&ctx.project, inventory)?;
+        crate::record_commit::working_tree(&ctx.project.records)
+            .map_err(Error::Validation)?
+            .ok_or_else(|| Error::Validation("rename records are not in a git repository".into()))?
+    } else {
+        ctx.project.records.clone()
+    };
+
     let Some(commit_lock) =
-        crate::record_commit::try_lock(&ctx.project.records).map_err(Error::Validation)?
+        crate::record_commit::try_lock(&commit_dir).map_err(Error::Validation)?
     else {
         return Err(Error::Validation(format!(
             "commit_unavailable: {} is not in a git repository (or git is missing)",
@@ -180,11 +214,20 @@ pub fn open_and_run(
         )));
     };
     let recovery = commit_lock
-        .recover(&ctx.project.records)
+        .recover(&commit_dir)
         .map_err(Error::Validation)?;
     ctx.warnings.extend(recovery.warnings);
 
-    let (expanded_paths, subject) = if classified.is_empty() {
+    let (expanded_paths, subject) = if let Some(inventory) = &receipt {
+        let files = rename_commit_paths(&ctx.project, inventory, &commit_dir)?;
+        let subject = message.unwrap_or_else(|| {
+            format!(
+                "chore(tasks): rename {} -> {}",
+                inventory.source, inventory.target
+            )
+        });
+        (files, subject)
+    } else if classified.is_empty() {
         let files = ctx.project.uncommitted_task_files()?.unwrap_or_default();
         let subject =
             message.unwrap_or_else(|| format!("chore(tasks): commit {} records", files.len()));
@@ -298,6 +341,9 @@ pub fn open_and_run(
         .collect();
 
     if paths.is_empty() {
+        if receipt.is_some() {
+            Inventory::remove_commit_receipt(&ctx.project.prefix)?;
+        }
         ctx.warnings
             .extend(crate::record_commit::recovery_warning(&left_uncommitted));
         return Ok(Output::Commit(CommitOut {
@@ -307,17 +353,104 @@ pub fn open_and_run(
         }));
     }
 
-    let (refused, commit_warnings) =
-        commit_lock.commit_paths(&ctx.project.records, &paths, &subject);
+    let (refused, commit_warnings) = commit_lock.commit_paths(&commit_dir, &paths, &subject);
     ctx.warnings.extend(commit_warnings);
     ctx.warnings
         .extend(crate::record_commit::recovery_warning(&left_uncommitted));
     if !refused.is_empty() {
         return Err(Error::Validation(refused.join("\n")));
     }
+    if receipt.is_some() {
+        Inventory::remove_commit_receipt(&ctx.project.prefix)?;
+    }
     Ok(Output::Commit(CommitOut {
         committed: expanded_paths.len(),
         paths: expanded_paths,
         warnings: ctx.warnings,
     }))
+}
+
+fn validate_rename_receipt(project: &Project, inventory: &Inventory) -> Result<()> {
+    let records = inventory.records_to.as_ref().unwrap_or(&inventory.root);
+    if records != &project.records || inventory.target != project.prefix {
+        return Err(Error::Validation(
+            "rename receipt does not match this project's records".into(),
+        ));
+    }
+    verify_receipt_digest(&project.records.join(CONFIG_REL), &inventory.config_to)?;
+    for entry in &inventory.entries {
+        let target = project
+            .tasks_dir()
+            .join(format!("{}-{}.md", inventory.target, entry.hex));
+        verify_receipt_digest(&target, &entry.to)?;
+        let source = project
+            .tasks_dir()
+            .join(format!("{}-{}.md", inventory.source, entry.hex));
+        if source.try_exists()? {
+            return Err(Error::Validation(format!(
+                "rename source file remains: {}",
+                source.display()
+            )));
+        }
+        if let Some(from) = &inventory.records_from {
+            let source = from.join(format!("tasks/{}-{}.md", inventory.source, entry.hex));
+            if source.try_exists()? {
+                return Err(Error::Validation(format!(
+                    "rename source file remains: {}",
+                    source.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn verify_receipt_digest(path: &Path, expected: &str) -> Result<()> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        Error::Validation(format!(
+            "rename receipt cannot read {}: {error}",
+            path.display()
+        ))
+    })?;
+    if digest(&bytes) != expected {
+        return Err(Error::Validation(format!(
+            "rename receipt digest mismatch: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn rename_commit_paths(
+    project: &Project,
+    inventory: &Inventory,
+    toplevel: &Path,
+) -> Result<Vec<String>> {
+    let roots = match (&inventory.records_from, &inventory.records_to) {
+        (Some(from), Some(to)) => vec![from.clone(), to.clone()],
+        _ => vec![project.tasks_dir()],
+    };
+    let pathspecs: Vec<String> = roots
+        .iter()
+        .map(|path| {
+            path.strip_prefix(toplevel)
+                .map(|relative| relative.display().to_string())
+                .map_err(|_| {
+                    Error::Validation(format!(
+                        "rename path {} is outside {}",
+                        path.display(),
+                        toplevel.display()
+                    ))
+                })
+        })
+        .collect::<Result<_>>()?;
+    let pathspecs: Vec<&str> = pathspecs.iter().map(String::as_str).collect();
+    let repository = Project {
+        records: toplevel.to_path_buf(),
+        ..project.clone()
+    };
+    Ok(repository
+        .status_paths(&pathspecs, false)?
+        .expect("under CommitLock")
+        .dirty)
 }

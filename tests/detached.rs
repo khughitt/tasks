@@ -1102,7 +1102,7 @@ fn a_plain_init_in_a_paired_checkout_refuses_while_its_records_are_off_this_host
 }
 
 #[test]
-fn init_records_force_refuses_a_retired_records_config() {
+fn init_records_force_preserves_a_retired_records_config() {
     let mut env = TestEnv::new();
     let l = layout(&mut env, "det");
     register(&env, &l, "det");
@@ -1112,13 +1112,12 @@ fn init_records_force_refuses_a_retired_records_config() {
     let mut args = init_records("det", &l.records).to_vec();
     args.push("--force");
     // re-pairing on this host
-    let detail = fail_detail(&env, &l.code, &args, "retired_project");
-    assert!(detail.contains("tasks unretire"), "{detail}");
+    env.json(&l.code, &args);
     // a second host meeting the retired config for the first time
     std::fs::remove_file(env.home.path().join(".config/tasks/projects.toml")).unwrap();
-    assert_eq!(env.fail(&l.code, &args), "retired_project");
+    env.json(&l.code, &args);
     assert_eq!(std::fs::read(&config).unwrap(), bytes);
-    assert!(!env.home.path().join(".config/tasks/projects.toml").exists());
+    assert!(env.home.path().join(".config/tasks/projects.toml").exists());
 }
 
 #[test]
@@ -2416,18 +2415,20 @@ fn init_records_force_refuses_to_relocate_away_from_an_existing_checkout() {
         "config"
     );
     unchanged(&env);
-    // A retired project refuses before any write.
+    // Relocation preserves the retired table while updating the checkout path.
     let retired = format!(
         "{}\n[retired]\ndate = \"2026-11-02\"\nreason = \"over\"\n",
         String::from_utf8(bytes.clone()).unwrap()
     );
     std::fs::write(&config, &retired).unwrap();
+    env.json(&moved, &init_records_force("det", &l.records));
+    let after: toml::Value = toml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    let before: toml::Value = toml::from_str(&retired).unwrap();
+    assert_eq!(after["retired"], before["retired"]);
     assert_eq!(
-        env.fail(&moved, &init_records_force("det", &l.records)),
-        "retired_project"
+        env.json(&moved, &["where"])["project"]["root"],
+        moved.to_str().unwrap()
     );
-    assert_eq!(std::fs::read_to_string(&config).unwrap(), retired);
-    assert_eq!(registry_text(&env), registry);
 }
 
 #[test]

@@ -387,6 +387,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     if stop_after("claims") {
         return Ok(out);
     }
+    inventory.save_commit_receipt()?;
     inventory.remove()?;
     Ok(out)
 }

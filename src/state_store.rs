@@ -54,6 +54,14 @@ impl<T: StateRecord> StateStore<T> {
     }
 
     pub fn load_from(&self, path: &Path) -> Result<Option<T>> {
+        self.load_from_with(path, T::validate_loaded)
+    }
+
+    pub fn load_from_with(
+        &self,
+        path: &Path,
+        validate: impl FnOnce(&T, &Path) -> Result<()>,
+    ) -> Result<Option<T>> {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -61,7 +69,7 @@ impl<T: StateRecord> StateStore<T> {
         };
         let record: T = toml::from_str(&text)
             .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
-        record.validate_loaded(path)?;
+        validate(&record, path)?;
         Ok(Some(record))
     }
 

@@ -44,7 +44,7 @@ pub fn run(
         let derived = records
             .as_ref()
             .map(|records| root.join(records).join(&prefix));
-        reject_repointing_a_retired_project(&registry, &prefix, &root, derived.as_deref())?;
+        validate_repointing_retirement(&registry, &prefix, &root, derived.as_deref())?;
     }
     let records = match records {
         Some(records_root) => Some(validate_records(&root, &records_root, &registry, &prefix)?),
@@ -191,45 +191,42 @@ fn skill_installed(root: &Path) -> bool {
     candidates.iter().any(|path| path.is_file())
 }
 
-/// `init --force` moves the authority that `retire` and every writer consult, so it is
-/// not done for a retired project: refused when the new root's config declares
-/// `[retired]`, or when the currently registered root declares it. An old root that is
-/// gone or holds no config does not block: repointing away from a moved checkout is what
-/// `--force` is for. One whose config exists but does not parse is an error. With
-/// `--records`, `records` is the records directory being paired, and a config already
-/// there that declares `[retired]` refuses too.
-fn reject_repointing_a_retired_project(
+/// A repoint preserves a reachable authority's retirement exactly. If an in-tree
+/// checkout was moved away, its destination config is the remaining authority.
+fn validate_repointing_retirement(
     registry: &Registry,
     prefix: &str,
     root: &Path,
     records: Option<&Path>,
 ) -> Result<()> {
-    let refuse = |where_: &Path| {
-        Err(Error::RetiredProject(format!(
-            "{prefix} is retired (declared in {}); run `tasks unretire` there before re-pointing it",
-            where_.display()
-        )))
+    let old_dir = registry
+        .records_dir(prefix)
+        .or_else(|| registry.project_root(prefix));
+    let old_state = old_dir
+        .filter(|dir| dir.join(crate::repo::CONFIG_REL).exists())
+        .map(|dir| Project::open(dir).map(|project| project.retired))
+        .transpose()?;
+    let target = records.unwrap_or(root);
+    let new_retired = if target.join(crate::repo::CONFIG_REL).exists() {
+        Project::open(target)?.retired
+    } else {
+        None
     };
-    if root.join(crate::repo::CONFIG_REL).exists() && Project::open(root)?.retired.is_some() {
-        return refuse(root);
+    match old_state {
+        Some(Some(old)) if new_retired.as_ref() != Some(&old) => {
+            Err(Error::RetiredProject(format!(
+                "{prefix} is retired; init --force requires {} to preserve the exact [retired] table",
+                target.display()
+            )))
+        }
+        Some(None) if new_retired.is_some() && registry.records_dir(prefix) != Some(target) => {
+            Err(Error::RetiredProject(format!(
+                "{prefix} is not retired; cannot repoint to retired target {} with init --force",
+                target.display()
+            )))
+        }
+        _ => Ok(()),
     }
-    if let Some(records) = records
-        && records.join(crate::repo::CONFIG_REL).exists()
-        && Project::open(records)?.retired.is_some()
-    {
-        return refuse(records);
-    }
-    // Only an old root that is gone, or holds no config, may be passed over unread; a
-    // config that exists and does not parse is an error, never "not retired".
-    if let Some(current) = registry.project_root(prefix)
-        && current != root
-        && crate::scope::is_reachable(registry, prefix)?
-        && let Some(dir) = crate::scope::config_dir(registry, prefix)
-        && Project::open(&dir)?.retired.is_some()
-    {
-        return refuse(&dir);
-    }
-    Ok(())
 }
 
 /// No command writes into a linked checkout (docs/project-operations.md), `init` included:

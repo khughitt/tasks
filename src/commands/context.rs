@@ -100,6 +100,23 @@ pub fn open_project_write_ctx(
     project: Option<String>,
     host: Arc<HostConfig>,
 ) -> Result<Ctx> {
+    open_project_write_ctx_inner(dir, project, host, false)
+}
+
+pub fn open_project_write_ctx_allow_retired(
+    dir: Option<&Path>,
+    project: Option<String>,
+    host: Arc<HostConfig>,
+) -> Result<Ctx> {
+    open_project_write_ctx_inner(dir, project, host, true)
+}
+
+fn open_project_write_ctx_inner(
+    dir: Option<&Path>,
+    project: Option<String>,
+    host: Arc<HostConfig>,
+    allow_retired: bool,
+) -> Result<Ctx> {
     let routing = project.clone().map_or(Routing::Local, Routing::Registered);
     let mut ctx = match project {
         Some(prefix) => {
@@ -110,7 +127,7 @@ pub fn open_project_write_ctx(
         }
         None => open_ctx(dir, host)?,
     };
-    lock_and_revalidate(&mut ctx, &routing)?;
+    lock_and_revalidate_inner(&mut ctx, &routing, allow_retired)?;
     Ok(ctx)
 }
 
@@ -200,6 +217,10 @@ pub enum Routing {
 /// Re-resolve after acquiring the lock: a rename may have completed while we waited.
 /// Retry a changed identity without holding both projects' locks at once.
 pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
+    lock_and_revalidate_inner(ctx, routing, false)
+}
+
+fn lock_and_revalidate_inner(ctx: &mut Ctx, routing: &Routing, allow_retired: bool) -> Result<()> {
     for _ in 0..4 {
         ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
         let registry = Registry::load()?;
@@ -216,7 +237,9 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
         };
         if project.prefix == ctx.project.prefix && project.records == ctx.project.records {
             reject_stale_local(&registry, &project)?;
-            reject_retired(&registry, &project)?;
+            if !allow_retired {
+                reject_retired(&registry, &project)?;
+            }
             ctx.project = project;
             ctx.registry = registry;
             ctx.routing = routing.clone();

@@ -1478,6 +1478,8 @@ impl Project {
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
+            // Commit scopes need both deletions and additions, including staged renames.
+            "--no-renames",
         ];
         if include_ignored {
             args.push("--ignored=matching");

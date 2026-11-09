@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 const STORE: StateStore<Inventory> = StateStore::new("rename");
+const COMMIT_STORE: StateStore<Inventory> = StateStore::new("rename-commit");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventoryEntry {
@@ -246,6 +247,26 @@ impl Inventory {
 
     pub(crate) fn remove_from(path: &Path) -> Result<()> {
         STORE.remove_from(path)
+    }
+
+    pub fn save_commit_receipt(&self) -> Result<()> {
+        COMMIT_STORE.save_to(self, &Self::commit_receipt_path(&self.target)?)
+    }
+
+    pub fn load_commit_receipt(target: &str) -> Result<Option<Inventory>> {
+        COMMIT_STORE.load_from_with(&Self::commit_receipt_path(target)?, |inventory, path| {
+            inventory.validate(path)?;
+            check_stem(path, &inventory.target)
+        })
+    }
+
+    pub fn remove_commit_receipt(target: &str) -> Result<()> {
+        COMMIT_STORE.remove_from(&Self::commit_receipt_path(target)?)
+    }
+
+    fn commit_receipt_path(target: &str) -> Result<PathBuf> {
+        validate_prefix(target)?;
+        COMMIT_STORE.path_with(target, |key| std::env::var_os(key))
     }
 
     pub fn pending() -> Result<Vec<Inventory>> {

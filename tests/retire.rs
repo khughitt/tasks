@@ -226,14 +226,11 @@ fn retired_lock_init_waits_for_the_project_lock() {
 }
 
 #[test]
-fn retired_lock_init_force_and_rename_refuse() {
+fn retired_lock_init_force_preserves_retirement_and_rename_refuses() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     declare_retired(&old, None);
-    assert_eq!(
-        env.fail(&old, &["init", "--prefix", "old", "--force"]),
-        "retired_project"
-    );
+    env.json(&old, &["init", "--prefix", "old", "--force"]);
     // Re-pointing the prefix at a fresh root is refused while the registered one is retired.
     let elsewhere = tempfile::tempdir().unwrap();
     assert_eq!(

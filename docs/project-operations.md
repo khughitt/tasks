@@ -99,6 +99,8 @@ to commit specific task IDs (`tasks/<id>.md` plus `tasks/files/<id>/`),
 records-relative paths (such as `docs/specs/...` or `docs/plans/...`, which
 require `-m <msg>`), or with no targets every uncommitted file under `tasks/`;
 this explicit command ignores the switch and fails if it cannot commit.
+Retired projects allow explicit config (`tasks/.config.toml`) and working-document
+path commits; task IDs, task directories and ordinary no-target sweeps remain refused.
 Git repository selection ignores inherited hook GIT_DIR/COMMON_DIR/WORK_TREE/
 INDEX_FILE, except the migration guard deliberately checks the committing index.
 
@@ -166,8 +168,16 @@ After another host's synced rename, `rename <old> <new> --adopt` updates only th
 host's registry and stores. Live old/new claims block it. Use the refusal's
 release/adopting remedy for unverifiable old claims only after the holder stops.
 Detached rename moves the whole records project directory and updates pairing;
-commit the directory rename in records. Rehearse with isolated XDG_CONFIG_HOME
-and XDG_STATE_HOME, never against live host stores.
+commit the directory rename with `tasks commit --project <new>` and no targets.
+A completed rename leaves a host-local receipt in `tasks/rename-commit/` under
+XDG_STATE_HOME (or `~/.local/state`). This commit route verifies the frozen config
+and task digests, includes source deletions and destination additions under the
+repository lock, and removes the receipt on success. A changed or missing task,
+changed config or remaining source file refuses the commit and keeps the receipt;
+a failed Git commit also keeps it. The default subject is
+`chore(tasks): rename <old> -> <new>`; `-m` overrides it. In-tree renames use the
+same receipt route for `tasks/`. Rehearse with isolated XDG_CONFIG_HOME and
+XDG_STATE_HOME, never against live host stores.
 
 ### Prefix rollback
 
@@ -245,8 +255,12 @@ parks remain source-keyed. Power-loss recovery is not promised.
 refuses open work in any checkout, live claims or unreadable linked worktrees.
 It writes retired date/reason/canonical successor. Writes from old worktrees then
 refuse retired_project. Explicit reads warn; group/all-project reads omit it,
-projects keeps the row and old ids still resolve. Unretire removes the table;
-commit config separately. Unregister removes host registration/aliases/history,
+projects keeps the row and old ids still resolve. Explicit config and document
+commits remain available. `init --force` may repoint a retired project while
+preserving its exact retired date, reason and successor. If its old in-tree
+checkout was moved away, init adopts the config at the destination; a reachable
+retired authority cannot be replaced with an active or differently retired config.
+Unretire removes the table; commit config separately. Unregister removes host registration/aliases/history,
 not shared task history. Broader project lifecycle coordination belongs to ops.
 
 `tools/review-backfill` and `tools/wait-backfill` are one-time migration helpers,
