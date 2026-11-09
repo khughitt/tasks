@@ -135,7 +135,8 @@ impl<F: FnMut(&TaskId) -> Result<Option<Task>>> View<'_, F> {
         if let Some(found) = self.memo.get(&key) {
             return Ok(found.clone());
         }
-        let mut found = crate::dependency::resolve(self.registry, &key, &mut self.lookup)?;
+        let mut found =
+            crate::dependency::resolve_canonical(self.registry, &key, &mut self.lookup)?;
         if let Some(task) = &mut found {
             task.id = self.registry.canonical_id(&task.id);
         }

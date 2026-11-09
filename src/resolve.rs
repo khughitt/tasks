@@ -612,14 +612,10 @@ pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
     }
 }
 
-/// Follows a foreign id through the registry. Lenient on purpose: an unregistered
+/// Follows a canonical foreign ID through the registry. Lenient on purpose: an unregistered
 /// prefix or a missing root or config is `Ok(None)`, because callers report those as
 /// unreachable-dependency warnings. Once those cases are excluded, the strict shared
 /// opener makes malformed config or a registry/config prefix mismatch a config error.
-pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
-    resolve_registered_canonical(registry, &registry.canonical_id(id))
-}
-
 pub(crate) fn resolve_registered_canonical(
     registry: &Registry,
     id: &TaskId,
@@ -636,7 +632,7 @@ pub(crate) fn resolve_registered_canonical(
 }
 
 /// The colour a registered project's config sets, as leniently as
-/// `resolve_registered`: an unregistered prefix or a missing root or config is `Ok(None)`.
+/// `resolve_registered_canonical`: an unregistered prefix or a missing root or config is `Ok(None)`.
 pub fn registered_color(registry: &Registry, prefix: &str) -> Result<Option<crate::palette::Rgb>> {
     let prefix = registry.canonical_prefix(prefix);
     let Some(dir) = crate::scope::config_dir(registry, prefix) else {

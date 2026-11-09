@@ -62,19 +62,18 @@ impl HaltSnapshot {
 }
 
 fn reachable(halt: &Task, local: &[Task], registry: &Registry) -> Result<HashSet<TaskId>> {
-    let resolve = |raw: &TaskId| {
-        let id = registry.canonical_id(raw);
+    let resolve = |id: &TaskId| {
         if id.prefix == halt.id.prefix {
-            Ok(local.iter().find(|task| task.id == id).cloned())
+            Ok(local.iter().find(|task| task.id == *id).cloned())
         } else {
-            crate::resolve::resolve_registered(registry, raw)
+            crate::resolve::resolve_registered_canonical(registry, id)
         }
     };
+    // Queue entries are canonical; only stored dependency and moved_to pointers are raw.
     let mut pending = vec![halt.id.clone()];
     let mut visited = HashSet::new();
     let mut allowed = HashSet::new();
     while let Some(id) = pending.pop() {
-        let id = registry.canonical_id(&id);
         if !visited.insert(id.clone()) {
             continue;
         }
@@ -83,7 +82,9 @@ fn reachable(halt: &Task, local: &[Task], registry: &Registry) -> Result<HashSet
         } else {
             resolve(&id)?
         };
-        let Some(task) = crate::tombstone::follow(first, resolve)? else {
+        let Some(task) =
+            crate::tombstone::follow(first, |raw| resolve(&registry.canonical_id(raw)))?
+        else {
             continue;
         };
         if task.id.prefix != halt.id.prefix {

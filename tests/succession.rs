@@ -628,3 +628,116 @@ fn succession_check_reports_predecessor_pairing_mismatch_from_code_checkout() {
         );
     }
 }
+
+#[test]
+fn succession_blockers_keep_missing_alias_dependency_unresolved() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    write_task(&old, "forge1-0e720e", "");
+    std::fs::write(old.join("tasks/.config.toml"), "prefix = \"forge1\"\n[retired]\ndate = \"2026-11-01\"\nreason = \"done\"\nsuccessor = \"forge\"\n").unwrap();
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    let mut reg = registry(&env);
+    reg["aliases"] = toml::toml! { forge2 = "forge" }.into();
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        toml::to_string(&reg).unwrap(),
+    )
+    .unwrap();
+    let id = id_of(env.json(&current, &["add", "blocked work"]));
+    let path = current.join(format!("tasks/{id}.md"));
+    let raw = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("depends: []", "depends: [forge2-0e720e]");
+    std::fs::write(&path, &raw).unwrap();
+    let report = env.json(&current, &["blockers"]);
+    assert_eq!(report["coverage"]["complete"], false, "{report}");
+    assert_eq!(
+        report["unresolved"].as_array().unwrap().len(),
+        1,
+        "{report}"
+    );
+    assert_eq!(report["unresolved"][0]["dependent"], id, "{report}");
+    assert_eq!(
+        report["unresolved"][0]["reference"], "forge2-0e720e",
+        "{report}"
+    );
+    assert_eq!(
+        report["unresolved"][0]["canonical"], "forge-0e720e",
+        "{report}"
+    );
+    std::fs::write(&path, raw.replace("forge2-0e720e", "forge-0e720e")).unwrap();
+    let report = env.json(&current, &["blockers"]);
+    assert!(
+        report["unresolved"].as_array().unwrap().is_empty(),
+        "{report}"
+    );
+    assert_eq!(report["coverage"]["complete"], true, "{report}");
+}
+
+#[test]
+fn succession_halt_exception_requires_a_genuine_predecessor_edge() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    write_task(&old, "forge1-0e720e", "moved_to: forge-18dae2\n");
+    let path = old.join("tasks/forge1-0e720e.md");
+    std::fs::write(
+        &path,
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("status: done", "status: moved"),
+    )
+    .unwrap();
+    std::fs::write(old.join("tasks/.config.toml"), "prefix = \"forge1\"\n[retired]\ndate = \"2026-11-01\"\nreason = \"done\"\nsuccessor = \"forge\"\n").unwrap();
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    let mut reg = registry(&env);
+    reg["aliases"] = toml::toml! { forge2 = "forge" }.into();
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        toml::to_string(&reg).unwrap(),
+    )
+    .unwrap();
+    write_task(&current, "forge-18dae2", "moved_from: forge-0e720e\n");
+    let carried = current.join("tasks/forge-18dae2.md");
+    std::fs::write(
+        &carried,
+        std::fs::read_to_string(&carried)
+            .unwrap()
+            .replace("status: done", "status: todo"),
+    )
+    .unwrap();
+    write_task(&current, "forge-aaaaaa", "");
+    let halt = current.join("tasks/forge-aaaaaa.md");
+    let raw = std::fs::read_to_string(&halt)
+        .unwrap()
+        .replace("status: done", "status: todo")
+        .replace("priority: 2", "priority: 0")
+        .replace("tags: []", "tags: [halt]")
+        .replace("depends: []", "depends: [forge2-0e720e]");
+    std::fs::write(&halt, &raw).unwrap();
+    let ready = env.json(&current, &["ready"]);
+    assert!(
+        !ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == "forge-18dae2"),
+        "{ready}"
+    );
+    assert_eq!(env.fail(&current, &["start", "forge-18dae2"]), "halted");
+    std::fs::write(&halt, raw.replace("forge2-0e720e", "forge-0e720e")).unwrap();
+    let ready = env.json(&current, &["ready"]);
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == "forge-18dae2"),
+        "{ready}"
+    );
+    assert_eq!(
+        env.json(&current, &["start", "forge-18dae2"])["id"],
+        "forge-18dae2"
+    );
+}

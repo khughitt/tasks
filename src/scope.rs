@@ -464,7 +464,7 @@ mod tests {
         let id = TaskId::parse("sci-000001").unwrap();
         assert!(!is_reachable(&registry, "sci").unwrap());
         assert!(
-            crate::resolve::resolve_registered(&registry, &id)
+            crate::resolve::resolve_registered_canonical(&registry, &id)
                 .unwrap()
                 .is_none(),
             "dependency resolution treats a non-file config as unreachable"
@@ -480,7 +480,7 @@ mod tests {
         std::fs::remove_dir_all(dir.path().join(CONFIG_REL)).unwrap();
         write_config(dir.path(), "zzz");
         assert!(matches!(
-            crate::resolve::resolve_registered(&registry, &id),
+            crate::resolve::resolve_registered_canonical(&registry, &id),
             Err(Error::Config(_))
         ));
     }
