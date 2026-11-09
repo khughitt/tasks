@@ -169,5 +169,33 @@ Nothing else. A pass with nothing in those groups says so in one line.
 
 ## Kinds
 
-Task kinds (templates) are derived from passes, not written up front. After a handful of
-passes, cluster what was seen; that work is tasks-5b73bf in the tasks project.
+Passes so far have met three task shapes. Each adds to the three answers above; a task
+that fits none is held to those alone. A shape is not a verdict: stale and duplicate
+are findings about a task of any shape.
+
+- **Defect**: something behaves wrongly now. The body says what happens against what
+  should, with a reproduction and the date it was last seen true, and where in the code
+  it happens. Done names the behaviour change, including any command that succeeds
+  today and will fail, and the test that pins it. A feedback report is a defect whose
+  premise is unverified: reproduce it on the current tree first, then keep the original
+  report verbatim at the end of the body. If a later commit already fixed the premise,
+  any remaining gap (such as an error message that does not name the fix) is the task;
+  otherwise it is stale.
+- **Decision**: the work waits on a choice the human owns. The body names the options
+  and what each costs or implies in the code. Alternatives already rejected keep their
+  reasons. The questions the human must answer go under `## Open questions`. Once
+  decided, the body is rewritten into the shape the outcome takes.
+- **Open idea**: a thought not yet framed as options. The body says why it matters and
+  who would use it first, what already exists to build on, and what is still unknown, as
+  open questions.
+
+Two checks apply to every shape. Facts that drift (counts, sizes, word totals, "still
+true") carry the date they were measured; re-measure them and keep the old figure dated
+beside the new one. A wait written in prose ("once X lands") belongs in a `depends`
+edge too: add it when missing, and when the awaited work has closed, say so in the body
+instead of leaving the wait standing.
+
+A research task filed by a scope pass already has its shape: keep the five fields of
+[the scope skill's §5](../scope/SKILL.md#5-make-follow-ups-answerable) intact. Goals and
+plan steps are left out: no pass has drawn one yet, and plan headings already template a
+step.
