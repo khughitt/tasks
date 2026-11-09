@@ -25935,6 +25935,59 @@ fn activity_uses_the_same_cross_project_neighborhood_in_list_and_tree() {
 }
 
 #[test]
+fn activity_prime_uses_each_claimed_rows_own_checkout() {
+    let mut env = TestEnv::new();
+    let main = env.init("dots");
+    write_project_color(&main, "dots", "#abcdef");
+    let (_x_dir, x) = unregistered_checkout("dots");
+    let (_y_dir, y) = unregistered_checkout("dots");
+    let a = id_of(env.json(&x, &["add", "Active in checkout X"]));
+    let b = id_of(env.json(&y, &["add", "Active in checkout Y"]));
+    // Each owner has a fresh record; the other checkout has its old copy. Whichever
+    // secondary scan is visited first must not supply the other owner's score.
+    for (id, source, destination) in [(&a, &x, &y), (&b, &y, &x)] {
+        let text = std::fs::read_to_string(source.join(format!("tasks/{id}.md"))).unwrap();
+        let text = text
+            .lines()
+            .map(|line| {
+                if line.starts_with("created: ") {
+                    "created: 2020-01-01T00:00:00Z"
+                } else if line.starts_with("updated: ") {
+                    "updated: 2020-01-01T00:00:00Z"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(destination.join(format!("tasks/{id}.md")), text).unwrap();
+        write_claim(&env, "dots", id, id, true);
+    }
+    let store = env.claim_store("dots");
+    let mut claims: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
+    for (id, checkout) in [(&a, &x), (&b, &y)] {
+        claims["claims"][id]["worktree"] = toml::Value::String(checkout.display().to_string());
+    }
+    std::fs::write(store, toml::to_string(&claims).unwrap()).unwrap();
+
+    let out = env
+        .cmd(&main)
+        .args(["--pretty", "--color", "always", "prime"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    for title in ["Active in checkout X", "Active in checkout Y"] {
+        assert!(
+            text.contains(&format!("\x1b[38;2;171;205;239m{title}")),
+            "{title} must use its own hot record, independent of scan order: {text:?}"
+        );
+    }
+}
+
+#[test]
 fn headers_label_each_table_view_and_leave_json_alone() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
