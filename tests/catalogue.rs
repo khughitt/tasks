@@ -1470,3 +1470,50 @@ fn refresh_refuses_an_alias_that_changed_while_waiting_for_its_project_lock() {
     assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before_a);
     assert_eq!(fs::read(config(&layout, "bb")).unwrap(), before_b);
 }
+
+#[test]
+fn refresh_reports_a_project_lock_error_and_refreshes_other_prefixes() {
+    let env = TestEnv::new();
+    let spec = || EntrySpec {
+        registered: true,
+        extra: "[git]\ncommit = true\n",
+    };
+    let layout = store_env(&env, &[("aa", spec()), ("bb", spec())]);
+    root_identity(&env, &layout, "aa", "name = 'A'\npurpose = 'P'\n");
+    root_identity(&env, &layout, "bb", "name = 'B'\npurpose = 'P'\n");
+    let before = fs::read(config(&layout, "aa")).unwrap();
+    let lock_path = env.claim_store("aa").with_file_name("aa.lock");
+    fs::create_dir_all(&lock_path).unwrap();
+    let out = env
+        .cmd(&layout.code)
+        .args(["identity", "refresh", "aa", "bb"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let value: Value = serde_json::from_slice(&out.stdout)
+        .expect("a project lock failure must return per-prefix results");
+    assert_eq!(value["results"].as_array().unwrap().len(), 2);
+    assert_eq!(value["results"][0]["prefix"], "aa");
+    assert_eq!(value["results"][0]["outcome"], "error");
+    assert!(
+        value["results"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("io:")
+    );
+    assert!(value["results"][0].get("commit").is_none());
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before);
+    assert_eq!(value["results"][1]["prefix"], "bb");
+    assert_eq!(value["results"][1]["outcome"], "refreshed");
+    assert_eq!(snapshot(&layout, "bb")["name"].as_str(), Some("B"));
+    assert_eq!(value["warnings"], json!([]));
+    assert_eq!(
+        git_text(
+            &env,
+            &layout.store,
+            &["show", "--format=", "--name-only", "HEAD"]
+        ),
+        "bb/tasks/.config.toml"
+    );
+    assert!(git_text(&env, &layout.store, &["status", "--porcelain"]).is_empty());
+}

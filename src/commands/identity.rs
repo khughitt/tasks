@@ -216,10 +216,16 @@ pub fn run(
         .collect();
     // Match init/rename/retire: canonical project locks precede records locks.
     // A sorted set also keeps overlapping refresh batches in the same lock order.
-    let _project_locks = lock_prefixes
-        .into_iter()
-        .map(|prefix| crate::claims::MutationLock::acquire(prefix))
-        .collect::<Result<Vec<_>>>()?;
+    let mut _project_locks = Vec::new();
+    let mut project_lock_errors = BTreeMap::new();
+    for prefix in lock_prefixes {
+        match crate::claims::MutationLock::acquire(prefix) {
+            Ok(lock) => _project_locks.push(lock),
+            Err(error) => {
+                project_lock_errors.insert(prefix.clone(), error);
+            }
+        }
+    }
     let locked_registry = Registry::load()?;
     let mut changed: BTreeSet<_> = seen
         .iter()
@@ -246,6 +252,10 @@ pub fn run(
         .collect();
     let mut groups: BTreeMap<PathBuf, Vec<(usize, Project)>> = BTreeMap::new();
     for (index, row) in results.iter_mut().enumerate() {
+        if let Some(error) = project_lock_errors.remove(&row.prefix) {
+            error_row(row, error);
+            continue;
+        }
         let prepared = (|| {
             if changed.contains(&row.prefix) {
                 return Err(Error::Config(format!(
