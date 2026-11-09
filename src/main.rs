@@ -1,3 +1,4 @@
+mod activity;
 mod attachments;
 mod blockers;
 mod blockers_text;
@@ -317,10 +318,12 @@ fn main() {
                 };
                 match resolved {
                     Ok(palette) => {
-                        let painter = stdout_painter.with_recency(style::Recency::new(
-                            ::time::OffsetDateTime::now_utc().date(),
-                            &palette,
-                        ));
+                        let painter = stdout_painter
+                            .with_recency(style::Recency::new(
+                                ::time::OffsetDateTime::now_utc().date(),
+                                &palette,
+                            ))
+                            .with_title_scale(style::TitleScale::new(&palette));
                         match palette.magenta {
                             Some(magenta) => painter
                                 .with_priority_scale(style::PriorityScale::new(magenta, &palette)),

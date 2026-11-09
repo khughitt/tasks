@@ -175,7 +175,9 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             sort.date_column()
         },
     });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -231,7 +233,9 @@ fn list_parked(
         })
         .collect();
     let mut out = Output::Parked(ParkedOut { tasks, warnings });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&ctx.project_colors());
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -623,7 +627,9 @@ pub fn ready(
         warnings: ctx.warnings,
         date: DateColumn::Updated,
     });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 
@@ -989,13 +995,19 @@ pub fn prime(
         doing: doing
             .iter()
             .map(|task| {
-                let (scan, deps) = elsewhere
+                let source = elsewhere
                     .iter()
-                    .position(|(_, found, _)| found.id == task.id)
-                    .map_or((all.as_slice(), &deps), |at| {
-                        (elsewhere[at].2.as_slice(), &elsewhere_deps[at])
-                    });
-                TaskSummary::of(task, scan, deps, Some(&claims), &ctx.registry, now)
+                    .position(|(_, found, _)| found.id == task.id);
+                let (scan, deps) = source.map_or((all.as_slice(), &deps), |at| {
+                    (elsewhere[at].2.as_slice(), &elsewhere_deps[at])
+                });
+                let mut row = TaskSummary::of(task, scan, deps, Some(&claims), &ctx.registry, now);
+                if source.is_some() {
+                    let mut activity = crate::activity::ActivityIndex::default();
+                    activity.extend_scan(scan, &ctx.registry, now);
+                    row.activity = activity.get(&task.id);
+                }
+                row
             })
             .collect(),
         roadmap,
@@ -1011,7 +1023,9 @@ pub fn prime(
     {
         crate::prime_summary::bound(prime, full)?;
     }
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }
 

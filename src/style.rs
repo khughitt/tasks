@@ -49,10 +49,31 @@ impl ColorMode {
     }
 }
 
+/// Combined task and 1-hop neighborhood activity quantized to `0..=255` (`0` = cold, `255` = hot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Activity(pub u8);
+
+impl Activity {
+    pub const COLD: Activity = Activity(0);
+    pub const HOT: Activity = Activity(255);
+
+    pub fn from_unit(a: f64) -> Activity {
+        Activity((a.clamp(0.0, 1.0) * 255.0).round() as u8)
+    }
+
+    pub fn unit(self) -> f64 {
+        f64::from(self.0) / 255.0
+    }
+}
+
 /// A role, never a color. Call sites name what a span means; this module decides how that
 /// looks, so the same meaning renders identically in every view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
+    Title {
+        color: Rgb,
+        activity: Activity,
+    },
     Project(Rgb),
     /// A task id: its project's colour, lightened so it reads apart from the title beside it.
     Id(Rgb),
@@ -151,12 +172,59 @@ impl PriorityScale {
     }
 }
 
+/// Maximum fraction a cold (`Activity::COLD`) title fades toward the background in OKLab.
+const MAX_COLD_FADE: f64 = 0.35;
+/// Minimum WCAG relative-luminance contrast ratio preserved against the background when fading.
+const MIN_COLD_CONTRAST: f64 = 3.5;
+
+/// Contrast-bounded OKLab title brightness scale against the run's background color.
+#[derive(Debug, Clone, Copy)]
+pub struct TitleScale {
+    bg: Rgb,
+}
+
+impl TitleScale {
+    pub fn new(palette: &Palette) -> TitleScale {
+        TitleScale { bg: palette.bg }
+    }
+
+    /// Maximum OKLab mix factor `t` in `[0.0, MAX_COLD_FADE]` toward `self.bg` that keeps
+    /// `base.mix(self.bg, t)` at or above `MIN_COLD_CONTRAST` against `self.bg`.
+    pub fn max_fade(&self, base: Rgb) -> f64 {
+        if base.contrast_ratio(self.bg) <= MIN_COLD_CONTRAST {
+            return 0.0;
+        }
+        if base.mix(self.bg, MAX_COLD_FADE).contrast_ratio(self.bg) >= MIN_COLD_CONTRAST {
+            return MAX_COLD_FADE;
+        }
+        let (mut lo, mut hi) = (0.0, MAX_COLD_FADE);
+        for _ in 0..16 {
+            let mid = 0.5 * (lo + hi);
+            if base.mix(self.bg, mid).contrast_ratio(self.bg) >= MIN_COLD_CONTRAST {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
+    pub fn color(&self, base: Rgb, activity: Activity) -> Rgb {
+        if activity == Activity::HOT {
+            return base;
+        }
+        let fade = self.max_fade(base) * (1.0 - activity.unit());
+        base.mix(self.bg, fade)
+    }
+}
+
 /// Paints for one output stream. `main` builds one per stream, because stdout and stderr
 /// are redirected independently and only `Auto` can differ between them.
 pub struct Painter {
     enabled: bool,
     recency: Option<Recency>,
     priority: Option<PriorityScale>,
+    title: Option<TitleScale>,
 }
 
 impl Painter {
@@ -170,6 +238,7 @@ impl Painter {
                 },
             recency: None,
             priority: None,
+            title: None,
         }
     }
 
@@ -189,6 +258,15 @@ impl Painter {
         }
     }
 
+    /// Titles modulate by activity only with a `TitleScale`; without one they use their
+    /// unmodulated project color.
+    pub fn with_title_scale(self, scale: TitleScale) -> Painter {
+        Painter {
+            title: Some(scale),
+            ..self
+        }
+    }
+
     pub fn enabled(&self) -> bool {
         self.enabled
     }
@@ -201,6 +279,13 @@ impl Painter {
             "paint spans a newline; the reset would land after the break: {text:?}"
         );
         let code: String = match style {
+            Style::Title { color, activity } => {
+                let shade = match &self.title {
+                    Some(scale) => scale.color(color, activity),
+                    None => color,
+                };
+                format!("38;2;{};{};{}", shade.r, shade.g, shade.b)
+            }
             Style::Project(color) => format!("38;2;{};{};{}", color.r, color.g, color.b),
             Style::Id(color) => {
                 let shade = color.mix(WHITE, ID_TOWARD_WHITE);
@@ -500,5 +585,77 @@ mod tests {
         );
         assert!(dated.enabled());
         assert!(!off.enabled());
+    }
+    #[test]
+    fn title_scale_preserves_contrast_floor_across_dark_and_light_backgrounds() {
+        let dark = Palette::BUILTIN;
+        let light = Palette {
+            fg: Rgb::parse_hex("#232136").unwrap(),
+            bg: Rgb::parse_hex("#faf4ed").unwrap(),
+            cyan: Rgb::parse_hex("#286983").unwrap(),
+            magenta: Some(Rgb::parse_hex("#907aa9").unwrap()),
+        };
+
+        for palette in [dark, light] {
+            let scale = TitleScale::new(&palette);
+            for hex in [
+                "#aa8c0e", "#7995cd", "#ff5e4a", "#8d6803", "#776558", "#abcdef", "#123456",
+            ] {
+                let base = Rgb::parse_hex(hex).unwrap();
+                assert_eq!(scale.color(base, Activity::HOT), base);
+
+                let cold = scale.color(base, Activity::COLD);
+                if base.contrast_ratio(palette.bg) <= MIN_COLD_CONTRAST {
+                    assert_eq!(
+                        cold, base,
+                        "color {hex} already at/below floor on {:?} must not fade further",
+                        palette.bg
+                    );
+                } else {
+                    let ratio = cold.contrast_ratio(palette.bg);
+                    assert!(
+                        ratio >= 3.5,
+                        "cold title for {hex} on {:?} fell below quantized floor: {ratio}",
+                        palette.bg
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn painter_modulates_title_only_when_title_scale_is_present() {
+        let base = Rgb::parse_hex("#abcdef").unwrap();
+        let plain_painter = Painter::new(ColorMode::Always, Format::Pretty, true);
+        assert_eq!(
+            plain_painter.paint(
+                Style::Title {
+                    color: base,
+                    activity: Activity::COLD
+                },
+                "Title"
+            ),
+            "\x1b[38;2;171;205;239mTitle\x1b[0m"
+        );
+
+        let scaled_painter = plain_painter.with_title_scale(TitleScale::new(&Palette::BUILTIN));
+        assert_eq!(
+            scaled_painter.paint(
+                Style::Title {
+                    color: base,
+                    activity: Activity::HOT
+                },
+                "Title"
+            ),
+            "\x1b[38;2;171;205;239mTitle\x1b[0m"
+        );
+        let cold_painted = scaled_painter.paint(
+            Style::Title {
+                color: base,
+                activity: Activity::COLD,
+            },
+            "Title",
+        );
+        assert_ne!(cold_painted, "\x1b[38;2;171;205;239mTitle\x1b[0m");
     }
 }

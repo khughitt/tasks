@@ -70,7 +70,80 @@ fn paint_lane(colors: &ProjectColors, lane: &mut crate::lanes::LaneRow) {
         .for_each(|row| paint_summary(colors, row));
 }
 
+fn paint_summary_activity(activity: &crate::activity::ActivityIndex, row: &mut TaskSummary) {
+    row.activity = row.activity.or_else(|| activity.get_id(&row.id));
+}
+
+fn paint_tree_activity(activity: &crate::activity::ActivityIndex, nodes: &mut [TreeNode]) {
+    for node in nodes {
+        paint_summary_activity(activity, &mut node.summary);
+        paint_tree_activity(activity, &mut node.children);
+    }
+}
+
+fn paint_lane_activity(
+    activity: &crate::activity::ActivityIndex,
+    lane: &mut crate::lanes::LaneRow,
+) {
+    paint_summary_activity(activity, &mut lane.lane);
+    if let Some(pick) = &mut lane.pick {
+        paint_summary_activity(activity, pick);
+    }
+    lane.active
+        .iter_mut()
+        .for_each(|row| paint_summary_activity(activity, row));
+}
+
 impl Output {
+    /// Fill `activity` on every task row a pretty view of this output shows.
+    pub fn paint_activity(&mut self, activity: &crate::activity::ActivityIndex) {
+        match self {
+            Output::List(o) => o
+                .tasks
+                .iter_mut()
+                .for_each(|row| paint_summary_activity(activity, row)),
+            Output::Parked(o) => o
+                .tasks
+                .iter_mut()
+                .for_each(|row| row.activity = row.activity.or_else(|| activity.get_id(&row.id))),
+            Output::Quiet(o) => o
+                .tasks
+                .iter_mut()
+                .for_each(|row| row.activity = row.activity.or_else(|| activity.get_id(&row.id))),
+            Output::Goals(o) => o
+                .goals
+                .iter_mut()
+                .for_each(|row| row.activity = row.activity.or_else(|| activity.get_id(&row.id))),
+            Output::Tree(o) => paint_tree_activity(activity, &mut o.nodes),
+            Output::Blockers(o) => o
+                .blockers
+                .iter_mut()
+                .for_each(|row| row.activity = row.activity.or_else(|| activity.get_id(&row.id))),
+            Output::Lanes(o) => o
+                .lanes
+                .iter_mut()
+                .for_each(|lane| paint_lane_activity(activity, lane)),
+            Output::Prime(o) => {
+                for row in o
+                    .closeout
+                    .iter_mut()
+                    .chain(o.ready.iter_mut())
+                    .chain(o.doing.iter_mut())
+                {
+                    paint_summary_activity(activity, row);
+                }
+                for row in &mut o.parked {
+                    row.activity = row.activity.or_else(|| activity.get_id(&row.id));
+                }
+                paint_tree_activity(activity, &mut o.roadmap);
+                o.lanes
+                    .iter_mut()
+                    .for_each(|lane| paint_lane_activity(activity, lane));
+            }
+            _ => {}
+        }
+    }
+
     /// Fill `project_color` on every task row a pretty view of this output shows. `claims`
     /// is left alone: it opens no checkout (docs/user-guide.md).
     pub fn paint_projects(&mut self, colors: &ProjectColors) {
@@ -207,6 +280,7 @@ impl TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
             project_color: None,
+            activity: None,
             status: task.status,
             priority: task.priority,
             size: task.size,
@@ -260,6 +334,7 @@ impl ParkedRow {
             id: summary.id,
             title: summary.title,
             project_color: summary.project_color,
+            activity: summary.activity,
             status: Some(summary.status),
             priority: Some(summary.priority),
             size: summary.size,
@@ -300,6 +375,7 @@ impl ParkedRow {
             id: id.into(),
             title: park.title.clone(),
             project_color: None,
+            activity: None,
             status: None,
             priority: None,
             size: None,

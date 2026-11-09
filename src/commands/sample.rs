@@ -90,6 +90,8 @@ pub fn sample(
         warnings: ctx.warnings,
         date: DateColumn::Updated,
     });
+    let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
+    out.paint_activity(&activity);
     Ok(out)
 }

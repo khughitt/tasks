@@ -25724,6 +25724,270 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
 }
 
 #[test]
+fn activity_modulates_titles_across_pretty_views_without_fading_ids_or_show() {
+    fn backdate(dir: &std::path::Path, id: &str) {
+        let path = dir.join(format!("tasks/{id}.md"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        let text = text
+            .lines()
+            .map(|line| {
+                if line.starts_with("created: ") {
+                    "created: 2020-01-01T00:00:00Z"
+                } else if line.starts_with("updated: ") {
+                    "updated: 2020-01-01T00:00:00Z"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn title_sgr(text: &str, title: &str) -> String {
+        let at = text
+            .find(title)
+            .unwrap_or_else(|| panic!("missing {title}: {text:?}"));
+        let before = &text[..at];
+        let start = before.rfind("\x1b[").expect("title has an SGR role");
+        before[start..].to_string()
+    }
+
+    fn no_activity(value: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                assert!(
+                    !fields.contains_key("activity"),
+                    "activity leaked into JSON: {value}"
+                );
+                for child in fields.values() {
+                    no_activity(child);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for child in items {
+                    no_activity(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut env = TestEnv::new();
+    let dir = env.init("dots");
+    write_project_color(&dir, "dots", "#abcdef");
+    let hot = id_of(env.json(&dir, &["add", "Hot active task"]));
+    let cold = id_of(env.json(&dir, &["add", "Cold isolated task"]));
+    let neighbor = id_of(env.json(&dir, &["add", "Warm neighbor task", "--depends", &hot]));
+    let lane = id_of(env.json(
+        &dir,
+        &["add", "Cold lane task", "--lane", "--origin", "user"],
+    ));
+    let child = id_of(env.json(&dir, &["add", "Cold lane child", "--parent", &lane]));
+    let parked = id_of(env.json(&dir, &["add", "Cold parked task"]));
+    let blocker = id_of(env.json(&dir, &["add", "Cold blocker task"]));
+    let dependent = id_of(env.json(&dir, &["add", "Cold blocked task", "--depends", &blocker]));
+    for id in [
+        &cold, &neighbor, &lane, &child, &parked, &blocker, &dependent,
+    ] {
+        backdate(&dir, id);
+    }
+    write_park(
+        &env,
+        "dots",
+        &parked,
+        "agent-a",
+        "user",
+        dir.to_str().unwrap(),
+    );
+    let store = env.claim_store("dots");
+    let mut parks = std::fs::read_to_string(&store).unwrap();
+    parks.push_str("reason = \"quiet\"\nminutes = 1\n");
+    std::fs::write(store, parks).unwrap();
+
+    let hot_sgr = "\x1b[38;2;171;205;239m";
+    let cases: Vec<(Vec<&str>, &str, &str)> = vec![
+        (vec!["list"], &cold, "Cold isolated task"),
+        (vec!["search", "task"], &cold, "Cold isolated task"),
+        (vec!["ready"], &cold, "Cold isolated task"),
+        (
+            vec!["sample", "-n", "100", "--older-than", "0d", "--seed", "1"],
+            &cold,
+            "Cold isolated task",
+        ),
+        (vec!["tree"], &cold, "Cold isolated task"),
+        (vec!["prime"], &cold, "Cold isolated task"),
+        (vec!["goals"], &lane, "Cold lane task"),
+        (vec!["lanes"], &lane, "Cold lane task"),
+        (vec!["list", "--parked"], &parked, "Cold parked task"),
+        (vec!["quiet"], &parked, "Cold parked task"),
+        (vec!["blockers"], &blocker, "Cold blocker task"),
+    ];
+    for (args, id, title) in cases {
+        let out = env
+            .cmd(&dir)
+            .args(["--pretty", "--color", "always"])
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {out:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            text.contains(&format!("{DOTS_ID}{id}")),
+            "fixed ID shade in {args:?}: {text:?}"
+        );
+        let cold_sgr = title_sgr(&text, title);
+        assert_ne!(
+            cold_sgr, hot_sgr,
+            "cold title must fade in {args:?}: {text:?}"
+        );
+        assert_eq!(strip_ansi(&text), env.pretty(&dir, &args));
+        no_activity(&env.json(&dir, &args));
+        if args == ["list"] {
+            assert_eq!(title_sgr(&text, "Hot active task"), hot_sgr);
+            let warm_sgr = title_sgr(&text, "Warm neighbor task");
+            assert_ne!(warm_sgr, cold_sgr);
+            assert_ne!(warm_sgr, hot_sgr);
+        }
+    }
+
+    env.json(&dir, &["edit", &hot, "--related", &cold]);
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "show", &hot])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(
+        title_sgr(&text, "Cold isolated task"),
+        hot_sgr,
+        "show stays unmodulated"
+    );
+
+    let plain = env.init("plain");
+    let plain_id = id_of(env.json(&plain, &["add", "Plain cold task"]));
+    backdate(&plain, &plain_id);
+    let out = env
+        .cmd(&plain)
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !title_sgr(&text, "Plain cold task").starts_with("\x1b[38;2;"),
+        "unassigned project gets no truecolor titles: {text:?}"
+    );
+}
+
+#[test]
+fn activity_uses_the_same_cross_project_neighborhood_in_list_and_tree() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let dots = env.init("dots");
+    write_project_color(&dots, "dots", "#abcdef");
+    let hot = id_of(env.json(&sci, &["add", "Hot prerequisite"]));
+    let cold = id_of(env.json(&dots, &["add", "Cross project neighbor", "--depends", &hot]));
+    let path = dots.join(format!("tasks/{cold}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = text
+        .lines()
+        .map(|line| {
+            if line.starts_with("created: ") {
+                "created: 2020-01-01T00:00:00Z"
+            } else if line.starts_with("updated: ") {
+                "updated: 2020-01-01T00:00:00Z"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(path, text).unwrap();
+
+    let color = |args: &[&str]| {
+        let out = env
+            .cmd(&dots)
+            .args(["--pretty", "--color", "always"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {out:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        let at = text.find("Cross project neighbor").unwrap();
+        let start = text[..at].rfind("\x1b[").unwrap();
+        text[start..at].to_string()
+    };
+    let list = color(&["list", "--all-projects"]);
+    let tree = color(&["tree", "--all-projects"]);
+    assert_eq!(
+        tree, list,
+        "both views must use all captured in-scope neighbors"
+    );
+    assert_ne!(
+        tree,
+        color(&["tree"]),
+        "local scope excludes the foreign prerequisite"
+    );
+}
+
+#[test]
+fn activity_prime_uses_each_claimed_rows_own_checkout() {
+    let mut env = TestEnv::new();
+    let main = env.init("dots");
+    write_project_color(&main, "dots", "#abcdef");
+    let (_x_dir, x) = unregistered_checkout("dots");
+    let (_y_dir, y) = unregistered_checkout("dots");
+    let a = id_of(env.json(&x, &["add", "Active in checkout X"]));
+    let b = id_of(env.json(&y, &["add", "Active in checkout Y"]));
+    // Each owner has a fresh record; the other checkout has its old copy. Whichever
+    // secondary scan is visited first must not supply the other owner's score.
+    for (id, source, destination) in [(&a, &x, &y), (&b, &y, &x)] {
+        let text = std::fs::read_to_string(source.join(format!("tasks/{id}.md"))).unwrap();
+        let text = text
+            .lines()
+            .map(|line| {
+                if line.starts_with("created: ") {
+                    "created: 2020-01-01T00:00:00Z"
+                } else if line.starts_with("updated: ") {
+                    "updated: 2020-01-01T00:00:00Z"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(destination.join(format!("tasks/{id}.md")), text).unwrap();
+        write_claim(&env, "dots", id, id, true);
+    }
+    let store = env.claim_store("dots");
+    let mut claims: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
+    for (id, checkout) in [(&a, &x), (&b, &y)] {
+        claims["claims"][id]["worktree"] = toml::Value::String(checkout.display().to_string());
+    }
+    std::fs::write(store, toml::to_string(&claims).unwrap()).unwrap();
+
+    let out = env
+        .cmd(&main)
+        .args(["--pretty", "--color", "always", "prime"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    for title in ["Active in checkout X", "Active in checkout Y"] {
+        assert!(
+            text.contains(&format!("\x1b[38;2;171;205;239m{title}")),
+            "{title} must use its own hot record, independent of scan order: {text:?}"
+        );
+    }
+}
+
+#[test]
 fn headers_label_each_table_view_and_leave_json_alone() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
