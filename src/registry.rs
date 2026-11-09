@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     #[serde(default)]
     pub projects: BTreeMap<String, PathBuf>,
@@ -184,32 +184,51 @@ impl Registry {
     }
 
     pub fn set_predecessor(&mut self, live: &str, pred: Option<Predecessor>) -> Result<()> {
-        let previous = match pred {
-            Some(pred) => self.predecessors.insert(live.into(), pred),
-            None => self.predecessors.remove(live),
-        };
-        if let Err(error) = self.rebuild_displaced() {
-            match previous {
-                Some(pred) => {
-                    self.predecessors.insert(live.into(), pred);
+        let mut proposed = self.clone();
+        match pred {
+            Some(pred) => {
+                pred.validate(live)?;
+                let alias = &pred.successor_alias;
+                if proposed.projects.contains_key(alias)
+                    || proposed.groups.contains_key(alias)
+                    || proposed
+                        .aliases
+                        .get(alias)
+                        .is_some_and(|target| target != live)
+                    || proposed.predecessors.iter().any(|(owner, p)| {
+                        owner != live && (p.prefix == *alias || p.successor_alias == *alias)
+                    })
+                {
+                    return Err(Error::Config(format!(
+                        "successor alias {alias:?} conflicts with another project, group, alias or predecessor owner"
+                    )));
                 }
-                None => {
-                    self.predecessors.remove(live);
-                }
+                proposed.aliases.insert(alias.clone(), live.into());
+                proposed.predecessors.insert(live.into(), pred);
             }
-            return Err(error);
+            None => {
+                proposed.predecessors.remove(live);
+            }
         }
+        proposed.rebuild_displaced()?;
+        *self = proposed;
         Ok(())
     }
 
     fn rebuild_displaced(&mut self) -> Result<()> {
         let mut displaced = BTreeMap::new();
         let mut seen = BTreeSet::new();
+        let mut aliases = BTreeSet::new();
         for (live, pred) in &self.predecessors {
             pred.validate(live)?;
             if !self.projects.contains_key(live)
                 || self.aliases.contains_key(&pred.prefix)
                 || !seen.insert(&pred.prefix)
+                || !aliases.insert(&pred.successor_alias)
+                || self
+                    .predecessors
+                    .values()
+                    .any(|other| other.prefix == pred.successor_alias)
             {
                 return Err(Error::Config(format!(
                     "invalid predecessor {:?} for {live:?}: live key must be registered, predecessor must not be an alias or shared",
@@ -342,45 +361,38 @@ impl Registry {
         target: &str,
         predecessor: Option<Predecessor>,
     ) -> Result<()> {
-        self.check_rename_bound(source)?;
+        let mut proposed = self.clone();
+        proposed.check_rename_bound(source)?;
         let handoff = predecessor
             .as_ref()
-            .is_some_and(|p| self.aliases.get(target) == Some(&p.prefix));
-        if !crate::model::is_valid_prefix(target) || (self.is_taken(target) && !handoff) {
+            .is_some_and(|p| proposed.aliases.get(target) == Some(&p.prefix));
+        if !crate::model::is_valid_prefix(target) || (proposed.is_taken(target) && !handoff) {
             return Err(Error::Config(format!(
                 "target prefix {target:?} is invalid or taken"
             )));
         }
-        let root = self
+        let root = proposed
             .projects
             .remove(source)
             .ok_or_else(|| Error::Config(format!("no project registered as {source:?}")))?;
         if handoff {
-            self.aliases.remove(target);
+            proposed.aliases.remove(target);
         }
-        self.projects.insert(target.into(), root);
-        let inherited = self.predecessors.remove(source);
-        if let Some(pred) = predecessor.or(inherited) {
-            self.predecessors.insert(target.into(), pred);
-        }
-        for pred in self.predecessors.values_mut() {
-            if pred.prefix == source {
-                pred.prefix = target.into();
-            }
-        }
-        for live in self.aliases.values_mut() {
+        proposed.projects.insert(target.into(), root);
+        for live in proposed.aliases.values_mut() {
             if live == source {
                 *live = target.into();
             }
         }
-        self.retarget_groups(source, target);
-        if let Some(history) = self.locations.remove(source) {
-            self.locations.insert(target.into(), history);
+        proposed.retarget_groups(source, target);
+        if let Some(history) = proposed.locations.remove(source) {
+            proposed.locations.insert(target.into(), history);
         }
-        self.move_records(source, target);
+        proposed.move_records(source, target);
 
-        self.aliases.insert(source.into(), target.into());
-        self.rebuild_displaced()?;
+        proposed.aliases.insert(source.into(), target.into());
+        proposed.set_predecessor(target, predecessor)?;
+        *self = proposed;
         Ok(())
     }
 
@@ -392,32 +404,33 @@ impl Registry {
         root: &Path,
         predecessor: Option<Predecessor>,
     ) -> Result<crate::locations::Displaced> {
-        self.check_rename_bound(source)?;
+        let mut proposed = self.clone();
+        proposed.check_rename_bound(source)?;
         if source == target || !crate::model::is_valid_prefix(target) {
             return Err(Error::Config(format!("invalid adoption target {target:?}")));
         }
-        if !self.projects.contains_key(source) {
+        if !proposed.projects.contains_key(source) {
             return Err(Error::Config(format!(
                 "no project registered as {source:?}"
             )));
         }
-        if self.aliases.contains_key(target)
+        if proposed.aliases.contains_key(target)
             && !predecessor
                 .as_ref()
-                .is_some_and(|p| self.aliases.get(target) == Some(&p.prefix))
+                .is_some_and(|p| proposed.aliases.get(target) == Some(&p.prefix))
         {
             return Err(Error::Config(format!(
                 "target prefix {target:?} is retired"
             )));
         }
-        if self.groups.contains_key(target) {
+        if proposed.groups.contains_key(target) {
             return Err(Error::Config(format!(
                 "target prefix {target:?} is the name of a group; remove it with \
                  `tasks group rm {target}` first"
             )));
         }
         let root = crate::rename::root_identity(root)?;
-        for (prefix, registered) in &self.projects {
+        for (prefix, registered) in &proposed.projects {
             if prefix == source {
                 continue;
             }
@@ -429,46 +442,38 @@ impl Registry {
                 )));
             }
         }
-        let previous = self.projects[source].clone();
-        let history = self.locations.get(source).cloned().unwrap_or_default();
-        if self.projects.contains_key(target) {
-            self.projects.remove(source);
-            for live in self.aliases.values_mut() {
+        let previous = proposed.projects[source].clone();
+        let history = proposed.locations.get(source).cloned().unwrap_or_default();
+        if proposed.projects.contains_key(target) {
+            proposed.projects.remove(source);
+            for live in proposed.aliases.values_mut() {
                 if live == source {
                     *live = target.into();
                 }
             }
-            self.retarget_groups(source, target);
-            self.move_records(source, target);
-            self.aliases.insert(source.into(), target.into());
+            proposed.retarget_groups(source, target);
+            proposed.move_records(source, target);
+            proposed.aliases.insert(source.into(), target.into());
         } else {
-            self.rename_with_predecessor(source, target, predecessor.clone())?;
+            proposed.rename_with_predecessor(source, target, predecessor.clone())?;
         }
-        let inherited = self.predecessors.remove(source);
-        if let Some(pred) = predecessor.or(inherited) {
-            self.predecessors.insert(target.into(), pred);
-        }
-        for pred in self.predecessors.values_mut() {
-            if pred.prefix == source {
-                pred.prefix = target.into();
-            }
-        }
-        self.rebuild_displaced()?;
-        self.repoint(target, &root)?;
+        proposed.set_predecessor(target, predecessor)?;
+        proposed.repoint(target, &root)?;
         // In the rename branch the source's table already moved to the target, and the
         // merge collapses its own pairs. In the registered-target branch it joins the
         // target's. The source's storage record leaves with `Displaced`, never
         // as the target's record.
-        self.locations.remove(source);
+        proposed.locations.remove(source);
         let storage = history.storage.clone();
-        let merged = self
+        let merged = proposed
             .locations
             .remove(target)
             .unwrap_or_default()
             .merge(history);
         if !merged.is_empty() {
-            self.locations.insert(target.into(), merged);
+            proposed.locations.insert(target.into(), merged);
         }
+        *self = proposed;
         Ok(crate::locations::Displaced {
             root: previous,
             storage,
@@ -719,6 +724,85 @@ mod tests {
     use crate::model::TaskId;
 
     #[test]
+    fn succession_alias_admission_is_atomic_in_memory() {
+        let predecessor = Predecessor {
+            prefix: "old".into(),
+            successor_alias: "former".into(),
+            suffixes: ["000001".into()].into(),
+        };
+        for conflict in ["alias", "live", "group", "owner", "pred-prefix"] {
+            let mut registry = Registry::default();
+            registry.register("current", Path::new("/current")).unwrap();
+            registry.register("other", Path::new("/other")).unwrap();
+            match conflict {
+                "alias" => {
+                    registry.aliases.insert("former".into(), "other".into());
+                }
+                "live" => {
+                    registry.projects.insert("former".into(), "/former".into());
+                }
+                "group" => {
+                    registry
+                        .groups
+                        .insert("former".into(), vec!["other".into()]);
+                }
+                "owner" => {
+                    registry.predecessors.insert(
+                        "other".into(),
+                        Predecessor {
+                            prefix: "older".into(),
+                            successor_alias: "former".into(),
+                            suffixes: Default::default(),
+                        },
+                    );
+                }
+                _ => {
+                    registry.predecessors.insert(
+                        "other".into(),
+                        Predecessor {
+                            prefix: "former".into(),
+                            successor_alias: "earlier".into(),
+                            suffixes: Default::default(),
+                        },
+                    );
+                }
+            }
+            registry.rebuild_displaced().unwrap();
+            let before = toml::to_string(&registry).unwrap();
+            let index = registry.displaced.clone();
+            assert!(
+                registry
+                    .set_predecessor("current", Some(predecessor.clone()))
+                    .is_err(),
+                "{conflict}"
+            );
+            assert_eq!(toml::to_string(&registry).unwrap(), before, "{conflict}");
+            assert_eq!(registry.displaced, index);
+        }
+    }
+
+    #[test]
+    fn predecessor_successor_alias_validates_in_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.toml");
+        for field in [
+            "",
+            "successor_alias = \"BAD\"",
+            "successor_alias = \"current\"",
+            "successor_alias = \"old\"",
+            "successor_alias = \"former\"\nunknown = true",
+        ] {
+            std::fs::write(&path, format!("[projects]\ncurrent = \"/current\"\n[predecessors.current]\nprefix = \"old\"\nsuffixes = []\n{field}\n")).unwrap();
+            assert!(Registry::load_from(&path).is_err(), "{field}");
+        }
+        std::fs::write(&path, "[projects]\ncurrent = \"/current\"\nother = \"/other\"\n[aliases]\nformer = \"other\"\n[predecessors.current]\nprefix = \"old\"\nsuccessor_alias = \"former\"\nsuffixes = []\n").unwrap();
+        assert!(
+            Registry::load_from(&path).is_ok(),
+            "conflicting aliases must stay diagnosable/repairable"
+        );
+    }
+
+    #[test]
     fn predecessor_registry_rejects_invalid_and_conflicting_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.toml");
@@ -740,10 +824,10 @@ mod tests {
             (
                 "forge",
                 "prefix = \"forge1\"\nsuffixes = []",
-                "[predecessors.other]\nprefix = \"forge1\"\nsuffixes = []",
+                "[predecessors.other]\nsuccessor_alias = \"older\"\nprefix = \"forge1\"\nsuffixes = []",
             ),
         ] {
-            std::fs::write(&path, format!("[projects]\nforge = \"/missing\"\nother = \"/other\"\n[predecessors.{live}]\n{body}\n{extra}\n")).unwrap();
+            std::fs::write(&path, format!("[projects]\nforge = \"/missing\"\nother = \"/other\"\n[predecessors.{live}]\nsuccessor_alias = \"forge2\"\n{body}\n{extra}\n")).unwrap();
             assert!(
                 matches!(Registry::load_from(&path), Err(Error::Config(_))),
                 "{body} {extra}"
@@ -764,6 +848,7 @@ forge1 = "/missing/old"
 [aliases]
 forge2 = "forge"
 [predecessors.forge]
+successor_alias = "forge2"
 prefix = "forge1"
 suffixes = ["0e720e"]
 "#,

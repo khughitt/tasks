@@ -606,7 +606,7 @@ notes through `tasks note`.
 
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
 Each write commits the records and attachments it wrote, plus whatever the repository's own pre-commit hook stages, once per git working tree. Staging another git process makes while the commit runs can land in it.
-Configuration changes (`init`, `rename`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` with `tasks commit tasks/.config.toml -m "chore(tasks): update config"`. `init --records` warns when it left such a config uncommitted.
+Configuration changes (`init`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` with `tasks commit tasks/.config.toml -m "chore(tasks): update config"`. `init --records` warns when it left such a config uncommitted.
 `commit_unavailable:` means git is missing or the root is outside git.
 `commit_deferred:` means staged changes, detached HEAD, or an in-progress git operation prevented the commit; clear the cause first.
 `commit_failed:` means a git operation or hook failed; resolve the cause, using [Record-commit recovery routes](#record-commit-recovery-routes) above for a refusing hook.
@@ -616,6 +616,7 @@ A successful write still exits 0 when its commit is skipped or fails; read its w
 - `tasks commit <id>...` commits only the named tasks (`tasks/<id>.md` and `tasks/files/<id>/`) with default message `chore(tasks): commit <ids>` (or `-m <msg>`); use it after a `commit_deferred:` or `commit_failed:` warning so unrelated uncommitted tasks in the same project are not swept in.
 - `tasks commit <path>... -m "<msg>"` (or combined `tasks commit <id>... <path>... -m "<msg>"`) commits records-relative working documents (such as `docs/specs/<name>.md`, `docs/plans/<name>.md`, or `docs/briefs/<name>.md`, or an absolute path under `records`) under the same repository lock; `-m <msg>` is required whenever any path target is given. Prefer `tasks commit <path>... -m "<msg>"` over raw `git -C <records> add`/`commit` in shared records repositories so document commits serialize cleanly with concurrent `tasks` writes.
 - `tasks commit` with no targets sweeps every uncommitted file under `tasks/` into one commit.
+- After a rename, use `tasks commit --project <new>` with no targets: its completed receipt verifies and commits only the owned source/target paths, including detached directory deletions. A failed verification or commit retains the receipt for retry. A retired project's completed rename permits this receipt commit; ordinary task writes remain blocked. A handoff commits the predecessor config too when it shares the records Git repository; for separate repositories follow the warning's explicit predecessor config commit command.
 
 ### Lifecycle provenance
 
@@ -886,7 +887,7 @@ re-point their registries.
 Adopt a rename already synced from another host with `tasks rename <old> <new> --adopt`
 before starting work there. For a detached project, rename moves
 `<records-root>/<old>` to `<records-root>/<new>` and updates the registry pairing;
-the directory rename is left for you to commit in the records repository.
+commit it with `tasks commit --project <new>` using the completed receipt.
 On the second host, `--adopt` pairs the directory already renamed by sync.
 With retained history, upgrade every participating reader before creating lineage
 config and keep one coordinated writer through rename/commit/adoption. Source
@@ -903,6 +904,22 @@ the moved attachment path; payload paths and external manual manifests stay lite
 Rehearsals must isolate both `XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
 not an undo; follow the [manual rollback procedure](../../docs/project-operations.md#prefix-rollback).
+
+To reclaim a retired predecessor's prefix, first rename the retired project
+`<pred> -> <pred1>` and commit its receipt, then rename its live successor
+`<succ> -> <pred>` and commit that receipt. Use `--explain` before Step 2. The
+predecessor must be reachable, settled and committed, with disjoint task suffixes;
+keep retired provenance and task records intact. Existing hosts adopt Step 1 before
+Step 2, including when both changes arrive in one sync. Fresh hosts register the
+two final projects in either order: init imports required `[predecessor]` fields
+`prefix`, `successor_alias` and `suffixes`, installing the former successor alias.
+A conflicting alias, live key, group or predecessor owner refuses without mutation.
+Missing host aliases are diagnosed by `check` and repaired with `init --force`
+(include `--records <records-root>` for detached storage); conflicting ownership
+is never stolen. Literal `<pred>-<old-suffix>` routes to `<pred1>`, while alias
+`<succ>-<old-suffix>` and bare old suffixes remain not found in the new project.
+Further renames of either handoff participant refuse under the single-handoff
+limit. See the [two-step handoff](../../docs/project-operations.md#reclaiming-a-retired-predecessors-prefix).
 
 ## Retiring a project
 
@@ -924,9 +941,10 @@ as fresh; `tasks check` then reports the first run's copies as `attachment_orpha
 or remove them. Without a successor, settle each task (close or drop it, or move one with
 `tasks move <id> --to <prefix>`; re-file with `--source <old id>` when it should change), then
 `tasks retire --reason "<one line>"`
-in its registered checkout. Every write to it is refused afterwards with `retired_project`,
-from every checkout; its ids keep resolving, `--all-projects` and `--group` reads leave it
-out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle
+in its registered checkout. Ordinary task writes are refused afterwards with
+`retired_project` from every checkout; lifecycle rename/adoption, verified completed
+rename-receipt commits, explicit config commits and `unretire` remain available.
+Its ids keep resolving, `--all-projects` and `--group` reads leave it out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle
 runbook in ops has the whole procedure.
 
 ## Task references

@@ -33,9 +33,10 @@ pub struct PredecessorHandoff {
 }
 
 impl PredecessorHandoff {
-    pub fn predecessor(&self) -> crate::repo::Predecessor {
+    pub fn predecessor(&self, source: &str) -> crate::repo::Predecessor {
         crate::repo::Predecessor {
             prefix: self.prefix.clone(),
+            successor_alias: source.into(),
             suffixes: self.suffixes.clone(),
         }
     }
@@ -231,7 +232,10 @@ impl Inventory {
     ) -> Result<Self> {
         if let Some(handoff) = handoff {
             let source = std::fs::read_to_string(project.records.join(CONFIG_REL))?;
-            let payload = with_predecessor(&self.target_config(&source)?, &handoff.predecessor())?;
+            let payload = with_predecessor(
+                &self.target_config(&source)?,
+                &handoff.predecessor(&self.source),
+            )?;
             self.config_to = digest(payload.as_bytes());
             self.config_payload = Some(payload);
             self.predecessor_handoff = Some(handoff);
@@ -350,7 +354,7 @@ impl Inventory {
                 || self
                     .predecessor_handoff
                     .as_ref()
-                    .is_some_and(|h| project.predecessor != Some(h.predecessor()))
+                    .is_some_and(|h| project.predecessor != Some(h.predecessor(&self.source)))
             {
                 return Err(Error::Config(
                     "rename payload disagrees with target or predecessor".into(),
@@ -412,7 +416,7 @@ impl Inventory {
                         edge,
                     )?;
                     match &self.predecessor_handoff {
-                        Some(h) => with_predecessor(&rewritten, &h.predecessor())?,
+                        Some(h) => with_predecessor(&rewritten, &h.predecessor(&self.source))?,
                         None => rewritten,
                     }
                 } != *payload
@@ -428,7 +432,7 @@ impl Inventory {
             }
         }
         if let Some(h) = &self.predecessor_handoff {
-            h.predecessor().validate(&self.target)?;
+            h.predecessor(&self.source).validate(&self.target)?;
             validate_digest(path, "predecessor config_from", &h.config_from)?;
             validate_digest(path, "predecessor config_to", &h.config_to)?;
             if !h.config_path.is_absolute()

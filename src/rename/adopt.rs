@@ -301,6 +301,10 @@ fn classify_registry(
         }
     }
     if source.is_some() && !registry.aliases.contains_key(old) {
+        let mut proposed = registry.clone();
+        if let Err(error) = proposed.adopt(old, new, &project.root, project.predecessor.clone()) {
+            return Ok(Stage::Refuse(error.to_string()));
+        }
         Ok(Stage::Fresh(String::new()))
     } else if source.is_none()
         && target.is_some()

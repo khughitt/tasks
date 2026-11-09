@@ -45,21 +45,37 @@ pub fn run(
             .as_ref()
             .map(|records| root.join(records).join(&prefix));
         validate_repointing_retirement(&registry, &prefix, &root, derived.as_deref())?;
-        // Repair the host pairing before checkout scans consult the old registry entry.
-        let target = derived.as_deref().unwrap_or(&root);
-        if registry.projects.contains_key(&prefix) && target.join(crate::repo::CONFIG_REL).is_file()
-        {
-            let project = Project::open(target)?;
-            if project.prefix == prefix {
-                registry.set_predecessor(&prefix, project.predecessor)?;
+    }
+    if records.is_none() {
+        Project::refuse_detached_config(&root)?;
+    }
+    // Admit shared metadata against the proposed registration before scans or config writes.
+    let target = records
+        .as_ref()
+        .map(|r| root.join(r).join(&prefix))
+        .unwrap_or_else(|| root.clone());
+    if target.join(crate::repo::CONFIG_REL).is_file() {
+        let project = Project::open(&target)?;
+        if project.prefix == prefix {
+            let mut proposed = registry.clone();
+            if force {
+                proposed.repoint(&prefix, &root)?;
+            } else {
+                proposed.register(&prefix, &root)?;
             }
+            proposed.set_predecessor(&prefix, project.predecessor)?;
+            if !registry.projects.contains_key(&prefix) {
+                registry.register(&prefix, &root)?;
+            }
+            registry.aliases = proposed.aliases;
+            registry.predecessors = proposed.predecessors;
+            registry.displaced = proposed.displaced;
         }
     }
     let records = match records {
         Some(records_root) => Some(validate_records(&root, &records_root, &registry, &prefix)?),
         None => {
             reject_linked_destination(&root, &registry)?;
-            Project::refuse_detached_config(&root)?;
             None
         }
     };
@@ -110,11 +126,14 @@ pub fn run(
             let plan = Project::plan_detached(&derived, &prefix, &root, force)?;
             registry.pair_records(&prefix, &derived);
             warnings.extend(registry.note_root_change(&prefix, previous, &today)?);
+            let pred = if derived.join(crate::repo::CONFIG_REL).is_file() {
+                Project::open(&derived)?.predecessor
+            } else {
+                None
+            };
+            registry.set_predecessor(&prefix, pred)?;
             plan.write()?;
-            let saved = (|| {
-                registry.set_predecessor(&prefix, Project::open(&derived)?.predecessor)?;
-                registry.save()
-            })();
+            let saved = registry.save();
             if let Err(error) = saved {
                 return Err(match plan.restore() {
                     Ok(()) => error,
@@ -143,6 +162,12 @@ pub fn run(
             (root.clone(), Some(derived))
         }
         None => {
+            let pred = if root.join(crate::repo::CONFIG_REL).is_file() {
+                Project::open(&root)?.predecessor
+            } else {
+                None
+            };
+            registry.set_predecessor(&prefix, pred)?;
             let project = Project::init(&root, &prefix, checkout.as_deref())?;
             // A plain init makes the project in-tree or linked: a pairing left from a
             // detached registration would send `locate` to the old records directory
@@ -154,7 +179,6 @@ pub fn run(
                 ));
             }
             warnings.extend(registry.note_root_change(&prefix, previous, &today)?);
-            registry.set_predecessor(&prefix, project.predecessor.clone())?;
             registry.save()?;
             (project.root, None)
         }

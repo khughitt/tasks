@@ -219,12 +219,21 @@ pub fn open_and_run(
     ctx.warnings.extend(recovery.warnings);
 
     let (expanded_paths, subject) = if let Some(inventory) = &receipt {
-        let files = rename_commit_paths(&ctx.project, inventory, &commit_dir)?;
-        if let Some(handoff) = &inventory.predecessor_handoff
-            && !handoff.config_path.starts_with(&commit_dir)
-        {
-            ctx.warnings.push(format!("predecessor config is in a separate repository; run `tasks commit --project {} tasks/.config.toml -m \"chore(tasks): update successor\"` there", handoff.prefix));
-        }
+        let predecessor_config = if let Some(handoff) = &inventory.predecessor_handoff {
+            let repository = crate::record_commit::working_tree(
+                handoff.config_path.parent().expect("config has parent"),
+            )
+            .map_err(Error::Validation)?;
+            if repository.as_ref() == Some(&commit_dir) {
+                Some(handoff.config_path.as_path())
+            } else {
+                ctx.warnings.push(format!("predecessor config is in a separate repository; run `tasks commit --project {} tasks/.config.toml -m \"chore(tasks): update successor\"` there", handoff.prefix));
+                None
+            }
+        } else {
+            None
+        };
+        let files = rename_commit_paths(&ctx.project, inventory, &commit_dir, predecessor_config)?;
         let subject = message.unwrap_or_else(|| {
             format!(
                 "chore(tasks): rename {} -> {}",
@@ -438,15 +447,14 @@ fn rename_commit_paths(
     project: &Project,
     inventory: &Inventory,
     toplevel: &Path,
+    predecessor_config: Option<&Path>,
 ) -> Result<Vec<String>> {
     let mut roots = match (&inventory.records_from, &inventory.records_to) {
         (Some(from), Some(to)) => vec![from.clone(), to.clone()],
         _ => vec![project.tasks_dir()],
     };
-    if let Some(handoff) = &inventory.predecessor_handoff
-        && handoff.config_path.starts_with(toplevel)
-    {
-        roots.push(handoff.config_path.clone());
+    if let Some(config) = predecessor_config {
+        roots.push(config.to_path_buf());
     }
     let pathspecs: Vec<String> = roots
         .iter()

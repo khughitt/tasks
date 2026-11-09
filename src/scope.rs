@@ -64,10 +64,29 @@ pub(crate) fn open_registered_config(
 }
 
 pub(crate) fn check_predecessor_pairing(registry: &Registry, project: &Project) -> Result<()> {
-    if registry.predecessors.get(&project.prefix) != project.predecessor.as_ref() {
+    if registry.predecessors.get(&project.prefix) != project.predecessor.as_ref()
+        || project
+            .predecessor
+            .as_ref()
+            .is_some_and(|p| registry.aliases.get(&p.successor_alias) != Some(&project.prefix))
+    {
+        let records = if project.kind == Kind::Detached {
+            format!(
+                " --records {}",
+                project
+                    .records
+                    .parent()
+                    .unwrap_or(&project.records)
+                    .display()
+            )
+        } else {
+            String::new()
+        };
         return Err(Error::Config(format!(
-            "predecessor configuration for {:?} disagrees with this host's registry; adopt both steps: `tasks rename <pred> <pred1> --adopt`, then `tasks rename <succ> <pred> --adopt`, or run `tasks init --prefix {} --force` in this checkout",
-            project.prefix, project.prefix
+            "predecessor configuration for {:?} disagrees with this host's registry; adopt both steps: `tasks rename <pred> <pred1> --adopt`, then `tasks rename <succ> <pred> --adopt`, or repair with `tasks init --prefix {}{records} --force` run in {}",
+            project.prefix,
+            project.prefix,
+            project.root.display()
         )));
     }
     Ok(())

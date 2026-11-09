@@ -28,7 +28,7 @@ The accepted top-level keys/tables are exactly those below.
 | `[growth]` | Optional positive `warn_bytes`; default min(65,536, floor(max_bytes/4)), at least 1. An explicit larger threshold is accepted with a warning, not clamped. |
 | `[checkout]` | Required `path` when present; relative to records or absolute. Missing `kind` means linked; the other accepted kind is `detached`. Managed by init/relocation. |
 | `[retired]` | Required `date` (real `YYYY-MM-DD` from year 1) and `reason` (nonblank single line without control characters); optional `successor` (well-formed prefix). Lifecycle metadata managed by retire/migrate. |
-| `[predecessor]` | One retired generation: `prefix` and a frozen `suffixes` array of six lowercase hex digits. Created by a two-step prefix handoff; reserves those suffixes for new task IDs and lets literal reclaimed-prefix IDs route to that generation. Unknown fields and invalid/self prefixes or suffixes refuse. |
+| `[predecessor]` | One retired generation: required `prefix`, `successor_alias` (the successor's former prefix), and a frozen `suffixes` array of six lowercase hex digits. Created by a two-step prefix handoff; reserves those suffixes for new task IDs and lets literal reclaimed-prefix IDs route to that generation. Unknown fields and invalid/self prefixes or suffixes refuse. |
 | `[git]` | Only `commit`, boolean default false; opt-in scoped automatic record commits. |
 
 A retention lineage edge has exactly `version` (integer 1), `from_prefix`,
@@ -178,10 +178,20 @@ changing a prefix needs the explicit journal/recovery workflow; editing registry
 text is not a substitute for reconciling record and checkout identities.
 
 The predecessor configuration is synced with records; its registry copy is host-local.
-For example, `[predecessor]` with `prefix = "forge1"` and
-`suffixes = ["0e720e"]` in the current `forge` project is paired with
-`[predecessors.forge]` carrying the same values in `projects.toml`. A mismatch
-refuses normal writes and is reported by `check`; re-pair through `init --force`.
+For example, `[predecessor]` with `prefix = "forge1"`,
+`successor_alias = "forge2"` and `suffixes = ["0e720e"]` in the current `forge` project is paired with
+`[predecessors.forge]` carrying the same values in `projects.toml` and alias
+`forge2 = "forge"`. Both prefixes must be valid and distinct from each other and
+the live prefix; all fields are required and unknown fields refuse. Init imports
+the metadata and alias together, in either generation's registration order.
+An identical existing alias is accepted. A conflicting alias, live project,
+group or predecessor owner refuses before config or registry changes.
+
+A metadata or alias mismatch refuses normal opens and is reported by `check`.
+Re-pair through `init --prefix forge --force` in the checkout; for detached
+records include `--records <records-root>`. A missing alias is repaired only when
+its name is free or already targets this project; a conflicting owner is never
+overwritten.
 An absent predecessor registration does not remove the reservation or redirect an
 old ID into the current project. See the
 [two-step handoff and its current limits](project-operations.md#reclaiming-a-retired-predecessors-prefix).

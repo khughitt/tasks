@@ -66,7 +66,24 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     } else {
         None
     };
-    let pending = pending.or(handoff_error).or(bound_error);
+    let admission_error = if snapshot.registry.old_key.is_some() {
+        handoff.as_ref().and_then(|h| {
+            let mut proposed = registry.clone();
+            proposed
+                .rename_with_predecessor(
+                    &invocation.source,
+                    &invocation.target,
+                    Some(h.predecessor(&invocation.source)),
+                )
+                .err()
+        })
+    } else {
+        None
+    };
+    let pending = pending
+        .or(handoff_error)
+        .or(bound_error)
+        .or(admission_error);
     let recovery = if let Some(error) = pending {
         if !explain {
             return Err(error);
@@ -370,7 +387,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         let pred = inventory
             .predecessor_handoff
             .as_ref()
-            .map(|h| h.predecessor())
+            .map(|h| h.predecessor(&inventory.source))
             .or_else(|| project.predecessor.clone());
         match pred {
             Some(pred) => registry.rename_with_predecessor(

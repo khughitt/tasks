@@ -97,6 +97,7 @@ impl Kind {
 #[serde(deny_unknown_fields)]
 pub struct Predecessor {
     pub prefix: String,
+    pub successor_alias: String,
     pub suffixes: BTreeSet<String>,
 }
 
@@ -106,6 +107,15 @@ impl Predecessor {
             return Err(Error::Config(format!(
                 "predecessor prefix {:?} must be valid and different from {live:?}",
                 self.prefix
+            )));
+        }
+        if !is_valid_prefix(&self.successor_alias)
+            || self.successor_alias == live
+            || self.successor_alias == self.prefix
+        {
+            return Err(Error::Config(format!(
+                "predecessor successor_alias {:?} must be valid and distinct from live {live:?} and predecessor {:?}",
+                self.successor_alias, self.prefix
             )));
         }
         if let Some(suffix) = self
@@ -1768,6 +1778,7 @@ mod tests {
         ));
         p.predecessor = Some(Predecessor {
             prefix: "old".into(),
+            successor_alias: "former".into(),
             suffixes: ["000001".into()].into(),
         });
         p.write_task(&registry, &task).unwrap();
@@ -1779,7 +1790,7 @@ mod tests {
     #[test]
     fn predecessor_config_validates_and_reserves_suffixes_in_create_and_new_id() {
         let (_dir, project) = project_with_config(
-            "prefix = \"tst\"\n[predecessor]\nprefix = \"forge1\"\nsuffixes = [\"000001\"]\n",
+            "prefix = \"tst\"\n[predecessor]\nsuccessor_alias = \"forge2\"\nprefix = \"forge1\"\nsuffixes = [\"000001\"]\n",
         );
         let p = project.unwrap();
         let registry = Registry::default();
@@ -1809,8 +1820,9 @@ mod tests {
             "prefix = \"forge1\"\nsuffixes = [\"12345\"]",
             "prefix = \"forge1\"\nsuffixes = []\nunknown = true",
         ] {
-            let (_dir, result) =
-                project_with_config(&format!("prefix = \"tst\"\n[predecessor]\n{bad}\n"));
+            let (_dir, result) = project_with_config(&format!(
+                "prefix = \"tst\"\n[predecessor]\nsuccessor_alias = \"forge2\"\n{bad}\n"
+            ));
             assert!(matches!(result, Err(Error::Config(_))), "{bad}: {result:?}");
         }
     }

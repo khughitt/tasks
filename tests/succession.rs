@@ -339,7 +339,10 @@ fn predecessor(env: &TestEnv, current: &Path, old: &str, suffixes: &[&str]) {
     let mut cfg = config(current);
     cfg.as_table_mut().unwrap().insert(
         "predecessor".into(),
-        toml::Value::try_from(serde_json::json!({"prefix": old, "suffixes": suffixes})).unwrap(),
+        toml::Value::try_from(
+            serde_json::json!({"prefix": old, "successor_alias": "forge2", "suffixes": suffixes}),
+        )
+        .unwrap(),
     );
     std::fs::write(
         current.join("tasks/.config.toml"),
@@ -504,7 +507,7 @@ fn succession_pairing_mismatch_and_unreachable_predecessor_are_reported() {
     let mut cfg = config(&current);
     cfg.as_table_mut().unwrap().insert(
         "predecessor".into(),
-        toml::toml! { prefix = "forge1" suffixes = ["0e720e"] }.into(),
+        toml::toml! { prefix = "forge1" successor_alias = "forge2" suffixes = ["0e720e"] }.into(),
     );
     std::fs::write(
         current.join("tasks/.config.toml"),
@@ -607,7 +610,8 @@ fn succession_check_reports_predecessor_pairing_mismatch_from_code_checkout() {
         let mut cfg = config(&project);
         cfg.as_table_mut().unwrap().insert(
             "predecessor".into(),
-            toml::toml! { prefix = "forge1" suffixes = ["0e720e"] }.into(),
+            toml::toml! { prefix = "forge1" successor_alias = "forge2" suffixes = ["0e720e"] }
+                .into(),
         );
         std::fs::write(
             project.join("tasks/.config.toml"),
@@ -837,7 +841,8 @@ fn prefix_handoff_refuses_uncommitted_step1_non_retired_wrong_successor_or_colli
                 } else {
                     cfg.as_table_mut().unwrap().insert(
                         "predecessor".into(),
-                        toml::toml! { prefix = "older" suffixes = [] }.into(),
+                        toml::toml! { prefix = "older" successor_alias = "oldest" suffixes = [] }
+                            .into(),
                     );
                 }
                 std::fs::write(
@@ -993,7 +998,6 @@ fn multi_host_succession_rehearsal_primary_secondary_and_fresh_init() {
     for early_adoption in [true, false] {
         let a = TestEnv::new();
         let b = TestEnv::new();
-        let c = TestEnv::new();
         let base = tempfile::tempdir().unwrap();
         let old = base.path().join("forge");
         let new = base.path().join("forge2");
@@ -1118,96 +1122,121 @@ fn multi_host_succession_rehearsal_primary_secondary_and_fresh_init() {
         if early_adoption {
             continue;
         }
-        c.json(
-            &old,
-            &[
-                "init",
-                "--prefix",
-                "forge",
-                "--records",
-                records.to_str().unwrap(),
-            ],
-        );
-        let out = c.cmd(&old).args(["show", "forge-0e720e"]).output().unwrap();
-        assert!(!out.status.success());
-        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-        assert_ne!(err["error"]["kind"], "task_not_found");
-        assert!(err["error"]["detail"].as_str().unwrap().contains("forge1"));
-        let added = id_of(c.json(&old, &["add", "new host work"]));
-        let reserved = config(&records.join("forge"))["predecessor"]["suffixes"]
-            .as_array()
-            .unwrap()
-            .clone();
-        assert!(
-            !reserved
-                .iter()
-                .any(|s| added.ends_with(s.as_str().unwrap()))
-        );
-        c.json(
-            &archived,
-            &[
-                "init",
-                "--prefix",
-                "forge1",
-                "--records",
-                records.to_str().unwrap(),
-            ],
-        );
-        // A fresh host has no historical forge2 alias until that generation is adopted.
-        assert_eq!(
-            c.json(&old, &["show", "forge-0e720e"])["task"]["id"],
-            "forge1-0e720e"
-        );
-        eprintln!("checking fresh host");
-        c.check(&old);
-        c.check(&archived);
+        for predecessor_first in [false, true] {
+            let c = TestEnv::new();
+            if predecessor_first {
+                c.json(
+                    &archived,
+                    &[
+                        "init",
+                        "--prefix",
+                        "forge1",
+                        "--records",
+                        records.to_str().unwrap(),
+                    ],
+                );
+            }
+            c.json(
+                &old,
+                &[
+                    "init",
+                    "--prefix",
+                    "forge",
+                    "--records",
+                    records.to_str().unwrap(),
+                ],
+            );
+            if !predecessor_first {
+                let out = c.cmd(&old).args(["show", "forge-0e720e"]).output().unwrap();
+                assert!(!out.status.success());
+                let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+                assert_ne!(err["error"]["kind"], "task_not_found");
+                assert!(err["error"]["detail"].as_str().unwrap().contains("forge1"));
+            }
+            let added = id_of(c.json(&old, &["add", "new host work"]));
+            let reserved = config(&records.join("forge"))["predecessor"]["suffixes"]
+                .as_array()
+                .unwrap()
+                .clone();
+            assert!(
+                !reserved
+                    .iter()
+                    .any(|s| added.ends_with(s.as_str().unwrap()))
+            );
+            c.json(
+                &archived,
+                &[
+                    "init",
+                    "--prefix",
+                    "forge1",
+                    "--records",
+                    records.to_str().unwrap(),
+                ],
+            );
+            // Shared provenance imports the alias without a manual registration step.
+            assert_eq!(
+                c.json(&old, &["show", "forge-0e720e"])["task"]["id"],
+                "forge1-0e720e"
+            );
+            eprintln!("checking fresh host");
+            assert_handoff_routing(&c, &old, &archived);
+        }
     }
 }
 
 #[test]
 fn prefix_handoff_separate_repositories_name_the_required_predecessor_commit() {
-    let mut env = TestEnv::new();
-    let old = env.init("forge");
-    let new = env.init("forge2");
-    for path in [&old, &new] {
-        repo(&env, path);
+    for nested in [false, true] {
+        let mut env = TestEnv::new();
+        let new = env.init("forge2");
+        repo(&env, &new);
+        let old = if nested {
+            let old = new.join("archive");
+            std::fs::create_dir(&old).unwrap();
+            env.json(&old, &["init", "--prefix", "forge"]);
+            std::fs::write(new.join(".git/info/exclude"), "archive/\n").unwrap();
+            old
+        } else {
+            env.init("forge")
+        };
+        repo(&env, &old);
+        write_task(&old, "forge-0e720e", "");
+        write_task(&new, "forge2-18dae2", "");
+        env.json(
+            &old,
+            &["retire", "--successor", "forge2", "--reason", "superseded"],
+        );
+        for path in [&old, &new] {
+            git(&env, path, &["add", "-A"]);
+            git(&env, path, &["commit", "-qm", "seed records"]);
+        }
+        env.json(&old, &["rename", "forge", "forge1"]);
+        env.json(&old, &["commit", "--project", "forge1"]);
+        env.json(&new, &["rename", "forge2", "forge"]);
+        let out = env.json(&new, &["commit", "--project", "forge"]);
+        assert!(
+            out["warnings"].as_array().unwrap().iter().any(|w| w
+                .as_str()
+                .unwrap()
+                .contains("tasks commit --project forge1 tasks/.config.toml")),
+            "{out}"
+        );
+        assert_eq!(git(&env, &new, &["status", "--porcelain"]), "");
+        assert!(!git(&env, &old, &["status", "--porcelain"]).is_empty());
+        env.json(
+            &old,
+            &[
+                "commit",
+                "--project",
+                "forge1",
+                "tasks/.config.toml",
+                "-m",
+                "chore: update successor",
+            ],
+        );
+        assert_eq!(git(&env, &old, &["status", "--porcelain"]), "");
+        assert_handoff_routing(&env, &new, &old);
     }
-    write_task(&old, "forge-0e720e", "");
-    write_task(&new, "forge2-18dae2", "");
-    env.json(
-        &old,
-        &["retire", "--successor", "forge2", "--reason", "superseded"],
-    );
-    for path in [&old, &new] {
-        git(&env, path, &["add", "-A"]);
-        git(&env, path, &["commit", "-qm", "seed records"]);
-    }
-    env.json(&old, &["rename", "forge", "forge1"]);
-    env.json(&old, &["commit", "--project", "forge1"]);
-    env.json(&new, &["rename", "forge2", "forge"]);
-    let out = env.json(&new, &["commit", "--project", "forge"]);
-    assert!(
-        out["warnings"].as_array().unwrap().iter().any(|w| w
-            .as_str()
-            .unwrap()
-            .contains("tasks commit --project forge1 tasks/.config.toml")),
-        "{out}"
-    );
-    assert_eq!(git(&env, &new, &["status", "--porcelain"]), "");
-    assert!(!git(&env, &old, &["status", "--porcelain"]).is_empty());
-    env.json(
-        &old,
-        &[
-            "commit",
-            "--project",
-            "forge1",
-            "tasks/.config.toml",
-            "-m",
-            "chore: update successor",
-        ],
-    );
-    assert_eq!(git(&env, &old, &["status", "--porcelain"]), "");
-    assert_handoff_routing(&env, &new, &old);
 }
 
 #[test]
@@ -1232,4 +1261,358 @@ fn prefix_handoff_refuses_a_later_generation_rename_without_losing_historical_ro
         assert_eq!(registry(&f.env), before);
     }
     assert_handoff_routing(&f.env, &f.new, &f.old);
+}
+
+fn alias_config(path: &Path, alias: &str) {
+    let mut cfg = config(path);
+    cfg.as_table_mut().unwrap().insert(
+        "predecessor".into(),
+        toml::Value::try_from(
+            serde_json::json!({"prefix":"forge1", "successor_alias":alias, "suffixes":[]}),
+        )
+        .unwrap(),
+    );
+    std::fs::write(
+        path.join("tasks/.config.toml"),
+        toml::to_string(&cfg).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn predecessor_successor_alias_validates() {
+    let mut env = TestEnv::new();
+    let current = env.init("forge");
+    for alias in [None, Some("BAD"), Some("forge"), Some("forge1")] {
+        let mut cfg = config(&current);
+        let mut pred = toml::toml! { prefix = "forge1" suffixes = [] };
+        if let Some(alias) = alias {
+            pred.insert("successor_alias".into(), alias.into());
+        }
+        cfg.as_table_mut()
+            .unwrap()
+            .insert("predecessor".into(), pred.into());
+        std::fs::write(
+            current.join("tasks/.config.toml"),
+            toml::to_string(&cfg).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            env.fail(&current, &["init", "--prefix", "forge", "--force"]),
+            "config",
+            "{alias:?}"
+        );
+    }
+    alias_config(&current, "forge2");
+    env.json(&current, &["init", "--prefix", "forge", "--force"]);
+    assert_eq!(registry(&env)["aliases"]["forge2"].as_str(), Some("forge"));
+    let mut cfg = config(&current);
+    cfg["predecessor"]
+        .as_table_mut()
+        .unwrap()
+        .insert("unknown".into(), true.into());
+    std::fs::write(
+        current.join("tasks/.config.toml"),
+        toml::to_string(&cfg).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        env.fail(&current, &["init", "--prefix", "forge", "--force"]),
+        "config"
+    );
+}
+
+#[test]
+fn succession_alias_admission_is_atomic() {
+    for detached in [false, true] {
+        for conflict in ["identical", "alias", "live", "group", "ownership"] {
+            let mut env = TestEnv::new();
+            let base = tempfile::tempdir().unwrap();
+            let code = base.path().join("code");
+            let records = base.path().join("records");
+            repo(&env, &code);
+            repo(&env, &records);
+            let other = env.init("other");
+            let current = if detached {
+                records.join("forge")
+            } else {
+                code.clone()
+            };
+            std::fs::create_dir_all(current.join("tasks")).unwrap();
+            std::fs::write(
+                current.join("tasks/.config.toml"),
+                if detached {
+                    format!(
+                        "prefix = \"forge\"\n[checkout]\npath = {:?}\nkind = \"detached\"\n",
+                        code
+                    )
+                } else {
+                    "prefix = \"forge\"\n".into()
+                },
+            )
+            .unwrap();
+            alias_config(&current, "forge2");
+            let mut reg = registry(&env);
+            match conflict {
+                "identical" => {
+                    reg["projects"]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert("forge".into(), code.to_str().unwrap().into());
+                    reg.as_table_mut()
+                        .unwrap()
+                        .insert("aliases".into(), toml::toml! { forge2 = "forge" }.into());
+                }
+                "alias" => {
+                    reg.as_table_mut()
+                        .unwrap()
+                        .insert("aliases".into(), toml::toml! { forge2 = "other" }.into());
+                }
+                "live" => {
+                    reg["projects"]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert("forge2".into(), other.to_str().unwrap().into());
+                }
+                "group" => {
+                    reg.as_table_mut()
+                        .unwrap()
+                        .insert("groups".into(), toml::toml! { forge2 = ["other"] }.into());
+                }
+                "ownership" => {
+                    reg.as_table_mut().unwrap().insert("predecessors".into(), toml::toml! { [other] prefix = "forge1" successor_alias = "older" suffixes = [] }.into());
+                    reg.as_table_mut()
+                        .unwrap()
+                        .insert("aliases".into(), toml::toml! { older = "other" }.into());
+                }
+                _ => unreachable!(),
+            }
+            let reg_path = env.home.path().join(".config/tasks/projects.toml");
+            std::fs::write(&reg_path, toml::to_string(&reg).unwrap()).unwrap();
+            let before_config = std::fs::read(current.join("tasks/.config.toml")).unwrap();
+            let before_registry = std::fs::read(&reg_path).unwrap();
+            let mut args = vec!["init", "--prefix", "forge"];
+            if detached {
+                args.extend(["--records", records.to_str().unwrap()]);
+            }
+            let out = env.cmd(&code).args(&args).output().unwrap();
+            if conflict == "identical" {
+                assert!(out.status.success(), "{detached}/{conflict}: {out:?}");
+                assert_eq!(registry(&env)["aliases"]["forge2"].as_str(), Some("forge"));
+            } else {
+                assert!(!out.status.success(), "{detached}/{conflict}: {out:?}");
+                assert_eq!(
+                    std::fs::read(current.join("tasks/.config.toml")).unwrap(),
+                    before_config
+                );
+                assert_eq!(std::fs::read(reg_path).unwrap(), before_registry);
+                assert!(
+                    !env.home
+                        .path()
+                        .join(".local/state/tasks/rename/forge.toml")
+                        .exists()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn succession_alias_pairing_is_diagnosed_and_repaired() {
+    let f = Handoff::new();
+    f.step1();
+    f.env.json(&f.new, &["rename", "forge2", "forge"]);
+    f.env.json(&f.new, &["commit", "--project", "forge"]);
+    for location in [&f.new, &f.records.join("forge")] {
+        let path = f.env.home.path().join(".config/tasks/projects.toml");
+        let mut reg = registry(&f.env);
+        reg["aliases"].as_table_mut().unwrap().remove("forge2");
+        std::fs::write(&path, toml::to_string(&reg).unwrap()).unwrap();
+        assert_eq!(f.env.fail(location, &["add", "blocked"]), "config");
+        let blocked = f
+            .env
+            .cmd(location)
+            .args(["add", "blocked"])
+            .output()
+            .unwrap();
+        let advice = String::from_utf8_lossy(&blocked.stderr);
+        assert!(
+            advice.contains(&format!("--records {}", f.records.display())),
+            "{advice}"
+        );
+        assert!(
+            advice.contains(&format!("run in {}", f.new.display())),
+            "{advice}"
+        );
+        let out = f.env.cmd(location).arg("check").output().unwrap();
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("predecessor_registry_mismatch"),
+            "{out:?}"
+        );
+        f.env.json(
+            location,
+            &[
+                "-C",
+                f.new.to_str().unwrap(),
+                "init",
+                "--prefix",
+                "forge",
+                "--records",
+                f.records.to_str().unwrap(),
+                "--force",
+            ],
+        );
+        assert_eq!(
+            registry(&f.env)["aliases"]["forge2"].as_str(),
+            Some("forge")
+        );
+        let mut reg = registry(&f.env);
+        reg["aliases"]["forge2"] = "forge1".into();
+        std::fs::write(&path, toml::to_string(&reg).unwrap()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let config_path = f.records.join("forge/tasks/.config.toml");
+        let before_config = std::fs::read(&config_path).unwrap();
+        assert_eq!(
+            f.env.fail(
+                location,
+                &[
+                    "-C",
+                    f.new.to_str().unwrap(),
+                    "init",
+                    "--prefix",
+                    "forge",
+                    "--records",
+                    f.records.to_str().unwrap(),
+                    "--force"
+                ]
+            ),
+            "config"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(std::fs::read(config_path).unwrap(), before_config);
+        reg["aliases"]["forge2"] = "forge".into();
+        std::fs::write(&path, toml::to_string(&reg).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn prefix_handoff_freezes_successor_alias() {
+    let f = Handoff::new();
+    f.step1();
+    f.env
+        .cmd(&f.new)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "forge2", "forge"])
+        .assert()
+        .success();
+    let journal = f
+        .env
+        .home
+        .path()
+        .join(".local/state/tasks/rename/forge2.toml");
+    let original = std::fs::read_to_string(&journal).unwrap();
+    let inv: toml::Value = toml::from_str(&original).unwrap();
+    let payload: toml::Value = toml::from_str(inv["config_payload"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        payload["predecessor"]["successor_alias"].as_str(),
+        Some("forge2")
+    );
+    let mut changed = inv.clone();
+    let payload = inv["config_payload"].as_str().unwrap().replace(
+        "successor_alias = \"forge2\"",
+        "successor_alias = \"wrong\"",
+    );
+    use sha2::{Digest, Sha256};
+    changed["config_to"] = format!("{:x}", Sha256::digest(payload.as_bytes())).into();
+    changed["config_payload"] = payload.into();
+    std::fs::write(&journal, toml::to_string(&changed).unwrap()).unwrap();
+    assert_eq!(f.env.fail(&f.new, &["rename", "forge2", "forge"]), "config");
+    std::fs::write(&journal, original).unwrap();
+    f.env.json(&f.new, &["rename", "forge2", "forge"]);
+    let receipt = f
+        .env
+        .home
+        .path()
+        .join(".local/state/tasks/rename-commit/forge.toml");
+    let inv: toml::Value = toml::from_str(&std::fs::read_to_string(receipt).unwrap()).unwrap();
+    let payload: toml::Value = toml::from_str(inv["config_payload"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        payload["predecessor"]["successor_alias"].as_str(),
+        Some("forge2")
+    );
+    f.env.json(&f.new, &["commit", "--project", "forge"]);
+}
+
+#[test]
+fn succession_alias_admission_refuses_primary_and_adopt_before_mutation() {
+    for adopt in [false, true] {
+        let f = Handoff::new();
+        let b = TestEnv::new();
+        for (path, prefix) in [(&f.old, "forge"), (&f.new, "forge2")] {
+            b.json(
+                path,
+                &[
+                    "init",
+                    "--prefix",
+                    prefix,
+                    "--records",
+                    f.records.to_str().unwrap(),
+                ],
+            );
+        }
+        f.step1();
+        let env = if adopt {
+            f.env.json(&f.new, &["rename", "forge2", "forge"]);
+            f.env.json(&f.new, &["commit", "--project", "forge"]);
+            b.json(&f.old, &["rename", "forge", "forge1", "--adopt"]);
+            &b
+        } else {
+            &f.env
+        };
+        let registry_path = env.home.path().join(".config/tasks/projects.toml");
+        let mut reg = registry(env);
+        reg["projects"].as_table_mut().unwrap().insert(
+            "other".into(),
+            f._base.path().join("missing").to_str().unwrap().into(),
+        );
+        reg.as_table_mut()
+            .unwrap()
+            .entry("predecessors")
+            .or_insert(toml::Value::Table(Default::default()))
+            .as_table_mut()
+            .unwrap()
+            .insert(
+                "other".into(),
+                toml::toml! { prefix = "older" successor_alias = "forge2" suffixes = [] }.into(),
+            );
+        std::fs::write(&registry_path, toml::to_string(&reg).unwrap()).unwrap();
+        let source = f.records.join(if adopt { "forge" } else { "forge2" });
+        let config_path = source.join("tasks/.config.toml");
+        let pred_path = f.records.join("forge1/tasks/.config.toml");
+        let before = [
+            std::fs::read(&registry_path).unwrap(),
+            std::fs::read(&config_path).unwrap(),
+            std::fs::read(&pred_path).unwrap(),
+        ];
+        let mut args = vec!["rename", "forge2", "forge"];
+        if adopt {
+            args.push("--adopt");
+        }
+        let out = env.cmd(&f.new).args(args).output().unwrap();
+        assert!(!out.status.success(), "adopt={adopt}: {out:?}");
+        assert_eq!(
+            before,
+            [
+                std::fs::read(registry_path).unwrap(),
+                std::fs::read(config_path).unwrap(),
+                std::fs::read(pred_path).unwrap()
+            ]
+        );
+        assert!(
+            !env.home
+                .path()
+                .join(".local/state/tasks/rename/forge2.toml")
+                .exists()
+        );
+    }
 }

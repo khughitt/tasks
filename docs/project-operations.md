@@ -202,8 +202,9 @@ its former detached records path must have no uncommitted deletions or additions
 The two generations' six-hex suffixes must be disjoint; a collision refuses with
 both IDs before any files change.
 
-Step 2 freezes the predecessor suffixes in the successor's `[predecessor]` config
-and the host registry's `[predecessors.forge]`, and updates the retired config's
+Step 2 freezes the predecessor prefix `forge1`, successor alias `forge2`, and
+predecessor suffixes in the successor's `[predecessor]` config and the host
+registry's `[predecessors.forge]`, installs `forge2 -> forge`, and updates the retired config's
 successor to `forge`. The rename inventory pins both configs' old/new digests;
 rerunning the same rename completes interrupted stages. The receipt verifies the
 predecessor config as well as the renamed task files. In a shared records Git
@@ -223,13 +224,21 @@ Literal `forge-<old-suffix>` IDs route to `forge1`; `forge2-<new-suffix>` routes
 through the host's alias to the current `forge`. `forge2-<old-suffix>` and a bare
 old suffix in the new project remain not found. New task IDs reserve the frozen
 predecessor suffixes, even when `forge1` is unregistered. A fresh host imports the
-predecessor table when pairing the successor; reads of old IDs name the missing
-predecessor until that project is registered.
+predecessor table and its required `successor_alias` when pairing the successor.
+Register the final projects in either order with ordinary `tasks init --prefix
+<p> --records <records-root>` from their checkouts (omit `--records` for in-tree
+records). Reads of old IDs name the missing predecessor until it is registered;
+after both registrations, carried migration links and `tasks check` resolve
+through the imported alias. No manual alias creation is needed.
 
-Current limit: a fresh host does not reconstruct the historical `forge2` alias
-from those two final configs. Carried migration links can therefore fail
-`tasks check` there; a full fresh-host carry cutover is not yet supported.
-Later renames of either generation participating in a handoff also refuse before
+Init, rename and adoption accept an identical alias but refuse a name owned by
+another alias, live project, group or predecessor before changing configs or
+registry. If the shared metadata and host alias disagree, normal opens refuse
+and `tasks check` reports `predecessor_registry_mismatch`. Re-run the appropriate
+`init --force` command above to restore a free or identically owned alias;
+conflicting ownership must be resolved first.
+
+Current limit: later renames of either generation participating in a handoff also refuse before
 mutation, because this single-predecessor format cannot preserve every historical
 literal prefix after another rename.
 
