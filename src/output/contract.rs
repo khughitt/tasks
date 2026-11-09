@@ -216,6 +216,28 @@ pub struct ResolveOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct IdentityRefreshOut {
+    pub results: Vec<RefreshRow>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize, Default)]
+pub struct RefreshRow {
+    pub prefix: String,
+    pub outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<EntrySnapshotRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub changed: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
 /// One input's answer (docs/task-model.md). Fields that do not apply are omitted.
 #[derive(Serialize, Default)]
 pub struct ResolveRow {
@@ -1200,6 +1222,7 @@ pub enum Output {
     Root(RootOut),
     Where(WhereOut),
     Resolve(ResolveOut),
+    IdentityRefresh(IdentityRefreshOut),
     Projects(ProjectsOut),
     Group(GroupOut),
     Groups(GroupsOut),

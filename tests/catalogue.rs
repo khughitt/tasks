@@ -649,3 +649,387 @@ fn rename_carries_profile_shorthand_and_identity() {
         assert_eq!(after[key], before[key], "rename changed {key}");
     }
 }
+
+fn root_identity(env: &TestEnv, layout: &StoreLayout, prefix: &str, text: &str) -> String {
+    let root = layout.code.join(prefix);
+    git(&root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("identity.toml"), text).unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "identity"]);
+    git_text(env, &root, &["rev-parse", "HEAD"])
+}
+
+fn refresh(env: &TestEnv, dir: &Path, args: &[&str], code: i32) -> Value {
+    let out = env
+        .cmd(dir)
+        .args(["identity", "refresh"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(code), "{out:?}");
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+fn config(layout: &StoreLayout, prefix: &str) -> PathBuf {
+    layout.store.join(prefix).join("tasks/.config.toml")
+}
+
+fn snapshot(layout: &StoreLayout, prefix: &str) -> toml::Value {
+    let doc: toml::Value =
+        toml::from_str(&fs::read_to_string(config(layout, prefix)).unwrap()).unwrap();
+    doc["identity"].clone()
+}
+
+#[test]
+fn refresh_reads_the_registered_roots_head() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let commit = root_identity(
+        &env,
+        &layout,
+        "aa",
+        "prefix = 'aa'\nname = 'A'\npurpose = 'Committed'\naliases = ['Alpha']\n",
+    );
+    let root = layout.code.join("aa");
+    let blob = git_text(&env, &root, &["rev-parse", "HEAD:identity.toml"]);
+    let wt = layout.code.join("worktree");
+    git(
+        &root,
+        &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &root, &wt);
+    fs::write(
+        wt.join("identity.toml"),
+        "name = 'C'\npurpose = 'Other branch'\n",
+    )
+    .unwrap();
+    git(&wt, &["add", "identity.toml"]);
+    git(&wt, &["commit", "-qm", "other"]);
+    fs::write(
+        root.join("identity.toml"),
+        "name = 'B'\npurpose = 'Dirty'\n",
+    )
+    .unwrap();
+    let before = fs::read_to_string(config(&layout, "aa")).unwrap();
+    let out = refresh(&env, &wt, &[], 0);
+    let row = &out["results"][0];
+    assert_eq!(row["prefix"], "aa");
+    assert_eq!(row["outcome"], "refreshed");
+    assert_eq!(row["commit"], commit);
+    assert_eq!(row["snapshot"]["blob"], blob);
+    let after = snapshot(&layout, "aa");
+    assert_eq!(after["name"].as_str(), Some("A"));
+    assert_eq!(after["purpose"].as_str(), Some("Committed"));
+    assert_eq!(after["aliases"][0].as_str(), Some("Alpha"));
+    assert_eq!(after["commit"].as_str(), Some(commit.as_str()));
+    let after_text = fs::read_to_string(config(&layout, "aa")).unwrap();
+    assert_eq!(
+        before.split("[identity]").next(),
+        after_text.split("[identity]").next()
+    );
+    assert!(
+        env.pretty(&root, &["identity", "refresh", "aa"])
+            .contains("unchanged")
+    );
+}
+
+#[test]
+fn refresh_refuses_a_mismatched_prefix_and_writes_nothing() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let commit = root_identity(
+        &env,
+        &layout,
+        "aa",
+        "prefix = 'bb'\nname = 'Wrong'\npurpose = 'P'\n",
+    );
+    let before = fs::read(config(&layout, "aa")).unwrap();
+    let out = refresh(&env, &layout.code, &["aa"], 1);
+    assert_eq!(out["results"][0]["outcome"], "error");
+    assert!(
+        out["results"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("identity_prefix_mismatch")
+    );
+    assert_eq!(out["results"][0]["commit"], commit);
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before);
+}
+
+#[test]
+fn refresh_from_seeds_and_refuses_when_committed() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let root = layout.code.join("aa");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["commit", "-qm", "empty", "--allow-empty"]);
+    let seed = layout.code.join("seed.toml");
+    fs::write(&seed, "name = 'Seed'\npurpose = 'Initial'\n").unwrap();
+    let args = ["aa", "--from", seed.to_str().unwrap()];
+    let out = refresh(&env, &layout.code, &args, 0);
+    assert_eq!(out["results"][0]["outcome"], "seeded");
+    assert!(out["results"][0].get("branch").is_none());
+    assert!(out["results"][0].get("commit").is_none());
+    assert_eq!(snapshot(&layout, "aa")["source"].as_str(), Some("seeded"));
+    // Same data is unchanged even when its old timestamp predates this invocation.
+    let path = config(&layout, "aa");
+    let old = fs::read_to_string(&path).unwrap();
+    let timestamp = snapshot(&layout, "aa")["refreshed"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fs::write(&path, old.replace(&timestamp, "2020-01-01T00:00:00Z")).unwrap();
+    let before = fs::read(&path).unwrap();
+    assert_eq!(
+        refresh(&env, &layout.code, &args, 0)["results"][0]["outcome"],
+        "unchanged"
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    root_identity(
+        &env,
+        &layout,
+        "aa",
+        "name = 'Committed'\npurpose = 'Authority'\n",
+    );
+    assert!(
+        refresh(&env, &layout.code, &args, 1)["results"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("identity_committed")
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    // A malformed committed identity is still committed authority: seeding cannot hide it.
+    root_identity(&env, &layout, "aa", "name = 1\n");
+    assert!(
+        refresh(&env, &layout.code, &args, 1)["results"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("identity_committed")
+    );
+    env.usage(
+        &layout.code,
+        &[
+            "identity",
+            "refresh",
+            "--all",
+            "--from",
+            seed.to_str().unwrap(),
+        ],
+    );
+    env.usage(
+        &layout.code,
+        &[
+            "identity",
+            "refresh",
+            "aa",
+            "bb",
+            "--from",
+            seed.to_str().unwrap(),
+        ],
+    );
+}
+
+#[test]
+fn refresh_error_row_carries_branch_and_commit() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered()), ("bb", registered())]);
+    let commit = root_identity(&env, &layout, "aa", "name = 1\npurpose = 'Malformed'\n");
+    root_identity(&env, &layout, "bb", "name = 'Valid'\npurpose = 'P'\n");
+    let before = fs::read(config(&layout, "aa")).unwrap();
+    let out = refresh(&env, &layout.code, &["aa", "bb"], 1);
+    let row = &out["results"][0];
+    assert_eq!(row["outcome"], "error");
+    assert_eq!(row["branch"], "main");
+    assert_eq!(row["commit"], commit);
+    assert!(row["detail"].as_str().unwrap().contains("identity_invalid"));
+    assert!(row["detail"].as_str().unwrap().contains(&commit));
+    assert_eq!(out["results"][1]["outcome"], "refreshed");
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before);
+}
+
+#[test]
+fn refresh_rows_name_branch_and_commit() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let commit = root_identity(&env, &layout, "aa", "name = 'Feature'\npurpose = 'P'\n");
+    let root = layout.code.join("aa");
+    git(&root, &["checkout", "-qb", "feature"]);
+    for outcome in ["refreshed", "unchanged"] {
+        let out = refresh(&env, &layout.code, &["aa"], 0);
+        assert_eq!(out["results"][0]["outcome"], outcome);
+        assert_eq!(out["results"][0]["branch"], "feature");
+        assert_eq!(out["results"][0]["commit"], commit);
+    }
+    let before = fs::read(config(&layout, "aa")).unwrap();
+    git(&root, &["rm", "-q", "identity.toml"]);
+    git(&root, &["commit", "-qm", "remove"]);
+    let commit = git_text(&env, &root, &["rev-parse", "HEAD"]);
+    let out = refresh(&env, &layout.code, &["aa"], 0);
+    assert_eq!(out["results"][0]["outcome"], "no_identity");
+    assert_eq!(out["results"][0]["branch"], "feature");
+    assert_eq!(out["results"][0]["commit"], commit);
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before);
+}
+
+#[test]
+fn refresh_on_detached_head_is_root_detached() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'N'\npurpose = 'P'\n");
+    git(&layout.code.join("aa"), &["checkout", "-q", "--detach"]);
+    let before = fs::read(config(&layout, "aa")).unwrap();
+    let row = &refresh(&env, &layout.code, &["aa"], 1)["results"][0];
+    assert_eq!(row["outcome"], "error");
+    assert!(row["detail"].as_str().unwrap().contains("root_detached"));
+    assert!(row.get("branch").is_none());
+    assert!(row.get("commit").is_none());
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before);
+}
+
+#[test]
+fn refresh_all_commits_once_per_repository() {
+    let env = TestEnv::new();
+    let spec = || EntrySpec {
+        registered: true,
+        extra: "[git]\ncommit = true\n",
+    };
+    let layout = store_env(&env, &[("aa", spec()), ("bb", spec())]);
+    root_identity(&env, &layout, "aa", "name = 'A'\npurpose = 'P'\n");
+    root_identity(&env, &layout, "bb", "name = 'B'\npurpose = 'P'\n");
+    let before = git_text(&env, &layout.store, &["rev-parse", "HEAD"]);
+    let out = refresh(&env, &layout.code, &["--all"], 0);
+    assert_eq!(out["results"].as_array().unwrap().len(), 2);
+    assert_eq!(out["warnings"], json!([]));
+    let range = format!("{before}..HEAD");
+    assert_eq!(
+        git_text(&env, &layout.store, &["rev-list", "--count", &range]),
+        "1"
+    );
+    assert_eq!(
+        git_text(
+            &env,
+            &layout.store,
+            &["show", "--format=%s", "--name-only", "HEAD"]
+        ),
+        "chore(tasks): refresh identity snapshot for aa, bb\n\naa/tasks/.config.toml\nbb/tasks/.config.toml"
+    );
+    assert!(git_text(&env, &layout.store, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn refresh_all_reports_a_gone_root_as_unreachable() {
+    let env = TestEnv::new();
+    let layout = store_env(
+        &env,
+        &[(
+            "aa",
+            EntrySpec {
+                registered: true,
+                extra: "[retired]\nreason = 'Retired'\nat = '2026-01-01T00:00:00Z'\n",
+            },
+        )],
+    );
+    fs::remove_dir(layout.code.join("aa")).unwrap();
+    let out = refresh(&env, &layout.code, &["--all"], 0);
+    assert_eq!(out["results"][0]["prefix"], "aa");
+    assert_eq!(out["results"][0]["outcome"], "unreachable");
+    assert!(out["results"][0].get("branch").is_none());
+}
+
+#[test]
+fn refresh_a_linked_project_from_its_overlay() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    linked_snapshot(&env, &layout);
+    let overlay = layout.store.join("aa");
+    fs::write(
+        overlay.join("identity.toml"),
+        "name = 'Updated overlay'\npurpose = 'Authority'\n",
+    )
+    .unwrap();
+    git(&layout.store, &["add", "aa/identity.toml"]);
+    git(&layout.store, &["commit", "-qm", "overlay update"]);
+    let out = refresh(&env, &layout.code.join("aa"), &[], 0);
+    assert_eq!(out["results"][0]["outcome"], "refreshed");
+    assert_eq!(
+        snapshot(&layout, "aa")["name"].as_str(),
+        Some("Updated overlay")
+    );
+    assert_eq!(
+        snapshot(&layout, "aa")["blob"].as_str(),
+        Some(git_text(&env, &overlay, &["rev-parse", "HEAD:./identity.toml"]).as_str())
+    );
+}
+
+#[test]
+fn refresh_without_git_commit_writes_and_leaves_it_uncommitted() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'Uncommitted'\npurpose = 'P'\n");
+    let before = git_text(&env, &layout.store, &["rev-parse", "HEAD"]);
+    refresh(&env, &layout.code, &["aa"], 0);
+    assert_eq!(
+        snapshot(&layout, "aa")["name"].as_str(),
+        Some("Uncommitted")
+    );
+    assert_eq!(
+        git_text(&env, &layout.store, &["rev-parse", "HEAD"]),
+        before
+    );
+    assert_eq!(
+        git_text(&env, &layout.store, &["status", "--porcelain"]).trim(),
+        "M aa/tasks/.config.toml"
+    );
+}
+
+#[test]
+fn refresh_keeps_the_snapshot_when_only_head_changes() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'N'\npurpose = 'P'\n");
+    refresh(&env, &layout.code, &["aa"], 0);
+    let path = config(&layout, "aa");
+    let old = fs::read_to_string(&path).unwrap();
+    let timestamp = snapshot(&layout, "aa")["refreshed"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fs::write(&path, old.replace(&timestamp, "2020-01-01T00:00:00Z")).unwrap();
+    let before = fs::read(&path).unwrap();
+    let root = layout.code.join("aa");
+    git(&root, &["commit", "-qm", "unrelated", "--allow-empty"]);
+    let out = refresh(&env, &layout.code, &["aa"], 0);
+    assert_eq!(out["results"][0]["outcome"], "unchanged");
+    assert_eq!(
+        out["results"][0]["commit"],
+        git_text(&env, &root, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn refresh_from_resolves_a_relative_file_under_chdir() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    let root = layout.code.join("aa");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["commit", "-qm", "empty", "--allow-empty"]);
+    fs::write(
+        root.join("seed.toml"),
+        "name = 'Local seed'\npurpose = 'P'\n",
+    )
+    .unwrap();
+    let out = env.json(
+        &layout.code,
+        &[
+            "-C",
+            root.to_str().unwrap(),
+            "identity",
+            "refresh",
+            "--from",
+            "seed.toml",
+        ],
+    );
+    assert_eq!(out["results"][0]["outcome"], "seeded");
+    assert_eq!(snapshot(&layout, "aa")["name"].as_str(), Some("Local seed"));
+}

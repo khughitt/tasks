@@ -156,6 +156,23 @@ fn main() {
         to_stderr(&usage_error(&error));
         std::process::exit(2);
     }
+    if let cli::Command::Identity {
+        action:
+            cli::IdentityAction::Refresh {
+                prefixes,
+                from: Some(_),
+                ..
+            },
+    } = &cli.command
+        && prefixes.len() > 1
+    {
+        let error = cli::Cli::command().error(
+            clap::error::ErrorKind::ArgumentConflict,
+            "--from accepts at most one prefix",
+        );
+        to_stderr(&usage_error(&error));
+        std::process::exit(2);
+    }
     let format = match Format::resolve(
         cli.json,
         cli.pretty,
@@ -401,6 +418,11 @@ fn main() {
             to_stderr(&warnings);
             if let output::Output::Check(check) = &out
                 && !check.errors.is_empty()
+            {
+                std::process::exit(1);
+            }
+            if let output::Output::IdentityRefresh(refresh) = &out
+                && refresh.results.iter().any(|row| row.outcome == "error")
             {
                 std::process::exit(1);
             }

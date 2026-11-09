@@ -65,6 +65,36 @@ registry metadata only: it never reads task records, writes or takes mutation
 locks. Without `--freshness`, it runs no git except the existing fallback for an
 unregistered path.
 
+## Identity snapshots
+
+`tasks identity refresh [<prefix>...]` refreshes records-entry snapshots from each
+registered root's committed `identity.toml`. With no prefix it selects the current
+project; rename aliases select their live prefix. `--all` selects every registered
+project, reporting missing roots as `unreachable`. The registered root supplies the
+identity even when invoked from a worktree or linked code checkout; linked projects
+use the overlay's identity, relative to its directory within the repository.
+
+The source is pinned to one captured HEAD commit and blob, never working files.
+Malformed identities produce `identity_invalid`, a declared different prefix produces
+`identity_prefix_mismatch`, and detached root HEAD produces `root_detached`; none
+replaces the snapshot. No committed identity gives `no_identity`, preserving any
+snapshot. `--from <file>` seeds one project only, with `source = "seeded"`, and refuses
+`identity_committed` if the root has a committed identity, even a malformed one.
+
+Only `[identity]` is replaced, preserving other config text. An unchanged identity
+keeps its bytes and refresh timestamp; a HEAD move with the same identity blob also
+keeps the original snapshot provenance. Each records repository is locked across its
+batch and receives one commit for changed configs opting into `[git] commit`, with
+subject `chore(tasks): refresh identity snapshot for <prefixes>`. Configs without
+that switch remain uncommitted; commit failures/deferred commits are warnings.
+
+JSON returns `results` and `warnings`. Each row has `prefix` and `outcome`
+(`refreshed`, `unchanged`, `seeded`, `no_identity`, `unreachable` or `error`), plus
+snapshot metadata, changed fields and error detail when applicable. Every row that
+read HEAD carries `branch` and `commit`, including later failures; `seeded`,
+`unreachable` and failures before HEAD omit them. All requested projects are attempted,
+and any `error` row makes the command exit 1.
+
 ## Detached pairing and relocation
 
 Remove in-tree tasks/config from working tree and index before detached init;

@@ -280,6 +280,18 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             }
         },
 
+        Output::IdentityRefresh(o) => o
+            .results
+            .iter()
+            .map(|row| {
+                let mut fields = vec![row.prefix.clone(), row.outcome.into()];
+                fields.extend(row.branch.iter().cloned());
+                fields.extend(row.commit.iter().cloned());
+                fields.extend(row.detail.iter().cloned());
+                fields.join("  ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::Resolve(o) => o
             .results
             .iter()

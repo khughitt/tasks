@@ -595,6 +595,11 @@ pub enum Command {
         #[arg(long)]
         freshness: bool,
     },
+    /// The identity snapshot in each records entry.
+    Identity {
+        #[command(subcommand)]
+        action: IdentityAction,
+    },
     /// Create a task.
     Add {
         title: String,
@@ -1184,6 +1189,22 @@ pub enum Command {
         /// The default and only scope; accepted for consistency with other read commands.
         #[arg(long)]
         all_projects: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IdentityAction {
+    /// Refresh records-entry identity snapshots from each registered root's committed identity.toml.
+    Refresh {
+        /// Registered prefixes or rename aliases; the current project when omitted.
+        #[arg(add = ArgValueCandidates::new(crate::complete::prefixes), conflicts_with = "all")]
+        prefixes: Vec<String>,
+        /// Refresh every registered project; report absent roots as unreachable.
+        #[arg(long)]
+        all: bool,
+        /// Seed one project from an identity-shaped file when no committed identity exists.
+        #[arg(long, value_name = "PATH", conflicts_with = "all")]
+        from: Option<PathBuf>,
     },
 }
 

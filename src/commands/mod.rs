@@ -16,6 +16,7 @@ pub mod feedback;
 pub mod goals;
 pub mod graph;
 pub mod group;
+pub mod identity;
 pub mod init;
 pub mod lanes;
 pub mod list;
@@ -133,6 +134,13 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             all,
             freshness,
         } => resolver::run(inputs, stdin, all, freshness, dir),
+        Command::Identity { action } => match action {
+            crate::cli::IdentityAction::Refresh {
+                prefixes,
+                all,
+                from,
+            } => identity::run(prefixes, all, from.as_deref(), dir),
+        },
         Command::Add {
             title,
             status,

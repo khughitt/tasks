@@ -330,6 +330,18 @@ registry-wide enumeration nor bare suffixes. Completion errors remain silent.
 
 ## Project locations
 
+`tasks identity refresh [<prefix>...]` writes each entry's snapshot from its
+registered root's committed `identity.toml`, including when run from a worktree.
+No prefix selects the current project; rename aliases are accepted. `--all` takes
+every registered prefix and reports absent roots as `unreachable`. Linked projects
+use the overlay's committed identity. `--from <file>` seeds one project only, and
+refuses `identity_committed` if the root already has a committed identity. A malformed
+source, prefix mismatch or detached root HEAD gives an error without replacing the
+snapshot. An unchanged identity keeps its timestamp. Writes preserve unrelated config
+text and use one lock/commit per records repository, committing only configs whose
+`[git] commit` is enabled. Rows report branch/commit after HEAD was read (except
+`seeded`); every requested project is attempted, and any `error` row exits 1.
+
 `tasks resolve --all` lists registered and discovered records-entry prefixes in
 prefix order; discovered-only entries keep status `unregistered`. Enumeration keeps
 literal keys while explicit inputs still follow rename aliases. A readable

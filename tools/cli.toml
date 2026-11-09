@@ -396,6 +396,19 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["identity"]
+summary = "The identity snapshot in each records entry"
+
+[[cli.tasks.commands]]
+path = ["identity", "refresh"]
+summary = "Refresh records-entry identity snapshots from each registered root's committed identity.toml"
+args = [{ name = "prefixes", value = "string", required = false, variadic = true }]
+options = [
+  { shared = "all", value = "none" },
+  { names = ["--from"], value = "path" },
+]
+
+[[cli.tasks.commands]]
 path = ["add"]
 verb = "add"
 summary = "Create a task"
