@@ -91,8 +91,11 @@ snapshot. `--from <file>` seeds one project only, with `source = "seeded"`, and 
 
 Only `[identity]` is replaced, preserving other config text. An unchanged identity
 keeps its bytes and refresh timestamp; a HEAD move with the same identity blob also
-keeps the original snapshot provenance. Each records repository is locked across its
-batch and receives one commit for changed configs opting into `[git] commit`, with
+keeps the original snapshot provenance. Refresh first holds the canonical project
+mutation locks in prefix order, reloads/revalidates registration and refuses pending
+lifecycle operations. Changed registration or alias routing while waiting gives an
+explicit retry error. Each records repository is then locked across its batch and
+receives one commit for changed configs opting into `[git] commit`, with
 subject `chore(tasks): refresh identity snapshot for <prefixes>`. Configs without
 that switch remain uncommitted; commit failures/deferred commits are warnings.
 

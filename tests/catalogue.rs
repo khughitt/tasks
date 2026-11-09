@@ -1334,3 +1334,139 @@ fn refresh_from_resolves_a_relative_file_under_chdir() {
     assert_eq!(out["results"][0]["outcome"], "seeded");
     assert_eq!(snapshot(&layout, "aa")["name"].as_str(), Some("Local seed"));
 }
+
+#[test]
+fn refresh_waits_for_the_project_mutation_lock_before_writing() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'Updated'\npurpose = 'P'\n");
+    let path = config(&layout, "aa");
+    let before = fs::read(&path).unwrap();
+    let lock = common::hold_project_lock(&env, "aa");
+    let mut child = env
+        .raw(&layout.code)
+        .args(["identity", "refresh", "aa"])
+        .spawn()
+        .unwrap();
+    let finished_while_locked = common::wait_bounded(&mut child, Duration::from_millis(500));
+    let while_locked = fs::read(&path).unwrap();
+    drop(lock);
+    let out = common::reap(child, Duration::from_secs(5))
+        .expect("refresh did not resume after releasing project lock");
+    assert!(
+        !finished_while_locked,
+        "refresh ignored the held project lock: {out:?}"
+    );
+    assert_eq!(
+        while_locked, before,
+        "snapshot changed under another writer's project lock"
+    );
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(snapshot(&layout, "aa")["name"].as_str(), Some("Updated"));
+}
+
+#[test]
+fn refresh_rejects_a_pending_rename_without_breaking_its_inventory() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'Updated'\npurpose = 'P'\n");
+    let stopped = env
+        .raw(&layout.code.join("aa"))
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "aa", "bb"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    let inventory = env.home.path().join(".local/state/tasks/rename/aa.toml");
+    let inventory_before = fs::read(&inventory).expect("rename saved its inventory");
+    let before = fs::read(config(&layout, "aa")).unwrap();
+    let out = env
+        .cmd(&layout.code)
+        .args(["identity", "refresh", "aa"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let row = &value["results"][0];
+    assert_eq!(row["outcome"], "error");
+    assert!(
+        row["detail"].as_str().unwrap().contains("validation:"),
+        "{row}"
+    );
+    assert!(
+        row["detail"].as_str().unwrap().contains("unfinished"),
+        "{row}"
+    );
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before);
+    assert_eq!(fs::read(&inventory).unwrap(), inventory_before);
+    let resumed = env.json(&layout.code.join("aa"), &["rename", "aa", "bb"]);
+    assert_eq!(resumed["prefix"], "bb");
+    assert!(!inventory.exists(), "rename did not finish recovery");
+    assert!(config(&layout, "bb").exists());
+}
+
+#[test]
+fn refresh_refuses_an_alias_that_changed_while_waiting_for_its_project_lock() {
+    let env = TestEnv::new();
+    let layout = store_env(&env, &[("aa", registered()), ("bb", registered())]);
+    root_identity(&env, &layout, "aa", "name = 'A'\npurpose = 'P'\n");
+    root_identity(&env, &layout, "bb", "name = 'B'\npurpose = 'P'\n");
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry
+        .as_table_mut()
+        .unwrap()
+        .insert("aliases".into(), toml::toml! { old = "aa" }.into());
+    fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    let before_a = fs::read(config(&layout, "aa")).unwrap();
+    let before_b = fs::read(config(&layout, "bb")).unwrap();
+    let lock = common::hold_project_lock(&env, "aa");
+    let lock_path = env.claim_store("aa").with_file_name("aa.lock");
+    let mut child = env
+        .raw(&layout.code)
+        .args(["identity", "refresh", "old"])
+        .spawn()
+        .unwrap();
+    // Observing its open lock fd makes the registration change deterministic:
+    // the child has resolved old -> aa and is waiting on our held lock.
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let reached_lock = loop {
+        let awaiting = fs::read_dir(format!("/proc/{}/fd", child.id())).is_ok_and(|fds| {
+            fds.filter_map(std::result::Result::ok)
+                .any(|fd| fs::read_link(fd.path()).is_ok_and(|path| path == lock_path))
+        });
+        if awaiting {
+            break true;
+        }
+        if child.try_wait().unwrap().is_some() || std::time::Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if reached_lock {
+        registry["aliases"]["old"] = "bb".into();
+        fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    }
+    drop(lock);
+    let out =
+        common::reap(child, Duration::from_secs(5)).expect("refresh did not leave its stale lock");
+    assert!(
+        reached_lock,
+        "refresh never waited on the resolved project lock: {out:?}"
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let row = &value["results"][0];
+    assert_eq!(row["outcome"], "error");
+    assert!(row["detail"].as_str().unwrap().contains("config:"), "{row}");
+    assert!(
+        row["detail"]
+            .as_str()
+            .unwrap()
+            .contains("changed while acquiring"),
+        "{row}"
+    );
+    assert_eq!(fs::read(config(&layout, "aa")).unwrap(), before_a);
+    assert_eq!(fs::read(config(&layout, "bb")).unwrap(), before_b);
+}

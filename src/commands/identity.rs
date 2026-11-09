@@ -20,6 +20,9 @@ pub enum RefreshKind {
 }
 
 /// Refresh one entry without committing it (init's configuration-write contract).
+/// Caller must hold its canonical project MutationLock, revalidate the registration
+/// and reject pending operations (init already does so). Acquire only the records
+/// lock here: acquiring the caller's project lock again would deadlock.
 /// The command holds one records lock across a repository's entire batch instead.
 pub fn refresh(registry: &Registry, project: &Project, now: &str) -> Result<RefreshReport> {
     let _lock = crate::record_commit::try_lock(&project.records).map_err(Error::Io)?;
@@ -200,12 +203,40 @@ pub fn run(
     } else {
         prefixes
     };
+    let requested = prefixes;
     let mut seen = BTreeSet::new();
-    let prefixes: Vec<_> = prefixes
+    let prefixes: Vec<_> = requested
         .iter()
         .map(|p| registry.canonical_prefix(p).to_string())
         .filter(|p| seen.insert(p.clone()))
         .collect();
+    let lock_prefixes: BTreeSet<_> = prefixes
+        .iter()
+        .filter(|prefix| registry.project_root(prefix).is_some())
+        .collect();
+    // Match init/rename/retire: canonical project locks precede records locks.
+    // A sorted set also keeps overlapping refresh batches in the same lock order.
+    let _project_locks = lock_prefixes
+        .into_iter()
+        .map(|prefix| crate::claims::MutationLock::acquire(prefix))
+        .collect::<Result<Vec<_>>>()?;
+    let locked_registry = Registry::load()?;
+    let mut changed: BTreeSet<_> = seen
+        .iter()
+        .filter(|prefix| {
+            registry.project_root(prefix) != locked_registry.project_root(prefix)
+                || registry.records_dir(prefix) != locked_registry.records_dir(prefix)
+                || registry.canonical_prefix(prefix) != locked_registry.canonical_prefix(prefix)
+        })
+        .cloned()
+        .collect();
+    for prefix in requested {
+        let locked = registry.canonical_prefix(&prefix);
+        if locked != locked_registry.canonical_prefix(&prefix) {
+            changed.insert(locked.to_string());
+        }
+    }
+    let registry = locked_registry;
     let mut results: Vec<_> = prefixes
         .iter()
         .map(|prefix| RefreshRow {
@@ -216,6 +247,13 @@ pub fn run(
     let mut groups: BTreeMap<PathBuf, Vec<(usize, Project)>> = BTreeMap::new();
     for (index, row) in results.iter_mut().enumerate() {
         let prepared = (|| {
+            if changed.contains(&row.prefix) {
+                return Err(Error::Config(format!(
+                    "project {} changed while acquiring refresh locks; retry",
+                    row.prefix
+                )));
+            }
+            super::reject_pending_operations(registry.project_root(&row.prefix), &row.prefix)?;
             let root = registry.project_root(&row.prefix).ok_or_else(|| {
                 Error::Config(format!("no project registered as {:?}", row.prefix))
             })?;
