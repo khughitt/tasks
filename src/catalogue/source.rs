@@ -104,13 +104,24 @@ fn output_text(output: Output) -> Result<String> {
 }
 
 pub fn freshness(root: &Path, snapshot: Option<&Snapshot>) -> (Freshness, Option<String>) {
+    freshness_with(root, snapshot, &mut |root, args| {
+        crate::git::at(root).args(args).output()
+    })
+}
+
+pub(crate) fn freshness_with(
+    root: &Path,
+    snapshot: Option<&Snapshot>,
+    git: &mut dyn FnMut(&Path, &[&str]) -> std::io::Result<Output>,
+) -> (Freshness, Option<String>) {
     let Some(snapshot) = snapshot else {
         return (Freshness::Unknown, None);
     };
     let current = (|| {
-        let output = crate::git::at(root)
-            .args(["rev-parse", "--verify", "-q", "HEAD:./identity.toml"])
-            .output()?;
+        let output = git(
+            root,
+            &["rev-parse", "--verify", "-q", "HEAD:./identity.toml"],
+        )?;
         if output.status.code() == Some(1) {
             return Ok(None);
         }
@@ -199,6 +210,14 @@ mod tests {
 
         fn read(&self, root: &Path) -> HeadIdentity {
             read_head_with(root, &mut |root, args| self.output(root, args)).unwrap()
+        }
+
+        fn freshness(
+            &self,
+            root: &Path,
+            snapshot: Option<&Snapshot>,
+        ) -> (Freshness, Option<String>) {
+            freshness_with(root, snapshot, &mut |root, args| self.output(root, args))
         }
     }
 
@@ -352,35 +371,69 @@ mod tests {
             refreshed: "now".into(),
         };
         assert_eq!(
-            freshness(repo.root(), Some(&snapshot)),
+            repo.freshness(repo.root(), Some(&snapshot)),
             (Freshness::Current, None)
         );
-        assert_eq!(freshness(repo.root(), None), (Freshness::Unknown, None));
+        assert_eq!(
+            repo.freshness(repo.root(), None),
+            (Freshness::Unknown, None)
+        );
         let missing = repo.root().join("missing");
-        let (state, warning) = freshness(&missing, Some(&snapshot));
+        let (state, warning) = repo.freshness(&missing, Some(&snapshot));
         assert_eq!(state, Freshness::Unknown);
         assert!(warning.is_some());
         let commit = repo.commit_identity(repo.root(), &identity("A"));
         assert_eq!(
-            freshness(repo.root(), Some(&snapshot)),
+            repo.freshness(repo.root(), Some(&snapshot)),
             (Freshness::Behind, None)
         );
         let blob = repo.git(repo.root(), &["rev-parse", "HEAD:identity.toml"]);
         snapshot.source = SnapshotSource::Head { commit, blob };
         assert_eq!(
-            freshness(repo.root(), Some(&snapshot)),
+            repo.freshness(repo.root(), Some(&snapshot)),
             (Freshness::Current, None)
         );
         repo.commit_identity(repo.root(), &identity("B"));
         assert_eq!(
-            freshness(repo.root(), Some(&snapshot)),
+            repo.freshness(repo.root(), Some(&snapshot)),
             (Freshness::Behind, None)
         );
         repo.git(repo.root(), &["rm", "identity.toml"]);
         repo.git(repo.root(), &["commit", "-m", "remove identity"]);
         assert_eq!(
-            freshness(repo.root(), Some(&snapshot)),
+            repo.freshness(repo.root(), Some(&snapshot)),
             (Freshness::Unknown, None)
         );
+    }
+
+    #[test]
+    fn freshness_uses_the_supplied_runner_once() {
+        let repo = Repository::new();
+        let snapshot = Snapshot {
+            name: "N".into(),
+            aliases: vec![],
+            purpose: "P".into(),
+            source: SnapshotSource::Seeded,
+            refreshed: "now".into(),
+        };
+        let mut calls = 0;
+        let mut git = |root: &Path, args: &[&str]| {
+            calls += 1;
+            assert_eq!(root, repo.root());
+            assert_eq!(
+                args,
+                ["rev-parse", "--verify", "-q", "HEAD:./identity.toml"]
+            );
+            repo.output(root, args)
+        };
+        assert_eq!(
+            freshness_with(repo.root(), None, &mut git),
+            (Freshness::Unknown, None)
+        );
+        assert_eq!(
+            freshness_with(repo.root(), Some(&snapshot), &mut git),
+            (Freshness::Current, None)
+        );
+        assert_eq!(calls, 1);
     }
 }
