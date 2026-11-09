@@ -159,12 +159,20 @@ then off. Flags and TASKS_COLOR are validated before precedence; an invalid
 environment setting is not hidden by a valid flag. Auto needs a terminal and
 only styles pretty output. JSON never contains ANSI escapes. Project color is
 used for prefixes and `show`; task ids use its fixed lighter variant. In multi-task
-views, titles fade toward the theme background as recent activity decreases.
+views, activity-aware titles use a shared OKLab lightness range while keeping the
+project hue; chroma decreases where necessary to fit sRGB. On the builtin dark
+palette, title lightness is `0.60 + 0.30a`, where `a` is activity from 0 to 1.
 Activity combines meaningful lifecycle and work events with bounded attention from
 immediate recorded neighbors; it does not change priority or picker order. Direct
 activity has a five-day half-life, with daily burst damping and bookkeeping notes
-excluded. Title fading is at most 35% in OKLab and preserves a 3.5:1 contrast floor;
-project colors already at or below that floor stay unchanged. Unassigned project
+excluded. The scale points toward whichever of black or white contrasts more with
+the theme background (white on a tie), so higher activity normally means lighter
+titles on dark backgrounds and darker titles on light backgrounds. Its cold end
+is adjusted when needed to preserve 3.5:1 contrast after RGB quantization; the hot
+end extends 0.30 lightness toward that ink, bounded by black/white. Unusual
+backgrounds may narrow the available range. IDs retain their fixed project shade;
+titles can be lighter than IDs and need not equal the original project color.
+Unassigned project
 titles stay plain, and activity is absent from JSON. Date recency fades over two
 years; priorities use bold/color scales where available. Missing terminal colors
 produce a warning and plain fallback; a palette without magenta disables only

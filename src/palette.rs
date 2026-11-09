@@ -70,6 +70,33 @@ impl Rgb {
         ])
     }
 
+    /// Preserve hue at a target OKLab lightness, reducing chroma to fit sRGB.
+    pub(crate) fn with_lightness(self, lightness: f64) -> Rgb {
+        debug_assert!((0.0..=1.0).contains(&lightness));
+        if lightness == 0.0 {
+            return Rgb { r: 0, g: 0, b: 0 };
+        }
+        if lightness == 1.0 {
+            return Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            };
+        }
+        let [_, a, b] = to_oklab(self);
+        let (mut fits, mut outside) = (0.0, 1.0);
+        for _ in 0..24 {
+            let chroma = 0.5 * (fits + outside);
+            let linear = linear_rgb_from_oklab([lightness, a * chroma, b * chroma]);
+            if linear.iter().all(|channel| (0.0..=1.0).contains(channel)) {
+                fits = chroma;
+            } else {
+                outside = chroma;
+            }
+        }
+        from_oklab([lightness, a * fits, b * fits])
+    }
+
     /// OKLab lightness, for tests that check a scale's order.
     #[cfg(test)]
     pub fn lightness(self) -> f64 {
@@ -109,14 +136,23 @@ fn to_oklab(color: Rgb) -> [f64; 3] {
     ]
 }
 
-fn from_oklab([l, a, b]: [f64; 3]) -> Rgb {
+fn linear_rgb_from_oklab([l, a, b]: [f64; 3]) -> [f64; 3] {
     let l_ = (l + 0.396_337_777_4 * a + 0.215_803_757_3 * b).powi(3);
     let m_ = (l - 0.105_561_345_8 * a - 0.063_854_172_8 * b).powi(3);
     let s_ = (l - 0.089_484_177_5 * a - 1.291_485_548_0 * b).powi(3);
+    [
+        4.076_741_662_1 * l_ - 3.307_711_591_3 * m_ + 0.230_969_929_2 * s_,
+        -1.268_438_004_6 * l_ + 2.609_757_401_1 * m_ - 0.341_319_396_5 * s_,
+        -0.004_196_086_3 * l_ - 0.703_418_614_7 * m_ + 1.707_614_701_0 * s_,
+    ]
+}
+
+fn from_oklab(lab: [f64; 3]) -> Rgb {
+    let [r, g, b] = linear_rgb_from_oklab(lab);
     Rgb {
-        r: from_linear(4.076_741_662_1 * l_ - 3.307_711_591_3 * m_ + 0.230_969_929_2 * s_),
-        g: from_linear(-1.268_438_004_6 * l_ + 2.609_757_401_1 * m_ - 0.341_319_396_5 * s_),
-        b: from_linear(-0.004_196_086_3 * l_ - 0.703_418_614_7 * m_ + 1.707_614_701_0 * s_),
+        r: from_linear(r),
+        g: from_linear(g),
+        b: from_linear(b),
     }
 }
 
@@ -582,6 +618,36 @@ mod tests {
                 b: 115
             }
         );
+    }
+
+    #[test]
+    fn lightness_fitting_matches_reference_and_neutrals() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/activity-title-mapping.json"
+        ))
+        .unwrap();
+        for row in fixture["gamut_references"].as_array().unwrap() {
+            let base = hex(row["base"].as_str().unwrap());
+            let target = row["lightness"].as_f64().unwrap();
+            let actual = base.with_lightness(target);
+            let expected = hex(row["expected"].as_str().unwrap());
+            for (got, want) in [actual.r, actual.g, actual.b]
+                .into_iter()
+                .zip([expected.r, expected.g, expected.b])
+            {
+                assert!(got.abs_diff(want) <= 1, "{row}: {actual:?}");
+            }
+            assert!((actual.lightness() - target).abs() <= 0.003, "{row}");
+            assert_eq!(base.with_lightness(0.0), hex("#000000"));
+            assert_eq!(base.with_lightness(1.0), hex("#ffffff"));
+        }
+        for base in ["#000000", "#808080", "#ffffff"] {
+            for target in [0.0, 0.25, 0.6, 0.9, 1.0] {
+                let actual = hex(base).with_lightness(target);
+                assert_eq!(actual.r, actual.g, "{base} at {target}");
+                assert_eq!(actual.g, actual.b, "{base} at {target}");
+            }
+        }
     }
 
     #[test]

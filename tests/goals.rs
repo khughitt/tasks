@@ -93,6 +93,72 @@ fn goal_with_child(env: &TestEnv, dir: &Path, title: &str) -> (String, String) {
 }
 
 #[test]
+fn goals_activity_mapping_distinguishes_scores_with_fixed_ids() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        "prefix = \"sci\"\ncolor = \"#123456\"\n",
+    )
+    .unwrap();
+    let (hot, _) = goal_with_child(&env, &dir, "Hot goal");
+    let (cold, child) = goal_with_child(&env, &dir, "Cold goal");
+    for id in [&cold, &child] {
+        for field in ["created", "updated"] {
+            set_field(&dir, id, field, Some("2020-01-01T00:00:00Z"));
+        }
+    }
+    let (closed, piece) = goal_with_child(&env, &dir, "Closed goal");
+    env.json(&dir, &["done", &piece]);
+    env.json(&dir, &["done", &closed]);
+    let output = env
+        .cmd(&dir)
+        .args(["goals", "--closed", "--pretty", "--color", "always"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    // Independent B references: the old contrast-limited mapping left both titles dark.
+    assert!(
+        text.contains("\x1b[38;2;198;225;255mHot goal\x1b[0m"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\x1b[38;2;95;131;170mCold goal\x1b[0m"),
+        "{text}"
+    );
+    for id in [&hot, &cold] {
+        assert!(
+            text.contains(&format!("\x1b[38;2;84;108;135m{id}\x1b[0m")),
+            "{text}"
+        );
+    }
+    assert!(text.contains("\x1b[2mClosed goal\x1b[0m"), "{text}");
+    let mut visible = String::new();
+    let mut sgr = false;
+    for ch in text.chars() {
+        if ch == '\x1b' {
+            sgr = true;
+        } else if sgr {
+            if ch == 'm' {
+                sgr = false;
+            }
+        } else {
+            visible.push(ch);
+        }
+    }
+    assert_eq!(
+        visible,
+        env.pretty(&dir, &["goals", "--closed", "--color", "never"])
+    );
+    let json = goals(&env, &dir, &["--closed"]);
+    for id in [&hot, &cold, &closed] {
+        assert_eq!(row(&json, id)["color"], "#123456");
+        assert!(row(&json, id).get("activity").is_none());
+    }
+}
+
+#[test]
 fn lists_user_and_mixed_goals_only() {
     let mut env = TestEnv::new();
     let aa = env.init("aa");

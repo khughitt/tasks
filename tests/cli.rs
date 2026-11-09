@@ -8747,6 +8747,9 @@ fn strip_ansi(text: &str) -> String {
 // way to white in OKLab, computed outside tasks.
 const SCI_ID: &str = "\x1b[38;2;84;108;135m";
 const DOTS_ID: &str = "\x1b[38;2;196;220;244m";
+// Independent B title references; project prefix/show colors and ID shades stay fixed.
+const SCI_HOT_TITLE: &str = "\x1b[38;2;198;225;255m";
+const DOTS_HOT_TITLE: &str = "\x1b[38;2;197;226;255m";
 
 fn write_project_color(dir: &std::path::Path, prefix: &str, color: &str) {
     std::fs::write(
@@ -8798,11 +8801,11 @@ fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
             assert!(colored.contains("\x1b[2mgone\x1b[0m"), "{colored:?}");
         } else {
             assert!(
-                colored.contains("\x1b[38;2;18;52;86mScience\x1b[0m"),
+                colored.contains(&format!("{SCI_HOT_TITLE}Science\x1b[0m")),
                 "{colored:?}"
             );
             assert!(
-                colored.contains("\x1b[38;2;171;205;239mDotfiles\x1b[0m"),
+                colored.contains(&format!("{DOTS_HOT_TITLE}Dotfiles\x1b[0m")),
                 "{colored:?}"
             );
             assert!(colored.contains(" \x1b[2m[research]\x1b[0m"), "{colored:?}");
@@ -9091,7 +9094,7 @@ fn project_colors_reset_and_resume_on_wrapped_titles() {
             assert!(line.contains("\x1b[2m"), "{line:?}");
         }
         if !visible.trim_start().starts_with("[research]") {
-            assert!(line.contains("\x1b[38;2;18;52;86m"), "{line:?}");
+            assert!(line.contains(SCI_HOT_TITLE), "{line:?}");
         }
         assert!(line.ends_with("\x1b[0m"), "reset before newline: {line:?}");
     }
@@ -25581,7 +25584,7 @@ fn search_rows_carry_the_project_color() {
         .unwrap();
     assert!(out.status.success());
     let colored = String::from_utf8(out.stdout).unwrap();
-    assert!(colored.contains("\x1b[38;2;18;52;86m"), "{colored:?}");
+    assert!(colored.contains(SCI_HOT_TITLE), "{colored:?}");
     assert!(colored.contains(&format!("{SCI_ID}{id}")), "{colored:?}");
     assert!(strip_ansi(&colored).contains("Colored match"));
 }
@@ -25596,7 +25599,7 @@ fn ready_tree_and_prime_rows_carry_the_project_color() {
         &["add", "Child title", "--parent", &goal, "--size", "s"],
     ));
     write_project_color(&sci, "sci", "#123456");
-    let paint = "\x1b[38;2;18;52;86m";
+    let paint = SCI_HOT_TITLE;
     // lanes paints its titles from Task 5, which pins it there.
     for args in [vec!["ready"], vec!["tree"], vec!["prime"]] {
         let mut full = vec!["--pretty", "--color", "always"];
@@ -25671,7 +25674,7 @@ fn parked_rows_paint_ids_in_the_id_shade_and_titles_in_the_project_color() {
         let text = String::from_utf8(out.stdout).unwrap();
         assert!(text.contains(&format!("{SCI_ID}{id}")), "{args:?}: {text}");
         assert!(
-            text.contains("\x1b[38;2;18;52;86mParked"),
+            text.contains(&format!("{SCI_HOT_TITLE}Parked")),
             "{args:?}: {text}"
         );
     }
@@ -25704,7 +25707,7 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
         "{text}"
     );
     write_project_color(&sci, "sci", "#123456");
-    let paint = "\x1b[38;2;18;52;86m";
+    let paint = SCI_HOT_TITLE;
     let out = env
         .cmd(&sci)
         .args(["--pretty", "--color", "always", "lanes"])
@@ -25806,7 +25809,8 @@ fn activity_modulates_titles_across_pretty_views_without_fading_ids_or_show() {
     parks.push_str("reason = \"quiet\"\nminutes = 1\n");
     std::fs::write(store, parks).unwrap();
 
-    let hot_sgr = "\x1b[38;2;171;205;239m";
+    let hot_sgr = DOTS_HOT_TITLE;
+    let base_sgr = "\x1b[38;2;171;205;239m";
     let cases: Vec<(Vec<&str>, &str, &str)> = vec![
         (vec!["list"], &cold, "Cold isolated task"),
         (vec!["search", "task"], &cold, "Cold isolated task"),
@@ -25862,7 +25866,7 @@ fn activity_modulates_titles_across_pretty_views_without_fading_ids_or_show() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(
         title_sgr(&text, "Cold isolated task"),
-        hot_sgr,
+        base_sgr,
         "show stays unmodulated"
     );
 
@@ -25981,7 +25985,7 @@ fn activity_prime_uses_each_claimed_rows_own_checkout() {
     let text = String::from_utf8(out.stdout).unwrap();
     for title in ["Active in checkout X", "Active in checkout Y"] {
         assert!(
-            text.contains(&format!("\x1b[38;2;171;205;239m{title}")),
+            text.contains(&format!("{DOTS_HOT_TITLE}{title}")),
             "{title} must use its own hot record, independent of scan order: {text:?}"
         );
     }

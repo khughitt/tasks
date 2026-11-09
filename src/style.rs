@@ -75,7 +75,7 @@ pub enum Style {
         activity: Activity,
     },
     Project(Rgb),
-    /// A task id: its project's colour, lightened so it reads apart from the title beside it.
+    /// A task id: its fixed project shade toward white, independent of title activity.
     Id(Rgb),
     Status(Status),
     Chrome,
@@ -172,49 +172,59 @@ impl PriorityScale {
     }
 }
 
-/// Maximum fraction a cold (`Activity::COLD`) title fades toward the background in OKLab.
-const MAX_COLD_FADE: f64 = 0.35;
-/// Minimum WCAG relative-luminance contrast ratio preserved against the background when fading.
-const MIN_COLD_CONTRAST: f64 = 3.5;
+const COLD_TITLE_LIGHTNESS: f64 = 0.60;
+const TITLE_LIGHTNESS_SPAN: f64 = 0.30;
+const MIN_TITLE_CONTRAST: f64 = 3.5;
 
-/// Contrast-bounded OKLab title brightness scale against the run's background color.
+/// Shared OKLab lightness range, directed toward readable ink on the run's background.
 #[derive(Debug, Clone, Copy)]
 pub struct TitleScale {
     bg: Rgb,
+    ink_lightness: f64,
 }
 
 impl TitleScale {
     pub fn new(palette: &Palette) -> TitleScale {
-        TitleScale { bg: palette.bg }
+        let black = Rgb { r: 0, g: 0, b: 0 };
+        TitleScale {
+            bg: palette.bg,
+            ink_lightness: if WHITE.contrast_ratio(palette.bg) >= black.contrast_ratio(palette.bg) {
+                1.0
+            } else {
+                0.0
+            },
+        }
     }
 
-    /// Maximum OKLab mix factor `t` in `[0.0, MAX_COLD_FADE]` toward `self.bg` that keeps
-    /// `base.mix(self.bg, t)` at or above `MIN_COLD_CONTRAST` against `self.bg`.
-    pub fn max_fade(&self, base: Rgb) -> f64 {
-        if base.contrast_ratio(self.bg) <= MIN_COLD_CONTRAST {
-            return 0.0;
+    /// Retain a quantized color that passes contrast while approaching from the target.
+    fn readable(&self, base: Rgb, lightness: f64) -> (f64, Rgb) {
+        let color = base.with_lightness(lightness);
+        if color.contrast_ratio(self.bg) >= MIN_TITLE_CONTRAST {
+            return (lightness, color);
         }
-        if base.mix(self.bg, MAX_COLD_FADE).contrast_ratio(self.bg) >= MIN_COLD_CONTRAST {
-            return MAX_COLD_FADE;
-        }
-        let (mut lo, mut hi) = (0.0, MAX_COLD_FADE);
-        for _ in 0..16 {
-            let mid = 0.5 * (lo + hi);
-            if base.mix(self.bg, mid).contrast_ratio(self.bg) >= MIN_COLD_CONTRAST {
-                lo = mid;
+        let (mut failed, mut passed) = (lightness, self.ink_lightness);
+        let mut color = base.with_lightness(passed);
+        for _ in 0..20 {
+            let mid = 0.5 * (failed + passed);
+            let candidate = base.with_lightness(mid);
+            if candidate.contrast_ratio(self.bg) >= MIN_TITLE_CONTRAST {
+                passed = mid;
+                color = candidate;
             } else {
-                hi = mid;
+                failed = mid;
             }
         }
-        lo
+        (passed, color)
     }
 
     pub fn color(&self, base: Rgb, activity: Activity) -> Rgb {
-        if activity == Activity::HOT {
-            return base;
-        }
-        let fade = self.max_fade(base) * (1.0 - activity.unit());
-        base.mix(self.bg, fade)
+        let (cold, _) = self.readable(base, COLD_TITLE_LIGHTNESS);
+        let hot = if self.ink_lightness == 1.0 {
+            (cold + TITLE_LIGHTNESS_SPAN).min(1.0)
+        } else {
+            (cold - TITLE_LIGHTNESS_SPAN).max(0.0)
+        };
+        self.readable(base, cold + (hot - cold) * activity.unit()).1
     }
 }
 
@@ -587,39 +597,99 @@ mod tests {
         assert!(!off.enabled());
     }
     #[test]
-    fn title_scale_preserves_contrast_floor_across_dark_and_light_backgrounds() {
-        let dark = Palette::BUILTIN;
-        let light = Palette {
-            fg: Rgb::parse_hex("#232136").unwrap(),
-            bg: Rgb::parse_hex("#faf4ed").unwrap(),
-            cyan: Rgb::parse_hex("#286983").unwrap(),
-            magenta: Some(Rgb::parse_hex("#907aa9").unwrap()),
-        };
-
-        for palette in [dark, light] {
+    fn activity_title_scale_covers_palette_edges() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/activity-title-mapping.json"
+        ))
+        .unwrap();
+        let black = Rgb::parse_hex("#000000").unwrap();
+        let white = Rgb::parse_hex("#ffffff").unwrap();
+        for bg in fixture["backgrounds"].as_array().unwrap() {
+            let bg = Rgb::parse_hex(bg.as_str().unwrap()).unwrap();
+            let palette = Palette {
+                bg,
+                ..Palette::BUILTIN
+            };
             let scale = TitleScale::new(&palette);
-            for hex in [
-                "#aa8c0e", "#7995cd", "#ff5e4a", "#8d6803", "#776558", "#abcdef", "#123456",
-            ] {
-                let base = Rgb::parse_hex(hex).unwrap();
-                assert_eq!(scale.color(base, Activity::HOT), base);
-
+            let direction = if white.contrast_ratio(bg) >= black.contrast_ratio(bg) {
+                1.0
+            } else {
+                -1.0
+            };
+            for hex in fixture["colors"].as_array().unwrap() {
+                let base = Rgb::parse_hex(hex.as_str().unwrap()).unwrap();
                 let cold = scale.color(base, Activity::COLD);
-                if base.contrast_ratio(palette.bg) <= MIN_COLD_CONTRAST {
-                    assert_eq!(
-                        cold, base,
-                        "color {hex} already at/below floor on {:?} must not fade further",
-                        palette.bg
-                    );
-                } else {
-                    let ratio = cold.contrast_ratio(palette.bg);
+                let hot = scale.color(base, Activity::HOT);
+                assert!(
+                    (hot.lightness() - cold.lightness()) * direction >= 0.20,
+                    "{hex} on {bg:?}"
+                );
+                let mut previous = cold.lightness();
+                for a in 0..=255 {
+                    let color = scale.color(base, Activity(a));
                     assert!(
-                        ratio >= 3.5,
-                        "cold title for {hex} on {:?} fell below quantized floor: {ratio}",
-                        palette.bg
+                        color.contrast_ratio(bg) >= 3.5,
+                        "{hex} at {a} on {bg:?}: {color:?}"
                     );
+                    let lightness = color.lightness();
+                    assert!(
+                        (lightness - previous) * direction >= -0.002,
+                        "{hex} at {a} on {bg:?}"
+                    );
+                    previous = lightness;
+                }
+                if bg == Palette::BUILTIN.bg {
+                    assert!((cold.lightness() - 0.60).abs() <= 0.003, "{hex}");
+                    assert!((hot.lightness() - 0.90).abs() <= 0.003, "{hex}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn activity_title_scale_matches_captured_goals() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/activity-title-mapping.json"
+        ))
+        .unwrap();
+        let scale = TitleScale::new(&Palette::BUILTIN);
+        let rows = fixture["goals"].as_array().unwrap();
+        assert_eq!(rows.len(), 80);
+        let mut projects: std::collections::BTreeMap<&str, Vec<f64>> =
+            std::collections::BTreeMap::new();
+        for row in rows {
+            let base = Rgb::parse_hex(row["base"].as_str().unwrap()).unwrap();
+            let actual = scale.color(
+                base,
+                Activity(row["activity"].as_u64().unwrap().try_into().unwrap()),
+            );
+            let expected = Rgb::parse_hex(row["expected"].as_str().unwrap()).unwrap();
+            for (got, want) in [actual.r, actual.g, actual.b]
+                .into_iter()
+                .zip([expected.r, expected.g, expected.b])
+            {
+                assert!(got.abs_diff(want) <= 1, "{row}: {actual:?}");
+            }
+            projects
+                .entry(row["project"].as_str().unwrap())
+                .or_default()
+                .push(actual.lightness());
+        }
+        assert_eq!(projects.len(), 19);
+        for (project, expected_span) in [
+            ("ops", 0.2993),
+            ("sci", 0.2003),
+            ("material", 0.0482),
+            ("mind6", 0.2844),
+        ] {
+            let values = &projects[project];
+            let low = values.iter().copied().fold(f64::INFINITY, f64::min);
+            let high = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert!(
+                (high - low - expected_span).abs() <= 0.006,
+                "{project}: {}",
+                high - low
+            );
         }
     }
 
@@ -647,7 +717,7 @@ mod tests {
                 },
                 "Title"
             ),
-            "\x1b[38;2;171;205;239mTitle\x1b[0m"
+            "\x1b[38;2;197;226;255mTitle\x1b[0m"
         );
         let cold_painted = scaled_painter.paint(
             Style::Title {

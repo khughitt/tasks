@@ -248,6 +248,10 @@ Color is opt-in for pretty output and absent from JSON. Set `--color`,
 [configuration](configuration.md#environment-and-precedence). Pretty `show`
 wraps at the terminal width up to 100 columns; piped output is unwrapped.
 In multi-task views, colored titles with more recent direct or neighboring activity
-fade less toward the theme background; IDs keep their fixed project shade. Fading
-is bounded by contrast, so some project colors remain unchanged even when cold.
+move through a shared lightness range. On the builtin dark palette, lightness is
+`0.60 + 0.30a` for activity `a` from 0 to 1. Higher activity normally makes titles
+lighter on dark backgrounds and darker on light backgrounds, keeping at least
+3.5:1 contrast. The project hue is preserved, with reduced chroma where needed;
+unusual backgrounds may limit the range. IDs keep their fixed project shade,
+independently of activity, and active titles can be lighter than IDs.
 Activity affects presentation only; priorities and work selection keep their order.
