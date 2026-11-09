@@ -166,18 +166,22 @@ check that held, in order, and `written` gives the absolute record and segment
 paths. A failed check refuses with `archive_unverified`. The checks are:
 
 - `notes_appended`: the new logical notes are the old notes, unchanged and in
-  order, plus exactly the `attached:` note and the `archived-notes:` receipt (so
-  the attachment ledger gains only the segment).
+  order, plus exactly the `attached:` note and the `archived-notes:` receipt by
+  one author (so the attachment ledger gains only the segment).
 - `fields_unchanged`: every other field is equal except `updated` and the one
   added descriptor.
-- `files_unchanged`: under the record lock, just before the switch, the task's
-  attachment directory holds the files it held before plus the segment.
+- `files_unchanged`: just before the switch, the task's attachment directory
+  holds the same entries as before (regular files by content hash, symlinks by
+  target, other entries by type) plus the segment. Apply holds the project
+  mutation lock throughout, so this catches writers that bypass it.
 - `record_reloaded`: after the switch, the record read back through the normal
-  loader equals the prepared record.
+  loader equals the prepared record and binds its receipt.
 
 The first two run before anything is written. A `files_unchanged` failure keeps
-the published segment for an exact-bytes retry, and the record is not switched. A
-`record_reloaded` failure comes after the switch. `already_archived` reports
+the published segment for an exact-bytes retry, and the record is not switched.
+`written` names the segment even when a retry reused a byte-identical one. A
+`record_reloaded` failure leaves the record switched and uncommitted; a retry would
+report `already_archived`, so inspect the record against the source preview first. `already_archived` reports
 `receipt_bound` (the receipt sits at its descriptor's exact boundary after its
 attach note) and `segments_verified` (each segment matched its hash and note count
 on load), and `written` is empty.

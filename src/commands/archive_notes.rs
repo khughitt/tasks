@@ -25,9 +25,10 @@ fn interrupt_at(boundary: &str) {
     }
 }
 
-// Test-only fault injection, beside interrupt_at: proves a failed check refuses the apply.
+// Fault injection for debug builds only, beside interrupt_at: proves a failed check
+// refuses the apply. Release builds ignore the variable.
 fn fault(name: &str) -> bool {
-    std::env::var("TASKS_ARCHIVE_FAULT").as_deref() == Ok(name)
+    cfg!(debug_assertions) && std::env::var("TASKS_ARCHIVE_FAULT").as_deref() == Ok(name)
 }
 
 fn note_section(raw: &str) -> &[u8] {
@@ -146,8 +147,8 @@ fn unverified(id: &TaskId, invariant: &str, detail: &str) -> Error {
 }
 
 /// The logical change apply may make, checked before anything is written: the old notes
-/// unchanged and in order plus the attach note and receipt, one more descriptor, a later
-/// `updated`, and nothing else. The attachment ledger is derived from the notes, so this
+/// unchanged and in order plus the attach note and receipt by one author, one more
+/// descriptor, any `updated`, and nothing else. The attachment ledger is derived from the notes, so this
 /// also holds it to the old ledger plus the segment.
 fn verify_prepared(before: &Task, prepared: &Prepared) -> Result<Vec<&'static str>> {
     let after = &prepared.task;
@@ -178,6 +179,13 @@ fn verify_prepared(before: &Task, prepared: &Prepared) -> Result<Vec<&'static st
             "the added notes are not exactly the attach note and the receipt",
         );
     }
+    // prior_receipt binds a receipt only to an attach note by the same author.
+    if after.notes[n].by != after.notes[n + 1].by {
+        return refuse(
+            "notes_appended",
+            "the attach note and the receipt have different authors",
+        );
+    }
     let mut descriptors = before.note_archives.clone();
     descriptors.push(prepared.archive.clone());
     if after.note_archives != descriptors {
@@ -199,8 +207,8 @@ fn verify_prepared(before: &Task, prepared: &Prepared) -> Result<Vec<&'static st
     Ok(vec!["notes_appended", "fields_unchanged"])
 }
 
-/// Every entry under the task's attachment directory: a regular file's SHA-256, or the
-/// file type of anything else.
+/// Every entry under the task's attachment directory: a regular file's streamed SHA-256,
+/// a symlink's target, or the file type of anything else.
 fn files_snapshot(project: &Project, id: &TaskId) -> Result<BTreeMap<String, String>> {
     let dir = attachments::task_dir(project, id);
     let mut files = BTreeMap::new();
@@ -213,7 +221,11 @@ fn files_snapshot(project: &Project, id: &TaskId) -> Result<BTreeMap<String, Str
         let entry = entry?;
         let meta = std::fs::symlink_metadata(entry.path())?;
         let value = if meta.is_file() {
-            digest(&std::fs::read(entry.path())?)
+            let mut hasher = Sha256::new();
+            std::io::copy(&mut std::fs::File::open(entry.path())?, &mut hasher)?;
+            format!("{:x}", hasher.finalize())
+        } else if meta.is_symlink() {
+            format!("symlink:{}", std::fs::read_link(entry.path())?.display())
         } else {
             format!("{:?}", meta.file_type())
         };
@@ -381,13 +393,16 @@ pub fn run(mut ctx: Ctx, id: String, expect: Option<String>) -> Result<Output> {
     invariants.push("files_unchanged");
     interrupt_at("after-record-switch");
     let record = ctx.project.task_path(&id);
-    if ctx.project.read_task(&id)? != prepared.task {
+    let reloaded = ctx.project.read_task(&id)?;
+    let bound = prior_receipt(&ctx, &reloaded, &expected)?;
+    if reloaded != prepared.task || bound.as_ref() != Some(&prepared.preview.archive_name) {
         return Err(unverified(
             &id,
             "record_reloaded",
             &format!(
-                "{} switched but reads back differently from the prepared record; \
-                 inspect it against the source preview before any further write",
+                "{} switched, uncommitted, and reads back differently from the prepared \
+                 record or without its bound receipt; a retry would report it \
+                 already_archived, so inspect it against the source preview first",
                 record.display()
             ),
         ));
@@ -497,6 +512,14 @@ mod tests {
 
         let (before, mut prepared) = archived_fixture();
         prepared.task.notes[0].at = "2026-10-29T00:00:00Z".into();
+        assert!(refusal(&before, &prepared).contains("notes_appended"));
+
+        let (before, mut prepared) = archived_fixture();
+        prepared.task.notes[2].by.push('2');
+        assert!(refusal(&before, &prepared).contains("different authors"));
+
+        let (before, mut prepared) = archived_fixture();
+        prepared.task.notes.swap(1, 2);
         assert!(refusal(&before, &prepared).contains("notes_appended"));
     }
 }
