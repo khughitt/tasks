@@ -671,8 +671,7 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
     // a carried v1 id leads to its new record.
     let by_id: BTreeMap<TaskId, &Task> = views.iter().map(|v| (v.id.clone(), v)).collect();
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
-        let id = ctx.registry.canonical_id(id);
-        if let Some(view) = by_id.get(&id) {
+        if let Some(view) = by_id.get(id) {
             return Ok(Some(
                 view.depends
                     .iter()
@@ -680,10 +679,10 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
                     .collect(),
             ));
         }
-        if let Some(new) = map.get(&id) {
+        if let Some(new) = map.get(id) {
             return Ok(Some(vec![new.clone()]));
         }
-        Ok(resolver.resolve_task(&id)?.map(|task| {
+        Ok(resolver.resolve_canonical_task(id)?.map(|task| {
             crate::tombstone::edges(&task)
                 .iter()
                 .map(|d| ctx.registry.canonical_id(d))
@@ -1089,8 +1088,8 @@ fn project_closed_in(
                     continue;
                 }
                 let open = carried_ids.contains_key(&dep) || {
-                    let found = crate::dependency::resolve(&ctx.registry, &dep, |id| {
-                        resolver.resolve_task(id)
+                    let found = crate::dependency::resolve_canonical(&ctx.registry, &dep, |id| {
+                        resolver.resolve_canonical_task(id)
                     })?;
                     crate::dependency::verdict(found.as_ref())
                         != crate::dependency::Verdict::Satisfied

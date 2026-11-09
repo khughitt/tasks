@@ -9,8 +9,7 @@ use crate::resolve::Resolver;
 pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
-        let id = ctx.registry.canonical_id(id);
-        if id == candidate.id {
+        if *id == candidate.id {
             return Ok(Some(
                 candidate
                     .depends
@@ -19,7 +18,7 @@ pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
                     .collect(),
             ));
         }
-        Ok(resolver.resolve_task(&id)?.map(|task| {
+        Ok(resolver.resolve_canonical_task(id)?.map(|task| {
             crate::tombstone::edges(&task)
                 .iter()
                 .map(|dependency| ctx.registry.canonical_id(dependency))
@@ -52,11 +51,11 @@ pub fn add_dependencies(
     let mut warnings = Vec::new();
     for value in values {
         let given = ctx.shorthand.parse(&ctx.registry, value)?;
-        let dependency = ctx.registry.canonical_id(&given);
+        let dependency = super::parse_id(&ctx.registry, &ctx.shorthand, value)?;
         if dependency == task.id {
             return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
         }
-        match resolver.resolve_task(&dependency)? {
+        match resolver.resolve_canonical_task(&dependency)? {
             None => return Err(Error::UnresolvableId(dependency.to_string())),
             Some(found) => crate::tombstone::refuse_reference(&found, "dependency")?,
         }

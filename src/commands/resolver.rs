@@ -38,7 +38,7 @@ fn row(
         return path_row(registry, index, dir, input, warnings);
     }
     if let Ok(id) = TaskId::parse(&input) {
-        let live = registry.canonical_prefix(&id.prefix).to_string();
+        let live = registry.canonical_id(&id).prefix;
         return match registry.project_root(&live) {
             Some(root) => ResolveRow {
                 id: Some(registry.canonical_id(&id).to_string()),

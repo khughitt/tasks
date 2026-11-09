@@ -8,7 +8,7 @@ use clap::{CommandFactory, Parser};
 use std::collections::BTreeSet;
 
 /// A tombstone carries exactly one pointer, to another project; a destination names
-/// another project as its source. Anything else is a hand edit outside `tasks move`.
+/// another project as its source. Project validation handles a reclaimed source prefix.
 pub fn validate(task: &Task) -> Result<()> {
     match (task.status, &task.moved_to) {
         (Status::Moved, None) => {
@@ -31,14 +31,6 @@ pub fn validate(task: &Task) -> Result<()> {
             )));
         }
         _ => {}
-    }
-    if let Some(from) = &task.moved_from
-        && from.prefix == task.id.prefix
-    {
-        return Err(Error::Validation(format!(
-            "{} moved_from {from} is in the same project",
-            task.id
-        )));
     }
     Ok(())
 }

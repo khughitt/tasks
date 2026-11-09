@@ -88,6 +88,101 @@ fn record_cycle(
     }
 }
 
+fn lifecycle_findings(
+    ctx: &Ctx,
+    tasks: &[Task],
+    errors: &mut Vec<Finding>,
+    warnings: &mut Vec<Finding>,
+) -> Result<()> {
+    let mut error = |kind: &str, detail: String| {
+        errors.push(finding(None, crate::repo::CONFIG_REL.into(), kind, detail));
+    };
+    if let Some(successor) = ctx
+        .project
+        .retired
+        .as_ref()
+        .and_then(|r| r.successor.as_ref())
+    {
+        match crate::scope::open_registered(&ctx.registry, successor, crate::scope::Origin::Prefix)
+        {
+            Ok(project) if project.retired.is_some() => error(
+                "retired_successor_retired",
+                format!("successor {successor:?} is retired"),
+            ),
+            Ok(project) if project.prefix != ctx.project.prefix => {}
+            Ok(_) => error(
+                "retired_successor_invalid",
+                "a retired project's successor cannot be itself".into(),
+            ),
+            Err(reason) => error(
+                "retired_successor_invalid",
+                format!("successor {successor:?} cannot be opened: {reason}"),
+            ),
+        }
+    }
+    if let Err(reason) = crate::scope::check_predecessor_pairing(&ctx.registry, &ctx.project) {
+        error("predecessor_registry_mismatch", reason.to_string());
+    }
+    let Some(pred) = &ctx.project.predecessor else {
+        return Ok(());
+    };
+    let collisions: Vec<_> = tasks
+        .iter()
+        .filter(|t| pred.suffixes.contains(&t.id.hex))
+        .map(|t| t.id.to_string())
+        .collect();
+    if !collisions.is_empty() {
+        error(
+            "predecessor_suffix_collision",
+            format!(
+                "local tasks use suffixes reserved by {:?}: {}",
+                pred.prefix,
+                collisions.join(", ")
+            ),
+        );
+    }
+    if !crate::scope::is_reachable(&ctx.registry, &pred.prefix)? {
+        warnings.push(finding(
+            None,
+            crate::repo::CONFIG_REL.into(),
+            "predecessor_unreachable",
+            format!(
+                "predecessor {:?} is not reachable on this host; frozen suffixes remain reserved",
+                pred.prefix
+            ),
+        ));
+        return Ok(());
+    }
+    let predecessor =
+        crate::scope::open_registered(&ctx.registry, &pred.prefix, crate::scope::Origin::Prefix)?;
+    if predecessor
+        .retired
+        .as_ref()
+        .and_then(|r| r.successor.as_ref())
+        .map(|s| ctx.registry.canonical_prefix(s))
+        != Some(ctx.project.prefix.as_str())
+    {
+        error(
+            "predecessor_not_retired_to_successor",
+            format!(
+                "predecessor {:?} must be retired to {:?}",
+                pred.prefix, ctx.project.prefix
+            ),
+        );
+    }
+    let suffixes: BTreeSet<_> = predecessor.scan()?.into_iter().map(|t| t.id.hex).collect();
+    if suffixes != pred.suffixes {
+        error(
+            "predecessor_suffix_mismatch",
+            format!(
+                "frozen suffixes differ from predecessor {:?}'s task inventory",
+                pred.prefix
+            ),
+        );
+    }
+    Ok(())
+}
+
 pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     // A code tree whose index still holds the config is on the pre-move side of the
     // migration: the walk missed it only because the working tree lost it.
@@ -155,6 +250,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         )
     };
     let mut warnings = Vec::new();
+    lifecycle_findings(&ctx, &tasks, &mut errors, &mut warnings)?;
     let threshold = ctx.project.growth_warn_bytes();
     for row in &growth_rows {
         if row.record_bytes > threshold {
@@ -257,28 +353,25 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     };
 
     let record = |id: &TaskId| -> Result<Option<Task>> {
-        let id = ctx.registry.canonical_id(id);
-        if id.prefix == ctx.project.prefix {
-            Ok(tasks
-                .iter()
-                .find(|task| ctx.registry.canonical_id(&task.id) == id)
-                .cloned())
+        let canonical = ctx.registry.canonical_id(id);
+        if canonical.prefix == ctx.project.prefix {
+            Ok(tasks.iter().find(|task| task.id == canonical).cloned())
         } else {
-            resolver.resolve_task(&id)
+            resolver.resolve_task(id)
         }
     };
     let counterpart = |id: &TaskId| -> Result<Counterpart> {
-        let id = ctx.registry.canonical_id(id);
-        if id.prefix == ctx.project.prefix {
-            return Ok(match record(&id)? {
+        let canonical = ctx.registry.canonical_id(id);
+        if canonical.prefix == ctx.project.prefix {
+            return Ok(match record(id)? {
                 Some(task) => Counterpart::Present(Box::new(task)),
                 None => Counterpart::Missing,
             });
         }
-        if !crate::scope::is_reachable(&ctx.registry, &id.prefix)? {
+        if !crate::scope::is_reachable(&ctx.registry, &canonical.prefix)? {
             return Ok(Counterpart::Unreachable);
         }
-        Ok(match foreign(&id) {
+        Ok(match foreign(id) {
             Ok(Some(task)) => Counterpart::Present(Box::new(task)),
             Ok(None) => Counterpart::Missing,
             Err(_) => Counterpart::Unreachable,
@@ -374,7 +467,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             }
             if task.status.is_open()
                 && task.status != Status::Shelved
-                && let Ok(Some(dependency_task)) = foreign(&dependency_id)
+                && let Ok(Some(dependency_task)) = foreign(dependency)
                 && dependency_task.status == Status::Shelved
             {
                 warnings.push(finding(
@@ -798,8 +891,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     let mut seen = BTreeSet::new();
     let unreachable = RefCell::new(BTreeSet::new());
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
-        let id = ctx.registry.canonical_id(id);
-        if let Some(task) = tasks.iter().find(|task| task.id == id) {
+        if let Some(task) = tasks.iter().find(|task| task.id == *id) {
             return Ok(Some(
                 crate::tombstone::edges(task)
                     .iter()
@@ -807,7 +899,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                     .collect(),
             ));
         }
-        match foreign(&id) {
+        match resolver.resolve_canonical_task(id) {
             Ok(Some(task)) => Ok(Some(
                 crate::tombstone::edges(&task)
                     .iter()
@@ -815,7 +907,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                     .collect(),
             )),
             Ok(None) | Err(_) => {
-                unreachable.borrow_mut().insert(id);
+                unreachable.borrow_mut().insert(id.clone());
                 Ok(Some(vec![]))
             }
         }

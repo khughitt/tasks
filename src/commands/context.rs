@@ -78,10 +78,25 @@ impl Ctx {
 }
 
 pub fn open_ctx(dir: Option<&Path>, host: Arc<HostConfig>) -> Result<Ctx> {
+    open_local_ctx(dir, host, false)
+}
+
+pub fn open_check_ctx(dir: Option<&Path>, host: Arc<HostConfig>) -> Result<Ctx> {
+    open_local_ctx(dir, host, true)
+}
+
+fn open_local_ctx(dir: Option<&Path>, host: Arc<HostConfig>, checking: bool) -> Result<Ctx> {
     let start = start_dir(dir)?;
-    let project = Project::locate(&start)?;
+    let project = if checking {
+        Project::locate_for_check(&start)?
+    } else {
+        Project::locate(&start)?
+    };
     let registry = Registry::load()?;
-    reject_stale_local(&registry, &project)?;
+    reject_stale_prefix(&registry, &project)?;
+    if !checking {
+        crate::scope::check_predecessor_pairing(&registry, &project)?;
+    }
     let shorthand = Shorthand::located(start, project.prefix.clone());
     Ok(Ctx::new(
         project,
@@ -135,6 +150,11 @@ fn open_project_write_ctx_inner(
 /// `open_registered` validates the registered destination, which after a rename is
 /// perfectly consistent, and an in-tree hit in `Project::locate` does not read the registry.
 pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> {
+    crate::scope::check_predecessor_pairing(registry, project)?;
+    reject_stale_prefix(registry, project)
+}
+
+fn reject_stale_prefix(registry: &Registry, project: &Project) -> Result<()> {
     let live = registry.canonical_prefix(&project.prefix);
     if live != project.prefix {
         return Err(Error::Config(format!(
@@ -442,7 +462,13 @@ pub struct ReadCtx {
 /// Parses a user-supplied id, full or a bare suffix, under the registry's current prefix
 /// names.
 pub fn parse_id(registry: &Registry, shorthand: &Shorthand, id: &str) -> Result<TaskId> {
-    Ok(registry.canonical_id(&shorthand.parse(registry, id)?))
+    let mut parsed = shorthand.parse(registry, id)?;
+    if crate::shorthand::is_bare_suffix(TaskId::trim_input(id)) {
+        parsed.prefix = registry.canonical_prefix(&parsed.prefix).to_string();
+        Ok(parsed)
+    } else {
+        Ok(registry.canonical_id(&parsed))
+    }
 }
 
 impl ReadCtx {
@@ -465,7 +491,7 @@ impl ReadCtx {
     }
 
     pub fn resolve_task(&self, id: &TaskId) -> Result<Option<Task>> {
-        self.scope.resolve_task(&self.registry, id)
+        self.scope.resolve_canonical_task(&self.registry, id)
     }
 }
 

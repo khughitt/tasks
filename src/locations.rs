@@ -39,7 +39,7 @@ impl CheckoutScan {
 }
 
 pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
-    scan_with(registry, None)
+    scan_with(registry, None, false)
 }
 
 /// `scan_checkouts` for `init --records` (docs/project-operations.md): `except`, the prefix
@@ -49,10 +49,18 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
 /// blocks no other project's repair while its declared checkout is still a conflict.
 /// Every other open failure stays in `failed`.
 pub fn scan_declared_checkouts(registry: &crate::registry::Registry, except: &str) -> CheckoutScan {
-    scan_with(registry, Some(registry.canonical_prefix(except)))
+    scan_with(registry, Some(registry.canonical_prefix(except)), false)
 }
 
-fn scan_with(registry: &crate::registry::Registry, declared_except: Option<&str>) -> CheckoutScan {
+pub(crate) fn scan_checkouts_for_check(registry: &crate::registry::Registry) -> CheckoutScan {
+    scan_with(registry, None, true)
+}
+
+fn scan_with(
+    registry: &crate::registry::Registry,
+    declared_except: Option<&str>,
+    checking: bool,
+) -> CheckoutScan {
     use crate::scope::{Origin, Registered, open_registered, open_registered_declared};
     let mut scan = CheckoutScan::default();
     for prefix in registry.projects.keys() {
@@ -62,6 +70,9 @@ fn scan_with(registry: &crate::registry::Registry, declared_except: Option<&str>
         let opened = crate::scope::is_reachable(registry, prefix).and_then(|reachable| {
             reachable
                 .then(|| match declared_except {
+                    None if checking => {
+                        crate::scope::open_registered_config(registry, prefix, Origin::Prefix)
+                    }
                     None => open_registered(registry, prefix, Origin::Prefix),
                     Some(_) => open_registered_declared(registry, prefix, Origin::Prefix).map(
                         |registered| match registered {

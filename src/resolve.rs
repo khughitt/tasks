@@ -173,11 +173,15 @@ impl<'a> Resolver<'a> {
     /// `Ok(None)` when the id is unreachable (unregistered prefix, missing root, or
     /// missing file); `Err` when a file exists but cannot be parsed.
     pub fn resolve_task(&self, id: &TaskId) -> Result<Option<Task>> {
-        let id = &self.registry.canonical_id(id);
+        self.resolve_canonical_task(&self.registry.canonical_id(id))
+    }
+
+    /// Resolve an already canonicalized ID without interpreting its prefix a second time.
+    pub fn resolve_canonical_task(&self, id: &TaskId) -> Result<Option<Task>> {
         if id.prefix == self.project.prefix {
             read_present(self.project, id)
         } else {
-            resolve_registered(self.registry, id)
+            resolve_registered_canonical(self.registry, id)
         }
     }
 
@@ -613,7 +617,13 @@ pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
 /// unreachable-dependency warnings. Once those cases are excluded, the strict shared
 /// opener makes malformed config or a registry/config prefix mismatch a config error.
 pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
-    let id = &registry.canonical_id(id);
+    resolve_registered_canonical(registry, &registry.canonical_id(id))
+}
+
+pub(crate) fn resolve_registered_canonical(
+    registry: &Registry,
+    id: &TaskId,
+) -> Result<Option<Task>> {
     let Some(dir) = crate::scope::config_dir(registry, &id.prefix) else {
         return Ok(None);
     };

@@ -43,6 +43,17 @@ pub fn config_dir(registry: &Registry, prefix: &str) -> Option<PathBuf> {
 /// mismatch is a `config` error naming the `init --records --force` that repairs it
 /// (docs/project-operations.md).
 pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project> {
+    let project = open_registered_config(registry, prefix, origin)?;
+    check_predecessor_pairing(registry, &project)?;
+    Ok(project)
+}
+
+/// The same opener without predecessor pairing: `check` diagnoses that disagreement.
+pub(crate) fn open_registered_config(
+    registry: &Registry,
+    prefix: &str,
+    origin: Origin,
+) -> Result<Project> {
     match open_registered_declared(registry, prefix, origin)? {
         Registered::Paired(project) => Ok(project),
         Registered::Mismatched(project) => Err(Error::Config(pairing_mismatch(
@@ -50,6 +61,16 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
             &project,
         ))),
     }
+}
+
+pub(crate) fn check_predecessor_pairing(registry: &Registry, project: &Project) -> Result<()> {
+    if registry.predecessors.get(&project.prefix) != project.predecessor.as_ref() {
+        return Err(Error::Config(format!(
+            "predecessor configuration for {:?} disagrees with this host's registry; adopt both steps: `tasks rename <pred> <pred1> --adopt`, then `tasks rename <succ> <pred> --adopt`, or run `tasks init --prefix {} --force` in this checkout",
+            project.prefix, project.prefix
+        )));
+    }
+    Ok(())
 }
 
 /// What `open_registered_declared` found for a registered prefix.
@@ -330,17 +351,15 @@ impl Scope {
             .collect()
     }
 
-    /// A project in scope answers for its own prefix; anything else goes through the
-    /// registry, leniently, as dependency resolution always has.
-    pub fn resolve_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
-        let id = &registry.canonical_id(id);
+    /// Resolve a canonical ID from this scope or its registered project.
+    pub fn resolve_canonical_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
         match self
             .projects()
             .iter()
             .find(|project| project.prefix == id.prefix)
         {
             Some(project) => crate::resolve::read_present(project, id),
-            None => crate::resolve::resolve_registered(registry, id),
+            None => crate::resolve::resolve_registered_canonical(registry, id),
         }
     }
 }

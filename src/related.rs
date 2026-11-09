@@ -34,14 +34,13 @@ pub fn add_related(
     let existing = task.related.len();
     let mut warnings = Vec::new();
     for value in values {
-        let given = ctx.shorthand.parse(&ctx.registry, value)?;
-        let target = ctx.registry.canonical_id(&given);
+        let target = crate::commands::parse_id(&ctx.registry, &ctx.shorthand, value)?;
         if target == task.id {
             return Err(Error::Validation(format!(
                 "{target} cannot relate to itself"
             )));
         }
-        match resolver.resolve_task(&target)? {
+        match resolver.resolve_canonical_task(&target)? {
             None => return Err(Error::UnresolvableId(target.to_string())),
             Some(found) => crate::tombstone::refuse_reference(&found, "related task")?,
         }
@@ -63,14 +62,13 @@ pub fn add_related(
     Ok(warnings)
 }
 
-/// Removes each of `ids` from `task.related`. Removals never resolve the id. An absent
+/// Removes canonical `ids` from `task.related`. Removals never resolve the id. An absent
 /// id refuses with `Error::Validation("<task> is not related to <id>")`, matching `dep --rm`.
 pub fn remove_related(registry: &Registry, task: &mut Task, ids: &[TaskId]) -> Result<()> {
     for id in ids {
-        let canonical = registry.canonical_id(id);
         let before = task.related.len();
         task.related
-            .retain(|item| registry.canonical_id(item) != canonical);
+            .retain(|item| registry.canonical_id(item) != *id);
         if task.related.len() == before {
             return Err(Error::Validation(format!(
                 "{} is not related to {id}",
@@ -105,7 +103,7 @@ pub fn validate_editor_related(
             .any(|stored| registry.canonical_id(stored) == canonical)
         {
             let found = resolver
-                .resolve_task(&canonical)?
+                .resolve_canonical_task(&canonical)?
                 .ok_or_else(|| Error::UnresolvableId(canonical.to_string()))?;
             crate::tombstone::refuse_reference(&found, "related task")?;
         }
@@ -240,10 +238,11 @@ pub fn link_citations(
         .map(|id| registry.canonical_id(&id));
 
     for id in cited {
-        let cited_canonical = registry.canonical_id(id);
-        let resolved: Option<Task> =
-            crate::dependency::resolve(registry, id, |id| resolver.resolve_task(id))
-                .unwrap_or_default();
+        let cited_canonical = id.clone();
+        let resolved: Option<Task> = crate::dependency::resolve_canonical(registry, id, |id| {
+            resolver.resolve_canonical_task(id)
+        })
+        .unwrap_or_default();
 
         let Some(dest) = resolved else {
             warnings.push(format!(
@@ -259,7 +258,7 @@ pub fn link_citations(
             .parent
             .as_ref()
             .is_some_and(|p| registry.canonical_id(p) == task_canonical)
-            || match resolver.resolve_task(id) {
+            || match resolver.resolve_canonical_task(id) {
                 Ok(Some(orig)) => orig
                     .parent
                     .as_ref()

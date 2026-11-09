@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::model::TaskId;
+pub use crate::repo::Predecessor;
 use crate::repo::atomic_write;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -13,6 +14,10 @@ pub struct Registry {
     /// a live prefix, enforced on load, so resolution is always one hop.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub predecessors: BTreeMap<String, Predecessor>,
+    #[serde(skip)]
+    pub displaced: BTreeMap<(String, String), String>,
     /// Live prefix -> the records directory of a detached project, absolute: the
     /// directory holding its `tasks/.config.toml`, not the records root. Every key is a
     /// live prefix, enforced on load. Not written when empty.
@@ -174,7 +179,49 @@ impl Registry {
                 )));
             }
         }
+        registry.rebuild_displaced()?;
         Ok(registry)
+    }
+
+    pub fn set_predecessor(&mut self, live: &str, pred: Option<Predecessor>) -> Result<()> {
+        let previous = match pred {
+            Some(pred) => self.predecessors.insert(live.into(), pred),
+            None => self.predecessors.remove(live),
+        };
+        if let Err(error) = self.rebuild_displaced() {
+            match previous {
+                Some(pred) => {
+                    self.predecessors.insert(live.into(), pred);
+                }
+                None => {
+                    self.predecessors.remove(live);
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn rebuild_displaced(&mut self) -> Result<()> {
+        let mut displaced = BTreeMap::new();
+        let mut seen = BTreeSet::new();
+        for (live, pred) in &self.predecessors {
+            pred.validate(live)?;
+            if !self.projects.contains_key(live)
+                || self.aliases.contains_key(&pred.prefix)
+                || !seen.insert(&pred.prefix)
+            {
+                return Err(Error::Config(format!(
+                    "invalid predecessor {:?} for {live:?}: live key must be registered, predecessor must not be an alias or shared",
+                    pred.prefix
+                )));
+            }
+            for suffix in &pred.suffixes {
+                displaced.insert((live.clone(), suffix.clone()), pred.prefix.clone());
+            }
+        }
+        self.displaced = displaced;
+        Ok(())
     }
 
     pub fn save(&self) -> Result<()> {
@@ -264,6 +311,8 @@ impl Registry {
         });
         self.locations.remove(prefix);
         self.records.remove(prefix);
+        self.predecessors.remove(prefix);
+        self.rebuild_displaced()?;
         Ok(Unregistered {
             root,
             aliases,
@@ -480,10 +529,14 @@ impl Registry {
         self.aliases.get(prefix).map_or(prefix, String::as_str)
     }
 
-    /// The same rule applied to an id. Only the prefix component moves; the hex is
-    /// preserved by a rename, which is what makes this a rule rather than an index.
+    /// Interpret a literal ID once: frozen predecessor suffixes take priority over aliases.
+    /// Do not canonicalize the result again; an alias to the successor is not the reclaimed literal prefix.
     pub fn canonical_id(&self, id: &TaskId) -> TaskId {
-        let prefix = self.canonical_prefix(&id.prefix);
+        let prefix = self
+            .displaced
+            .get(&(id.prefix.clone(), id.hex.clone()))
+            .map(String::as_str)
+            .unwrap_or_else(|| self.canonical_prefix(&id.prefix));
         if prefix == id.prefix {
             return id.clone();
         }
@@ -611,6 +664,81 @@ fn is_valid_group_name(name: &str) -> bool {
 mod tests {
     use super::*;
     use crate::model::TaskId;
+
+    #[test]
+    fn predecessor_registry_rejects_invalid_and_conflicting_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.toml");
+        for (live, body, extra) in [
+            ("missing", "prefix = \"forge1\"\nsuffixes = []", ""),
+            ("forge", "prefix = \"forge\"\nsuffixes = []", ""),
+            ("forge", "prefix = \"bad-prefix\"\nsuffixes = []", ""),
+            ("forge", "prefix = \"forge1\"\nsuffixes = [\"ABCDEF\"]", ""),
+            (
+                "forge",
+                "prefix = \"forge1\"\nsuffixes = []\nunknown = true",
+                "",
+            ),
+            (
+                "forge",
+                "prefix = \"forge1\"\nsuffixes = []",
+                "[aliases]\nforge1 = \"forge\"",
+            ),
+            (
+                "forge",
+                "prefix = \"forge1\"\nsuffixes = []",
+                "[predecessors.other]\nprefix = \"forge1\"\nsuffixes = []",
+            ),
+        ] {
+            std::fs::write(&path, format!("[projects]\nforge = \"/missing\"\nother = \"/other\"\n[predecessors.{live}]\n{body}\n{extra}\n")).unwrap();
+            assert!(
+                matches!(Registry::load_from(&path), Err(Error::Config(_))),
+                "{body} {extra}"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_id_routes_displaced_suffixes_only_on_reclaimed_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.toml");
+        std::fs::write(
+            &path,
+            r#"
+[projects]
+forge = "/missing/current"
+forge1 = "/missing/old"
+[aliases]
+forge2 = "forge"
+[predecessors.forge]
+prefix = "forge1"
+suffixes = ["0e720e"]
+"#,
+        )
+        .unwrap();
+        let mut registry = Registry::load_from(&path).unwrap();
+        for (given, expected) in [
+            ("forge-0e720e", "forge1-0e720e"),
+            ("forge1-0e720e", "forge1-0e720e"),
+            ("forge-18dae2", "forge-18dae2"),
+            ("forge2-18dae2", "forge-18dae2"),
+            ("forge2-0e720e", "forge-0e720e"),
+        ] {
+            assert_eq!(
+                registry
+                    .canonical_id(&TaskId::parse(given).unwrap())
+                    .to_string(),
+                expected
+            );
+        }
+        registry.set_predecessor("forge", None).unwrap();
+        assert_eq!(
+            registry
+                .canonical_id(&TaskId::parse("forge-0e720e").unwrap())
+                .to_string(),
+            "forge-0e720e"
+        );
+    }
 
     #[test]
     fn adopt_flattens_aliases_with_free_or_pre_registered_target() {

@@ -62,12 +62,12 @@ impl HaltSnapshot {
 }
 
 fn reachable(halt: &Task, local: &[Task], registry: &Registry) -> Result<HashSet<TaskId>> {
-    let resolve = |id: &TaskId| {
-        let id = registry.canonical_id(id);
+    let resolve = |raw: &TaskId| {
+        let id = registry.canonical_id(raw);
         if id.prefix == halt.id.prefix {
             Ok(local.iter().find(|task| task.id == id).cloned())
         } else {
-            crate::resolve::resolve_registered(registry, &id)
+            crate::resolve::resolve_registered(registry, raw)
         }
     };
     let mut pending = vec![halt.id.clone()];
@@ -230,6 +230,7 @@ mod tests {
             },
             growth_warn_bytes: None,
             retired: None,
+            predecessor: None,
             checkout: PathBuf::new(),
             worktree: None,
             commit_records: false,
@@ -267,6 +268,7 @@ mod tests {
             },
             growth_warn_bytes: None,
             retired: None,
+            predecessor: None,
             checkout: PathBuf::new(),
             worktree: None,
             commit_records: false,

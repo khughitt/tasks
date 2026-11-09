@@ -367,10 +367,11 @@ pub fn shelve(
     let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let mut targets = Vec::new();
     for value in wake_on {
-        let given = ctx.shorthand.parse(&ctx.registry, &value)?;
-        let found =
-            crate::dependency::resolve(&ctx.registry, &given, |id| resolver.resolve_task(id))?
-                .ok_or_else(|| Error::UnresolvableId(given.to_string()))?;
+        let given = super::parse_id(&ctx.registry, &ctx.shorthand, &value)?;
+        let found = crate::dependency::resolve_canonical(&ctx.registry, &given, |id| {
+            resolver.resolve_canonical_task(id)
+        })?
+        .ok_or_else(|| Error::UnresolvableId(given.to_string()))?;
         let target = ctx.registry.canonical_id(&found.id);
         if target == task.id {
             return Err(Error::Validation(format!(

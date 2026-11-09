@@ -68,7 +68,7 @@ impl Shorthand {
 
 /// Exactly six lowercase hex digits: the only shorthand. Shorter, longer, and uppercase
 /// forms are left to `TaskId::parse` to reject.
-fn is_bare_suffix(s: &str) -> bool {
+pub(crate) fn is_bare_suffix(s: &str) -> bool {
     s.len() == 6
         && s.chars()
             .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))

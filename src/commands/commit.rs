@@ -163,7 +163,7 @@ pub fn open_and_run(
         let mut distinct = BTreeSet::new();
         for kind in &classified {
             if let TargetKind::FullId(id) = kind {
-                distinct.insert(registry.canonical_prefix(&id.prefix).to_string());
+                distinct.insert(registry.canonical_id(id).prefix);
             }
         }
         if distinct.len() > 1 {
@@ -239,6 +239,7 @@ pub fn open_and_run(
         let mut has_path_target = false;
 
         for kind in classified {
+            let bare_suffix = matches!(&kind, TargetKind::BareSuffix(_));
             let resolved_kind = match kind {
                 TargetKind::BareSuffix(hex) => {
                     if ctx.project.records.join(&hex).exists()
@@ -255,7 +256,11 @@ pub fn open_and_run(
 
             match resolved_kind {
                 TargetKind::FullId(id) => {
-                    let canonical = ctx.registry.canonical_prefix(&id.prefix).to_string();
+                    let canonical = if bare_suffix {
+                        id.prefix.clone()
+                    } else {
+                        ctx.registry.canonical_id(&id).prefix
+                    };
                     if canonical != ctx.project.prefix {
                         return Err(Error::Validation(format!(
                             "task {id} belongs to project {:?}, not {:?}; cannot mix projects or combine cross-project task IDs with local paths",

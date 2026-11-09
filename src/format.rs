@@ -1021,11 +1021,6 @@ mod tests {
                 "moved_to: dots-00000b\n",
                 "moved_to in the same project",
             ),
-            (
-                "todo",
-                "moved_from: dots-00000c\n",
-                "moved_from in the same project",
-            ),
         ] {
             assert!(
                 crate::history::fixture(&base(status, extra), "tasks/dots-00000a.md").is_err(),

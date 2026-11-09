@@ -333,8 +333,9 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     let mut open = Vec::new();
     for dependency in &task.depends {
         // The project's own file answers for its prefix, registered roots for the rest.
-        let found =
-            crate::dependency::resolve(&ctx.registry, dependency, |id| resolver.resolve_task(id))?;
+        let found = crate::dependency::resolve(&ctx.registry, dependency, |id| {
+            resolver.resolve_canonical_task(id)
+        })?;
         if crate::dependency::verdict(found.as_ref()) != crate::dependency::Verdict::Satisfied {
             open.push(dependency.to_string());
         }

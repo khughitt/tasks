@@ -20,6 +20,8 @@ pub fn isolated_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
     let mut vars: Vec<(&'static str, std::ffi::OsString)> = vec![
         ("PATH", std::env::var_os("PATH").expect("PATH is set")),
         ("HOME", home.into()),
+        ("XDG_CONFIG_HOME", home.join(".config").into()),
+        ("XDG_STATE_HOME", home.join(".local/state").into()),
         ("USER", "tester".into()),
         ("LC_ALL", "C".into()),
         ("GIT_CONFIG_GLOBAL", "/dev/null".into()),

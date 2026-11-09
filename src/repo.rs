@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::format::{parse_physical, serialize_physical, validate_doc_path};
 use crate::model::{Status, Task, TaskId, is_valid_prefix};
 use crate::registry::Registry;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -92,6 +92,35 @@ impl Kind {
     }
 }
 
+/// Frozen suffixes belonging to the retired project whose prefix was reclaimed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Predecessor {
+    pub prefix: String,
+    pub suffixes: BTreeSet<String>,
+}
+
+impl Predecessor {
+    pub(crate) fn validate(&self, live: &str) -> Result<()> {
+        if !is_valid_prefix(&self.prefix) || self.prefix == live {
+            return Err(Error::Config(format!(
+                "predecessor prefix {:?} must be valid and different from {live:?}",
+                self.prefix
+            )));
+        }
+        if let Some(suffix) = self
+            .suffixes
+            .iter()
+            .find(|s| !crate::shorthand::is_bare_suffix(s))
+        {
+            return Err(Error::Config(format!(
+                "predecessor suffix {suffix:?} must be six lowercase hex digits"
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Project {
     /// The `[git] commit` switch: commit each record write as it lands. See
@@ -126,6 +155,7 @@ pub struct Project {
     pub growth_warn_bytes: Option<u64>,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.
     pub retired: Option<Retirement>,
+    pub predecessor: Option<Predecessor>,
     /// The code checkout sessions run in: the config's `[checkout] path`, absolute and
     /// normalized, for a linked or detached project; the root for an in-tree one. It need
     /// not exist: `check` reports a missing one, and a missing one never matches (ops
@@ -181,6 +211,8 @@ struct Config {
     needs: Option<crate::needs::Vocabulary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retired: Option<RetiredConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    predecessor: Option<Predecessor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkout: Option<CheckoutConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -682,6 +714,7 @@ impl Project {
                 growth: None,
                 needs: None,
                 retired: None,
+                predecessor: None,
                 git: None,
                 checkout: checkout
                     .map(|checkout| {
@@ -802,6 +835,7 @@ impl Project {
                 growth: None,
                 needs: None,
                 retired: None,
+                predecessor: None,
                 checkout: Some(CheckoutConfig {
                     path: path.to_string(),
                     kind: Some(Kind::Detached.as_str().into()),
@@ -864,6 +898,9 @@ impl Project {
                 config.prefix
             )));
         }
+        if let Some(predecessor) = &config.predecessor {
+            predecessor.validate(&config.prefix)?;
+        }
         let (spec_dirs, plan_dirs, commit_records) = doc_layout(&config)?;
         let (kind, root, checkout) = match checkout_path(&records, config.checkout)? {
             None => (Kind::InTree, records.clone(), records.clone()),
@@ -905,6 +942,7 @@ impl Project {
                 limit => limit,
             },
             retired: retirement(config.retired)?,
+            predecessor: config.predecessor,
         })
     }
 
@@ -929,17 +967,22 @@ impl Project {
     /// `no_project` whatever state the registry is in; a missing registry is empty and a
     /// malformed one is an error.
     pub fn locate(start: &Path) -> Result<Project> {
-        Self::locate_with_loader(start, Registry::load)
+        Self::locate_with_loader(start, Registry::load, false)
     }
 
     /// `locate` against a `Registry` the caller has already loaded.
     pub fn locate_with(registry: &Registry, start: &Path) -> Result<Project> {
-        Self::locate_with_loader(start, || Ok(registry))
+        Self::locate_with_loader(start, || Ok(registry), false)
+    }
+
+    pub(crate) fn locate_for_check(start: &Path) -> Result<Project> {
+        Self::locate_with_loader(start, Registry::load, true)
     }
 
     fn locate_with_loader<R: std::borrow::Borrow<Registry>>(
         start: &Path,
         load: impl FnOnce() -> Result<R>,
+        checking: bool,
     ) -> Result<Project> {
         let start = canonical_start(start)?;
         let mut directory = Some(start.as_path());
@@ -953,7 +996,12 @@ impl Project {
         }
         if let Some(tree) = crate::link::GitTree::of(&start)? {
             let registry = load()?;
-            if let Some(project) = crate::link::project_of_tree(registry.borrow(), &tree)? {
+            let locate = if checking {
+                crate::link::project_of_tree_for_check
+            } else {
+                crate::link::project_of_tree
+            };
+            if let Some(project) = locate(registry.borrow(), &tree)? {
                 return Ok(project);
             }
         }
@@ -1017,6 +1065,11 @@ impl Project {
         }
         let task =
             crate::history::load_logical(physical, |archive| self.read_archive(id, archive))?;
+        self.validate_move_source(&task)
+            .map_err(|error| Error::Parse {
+                file: file.clone(),
+                detail: error.to_string(),
+            })?;
         self.validate_docs(&task).map_err(|error| Error::Parse {
             file: file.clone(),
             detail: error.to_string(),
@@ -1111,6 +1164,19 @@ impl Project {
         (tasks, errors)
     }
 
+    fn validate_move_source(&self, task: &Task) -> Result<()> {
+        if let Some(from) = &task.moved_from
+            && from.prefix == task.id.prefix
+            && !self.is_reserved_suffix(&from.hex)
+        {
+            return Err(Error::Validation(format!(
+                "{} moved_from {from} is in the same project and is not a reserved predecessor suffix",
+                task.id
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate_invariants(&self, registry: &Registry, task: &Task) -> Result<()> {
         self.validate_invariants_among(registry, task, &[])
     }
@@ -1121,6 +1187,7 @@ impl Project {
         task: &Task,
         projected: &[Task],
     ) -> Result<()> {
+        self.validate_move_source(task)?;
         if task.status == Status::Moved && !task.related.is_empty() {
             return Err(Error::Validation(format!(
                 "{} is a tombstone and cannot carry related",
@@ -1569,7 +1636,7 @@ impl Project {
                 hex: format!("{:06x}", candidate()),
             };
             let path = self.task_path(&task.id);
-            if path.exists() {
+            if self.is_reserved_suffix(&task.id.hex) || path.exists() {
                 continue;
             }
             let raw = serialize_physical(&self.physical_for_save(task)?);
@@ -1587,6 +1654,13 @@ impl Project {
 
     /// Create the journal's reserved id exclusively; never redraw it on a collision.
     pub fn create_task_exact(&self, registry: &Registry, task: &Task) -> Result<()> {
+        if self.is_reserved_suffix(&task.id.hex) {
+            return Err(Error::Validation(format!(
+                "{} is reserved by predecessor {:?}",
+                task.id,
+                self.predecessor.as_ref().unwrap().prefix
+            )));
+        }
         crate::format::validate_task(task)?;
         self.validate_docs(task)?;
         crate::needs::require_declared(&self.needs, &task.needs)?;
@@ -1652,13 +1726,23 @@ impl Project {
         linked
     }
 
+    pub fn is_reserved_suffix(&self, hex: &str) -> bool {
+        self.predecessor
+            .as_ref()
+            .is_some_and(|pred| pred.suffixes.contains(hex))
+    }
+
     pub fn new_id(&self) -> Result<TaskId> {
+        self.new_id_with(|| fastrand::u32(..0x100_0000))
+    }
+
+    fn new_id_with(&self, mut candidate: impl FnMut() -> u32) -> Result<TaskId> {
         for _ in 0..16 {
             let id = TaskId {
                 prefix: self.prefix.clone(),
-                hex: format!("{:06x}", fastrand::u32(..0x100_0000)),
+                hex: format!("{:06x}", candidate()),
             };
-            if !self.task_path(&id).exists() {
+            if !self.is_reserved_suffix(&id.hex) && !self.task_path(&id).exists() {
                 return Ok(id);
             }
         }
@@ -1671,6 +1755,65 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_from_reclaimed_prefix_requires_frozen_predecessor_ownership() {
+        let (_dir, mut p) = temp_project();
+        let registry = Registry::default();
+        let mut task = sample(&p);
+        task.moved_from = Some(TaskId::parse("tst-000001").unwrap());
+        assert!(matches!(
+            p.write_task(&registry, &task),
+            Err(Error::Validation(_))
+        ));
+        p.predecessor = Some(Predecessor {
+            prefix: "old".into(),
+            suffixes: ["000001".into()].into(),
+        });
+        p.write_task(&registry, &task).unwrap();
+        assert_eq!(p.read_task(&task.id).unwrap().moved_from, task.moved_from);
+        p.predecessor = None;
+        assert!(matches!(p.read_task(&task.id), Err(Error::Parse { .. })));
+    }
+
+    #[test]
+    fn predecessor_config_validates_and_reserves_suffixes_in_create_and_new_id() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"tst\"\n[predecessor]\nprefix = \"forge1\"\nsuffixes = [\"000001\"]\n",
+        );
+        let p = project.unwrap();
+        let registry = Registry::default();
+        let mut task = sample(&p);
+        let mut candidates = [1, 2].into_iter();
+        p.create_task_with(&registry, &mut task, || candidates.next().unwrap())
+            .unwrap();
+        assert_eq!(task.id.hex, "000002");
+        task.id.hex = "000001".into();
+        let error = p.create_task_exact(&registry, &task).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("reserved by predecessor \"forge1\""),
+            "{error}"
+        );
+        std::fs::remove_file(p.task_path(&TaskId::parse("tst-000002").unwrap())).unwrap();
+        let mut candidates = [1, 2].into_iter();
+        assert_eq!(
+            p.new_id_with(|| candidates.next().unwrap()).unwrap().hex,
+            "000002"
+        );
+        for bad in [
+            "prefix = \"bad-prefix\"\nsuffixes = []",
+            "prefix = \"tst\"\nsuffixes = []",
+            "prefix = \"forge1\"\nsuffixes = [\"ABCDEF\"]",
+            "prefix = \"forge1\"\nsuffixes = [\"12345\"]",
+            "prefix = \"forge1\"\nsuffixes = []\nunknown = true",
+        ] {
+            let (_dir, result) =
+                project_with_config(&format!("prefix = \"tst\"\n[predecessor]\n{bad}\n"));
+            assert!(matches!(result, Err(Error::Config(_))), "{bad}: {result:?}");
+        }
+    }
 
     #[test]
     fn multipart_config_defaults() {

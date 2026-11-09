@@ -45,6 +45,15 @@ pub fn run(
             .as_ref()
             .map(|records| root.join(records).join(&prefix));
         validate_repointing_retirement(&registry, &prefix, &root, derived.as_deref())?;
+        // Repair the host pairing before checkout scans consult the old registry entry.
+        let target = derived.as_deref().unwrap_or(&root);
+        if registry.projects.contains_key(&prefix) && target.join(crate::repo::CONFIG_REL).is_file()
+        {
+            let project = Project::open(target)?;
+            if project.prefix == prefix {
+                registry.set_predecessor(&prefix, project.predecessor)?;
+            }
+        }
     }
     let records = match records {
         Some(records_root) => Some(validate_records(&root, &records_root, &registry, &prefix)?),
@@ -102,7 +111,11 @@ pub fn run(
             registry.pair_records(&prefix, &derived);
             warnings.extend(registry.note_root_change(&prefix, previous, &today)?);
             plan.write()?;
-            if let Err(error) = registry.save() {
+            let saved = (|| {
+                registry.set_predecessor(&prefix, Project::open(&derived)?.predecessor)?;
+                registry.save()
+            })();
+            if let Err(error) = saved {
                 return Err(match plan.restore() {
                     Ok(()) => error,
                     Err(restore) => Error::Config(format!(
@@ -141,6 +154,7 @@ pub fn run(
                 ));
             }
             warnings.extend(registry.note_root_change(&prefix, previous, &today)?);
+            registry.set_predecessor(&prefix, project.predecessor.clone())?;
             registry.save()?;
             (project.root, None)
         }

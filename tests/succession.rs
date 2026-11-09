@@ -334,3 +334,297 @@ fn commit_rename_receipt_includes_both_sides_of_staged_git_renames() {
         assert!(!receipt.exists());
     }
 }
+
+fn predecessor(env: &TestEnv, current: &Path, old: &str, suffixes: &[&str]) {
+    let mut cfg = config(current);
+    cfg.as_table_mut().unwrap().insert(
+        "predecessor".into(),
+        toml::Value::try_from(serde_json::json!({"prefix": old, "suffixes": suffixes})).unwrap(),
+    );
+    std::fs::write(
+        current.join("tasks/.config.toml"),
+        toml::to_string(&cfg).unwrap(),
+    )
+    .unwrap();
+    env.json(current, &["init", "--prefix", "forge", "--force"]);
+}
+
+fn write_task(root: &Path, id: &str, extra: &str) {
+    std::fs::write(root.join(format!("tasks/{id}.md")), format!("---\nid: {id}\ntitle: fixture\nstatus: done\npriority: 2\ncreated: 2026-11-01T00:00:00Z\nupdated: 2026-11-01T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n")).unwrap();
+}
+
+#[test]
+fn succession_routes_literal_ids_and_keeps_bare_suffixes_local() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    write_task(&old, "forge1-0e720e", "");
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    let mut reg = registry(&env);
+    reg["aliases"] = toml::toml! { forge2 = "forge" }.into();
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        toml::to_string(&reg).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        env.json(&current, &["show", "forge-0e720e"])["task"]["id"],
+        "forge1-0e720e"
+    );
+    assert_eq!(env.fail(&current, &["show", "0e720e"]), "task_not_found");
+    assert_eq!(
+        env.fail(&current, &["show", "forge2-0e720e"]),
+        "task_not_found"
+    );
+    for value in ["0e720e", "forge2-0e720e"] {
+        assert_eq!(
+            env.fail(&current, &["add", "invalid reference", "--depends", value]),
+            "unresolvable_id"
+        );
+        assert_eq!(
+            env.fail(&current, &["add", "invalid reference", "--related", value]),
+            "unresolvable_id"
+        );
+    }
+    let rows = env.json(&current, &["resolve", "forge-0e720e", "forge2-0e720e"]);
+    assert_eq!(rows["results"][0]["prefix"], "forge1", "{rows}");
+    assert_eq!(rows["results"][1]["prefix"], "forge", "{rows}");
+}
+
+#[test]
+fn check_reports_retired_successor_and_predecessor_errors() {
+    for retired in [false, true] {
+        let mut env = TestEnv::new();
+        let old = env.init("forge1");
+        let current = env.init("forge");
+        if retired {
+            env.json(&current, &["retire", "--reason", "done"]);
+        }
+        let successor = if retired { "forge" } else { "missing" };
+        std::fs::write(old.join("tasks/.config.toml"), format!("prefix = \"forge1\"\n[retired]\ndate = \"2026-11-01\"\nreason = \"done\"\nsuccessor = \"{successor}\"\n")).unwrap();
+        let out = env.cmd(&old).arg("check").output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let kind = if retired {
+            "retired_successor_retired"
+        } else {
+            "retired_successor_invalid"
+        };
+        assert!(
+            report["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == kind),
+            "{report}"
+        );
+    }
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    write_task(&old, "forge1-0e720e", "");
+    predecessor(&env, &current, "forge1", &["0e720e", "123456"]);
+    write_task(&current, "forge-0e720e", "");
+    let out = env.cmd(&current).arg("check").output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    for kind in [
+        "predecessor_suffix_collision",
+        "predecessor_suffix_mismatch",
+        "predecessor_not_retired_to_successor",
+    ] {
+        assert!(
+            report["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == kind),
+            "{report}"
+        );
+    }
+    std::fs::remove_file(current.join("tasks/forge-0e720e.md")).unwrap();
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    write_task(&old, "forge1-0e720e", "moved_to: forge-18dae2\n");
+    let path = old.join("tasks/forge1-0e720e.md");
+    std::fs::write(
+        &path,
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("status: done", "status: moved"),
+    )
+    .unwrap();
+    std::fs::write(old.join("tasks/.config.toml"), "prefix = \"forge1\"\n[retired]\ndate = \"2026-11-01\"\nreason = \"done\"\nsuccessor = \"forge\"\n").unwrap();
+    write_task(&current, "forge-18dae2", "moved_from: forge-0e720e\n");
+    assert!(env.check(&current)["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn succession_citations_and_stored_dependencies_do_not_route_aliases_twice() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    write_task(&old, "forge1-0e720e", "");
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    let mut reg = registry(&env);
+    reg["aliases"] = toml::toml! { forge2 = "forge" }.into();
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        toml::to_string(&reg).unwrap(),
+    )
+    .unwrap();
+    let id = id_of(env.json(&current, &["add", "citation", "-b", "forge2-0e720e"]));
+    let shown = env.json(&current, &["show", &id]);
+    assert!(shown["task"].get("related").is_none(), "{shown}");
+    let id = id_of(env.json(&current, &["add", "wake target"]));
+    assert_eq!(
+        env.fail(
+            &current,
+            &[
+                "shelve",
+                &id,
+                "wake",
+                "--defer",
+                "1d",
+                "--wake-on",
+                "0e720e"
+            ]
+        ),
+        "unresolvable_id"
+    );
+    let mut raw = std::fs::read_to_string(current.join(format!("tasks/{id}.md"))).unwrap();
+    raw = raw.replace("depends: []", "depends: [forge2-0e720e]");
+    std::fs::write(current.join(format!("tasks/{id}.md")), raw).unwrap();
+    let shown = env.json(&current, &["show", &id]);
+    assert_eq!(shown["depends_on"][0]["resolved"], false, "{shown}");
+}
+
+#[test]
+fn succession_pairing_mismatch_and_unreachable_predecessor_are_reported() {
+    let mut env = TestEnv::new();
+    let current = env.init("forge");
+    let mut cfg = config(&current);
+    cfg.as_table_mut().unwrap().insert(
+        "predecessor".into(),
+        toml::toml! { prefix = "forge1" suffixes = ["0e720e"] }.into(),
+    );
+    std::fs::write(
+        current.join("tasks/.config.toml"),
+        toml::to_string(&cfg).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(env.fail(&current, &["add", "stale pairing"]), "config");
+    let out = env.cmd(&current).arg("check").output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "predecessor_registry_mismatch"),
+        "{report}"
+    );
+    env.json(&current, &["init", "--prefix", "forge", "--force"]);
+    let report = env.check(&current);
+    assert!(
+        report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "predecessor_unreachable"),
+        "{report}"
+    );
+    write_task(&current, "forge-18dae2", "moved_from: forge-abcdef\n");
+    assert_eq!(env.fail(&current, &["show", "forge-18dae2"]), "parse");
+}
+
+#[test]
+fn succession_commit_routes_full_ids_once_and_bare_suffixes_locally() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    repo(&env, &old);
+    repo(&env, &current);
+    write_task(&old, "forge1-0e720e", "");
+    write_task(&current, "forge-18dae2", "");
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    let mut reg = registry(&env);
+    reg["aliases"] = toml::toml! { forge2 = "forge" }.into();
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        toml::to_string(&reg).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        env.json(&current, &["commit", "forge-0e720e"])["committed"],
+        1
+    );
+    assert!(git(&env, &old, &["show", "HEAD:tasks/forge1-0e720e.md"]).contains("fixture"));
+    assert_eq!(
+        env.json(&current, &["commit", "forge2-18dae2"])["committed"],
+        1
+    );
+    let before = git(&env, &old, &["rev-parse", "HEAD"]);
+    write_task(&old, "forge1-0e720e", "source: changed\n");
+    for value in ["0e720e", "forge2-0e720e"] {
+        assert_eq!(env.fail(&current, &["commit", value]), "task_not_found");
+    }
+    assert_eq!(git(&env, &old, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn succession_check_reports_predecessor_pairing_mismatch_from_code_checkout() {
+    for detached in [false, true] {
+        let env = TestEnv::new();
+        let base = tempfile::tempdir().unwrap();
+        let code = base.path().join("code");
+        let records = base.path().join("records");
+        repo(&env, &code);
+        repo(&env, &records);
+        let project = if detached {
+            env.json(
+                &code,
+                &[
+                    "init",
+                    "--prefix",
+                    "forge",
+                    "--records",
+                    records.to_str().unwrap(),
+                ],
+            );
+            records.join("forge")
+        } else {
+            env.json(
+                &records,
+                &[
+                    "init",
+                    "--prefix",
+                    "forge",
+                    "--checkout",
+                    code.to_str().unwrap(),
+                ],
+            );
+            records.clone()
+        };
+        let mut cfg = config(&project);
+        cfg.as_table_mut().unwrap().insert(
+            "predecessor".into(),
+            toml::toml! { prefix = "forge1" suffixes = ["0e720e"] }.into(),
+        );
+        std::fs::write(
+            project.join("tasks/.config.toml"),
+            toml::to_string(&cfg).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(env.fail(&code, &["add", "stale pairing"]), "config");
+        let out = env.cmd(&code).arg("check").output().unwrap();
+        let report: serde_json::Value =
+            serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{out:?}"));
+        assert!(
+            report["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == "predecessor_registry_mismatch"),
+            "{report}"
+        );
+    }
+}

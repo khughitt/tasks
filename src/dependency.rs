@@ -22,11 +22,19 @@ pub enum Verdict {
 pub fn resolve(
     registry: &Registry,
     id: &TaskId,
+    lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
+) -> Result<Option<Task>> {
+    resolve_canonical(registry, &registry.canonical_id(id), lookup)
+}
+
+/// Like `resolve`, with an already canonicalized first ID; moved-to hops are still raw.
+pub fn resolve_canonical(
+    registry: &Registry,
+    id: &TaskId,
     mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
 ) -> Result<Option<Task>> {
-    let mut read = |id: &TaskId| lookup(&registry.canonical_id(id));
-    let first = read(id)?;
-    crate::tombstone::follow(first, read)
+    let first = lookup(id)?;
+    crate::tombstone::follow(first, |id| lookup(&registry.canonical_id(id)))
 }
 
 /// The one satisfaction rule: a closed record satisfies (done, recurring done until it is

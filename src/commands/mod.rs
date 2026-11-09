@@ -410,7 +410,9 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             blockers::run(open_read_ctx(dir, &args.scope, host.clone())?, args)
         }
         Command::Graph { format, all } => graph::run(open_ctx(dir, host.clone())?, format, all),
-        Command::Check { growth } => check::run(open_ctx(dir, host.clone())?, growth),
+        Command::Check { growth } => {
+            check::run(context::open_check_ctx(dir, host.clone())?, growth)
+        }
         Command::Commit {
             targets,
             message,

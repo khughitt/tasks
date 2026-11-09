@@ -330,7 +330,7 @@ fn obstruction(marker: &Path, metadata: &std::fs::Metadata) -> String {
 /// `worktree` set to `tree`'s top level. A registered root that holds a config is an
 /// in-tree project reached from a worktree without the file, `Ok(None)` as before; one
 /// with neither a config nor a pairing is `records_unpaired`.
-pub fn paired_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
+fn paired_project(registry: &Registry, tree: &GitTree, checking: bool) -> Result<Option<Project>> {
     let Some(main) = tree.main_checkout() else {
         return Ok(None);
     };
@@ -339,8 +339,12 @@ pub fn paired_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
             continue;
         }
         if registry.records_dir(prefix).is_some() {
-            let mut project =
-                crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;
+            let open = if checking {
+                crate::scope::open_registered_config
+            } else {
+                crate::scope::open_registered
+            };
+            let mut project = open(registry, prefix, crate::scope::Origin::Prefix)?;
             project.worktree = Some(tree.top.clone());
             return Ok(Some(project));
         }
@@ -369,9 +373,24 @@ pub fn records_unpaired(prefix: &str, root: &Path) -> Error {
 /// The project a code tree without a config of its own belongs to: the detached project
 /// paired with its main checkout, else the linked project declaring it.
 pub fn project_of_tree(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
-    match paired_project(registry, tree)? {
+    project_of_tree_inner(registry, tree, false)
+}
+
+pub(crate) fn project_of_tree_for_check(
+    registry: &Registry,
+    tree: &GitTree,
+) -> Result<Option<Project>> {
+    project_of_tree_inner(registry, tree, true)
+}
+
+fn project_of_tree_inner(
+    registry: &Registry,
+    tree: &GitTree,
+    checking: bool,
+) -> Result<Option<Project>> {
+    match paired_project(registry, tree, checking)? {
         Some(project) => Ok(Some(project)),
-        None => linked_project(registry, tree),
+        None => linked_project(registry, tree, checking),
     }
 }
 
@@ -398,11 +417,16 @@ pub fn refuse_moved(registry: &Registry, project: &Project) -> Result<()> {
 
 /// The registered linked project whose `[checkout]` is `tree`'s main checkout. Two such
 /// projects are `checkout_conflict`. Opened with `worktree` set to `tree`'s top level.
-pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
+fn linked_project(registry: &Registry, tree: &GitTree, checking: bool) -> Result<Option<Project>> {
     let Some(main) = tree.main_checkout() else {
         return Ok(None);
     };
-    let matches: Vec<_> = crate::locations::scan_checkouts(registry)
+    let scan = if checking {
+        crate::locations::scan_checkouts_for_check(registry)
+    } else {
+        crate::locations::scan_checkouts(registry)
+    };
+    let matches: Vec<_> = scan
         .strict()?
         .into_iter()
         .filter(|linked| linked.kind == Kind::Linked && linked.checkout == main)
@@ -410,8 +434,12 @@ pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
     match matches.as_slice() {
         [] => Ok(None),
         [one] => {
-            let mut project =
-                crate::scope::open_registered(registry, &one.prefix, crate::scope::Origin::Prefix)?;
+            let open = if checking {
+                crate::scope::open_registered_config
+            } else {
+                crate::scope::open_registered
+            };
+            let mut project = open(registry, &one.prefix, crate::scope::Origin::Prefix)?;
             project.worktree = Some(tree.top.clone());
             Ok(Some(project))
         }

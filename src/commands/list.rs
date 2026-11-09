@@ -75,7 +75,7 @@ pub(super) fn recorded_review_deps(
         crate::dependency::resolve(&ctx.registry, id, |id| {
             match scan.iter().find(|task| task.id == *id) {
                 Some(task) => Ok(Some(task.clone())),
-                None => resolver.resolve_task(id),
+                None => resolver.resolve_canonical_task(id),
             }
         })
     })?;

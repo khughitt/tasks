@@ -114,7 +114,7 @@ pub fn describe(
         crate::dependency::resolve(registry, id, |id| {
             match all.iter().find(|candidate| candidate.id == *id) {
                 Some(found) => Ok(Some(found.clone())),
-                None => resolver.resolve_task(id),
+                None => resolver.resolve_canonical_task(id),
             }
         })
     })?;
