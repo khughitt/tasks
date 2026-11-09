@@ -583,11 +583,17 @@ pub enum Command {
     /// renames and moves.
     Resolve {
         /// Ids, prefixes, or paths.
-        #[arg(required_unless_present = "stdin", conflicts_with = "stdin")]
+        #[arg(required_unless_present_any = ["stdin", "all"], conflicts_with_all = ["stdin", "all"])]
         inputs: Vec<String>,
         /// Read one input per line from stdin.
         #[arg(long)]
         stdin: bool,
+        /// List every catalogued prefix, including unregistered records entries.
+        #[arg(long, conflicts_with_all = ["inputs", "stdin"])]
+        all: bool,
+        /// Compare each entry's snapshot with its checkout's committed identity.
+        #[arg(long)]
+        freshness: bool,
     },
     /// Create a task.
     Add {

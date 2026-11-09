@@ -127,7 +127,12 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
         },
         Command::Groups => group::list(dir),
         Command::Root { id } => root::run(id, dir),
-        Command::Resolve { inputs, stdin } => resolver::run(inputs, stdin, dir),
+        Command::Resolve {
+            inputs,
+            stdin,
+            all,
+            freshness,
+        } => resolver::run(inputs, stdin, all, freshness, dir),
         Command::Add {
             title,
             status,

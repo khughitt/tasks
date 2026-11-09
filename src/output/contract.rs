@@ -233,6 +233,12 @@ pub struct ResolveRow {
     /// The project's records directory; set whenever `root` is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub records: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry: Option<EntryRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub records_store: Option<String>,
     /// The resolved project's identity color, when its config sets one and was read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
@@ -248,6 +254,43 @@ pub struct ResolveRow {
     pub candidates: Vec<crate::locations::Candidate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct EntryRow {
+    pub config: String,
+    pub records: String,
+    pub checkout: String,
+    pub kind: crate::repo::Kind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aliases: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<EntrySnapshotRow>,
+    pub shorthand: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<crate::palette::Rgb>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retired: Option<crate::repo::Retirement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freshness: Option<crate::catalogue::source::Freshness>,
+}
+
+#[derive(Serialize)]
+pub struct EntrySnapshotRow {
+    pub source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
+    pub refreshed: String,
 }
 
 #[derive(Serialize)]

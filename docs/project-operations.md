@@ -42,6 +42,27 @@ unregistered, ambiguous or invalid without failing other rows; registry errors
 still fail the command. Use show to verify a task. Paths report via/location and
 optional worktree/relpath; retired prefix aliases resolve while registered.
 
+`resolve --all` lists every catalogued prefix in prefix order, including entries
+discovered under a records store that this host has not registered. It conflicts
+with positional inputs and `--stdin`. Registered projects retain their existing
+resolution statuses and fields; discovered-only prefixes stay `unregistered`.
+Each readable records entry adds `entry`: config, records and declared checkout
+paths, layout kind, shorthand and optional profile, color, retirement and feedback
+scope. A snapshot adds name, public aliases, purpose and source/refreshed metadata
+(plus commit/blob for a HEAD snapshot). Unset optional fields are omitted.
+An unreadable or malformed entry adds `entry_error` and a warning while other rows
+continue. Path rows within a known records store add its root as `records_store`,
+including the store root itself and symlinked paths. An in-tree project's own
+repository is not a records store.
+
+`resolve --freshness` adds `entry.freshness`: `current` when the committed identity
+blob matches (or a seeded snapshot still has no committed identity), `behind` when
+the committed identity differs, and `unknown` without a snapshot or accessible
+checkout, or when git fails. Git failures also warn. Resolve reads configs and
+registry metadata only: it never reads task records, writes or takes mutation
+locks. Without `--freshness`, it runs no git except the existing fallback for an
+unregistered path.
+
 ## Detached pairing and relocation
 
 Remove in-tree tasks/config from working tree and index before detached init;

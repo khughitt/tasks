@@ -295,7 +295,28 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                             .to_string()
                     })
                     .unwrap_or_default();
-                [r.input.as_str(), r.status, answer, via.as_str()]
+                let mut parts = vec![r.input.clone(), r.status.into(), answer.into(), via];
+                if let Some(entry) = &r.entry {
+                    parts.extend(entry.name.iter().cloned());
+                    if let Some(freshness) = &entry.freshness {
+                        parts.push(
+                            serde_json::to_value(freshness)
+                                .unwrap()
+                                .as_str()
+                                .unwrap()
+                                .into(),
+                        );
+                    }
+                }
+                if let Some(store) = &r.records_store {
+                    parts.push(format!("records store: {store}"));
+                }
+                parts.extend(
+                    r.entry_error
+                        .iter()
+                        .map(|error| format!("entry error: {error}")),
+                );
+                parts
                     .into_iter()
                     .filter(|part| !part.is_empty())
                     .collect::<Vec<_>>()

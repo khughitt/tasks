@@ -391,6 +391,8 @@ summary = "The project, canonical id, or live prefix for an id, prefix, or path,
 args = [{ name = "inputs", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--stdin"], value = "none" },
+  { shared = "all", value = "none" },
+  { names = ["--freshness"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
