@@ -25,6 +25,18 @@ impl serde::Serialize for Rgb {
 }
 
 impl Rgb {
+    /// WCAG 2.x relative luminance in `[0.0, 1.0]`.
+    pub fn relative_luminance(self) -> f64 {
+        0.2126 * to_linear(self.r) + 0.7152 * to_linear(self.g) + 0.0722 * to_linear(self.b)
+    }
+
+    /// WCAG 2.x contrast ratio in `[1.0, 21.0]`.
+    pub fn contrast_ratio(self, other: Rgb) -> f64 {
+        let l1 = self.relative_luminance();
+        let l2 = other.relative_luminance();
+        (l1.max(l2) + 0.05) / (l1.min(l2) + 0.05)
+    }
+
     /// Exactly `#rrggbb`, either case; anything else is `None`.
     pub fn parse_hex(hex: &str) -> Option<Rgb> {
         let digits = hex.strip_prefix('#')?;
@@ -972,5 +984,19 @@ mod tests {
             QueryError::TypeAhead.to_string(),
             "keys were waiting in the terminal's input"
         );
+    }
+    #[test]
+    fn wcag_relative_luminance_and_contrast_ratio_match_reference_values() {
+        let black = Rgb::parse_hex("#000000").unwrap();
+        let white = Rgb::parse_hex("#ffffff").unwrap();
+        assert!((black.relative_luminance() - 0.0).abs() < 1e-12);
+        assert!((white.relative_luminance() - 1.0).abs() < 1e-12);
+        assert!((white.contrast_ratio(black) - 21.0).abs() < 1e-9);
+        assert!((black.contrast_ratio(white) - 21.0).abs() < 1e-9);
+
+        let bg = Palette::BUILTIN.bg;
+        let tasks_gold = Rgb::parse_hex("#aa8c0e").unwrap();
+        let ratio = tasks_gold.contrast_ratio(bg);
+        assert!(ratio > 5.5 && ratio < 6.0, "expected ~5.7:1, got {ratio}");
     }
 }

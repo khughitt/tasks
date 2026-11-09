@@ -5,7 +5,7 @@
 use crate::model::{Complexity, Process, Size, Status};
 use crate::output::ClaimInfo;
 use crate::palette::Rgb;
-use crate::style::{Painter, Style, When};
+use crate::style::{Activity, Painter, Style, When};
 
 /// A field's text and the role it paints in. Pad the text first, paint last.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,11 +64,15 @@ pub fn review_mark(needs_review: bool, reserved: bool) -> Span {
     }
 }
 
-/// A title in a row: the project's color when it has one, else plain.
-pub fn title(title: &str, project: Option<Rgb>) -> Span {
+/// A title in a row: the project's color when it has one (modulated by `activity` when
+/// supplied), else plain.
+pub fn title(title: &str, project: Option<Rgb>, activity: Option<Activity>) -> Span {
     Span {
         text: title.into(),
-        style: project.map(Style::Project),
+        style: project.map(|color| match activity {
+            Some(activity) => Style::Title { color, activity },
+            None => Style::Project(color),
+        }),
     }
 }
 
@@ -179,7 +183,18 @@ mod tests {
         assert_eq!(id("xx-000001", None).style, Some(Style::Chrome));
         let rgb = Rgb { r: 1, g: 2, b: 3 };
         assert_eq!(id("xx-000001", Some(rgb)).style, Some(Style::Id(rgb)));
-        assert_eq!(title("T", Some(rgb)).style, Some(Style::Project(rgb)));
+        assert_eq!(title("T", Some(rgb), None).style, Some(Style::Project(rgb)));
+        assert_eq!(
+            title("T", Some(rgb), Some(crate::style::Activity(128))).style,
+            Some(Style::Title {
+                color: rgb,
+                activity: crate::style::Activity(128),
+            })
+        );
+        assert_eq!(
+            title("T", None, Some(crate::style::Activity::HOT)),
+            Span::plain("T")
+        );
         assert_eq!(owner("me").style, Some(Style::Chrome));
         assert_eq!(
             status(Status::Doing).style,
@@ -196,7 +211,7 @@ mod tests {
             Span::styled("a, b", Style::Chrome)
         );
         assert_eq!(today(), Span::styled("now", Style::Date(When::Today)));
-        assert_eq!(title("T", None), Span::plain("T"));
+        assert_eq!(title("T", None, None), Span::plain("T"));
         assert_eq!(project("xx", None).style, Some(Style::Chrome));
         assert_eq!(count(Status::Blocked, 0).style, Some(Style::Chrome));
         assert_eq!(
@@ -229,6 +244,8 @@ mod tests {
             ("output/project.rs", include_str!("output/project.rs")),
             ("output/tables.rs", include_str!("output/tables.rs")),
             ("output/meta.rs", include_str!("output/meta.rs")),
+            ("output/goals.rs", include_str!("output/goals.rs")),
+            ("blockers_text.rs", include_str!("blockers_text.rs")),
             ("show_text.rs", include_str!("show_text.rs")),
         ] {
             let code = text.split("#[cfg(test)]").next().unwrap();
@@ -238,6 +255,7 @@ mod tests {
                 "Style::Date(",
                 "Style::Project(",
                 "Style::Id(",
+                "Style::Title",
             ] {
                 assert!(
                     !code.contains(role),

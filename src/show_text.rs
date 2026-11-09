@@ -542,7 +542,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
         rendered.push_str(&block(
             &lead,
             lead_width,
-            &[(title, present::title(title, project).style)],
+            &[(title, present::title(title, project, None).style)],
             lead_width,
             painter,
             width,

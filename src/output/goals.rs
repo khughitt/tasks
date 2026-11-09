@@ -289,7 +289,7 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
         values[Field::Title as usize] = if goal.closed.is_some() {
             painter.paint(Style::Chrome, &title)
         } else {
-            present::title(&title, goal.project_color).paint(painter)
+            present::title(&title, goal.project_color, None).paint(painter)
         };
         let mut row = Row::new(fields.iter().map(|f| values[*f as usize].clone()).collect());
         let mut progress = Vec::new();
