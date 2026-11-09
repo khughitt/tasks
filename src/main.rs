@@ -1,3 +1,4 @@
+mod activity;
 mod attachments;
 mod blockers;
 mod blockers_text;

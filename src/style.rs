@@ -49,6 +49,23 @@ impl ColorMode {
     }
 }
 
+/// Combined task and 1-hop neighborhood activity quantized to `0..=255` (`0` = cold, `255` = hot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Activity(pub u8);
+
+impl Activity {
+    pub const COLD: Activity = Activity(0);
+    pub const HOT: Activity = Activity(255);
+
+    pub fn from_unit(a: f64) -> Activity {
+        Activity((a.clamp(0.0, 1.0) * 255.0).round() as u8)
+    }
+
+    pub fn unit(self) -> f64 {
+        f64::from(self.0) / 255.0
+    }
+}
+
 /// A role, never a color. Call sites name what a span means; this module decides how that
 /// looks, so the same meaning renders identically in every view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
