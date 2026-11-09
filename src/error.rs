@@ -25,6 +25,14 @@ pub enum Error {
     NoProjectNext { dir: PathBuf, next: String },
     #[error("{0}")]
     Config(String),
+    #[error("{0}")]
+    IdentityInvalid(String),
+    #[error("{0}")]
+    IdentityPrefixMismatch(String),
+    #[error("{0}")]
+    IdentityCommitted(String),
+    #[error("{0}")]
+    RootDetached(String),
     #[error("task {0} not found")]
     TaskNotFound(String),
     /// `task_not_found` with what to do next, after the fact rather than inside it.
@@ -155,6 +163,10 @@ impl Error {
                 next: next + suffix,
             },
             Error::Config(detail) => Error::Config(detail + suffix),
+            Error::IdentityInvalid(detail) => Error::IdentityInvalid(detail + suffix),
+            Error::IdentityPrefixMismatch(detail) => Error::IdentityPrefixMismatch(detail + suffix),
+            Error::IdentityCommitted(detail) => Error::IdentityCommitted(detail + suffix),
+            Error::RootDetached(detail) => Error::RootDetached(detail + suffix),
             Error::TaskNotFound(detail) => Error::TaskNotFound(detail + suffix),
             Error::TaskNotFoundNext { id, next } => Error::TaskNotFoundNext {
                 id,
@@ -257,6 +269,10 @@ impl Error {
             Error::SummaryTooLarge => "summary_too_large",
             Error::NoProject(_) | Error::NoProjectNext { .. } => "no_project",
             Error::Config(_) => "config",
+            Error::IdentityInvalid(_) => "identity_invalid",
+            Error::IdentityPrefixMismatch(_) => "identity_prefix_mismatch",
+            Error::IdentityCommitted(_) => "identity_committed",
+            Error::RootDetached(_) => "root_detached",
             Error::TaskNotFound(_) | Error::TaskNotFoundNext { .. } => "task_not_found",
             Error::UnresolvableId(_) => "unresolvable_id",
             Error::InvalidId(..) => "invalid_id",
