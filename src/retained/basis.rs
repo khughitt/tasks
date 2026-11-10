@@ -12,12 +12,10 @@ pub struct PinnedTask {
     pub warnings: Vec<String>,
 }
 pub fn git(project: &Project, args: &[&str]) -> Result<Vec<u8>> {
-    let out = crate::git::at(&root(project)?)
-        .arg("--literal-pathspecs")
-        .args(args)
-        .output()?;
+    let read = super::read::run(project, args)?;
+    let out = read.output;
     if args.starts_with(&["cat-file", "blob"]) {
-        crate::history::record_metadata_read(out.stdout.len());
+        crate::history::record_metadata_read(read.bytes_read as usize);
     }
     if !out.status.success() {
         return Err(Error::RetainedHistoryBlocked(format!(
@@ -37,7 +35,7 @@ fn path_string(path: &Path) -> Result<String> {
         .ok_or_else(|| invalid("records-relative path must be UTF-8"))
 }
 pub fn root(project: &Project) -> Result<PathBuf> {
-    crate::record_commit::working_tree(&project.records).map_err(Error::Io)?.ok_or_else(||Error::RetainedPublicationUnsupported("Retained state needs a Git-backed records basis; use the manual immutable-snapshot recovery route for non-Git records".into()))
+    super::read::root(project)
 }
 pub fn resolve(project: &Project, revision: &str) -> Result<String> {
     if !line(revision) || revision.starts_with('-') {
@@ -150,23 +148,27 @@ pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result
     {
         return Err(Error::RetainedHistoryBlocked("Records pairing/layout changed; record a verified locator for the same exact history before retry".into()));
     }
-    let branch = crate::git::at(&project.records)
-        .args(["show-ref", "--verify", "--quiet", &basis.retained_ref])
-        .output()?;
+    let branch = super::read::run(
+        project,
+        &["show-ref", "--verify", "--quiet", &basis.retained_ref],
+    )?
+    .output;
     if !branch.status.success() {
         return Err(Error::RetainedHistoryBlocked(format!(
             "Retained ref {} is not an existing named branch; recover that exact ref",
             basis.retained_ref
         )));
     }
-    let out = crate::git::at(&project.records)
-        .args([
+    let out = super::read::run(
+        project,
+        &[
             "merge-base",
             "--is-ancestor",
             &basis.commit,
             &basis.retained_ref,
-        ])
-        .output()?;
+        ],
+    )?
+    .output;
     if !out.status.success() {
         return Err(Error::RetainedHistoryBlocked(format!(
             "Basis {} is not reachable through {}; preserve or recover its named ref",
@@ -200,9 +202,7 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
             "refs/heads/",
         ],
     )?)?;
-    let current = crate::git::at(&project.records)
-        .args(["symbolic-ref", "-q", "HEAD"])
-        .output()?;
+    let current = super::read::run(project, &["symbolic-ref", "-q", "HEAD"])?.output;
     let current_ref = if current.status.success() {
         string(current.stdout)?.trim().to_string()
     } else {
@@ -241,10 +241,7 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
             .collect::<Vec<_>>();
         let mut args = vec!["diff", "--quiet", "HEAD", "--"];
         args.extend(paths.iter().map(String::as_str));
-        let out = crate::git::at(&root)
-            .arg("--literal-pathspecs")
-            .args(args)
-            .output()?;
+        let out = super::read::run(project, &args)?.output;
         if !out.status.success() {
             return Err(Error::RetainedStaleBasis("Task or required history has unpublished changes; publish them before querying current retained state, or explicitly select a historical --at basis".into()));
         }
@@ -346,9 +343,11 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
             }
         }
     }
-    let ancestor = crate::git::at(&project.records)
-        .args(["merge-base", "--is-ancestor", &basis.commit, &head])
-        .output()?;
+    let ancestor = super::read::run(
+        project,
+        &["merge-base", "--is-ancestor", &basis.commit, &head],
+    )?
+    .output;
     if !ancestor.status.success() {
         pinned.warnings.push("Historical basis is outside current HEAD ancestry; it remains reachable through its named retained ref".into())
     }

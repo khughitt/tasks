@@ -415,8 +415,7 @@ fn payload_digest(
         return Err(invalid("preserved payload is not a regular Git blob"));
     }
     let object = format!("{}:{path}", b.commit);
-    let mut child = crate::git::at(&basis::root(&p)?)
-        .args(["cat-file", "blob", &object])
+    let mut child = super::read::command(&p, &["cat-file", "blob", &object])?
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;

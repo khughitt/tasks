@@ -133,6 +133,7 @@ impl Predecessor {
 
 #[derive(Debug, Clone)]
 pub struct Project {
+    pub(crate) retention_reads: Option<crate::retained::read::Session>,
     /// The `[git] commit` switch: commit each record write as it lands. See
     /// docs/project-operations.md
     pub commit_records: bool,
@@ -943,6 +944,7 @@ impl Project {
         crate::retained::lineage::validate_shape(&config.prefix, kind, &config.retention_lineage)
             .map_err(|e| Error::Config(format!("{CONFIG_REL}: {e}")))?;
         Ok(Project {
+            retention_reads: None,
             root,
             records,
             kind,

@@ -26,7 +26,7 @@ impl<'a> Resolver<'a> {
             &resolved.prefix,
             crate::scope::Origin::Id(&id),
         ) {
-            Ok(registered) => Ok(registered),
+            Ok(registered) => super::read::inherit(self.candidate, registered),
             Err(error) => {
                 if let Some(peer) = successor_candidate(project, &registry, &id)? {
                     return Ok(peer);
@@ -70,7 +70,7 @@ fn successor_candidate(
     if !crate::scope::has_config(&records)? {
         return Ok(None);
     }
-    let peer = Project::open(&records)?;
+    let peer = super::read::inherit(predecessor, Project::open(&records)?)?;
     if peer.prefix != successor
         || !peer
             .predecessor

@@ -406,6 +406,7 @@ pub fn reservation_ended(project: &Project, task: &Task, note: &OperationNote) -
             crate::scope::Origin::Id(&from),
         )?
     };
+    let p = super::read::inherit(project, p)?;
     let reference = note
         .input_bases
         .iter()

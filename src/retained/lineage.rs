@@ -69,6 +69,9 @@ pub fn validate_shape(prefix: &str, kind: crate::repo::Kind, edges: &[RenameEdge
     Ok(())
 }
 pub fn validate(project: &Project) -> Result<()> {
+    if super::read::lineage_cached(project)? {
+        return Ok(());
+    }
     let edges = &project.retention_lineage;
     validate_shape(&project.prefix, project.kind, edges)?;
     if edges.is_empty() {
@@ -101,6 +104,7 @@ pub fn validate(project: &Project) -> Result<()> {
             "retention lineage endpoint differs from live pairing",
         ));
     }
+    super::read::remember_lineage(project)?;
     Ok(())
 }
 pub fn epoch_subdir(project: &Project, prefix: &str) -> Result<String> {
@@ -635,10 +639,12 @@ pub fn prepare(project: &Project, target: &str) -> Result<Option<RenameEdge>> {
     }))
 }
 pub fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
-    validate(project)?;
     if project.retention_lineage.is_empty() {
-        return Ok(());
+        return validate(project);
     }
+    let scoped = super::read::start(project)?;
+    let project = &scoped;
+    validate(project)?;
     for task in tasks {
         check_protected_storage(project, task)?;
         for edge in &project.retention_lineage {
