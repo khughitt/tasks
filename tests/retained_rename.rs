@@ -1779,3 +1779,166 @@ fn retention_transfer_handoff_shared_late() {
 fn retention_transfer_handoff_shared_early() {
     transfer_handoff_adoption(true, true);
 }
+
+fn checked_read_trace(f: &RetainedEnv) -> (std::process::Output, Vec<serde_json::Value>) {
+    let trace = f.env.home.path().join("check-git-trace.jsonl");
+    if trace.exists() {
+        std::fs::remove_file(&trace).unwrap();
+    }
+    let out = f
+        .cmd()
+        .env("GIT_TRACE2_EVENT", &trace)
+        .arg("check")
+        .output()
+        .unwrap();
+    let events = std::fs::read_to_string(trace)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    (out, events)
+}
+fn read_starts(events: &[serde_json::Value]) -> usize {
+    let verbs = [
+        "rev-parse",
+        "show-ref",
+        "merge-base",
+        "ls-tree",
+        "cat-file",
+        "log",
+        "symbolic-ref",
+        "for-each-ref",
+        "diff",
+        "status",
+        "ls-files",
+        "rev-list",
+        "check-ref-format",
+    ];
+    events
+        .iter()
+        .filter(|e| {
+            e["event"] == "start"
+                && e["argv"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| verbs.iter().any(|verb| arg == verb))
+        })
+        .count()
+}
+fn assert_clean_check(out: &std::process::Output) {
+    assert!(out.status.success(), "{out:?}");
+    if !out.stdout.is_empty() {
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(report["errors"], json!([]), "{report}");
+    }
+}
+#[test]
+fn retention_rename_check_read_bound() {
+    for layout in ["in-tree", "detached", "linked"] {
+        let mut f = observed(layout);
+        f.json(&["start", &f.id]);
+        checkpoint(&f, &checkpoint_request(&f, 2, json!([])));
+        for _ in 0..5 {
+            f.json(&["add", "Unrelated task"]);
+        }
+        f.json(&["park", &f.id, "before cutover"]);
+        seed_rename(&mut f, "new");
+        let (out, events) = checked_read_trace(&f);
+        assert_clean_check(&out);
+        let count = read_starts(&events);
+        println!("VALIDATION_READ_COUNT layout={layout} count={count}");
+        // N=103, B=10103: L=N+max(32,ceil(N/4))=135; fewer reads remain valid.
+        assert!(
+            count > 0 && count <= 135,
+            "{layout}: {count} Git reads exceeds 135"
+        );
+    }
+}
+#[test]
+fn retention_rename_check_rejects_corrupt_history_after_cached_pass() {
+    let mut f = observed("in-tree");
+    seed_rename(&mut f, "new");
+    assert_clean_check(&checked_read_trace(&f).0);
+    let request = std::fs::read_dir(f.records.join(format!("tasks/files/{}", f.id)))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(".request.json")
+        })
+        .unwrap();
+    std::fs::write(request, b"{}").unwrap();
+    let (out, _) = checked_read_trace(&f);
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "retention_lineage")
+    );
+}
+#[test]
+fn retention_rename_check_peer_context() {
+    use common::retained::{cross_receiver, transfer, transfer_request};
+    use std::collections::BTreeMap;
+    let mut f = observed("in-tree");
+    f.json(&["start", &f.id]);
+    let (other, to) = cross_receiver(&f, false);
+    transfer(&f, &to, &transfer_request(&f, &to));
+    f.json(&["park", &f.id, "rename"]);
+    f.json(&["-C", other.to_str().unwrap(), "park", &to, "rename"]);
+    let saved = (f.dir.clone(), f.records.clone(), f.id.clone());
+    f.dir = other.clone();
+    f.records = other;
+    f.id = to;
+    seed_rename(&mut f, "other");
+    (f.dir, f.records, f.id) = saved;
+    seed_rename(&mut f, "new");
+    let (out, events) = checked_read_trace(&f);
+    assert_clean_check(&out);
+    let repositories: BTreeMap<String, String> = events
+        .iter()
+        .filter(|e| e["event"] == "def_repo")
+        .map(|e| {
+            (
+                e["sid"].as_str().unwrap().into(),
+                e["worktree"].as_str().unwrap().into(),
+            )
+        })
+        .collect();
+    assert!(
+        repositories
+            .values()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            >= 2
+    );
+    let mut calls = BTreeMap::new();
+    for event in events.iter().filter(|e| e["event"] == "start") {
+        let args: Vec<String> = event["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        let immutable = args.iter().any(|a| a == "ls-tree" || a == "log")
+            || args.windows(2).any(|a| a == ["cat-file", "-s"]);
+        if immutable {
+            let repo = repositories
+                .get(event["sid"].as_str().unwrap())
+                .expect("Git read has a repository");
+            *calls.entry((repo.clone(), args)).or_insert(0usize) += 1;
+        }
+    }
+    assert!(!calls.is_empty());
+    assert!(
+        calls.values().all(|count| *count <= 1),
+        "duplicate immutable queries: {calls:?}"
+    );
+}

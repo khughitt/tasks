@@ -21,6 +21,23 @@ Git records with git.commit=true, exact input bases and ordinary ownership. Loca
 locks/heartbeats do not exclude remote writers or create atomic directory snapshots.
 No payload copying, relocation, deletion or automatic closure is implemented here.
 
+## Record validation reads
+
+For a project with retention rename lineage, `tasks check` uses one invocation-owned
+read session for its retention validation pass. It captures each records repository's
+HEAD and local branches on first access, including repositories reached through peer
+proofs, and reuses immutable Git reads and parsed logical task history within a
+bounded cache. Concurrent ref changes alone do not introduce a stale-basis failure;
+the next invocation captures fresh refs. Live storage and protected attachment byte
+checks still run, and malformed or missing history still fails validation.
+
+The cache is discarded on return, including errors. It admits at most 2,048 optional
+entries and 32 MiB of accounted payload/key bytes, without eviction; after admission
+fills, new reads remain uncached. These limits bound retained cache inputs rather
+than exact process RSS. This optimization does not change the standalone retained
+commands' metrics, lifecycle mutation freshness rules, historical ref acceptance,
+locator rules, schemas, or `check` JSON shapes.
+
 ## Retention records and manifests
 
 Notes beginning `retained: ` contain strict JSON. New records use integer version
