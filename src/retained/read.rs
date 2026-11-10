@@ -1,6 +1,7 @@
 //! Invocation-owned Git snapshots for retention validation; ordinary readers stay live.
 use crate::{
     error::{Error, Result},
+    model::Task,
     repo::Project,
 };
 use std::{
@@ -18,14 +19,50 @@ impl std::fmt::Debug for Session {
         f.write_str("Session")
     }
 }
-#[derive(Default)]
 struct SessionState {
     aliases: BTreeMap<PathBuf, RepoKey>,
     repositories: BTreeMap<RepoKey, Arc<Snapshot>>,
     lineages: BTreeSet<String>,
+    max_entries: usize,
+    max_bytes: usize,
+    used_bytes: usize,
+    queries: BTreeMap<QueryKey, Output>,
+    tasks: BTreeMap<TaskKey, Task>,
 }
 type RepoKey = (PathBuf, PathBuf, PathBuf);
+type QueryKey = (RepoKey, Vec<String>);
+type TaskKey = (RepoKey, String, String, u64);
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            aliases: BTreeMap::new(),
+            repositories: BTreeMap::new(),
+            lineages: BTreeSet::new(),
+            queries: BTreeMap::new(),
+            tasks: BTreeMap::new(),
+            max_entries: 2048,
+            max_bytes: 32 * 1024 * 1024,
+            used_bytes: 0,
+        }
+    }
+}
+impl SessionState {
+    fn admit(&mut self, charge: usize) -> bool {
+        if self.queries.len() + self.tasks.len() + self.lineages.len() >= self.max_entries {
+            return false;
+        }
+        let Some(total) = self.used_bytes.checked_add(charge) else {
+            return false;
+        };
+        if total > self.max_bytes {
+            return false;
+        }
+        self.used_bytes = total;
+        true
+    }
+}
 struct Snapshot {
+    identity: RepoKey,
     root: PathBuf,
     head: String,
     symbolic_head: Option<String>,
@@ -112,6 +149,7 @@ impl Session {
             return Err(invalid("invalid HEAD object ID"));
         }
         let snapshot = Arc::new(Snapshot {
+            identity: key.clone(),
             root,
             head,
             symbolic_head,
@@ -203,7 +241,13 @@ pub(crate) fn command(p: &Project, args: &[&str]) -> Result<Command> {
     Ok(command)
 }
 pub(crate) fn ancestor(p: &Project, older: &str, newer: &str) -> Result<bool> {
-    let out = raw(&root(p)?, &["merge-base", "--is-ancestor", older, newer])?;
+    let args = ["merge-base", "--is-ancestor", older, newer];
+    let out = if let Some(session) = &p.retention_reads {
+        let snapshot = session.snapshot(p)?;
+        session.query(&snapshot, &args)?.output
+    } else {
+        raw(&root(p)?, &args)?
+    };
     match out.status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
@@ -308,13 +352,7 @@ pub(crate) fn run(p: &Project, args: &[&str]) -> Result<ReadOutput> {
         _ => {}
     }
     let args = normalized.iter().map(String::as_str).collect::<Vec<_>>();
-    let output = raw(&snapshot.root, &args)?;
-    let bytes_read = if args.starts_with(&["cat-file", "blob"]) {
-        output.stdout.len() as u64
-    } else {
-        0
-    };
-    Ok(ReadOutput { output, bytes_read })
+    session.query(&snapshot, &args)
 }
 fn lineage_key(p: &Project) -> Result<String> {
     serde_json::to_string(&(&p.records, &p.prefix, p.kind.as_str(), &p.retention_lineage))
@@ -329,7 +367,101 @@ pub(crate) fn lineage_cached(p: &Project) -> Result<bool> {
 pub(crate) fn remember_lineage(p: &Project) -> Result<()> {
     if let Some(s) = &p.retention_reads {
         let key = lineage_key(p)?;
-        s.lock()?.lineages.insert(key);
+        let mut state = s.lock()?;
+        if !state.lineages.contains(&key) && state.admit(key.len().saturating_add(64)) {
+            state.lineages.insert(key);
+        }
+    }
+    Ok(())
+}
+fn cacheable(args: &[&str]) -> bool {
+    match args {
+        ["ls-tree", "-z", oid, "--", _] => oid_is_full(oid),
+        ["cat-file", "blob" | "-s", object] => oid_is_full(object.split(':').next().unwrap_or("")),
+        ["merge-base", "--is-ancestor", a, b] => oid_is_full(a) && oid_is_full(b),
+        [
+            "log",
+            "--first-parent",
+            "--reverse",
+            "--format=%H",
+            oid,
+            "--",
+            _,
+        ] => oid_is_full(oid),
+        _ => false,
+    }
+}
+impl Session {
+    fn query(&self, snapshot: &Snapshot, args: &[&str]) -> Result<ReadOutput> {
+        let allowed = cacheable(args);
+        let key = (
+            snapshot.identity.clone(),
+            args.iter().map(|s| s.to_string()).collect(),
+        );
+        if allowed && let Some(output) = self.lock()?.queries.get(&key).cloned() {
+            return Ok(ReadOutput {
+                output,
+                bytes_read: 0,
+            });
+        }
+        let output = raw(&snapshot.root, args)?;
+        let bytes_read = if args.starts_with(&["cat-file", "blob"]) {
+            output.stdout.len() as u64
+        } else {
+            0
+        };
+        let complete = output.status.success()
+            || (args.starts_with(&["merge-base", "--is-ancestor"])
+                && output.status.code() == Some(1));
+        if allowed && complete {
+            let charge = serde_json::to_vec(&key)
+                .map_err(invalid)?
+                .len()
+                .saturating_add(output.stdout.len())
+                .saturating_add(output.stderr.len())
+                .saturating_add(64);
+            let mut state = self.lock()?;
+            if !state.queries.contains_key(&key) && state.admit(charge) {
+                state.queries.insert(key, output.clone());
+            }
+        }
+        Ok(ReadOutput { output, bytes_read })
+    }
+    fn task_key(&self, p: &Project, b: &super::model::Basis) -> Result<TaskKey> {
+        Ok((
+            self.snapshot(p)?.identity.clone(),
+            b.commit.clone(),
+            b.task_path.clone(),
+            p.attachments_max_bytes,
+        ))
+    }
+}
+pub(crate) fn task_cached(p: &Project, b: &super::model::Basis) -> Result<Option<Task>> {
+    let Some(session) = &p.retention_reads else {
+        return Ok(None);
+    };
+    if !oid_is_full(&b.commit) {
+        return Ok(None);
+    }
+    let key = session.task_key(p, b)?;
+    Ok(session.lock()?.tasks.get(&key).cloned())
+}
+pub(crate) fn remember_task(p: &Project, b: &super::model::Basis, task: &Task) -> Result<()> {
+    let Some(session) = &p.retention_reads else {
+        return Ok(());
+    };
+    if !oid_is_full(&b.commit) {
+        return Ok(());
+    }
+    let key = session.task_key(p, b)?;
+    let charge = serde_json::to_vec(&key)
+        .map_err(invalid)?
+        .len()
+        .saturating_add(serde_json::to_vec(task).map_err(invalid)?.len())
+        .saturating_add(64);
+    let mut state = session.lock()?;
+    if !state.tasks.contains_key(&key) && state.admit(charge) {
+        state.tasks.insert(key, task.clone());
     }
     Ok(())
 }

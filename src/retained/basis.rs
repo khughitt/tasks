@@ -12,8 +12,11 @@ pub struct PinnedTask {
     pub warnings: Vec<String>,
 }
 pub fn git(project: &Project, args: &[&str]) -> Result<Vec<u8>> {
+    Ok(git_read(project, args)?.output.stdout)
+}
+fn git_read(project: &Project, args: &[&str]) -> Result<super::read::ReadOutput> {
     let read = super::read::run(project, args)?;
-    let out = read.output;
+    let out = &read.output;
     if args.starts_with(&["cat-file", "blob"]) {
         crate::history::record_metadata_read(read.bytes_read as usize);
     }
@@ -24,7 +27,7 @@ pub fn git(project: &Project, args: &[&str]) -> Result<Vec<u8>> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    Ok(out.stdout)
+    Ok(read)
 }
 fn string(bytes: Vec<u8>) -> Result<String> {
     String::from_utf8(bytes).map_err(|_| invalid("Git metadata must be UTF-8"))
@@ -86,11 +89,11 @@ pub fn blob(
             )));
         }
     }
-    let bytes = git(project, &["cat-file", "blob", &object])?;
+    let read = git_read(project, &["cat-file", "blob", &object])?;
     *bytes_read = bytes_read
-        .checked_add(bytes.len() as u64)
+        .checked_add(read.bytes_read)
         .ok_or_else(|| invalid("history byte counter overflow"))?;
-    Ok(bytes)
+    Ok(read.output.stdout)
 }
 pub(crate) fn task_at(
     project: &Project,
@@ -99,6 +102,9 @@ pub(crate) fn task_at(
     bytes_read: &mut u64,
 ) -> Result<Task> {
     let original = super::lineage::historical_id(basis)?;
+    if let Some(task) = super::read::task_cached(project, basis)? {
+        return Ok(task);
+    }
     let id = &original;
     let raw = string(blob(
         project,
@@ -125,6 +131,7 @@ pub(crate) fn task_at(
             "Pinned task has a different id; restore the declared pairing".into(),
         ));
     }
+    super::read::remember_task(project, basis, &task)?;
     Ok(task)
 }
 pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result<()> {
