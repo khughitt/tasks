@@ -749,9 +749,17 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   [recovery limits](../../docs/project-operations.md#move-manual-undo).
 - A growing task record: `tasks check --growth` reports active bytes and complete
   logical-history counts. `tasks archive-notes <id>` is a read-only lossless
-  note-archive preview. Operational guidance is preview-only pending the reader,
-  consumer and coordinated-writer rollout gate tasks-82096b and explicit shared
-  apply authorization. A preview alone authorizes no mutation.
+  note-archive preview. The shared-reader rollout is complete and apply verifies
+  its own result. The owner (the session holding or closing the record) may approve
+  applying to its own shared record only as the sole writer, with no other live
+  claim. Any other shared record needs the user's approval of the exact source hash.
+  Coordinate one writer across hosts; local claims alone do not prove that.
+  Write a stamped note on the target naming the applying host before previewing,
+  then preview, obtain any required approval, and apply with
+  `tasks archive-notes <id> --expect <source_sha256>`. Nothing writes to the target
+  between preview and apply (`start`, `park`, and notes also change the hash);
+  a stale hash refuses. Inspect apply's `verified` output, synchronize the records,
+  and run `tasks check` on the other host. A preview alone authorizes no mutation.
   `tasks show` JSON contains every verified archived note in descriptor order,
   followed by the inline suffix. Physical Markdown can contain `note_archives`
   descriptors and only that suffix; read full history through the CLI, and classify

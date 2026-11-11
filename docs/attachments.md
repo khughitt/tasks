@@ -142,9 +142,19 @@ shared skills/settings. Ordinary evidence publication does not grant host action
 `archive-notes <id>` previews source_sha256, archive_name/bytes, note_count,
 record_bytes_before/after, eligible and reasons without writing. Empty suffix,
 no saving, unsafe/conflicting storage or over-cap segment is ineligible; corrupt
-history fails. Shared apply needs all readers/consumers upgraded and one coordinated
-writer host. That rollout is tracked separately; normal guidance remains preview
-only until its activation gate is satisfied.
+history fails. The shared-reader rollout is complete. Shared apply still requires
+upgraded readers/consumers and one coordinated writer across hosts; local claims
+alone do not establish cross-host exclusivity.
+
+The record's owner—the session holding or closing it—may authorize an apply to
+its own shared record when it is the sole writer and no other live claim exists.
+Any other shared record requires the user's approval of its exact source hash.
+Before previewing, write a stamped `tasks note <id> "Archive writer: <host>" --stamp`
+on the target naming the applying host. Then preview, obtain any required approval,
+and apply with `--expect <source_sha256>`. Nothing may write to the target between
+preview and apply: `start`, `park`, and further notes also change the source hash.
+Inspect apply's built-in `verified` result below, synchronize the records, and run
+`tasks check` on the other host. A preview alone grants no apply authority.
 
 Technical apply is `archive-notes <id> --expect <source_sha256>` from the exact
 preview. No force bypass exists. Foreign held claims refuse; closed/shelved status
