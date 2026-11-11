@@ -281,12 +281,11 @@ pub(super) fn lock_pair_and_revalidate(
     ctx: &mut Ctx,
     routing: &Routing,
     peer: &str,
+    on_same_prefix: impl Fn(&str) -> Error,
 ) -> Result<MutationLock> {
     for _ in 0..4 {
         if peer == ctx.project.prefix {
-            return Err(Error::Validation(format!(
-                "--adopting {peer} names this checkout's own prefix; it takes the prefix being adopted"
-            )));
+            return Err(on_same_prefix(peer));
         }
         let (peer_lock, project_lock) = if peer < ctx.project.prefix.as_str() {
             let first = MutationLock::acquire(peer)?;

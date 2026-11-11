@@ -77,10 +77,13 @@ pub fn open(
         )));
     }
     let mut ctx = super::open_id_ctx(dir, id, host.clone())?;
+    let same_prefix = |peer: &str| {
+        Error::Validation(format!(
+            "--adopting {peer} names this checkout's own prefix; it takes the prefix being adopted"
+        ))
+    };
     if old == ctx.project.prefix {
-        return Err(Error::Validation(format!(
-            "--adopting {old} names this checkout's own prefix; it takes the prefix being adopted"
-        )));
+        return Err(same_prefix(old));
     }
     // A first check before locking spares a typo a lock file; only the one under both
     // locks below counts.
@@ -88,7 +91,7 @@ pub fn open(
     let routing = ctx.routing.clone();
     // Both locks are acquired in sorted order and dropped together on retry if the
     // checkout's prefix changes; `ctx.registry` is refreshed while both locks are held.
-    let lock = super::lock_pair_and_revalidate(&mut ctx, &routing, old)?;
+    let lock = super::lock_pair_and_revalidate(&mut ctx, &routing, old, same_prefix)?;
     eligible(&ctx, old)?;
     let store = ClaimStore::load(old)?;
     Ok((

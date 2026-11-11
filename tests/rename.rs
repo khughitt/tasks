@@ -1806,6 +1806,119 @@ fn release_adopting_early_lock_order_and_prerename_worktree_guidance() {
     );
 }
 
+#[test]
+fn release_adopting_postrename_worktree_guidance_checks_adoptability() {
+    let env = TestEnv::new();
+    let main = env.home.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    adopt_json(&env, &main, &["init", "--prefix", "alpha"]);
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+
+    let side = main.join("side wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    let old_id = id_of(adopt_json(&env, &side, &["add", "Side renamed", "-p", "2"]));
+    let new_id = old_id.replacen("alpha-", "sci-", 1);
+
+    // Rename `main` to `sci`, and bring `side` onto `sci` with `tasks/<new_id>.md`
+    // while `main` still lacks `tasks/<new_id>.md`.
+    for checkout in [&main, &side] {
+        let cfg = checkout.join("tasks/.config.toml");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        std::fs::write(&cfg, text.replace("prefix = \"alpha\"", "prefix = \"sci\"")).unwrap();
+    }
+    let raw = std::fs::read_to_string(side.join(format!("tasks/{old_id}.md"))).unwrap();
+    std::fs::remove_file(side.join(format!("tasks/{old_id}.md"))).unwrap();
+    std::fs::write(
+        side.join(format!("tasks/{new_id}.md")),
+        raw.replacen(&old_id, &new_id, 1),
+    )
+    .unwrap();
+
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+    let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+    let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        state.join("alpha.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"side\"\nsession = \"sandboxed\"\nhost = \"host\"\n\
+             worktree = {:?}\nstarted = \"2099-01-01T00:00:00Z\"\n\
+             seen = \"2099-01-01T00:00:00Z\"\npid = {}\npid_start = {start}\n\
+             boot_id = \"{}\"\npid_view = \"0:1\"\n",
+            side.display().to_string(),
+            std::process::id(),
+            boot.trim(),
+        ),
+    )
+    .unwrap();
+
+    // While `alpha`'s registered root (`main`) still holds `tasks/.config.toml`,
+    // `side` cannot run `--adopting alpha`: guidance tells the caller to merge into `main`.
+    let out = adopt_cmd(&env, &main)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "alpha"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "task_not_found", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains(&format!(
+            "Its record `tasks/{new_id}.md` is in {}: merge that branch into {}",
+            side.display(),
+            main.display()
+        )),
+        "{detail}"
+    );
+    assert!(!detail.contains("--adopting alpha"), "{detail}");
+
+    // When `alpha`'s registered root is a vanished checkout, `side` CAN run `--adopting alpha`:
+    // guidance offers `-C '<side>' release <new_id> "<why>" --adopting alpha`, and that call succeeds.
+    let vanished = env.home.path().join("vanished");
+    let reg_path = env.home.path().join("config/tasks/projects.toml");
+    let reg_text = std::fs::read_to_string(&reg_path).unwrap();
+    std::fs::write(
+        &reg_path,
+        reg_text.replace(&main.display().to_string(), &vanished.display().to_string()),
+    )
+    .unwrap();
+
+    let out = adopt_cmd(&env, &main)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "alpha"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "task_not_found", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains(&format!(
+            "rerun this release there with `tasks -C '{}' release {new_id} \"<why>\" --adopting alpha`",
+            side.display()
+        )),
+        "{detail}"
+    );
+
+    let out = adopt_cmd(&env, &side)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "alpha"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
 #[cfg(unix)]
 #[test]
 fn release_adopting_drops_early_lock_when_checkout_prefix_changes_while_waiting() {
