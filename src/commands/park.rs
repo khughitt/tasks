@@ -38,35 +38,58 @@ pub fn run(
     let resolution = ctx.resolve_for_guard()?;
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
     let held = existing.as_ref().map(|claim| claim.session.clone());
-    let me = match &existing {
-        Some(claim) => match crate::commands::ownership(claim, &resolution, &ctx.host) {
-            crate::commands::Ownership::ByIdentity => resolution.require()?,
-            crate::commands::Ownership::ByProof => crate::claims::continuation_identity(claim),
-            crate::commands::Ownership::Foreign => resolution
-                .require()
-                .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?,
-        },
+    let ownership = existing
+        .as_ref()
+        .map(|claim| crate::commands::ownership(claim, &resolution, &ctx.host));
+    let me = match (&existing, ownership) {
+        (_, Some(crate::commands::Ownership::ByIdentity)) => resolution.require()?,
+        (Some(claim), Some(crate::commands::Ownership::ByProof)) => {
+            crate::claims::continuation_identity(claim)
+        }
+        (_, Some(crate::commands::Ownership::Foreign)) => resolution
+            .require()
+            .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?,
         // Parking an unclaimed task records a session, so it is acquisition too.
-        None => resolution.require()?,
+        (None, None) => resolution.require()?,
+        (None, Some(_)) | (Some(_), None) => unreachable!("ownership is mapped from existing"),
     };
 
-    // The claim rules of , as a guard: a live foreign claim refuses (no --force), a
-    // stale one is taken over with the warning `start` gives, our own is simply replaced.
-    let takeover = {
-        let store = ctx.claims_mut()?;
-        match store.get(&task.id) {
-            Some(existing) if existing.session != me.session => {
-                let live = crate::claims::liveness(existing);
-                let description = Ctx::describe_claim(existing, &live);
-                match live {
-                    Liveness::Live | Liveness::Unverifiable(_) => {
-                        return Err(Error::Claimed(task.id.to_string(), description));
-                    }
-                    Liveness::Stale(_) => Some(format!("took over {description}")),
+    // The claim rules (docs/ownership.md), as a guard: a live or unverifiable foreign claim
+    // refuses (no --force) with non-authorizing recovery hints, a stale one is taken over
+    // with the warning `start` gives, and our own is simply replaced.
+    let takeover = match (&existing, ownership) {
+        (Some(existing), Some(crate::commands::Ownership::Foreign)) => {
+            let live = crate::claims::liveness(existing);
+            let description = Ctx::describe_claim(existing, &live);
+            match live {
+                Liveness::Live | Liveness::Unverifiable(_) => {
+                    let task_id = task.id.to_string();
+                    let continuation =
+                        if std::path::Path::new(&existing.worktree) == ctx.project.resume_root() {
+                            let holder = Ctx::session_label(existing);
+                            format!(
+                                "; if this conversation continued from {holder}, take it over with \
+                             `tasks start --force {task_id} --reason \"continued from {holder}\"` \
+                             before parking"
+                            )
+                        } else {
+                            String::new()
+                        };
+                    let release = match live {
+                        Liveness::Unverifiable(_) => {
+                            crate::commands::release::hint(&task_id, &existing.session)
+                        }
+                        _ => String::new(),
+                    };
+                    return Err(Error::Claimed(
+                        task_id,
+                        format!("{description}{continuation}{release}"),
+                    ));
                 }
+                Liveness::Stale(_) => Some(format!("took over {description}")),
             }
-            _ => None,
         }
+        _ => None,
     };
     if let Some(warning) = takeover {
         ctx.warnings.push(warning);

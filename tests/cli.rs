@@ -29620,3 +29620,124 @@ fn goals_sort_completion() {
     offered.sort();
     assert_eq!(offered, ["activity", "priority", "project"]);
 }
+
+#[test]
+fn park_foreign_claim_hints_same_worktree_continuation_and_unverifiable_release() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+
+    // 1. Same-worktree foreign live claim: park refuses with `claimed` and names the
+    //    explicit `start --force --reason "continued from session ..."` recovery route.
+    as_agent(&env, &main, "claude-code:old-session")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["park", &id, "hand off"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    let expected_takeover = format!(
+        "tasks start --force {id} --reason \"continued from session claude-code:old-session\""
+    );
+    assert!(detail.contains(&expected_takeover), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+
+    // Running that exact takeover command followed by `park` succeeds.
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args([
+            "start",
+            "--force",
+            &id,
+            "--reason",
+            "continued from session claude-code:old-session",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args(["park", &id, "hand off"])
+        .assert()
+        .success();
+
+    // 2. Cross-worktree foreign live claim: park in `main` while `side` holds the claim
+    //    emits neither the same-worktree continuation hint nor `tasks release`.
+    let cross = id_of(env.json(&main, &["add", "Cross worktree", "-p", "2"]));
+    std::fs::copy(
+        main.join(format!("tasks/{cross}.md")),
+        side.join(format!("tasks/{cross}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &side, "claude-code:other-wt")
+        .args(["start", &cross])
+        .assert()
+        .success();
+    stamp(
+        &main,
+        &cross,
+        "2026-09-01T00:00:00Z",
+        "2099-01-01T00:00:00Z",
+    );
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["park", &cross, "wrong wt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+
+    // 3. Same-worktree Unix-session (`sid:<pid>`) claim: never suggests copying a raw PID
+    //    into `--reason`.
+    let unix = id_of(env.json(&main, &["add", "Unix holder", "-p", "2"]));
+    as_agent(&env, &main, "sid:424242")
+        .args(["start", &unix])
+        .assert()
+        .success();
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["park", &unix, "after shell"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains("--reason \"continued from Unix session\""),
+        "{detail}"
+    );
+    assert!(
+        !detail.contains("continued from session sid:424242"),
+        "{detail}"
+    );
+
+    // 4. Foreign unverifiable claim: includes `tasks release` hint (plus continuation hint
+    //    only when in the same worktree).
+    set_pid_view(&env, "sci", &cross, "0:1");
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["park", &cross, "unverifiable other wt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(
+        detail.contains(&format!("tasks release {cross} \"<why>\"")),
+        "{detail}"
+    );
+
+    set_pid_view(&env, "sci", &unix, "0:1");
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["park", &unix, "unverifiable same wt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains("--reason \"continued from Unix session\""),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks release {unix} \"<why>\"")),
+        "{detail}"
+    );
+}

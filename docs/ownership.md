@@ -87,8 +87,15 @@ a foreign claim. A mismatched explicit TASKS_SESSION disables proof fallback.
 
 Parking releases ownership, so the next start is a new acquisition and needs
 current registry evidence or an explicit session. Legitimate owners recovering
-from missing hints can inspect `show` and use its exact held session. Set a PID
-only for a real long-lived process, never for the current CLI invocation.
+from missing hints can inspect `show` and use its exact held session. When a
+harness continues one conversation under a new native session id (Claude Code
+`/background` hand-off or `--resume` copy, or Codex `/new`, `/resume` or
+`/fork` in one process), `tasks` receives no verified predecessor lineage and
+refuses non-`start` writes as foreign; after confirming the claim's session is
+the predecessor of this conversation, take it over explicitly with
+`tasks start --force <id> --reason "continued from session <old>"` before
+parking or continuing. Set a PID only for a real long-lived process, never for
+the current CLI invocation.
 
 ## PID views and takeover
 

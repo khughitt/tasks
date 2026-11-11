@@ -131,8 +131,14 @@ mean those documents were verified.
    `ready` and `next` omit live claims; see the [claim and checkout contract](../../docs/ownership.md#acquire-refresh-and-release)
    and `tasks start --help` / `tasks release --help` for ownership and recovery.
    `tasks start --force <id>` deliberately takes over another session's claim and records it;
-   do not treat it as an ordinary retry. Treat `unverifiable` claims as held; use
-   `tasks release <id> "<why>"` only when you know the holder is gone.
+   do not treat it as an ordinary retry. When a harness continues your own conversation under
+   a new native session id (a Claude Code `/background` hand-off or `--resume` copy, or Codex
+   `/new`, `/resume` or `/fork` in one process), your earlier live claim reads as foreign (`park`
+   and `done` refuse with `claimed`); once you confirm the claim's session is the one your own
+   conversation continued from, recover it explicitly with
+   `tasks start --force <id> --reason "continued from session <old>"`, then park or continue.
+   Treat `unverifiable` claims as held; use `tasks release <id> "<why>"` only when you know the
+   holder is gone.
    Follow `stale_copy` and `task_not_found` recovery guidance for the recorded checkout;
    `stale_copy` has no override. Leave records held by another live session to that session,
    except when `tasks note` offers its explicit `tasks -C <wt> note ...` remedy to append a
