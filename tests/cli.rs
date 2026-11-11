@@ -29660,6 +29660,23 @@ fn park_foreign_claim_hints_same_worktree_continuation_and_unverifiable_release(
         .args(["park", &id, "hand off"])
         .assert()
         .success();
+    let shown = env.json(&main, &["show", &id]);
+    assert!(shown["claim"].is_null(), "{shown}");
+    assert_eq!(
+        shown["park"]["session"], "claude-code:bg-session",
+        "{shown}"
+    );
+    assert!(
+        shown["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("continued from session claude-code:old-session")),
+        "{shown}"
+    );
 
     // 2. Cross-worktree foreign live claim: park in `main` while `side` holds the claim
     //    emits neither the same-worktree continuation hint nor `tasks release`.
