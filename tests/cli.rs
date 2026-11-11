@@ -27012,17 +27012,61 @@ fn an_unverifiable_claim_is_held_not_pruned_or_taken() {
 fn pretty_claims_name_an_unverifiable_claim() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
-    write_claim_in_view(&env, "sci", &id, "sandboxed", "0:1");
-    let out = env
-        .cmd(&sci)
-        .env("TASKS_FORMAT", "pretty")
-        .args(["claims"])
-        .output()
-        .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("unverifiable"), "{text}");
-    assert!(!text.contains("stale"), "{text}");
+    let other_view = id_of(env.json(&sci, &["add", "Other view", "-p", "2"]));
+    let legacy = id_of(env.json(&sci, &["add", "Legacy claim", "-p", "2"]));
+    write_claim_in_view(&env, "sci", &other_view, "sandboxed", "0:1");
+    write_claim(&env, "sci", &legacy, "legacy", true);
+    let path = env.claim_store("sci");
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    store["claims"][&legacy]
+        .as_table_mut()
+        .unwrap()
+        .remove("pid_view");
+    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
+
+    let pretty = |args: &[&str]| {
+        let out = env
+            .cmd(&sci)
+            .env("TASKS_FORMAT", "pretty")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    let claims = pretty(&["claims"]);
+    assert!(
+        claims.contains("unverifiable: recorded in another PID view"),
+        "{claims}"
+    );
+    assert!(
+        claims.contains("unverifiable: PID view not established when recorded"),
+        "{claims}"
+    );
+    assert!(!claims.contains("stale"), "{claims}");
+
+    let shown_other = pretty(&["show", &other_view]);
+    assert!(
+        shown_other.contains("someone [sandboxed unverifiable: recorded in another PID view]"),
+        "{shown_other}"
+    );
+    let shown_legacy = pretty(&["show", &legacy]);
+    assert!(
+        shown_legacy
+            .contains("someone [legacy unverifiable: PID view not established when recorded]"),
+        "{shown_legacy}"
+    );
+
+    let prime = pretty(&["prime"]);
+    assert!(
+        prime.contains("@someone [sandboxed unverifiable: recorded in another PID view]"),
+        "{prime}"
+    );
+    assert!(
+        prime.contains("@someone [legacy unverifiable: PID view not established when recorded]"),
+        "{prime}"
+    );
 }
 
 #[test]

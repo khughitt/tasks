@@ -137,13 +137,13 @@ pub fn today() -> Span {
     Span::styled("now", Style::Date(When::Today))
 }
 
-/// `<owner> [<session>]`, with ` stale` or ` unverifiable` inside the brackets when the
-/// claim is not plainly live.
+/// `<owner> [<session>]`, with ` stale` or ` unverifiable: <why>` inside the brackets
+/// when the claim is not plainly live.
 pub fn claim(claim: &ClaimInfo) -> Span {
     let state = match (&claim.unverified, claim.live) {
-        (Some(_), _) => " unverifiable",
-        (None, true) => "",
-        (None, false) => " stale",
+        (Some(why), _) => format!(" unverifiable: {why}"),
+        (None, true) => String::new(),
+        (None, false) => " stale".into(),
     };
     Span::styled(
         format!("{} [{}{state}]", claim.owner, claim.session),
@@ -232,6 +232,38 @@ mod tests {
     #[test]
     fn left_pads_before_painting() {
         assert_eq!(id("ab", None).left(4).text, "ab  ");
+    }
+
+    #[test]
+    fn claim_carries_state_and_unverifiable_reason() {
+        let base = |live: bool, unverified: Option<&str>| ClaimInfo {
+            owner: "someone".into(),
+            session: "sandboxed".into(),
+            root_session: None,
+            host: "h".into(),
+            pid: Some(7),
+            worktree: "/elsewhere".into(),
+            started: "2026-01-01T00:00:00Z".into(),
+            seen: "2026-01-01T00:00:00Z".into(),
+            live,
+            unverified: unverified.map(Into::into),
+            holds: vec![],
+        };
+        assert_eq!(
+            claim(&base(true, None)),
+            Span::styled("someone [sandboxed]", Style::Chrome)
+        );
+        assert_eq!(
+            claim(&base(false, None)),
+            Span::styled("someone [sandboxed stale]", Style::Chrome)
+        );
+        assert_eq!(
+            claim(&base(true, Some("recorded in another PID view"))),
+            Span::styled(
+                "someone [sandboxed unverifiable: recorded in another PID view]",
+                Style::Chrome
+            )
+        );
     }
 
     /// Current contract (docs/task-model.md): the views ask this module, so a field cannot look different in two

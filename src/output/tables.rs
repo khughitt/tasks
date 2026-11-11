@@ -497,11 +497,10 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                         row.id.clone(),
                         row.claim.session.clone(),
                         match (&row.claim.unverified, row.claim.live) {
-                            (Some(_), _) => "unverifiable",
-                            (None, true) => "live",
-                            (None, false) => "stale",
-                        }
-                        .into(),
+                            (Some(why), _) => format!("unverifiable: {why}"),
+                            (None, true) => "live".into(),
+                            (None, false) => "stale".into(),
+                        },
                         row.claim.worktree.clone(),
                     ])
                 })
