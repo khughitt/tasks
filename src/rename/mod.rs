@@ -44,7 +44,12 @@ pub(crate) fn dir_identity(path: &std::path::Path) -> Result<std::path::PathBuf>
 
 /// The command holds both prefix locks and the registry lock for mutating calls.
 /// Observation is repeated here after lock acquisition; explain needs none of the locks.
-pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> Result<RenameOut> {
+pub fn run(
+    registry: &mut Registry,
+    invocation: &Invocation,
+    explain: bool,
+    host: &crate::config::HostConfig,
+) -> Result<RenameOut> {
     let snapshot = observe(registry, invocation, Inventory::load(&invocation.source)?)?;
     let source = registry.canonical_prefix(&invocation.source).to_string();
     let target = registry.canonical_prefix(&invocation.target).to_string();
@@ -186,7 +191,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     }
     // The files are in the current records directory; `root` is only the identity.
     let project = Project::open(&invocation.records)?;
-    authorize(&project, invocation, &mut out.warnings)?;
+    authorize(&project, invocation, host, &mut out.warnings)?;
     if recovery != Recovery::Fresh {
         // Resumed records may already use the target prefix and skip the file-write pass.
         for path in inventory::task_paths(&project.tasks_dir())? {
@@ -452,7 +457,12 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     Ok(out)
 }
 
-fn authorize(project: &Project, invocation: &Invocation, warnings: &mut Vec<String>) -> Result<()> {
+fn authorize(
+    project: &Project,
+    invocation: &Invocation,
+    host: &crate::config::HostConfig,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
     for prefix in [&invocation.source, &invocation.target] {
         for (id, claim) in ClaimStore::load(prefix)?.iter() {
             let live = crate::claims::liveness(claim);
@@ -461,7 +471,8 @@ fn authorize(project: &Project, invocation: &Invocation, warnings: &mut Vec<Stri
                 // store has no record here to note, so it gets no hint.
                 let hint = match live {
                     crate::claims::Liveness::Unverifiable(_) if prefix == &invocation.source => {
-                        crate::commands::release::hint(id, &claim.session)
+                        let me = crate::claims::resolve_identity(host, &mut Vec::new());
+                        crate::commands::release::hint_if_foreign(id, claim, &me, host)
                     }
                     _ => String::new(),
                 };

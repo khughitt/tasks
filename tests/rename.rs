@@ -1669,6 +1669,235 @@ fn adopt_hints_plain_release_for_an_unverifiable_claim_in_the_new_store() {
 }
 
 #[test]
+fn adopt_with_malformed_old_claim_key_still_reports_claimed() {
+    let env = TestEnv::new();
+    let (dir, _) = adopt_fixture(&env);
+    adopt_old_claim(&env, "not-an-id", "sandboxed", Some("0:1"));
+    let out = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(detail.contains("session sandboxed"), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+}
+
+#[test]
+fn adopt_omits_release_hint_for_the_callers_own_unverifiable_claim() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+
+    // Caller's own unverifiable claim in the old store.
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "sandboxed")
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("tasks release"), "{detail}");
+
+    // Caller's own unverifiable claim in the new store.
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::rename(state.join("old.toml"), state.join("new.toml")).unwrap();
+    let text = std::fs::read_to_string(state.join("new.toml")).unwrap();
+    std::fs::write(state.join("new.toml"), text.replace(&old_id, &new_id)).unwrap();
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "sandboxed")
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("tasks release"), "{detail}");
+}
+
+#[test]
+fn release_adopting_early_lock_order_and_prerename_worktree_guidance() {
+    // `alpha` < `sci` exercises the `old < prefix` lock order, and `side` holds a
+    // pre-rename `tasks/alpha-<hex>.md` record absent from `main`.
+    let env = TestEnv::new();
+    let main = env.home.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    adopt_json(&env, &main, &["init", "--prefix", "alpha"]);
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+
+    let side = main.join("side wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    let old_id = id_of(adopt_json(&env, &side, &["add", "Side only", "-p", "2"]));
+    let new_id = old_id.replacen("alpha-", "sci-", 1);
+
+    // Simulate another host renaming `main` from `alpha` to `sci`.
+    let cfg = main.join("tasks/.config.toml");
+    let cfg_text = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(
+        &cfg,
+        cfg_text.replace("prefix = \"alpha\"", "prefix = \"sci\""),
+    )
+    .unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "rename alpha -> sci"]);
+
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+    let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+    let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        state.join("alpha.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"side\"\nsession = \"sandboxed\"\nhost = \"host\"\n\
+             worktree = {:?}\nstarted = \"2099-01-01T00:00:00Z\"\n\
+             seen = \"2099-01-01T00:00:00Z\"\npid = {}\npid_start = {start}\n\
+             boot_id = \"{}\"\npid_view = \"0:1\"\n",
+            side.display().to_string(),
+            std::process::id(),
+            boot.trim(),
+        ),
+    )
+    .unwrap();
+
+    let out = adopt_cmd(&env, &main)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "alpha"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "task_not_found", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(
+        detail.starts_with(&format!("task {new_id} not found; the claim stays.")),
+        "{detail}"
+    );
+    assert!(detail.contains(&format!("tasks/{old_id}.md")), "{detail}");
+    assert!(detail.contains(&side.display().to_string()), "{detail}");
+
+    // Bring `side`'s record onto the renamed prefix in `main`, then rerun the release.
+    let raw = std::fs::read_to_string(side.join(format!("tasks/{old_id}.md"))).unwrap();
+    std::fs::write(
+        main.join(format!("tasks/{new_id}.md")),
+        raw.replacen(&old_id, &new_id, 1),
+    )
+    .unwrap();
+    let out = adopt_cmd(&env, &main)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "alpha"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        adopt_json(&env, &main, &["rename", "alpha", "sci", "--adopt"])["recovery"],
+        "fresh"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn release_adopting_drops_early_lock_when_checkout_prefix_changes_while_waiting() {
+    use std::os::unix::fs::MetadataExt;
+    let env = TestEnv::new();
+    let dir = env.home.path().join("checkout");
+    std::fs::create_dir(&dir).unwrap();
+    adopt_json(&env, &dir, &["init", "--prefix", "alpha"]);
+    let old_id = id_of(adopt_json(&env, &dir, &["add", "Task"]));
+    let new_id = old_id.replacen("alpha-", "sci-", 1);
+    let old_text = std::fs::read_to_string(dir.join(format!("tasks/{old_id}.md"))).unwrap();
+    std::fs::write(
+        dir.join(format!("tasks/{new_id}.md")),
+        old_text.replacen(&old_id, &new_id, 1),
+    )
+    .unwrap();
+    std::fs::remove_file(dir.join(format!("tasks/{old_id}.md"))).unwrap();
+    let config = dir.join("tasks/.config.toml");
+    let config_text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        config_text.replace("prefix = \"alpha\"", "prefix = \"sci\""),
+    )
+    .unwrap();
+
+    // Hold `sci`'s lock (`alpha` < `sci`): release acquires `alpha.lock` first and blocks
+    // on `sci.lock`.
+    let claims_dir = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&claims_dir).unwrap();
+    let lock_path = claims_dir.join("sci.lock");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    held.lock().unwrap();
+    let ino = std::fs::metadata(&lock_path).unwrap().ino();
+
+    let mut child = env
+        .raw(&dir)
+        .env("XDG_CONFIG_HOME", env.home.path().join("config"))
+        .env("XDG_STATE_HOME", env.home.path().join("state"))
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "gone", "--adopting", "alpha"])
+        .spawn()
+        .unwrap();
+
+    let blocked = || {
+        std::fs::read_to_string("/proc/locks")
+            .unwrap()
+            .lines()
+            .any(|line| {
+                line.contains("->")
+                    && line
+                        .split_whitespace()
+                        .any(|field| field.ends_with(&format!(":{ino}")))
+            })
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !blocked() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "release never blocked on sci.lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Revert the checkout's prefix to `alpha` while release waits on `sci.lock`, then
+    // release `sci.lock`. Without dropping `alpha.lock` before retrying, release would
+    // self-deadlock trying to acquire `alpha.lock` a second time.
+    std::fs::write(&config, &config_text).unwrap();
+    drop(held);
+
+    let wait_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= wait_deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("release self-deadlocked after checkout prefix changed back to alpha");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(err_kind(&out), "validation", "{out:?}");
+    assert!(err_detail(&out).contains("own prefix"), "{out:?}");
+}
+
+#[test]
 fn rename_recovers_through_noncanonical_registry_roots_before_and_after_registry_write() {
     for spelling in ["symlink", "dotdot"] {
         for (stop, verdict) in [("files", "resume_files"), ("registry", "resume_cleanup")] {

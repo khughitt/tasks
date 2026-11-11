@@ -3,6 +3,7 @@
 //! that changes this prefix's root (`init --force`, `rename`) takes this lock first.
 
 use crate::claims::{ClaimStore, MutationLock};
+use crate::config::HostConfig;
 use crate::error::{Error, Result};
 use crate::model::Task;
 use crate::registry::Registry;
@@ -10,7 +11,12 @@ use crate::repo::{CONFIG_REL, Project, Retirement, validate_retirement};
 use crate::scope::Origin;
 use std::path::{Path, PathBuf};
 
-pub fn retire(here: Project, successor: Option<String>, reason: String) -> Result<Retirement> {
+pub fn retire(
+    here: Project,
+    successor: Option<String>,
+    reason: String,
+    host: &HostConfig,
+) -> Result<Retirement> {
     let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
@@ -50,7 +56,7 @@ pub fn retire(here: Project, successor: Option<String>, reason: String) -> Resul
             )));
         }
     }
-    reject_live_claims(&project)?;
+    reject_live_claims(&project, host)?;
     reject_open_copies(&project)?;
     write_table(&project, Some(&retirement))?;
     Ok(retirement)
@@ -86,14 +92,15 @@ fn authority(registry: &Registry, here: &Project) -> Result<Project> {
     Ok(project)
 }
 
-fn reject_live_claims(project: &Project) -> Result<()> {
+fn reject_live_claims(project: &Project, host: &HostConfig) -> Result<()> {
     let store = ClaimStore::load(&project.prefix)?;
     for (id, claim) in store.iter() {
         let live = crate::claims::liveness(claim);
         if !live.is_stale() {
             let hint = match live {
                 crate::claims::Liveness::Unverifiable(_) => {
-                    super::release::hint(id, &claim.session)
+                    let me = crate::claims::resolve_identity(host, &mut Vec::new());
+                    super::release::hint_if_foreign(id, claim, &me, host)
                 }
                 _ => String::new(),
             };

@@ -21541,8 +21541,8 @@ fn show_names_the_checkout_when_the_one_holding_the_task_is_gone() {
     assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
     let detail = error["error"]["detail"].as_str().unwrap();
     assert!(
-        detail.contains(&format!(
-            "claimed in {}, which is unavailable",
+        detail.starts_with(&format!(
+            "task {id} not found; claimed in {}, which is unavailable",
             side.display()
         )),
         "{detail}"
@@ -27356,6 +27356,25 @@ fn release_refusals_write_nothing() {
 #[test]
 fn release_refuses_a_blank_reason() {
     let mut env = TestEnv::new();
+    // Checked before opening any project, reading the registry, or creating a lock file.
+    for why in ["", "   \t "] {
+        let error = error_as(
+            &env,
+            env.home.path(),
+            "releaser",
+            &["release", "nope-000000", why, "--adopting", "../claims/bad"],
+        );
+        assert_eq!(error["error"]["kind"], "validation", "{why:?}: {error}");
+        assert!(
+            error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("needs a reason"),
+            "{error}"
+        );
+    }
+    assert!(!env.home.path().join(".local/state/tasks/claims").exists());
+
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
     json_as(&env, &sci, "sandboxed", &["start", &id]);
@@ -27516,7 +27535,12 @@ fn park_store_failure_after_the_note_names_the_rerun() {
 fn release_from_main_skips_the_gone_sessions_claims_in_the_stale_copy_check() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
-    let other = id_of(env.json(&side, &["add", "Other work", "-p", "2"]));
+    let other = id_of(env.json(&main, &["add", "Other work", "-p", "2"]));
+    std::fs::copy(
+        main.join(format!("tasks/{other}.md")),
+        side.join(format!("tasks/{other}.md")),
+    )
+    .unwrap();
     as_agent(&env, &side, "gone")
         .args(["start", &id])
         .assert()
@@ -27529,15 +27553,30 @@ fn release_from_main_skips_the_gone_sessions_claims_in_the_stale_copy_check() {
     set_pid_view(&env, "sci", &other, "0:1");
     stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
     stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
-
-    // The gone session's two claims occupy nothing for its release: the remedy is the rerun.
-    let release = ["release", id.as_str(), "sandbox exited"];
-    let detail = stale_detail(&env, &main, &release);
-    assert!(
-        !detail.contains("Wait for that branch to merge"),
-        "{detail}"
+    stamp(
+        &main,
+        &other,
+        "2026-09-01T00:00:00Z",
+        "2026-09-05T09:00:00Z",
     );
-    assert!(detail.contains("tasks -C "), "{detail}");
+    stamp(
+        &side,
+        &other,
+        "2026-09-01T00:00:00Z",
+        "2026-09-07T10:00:00Z",
+    );
+
+    // The gone session's two claims occupy nothing for its release: both get the rerun.
+    let release = ["release", id.as_str(), "sandbox exited"];
+    let release_other = ["release", other.as_str(), "sandbox exited"];
+    for cmd in [&release[..], &release_other[..]] {
+        let detail = stale_detail(&env, &main, cmd);
+        assert!(
+            !detail.contains("Wait for that branch to merge"),
+            "{cmd:?}: {detail}"
+        );
+        assert!(detail.contains("tasks -C "), "{cmd:?}: {detail}");
+    }
 
     // A note from main still names the holder, as before.
     let detail = stale_detail(&env, &main, &["note", &id, "x"]);
@@ -27553,12 +27592,51 @@ fn release_from_main_skips_the_gone_sessions_claims_in_the_stale_copy_check() {
     assert!(detail.contains("Wait for that branch to merge"), "{detail}");
     assert!(detail.contains("agent-c"), "{detail}");
 
-    // The printed rerun, made where the newer copy is, succeeds.
-    as_agent(&env, &side, "releaser")
-        .args(release)
+    // The printed reruns, made where the newer copies are, both succeed.
+    for (cmd, target) in [(&release[..], &id), (&release_other[..], &other)] {
+        as_agent(&env, &side, "releaser")
+            .args(cmd)
+            .assert()
+            .success();
+        assert!(env.json(&side, &["show", target])["claim"].is_null());
+    }
+}
+
+#[test]
+fn release_from_main_keeps_another_sandboxs_sid_claim_as_an_occupant() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let other = id_of(env.json(&side, &["add", "Second sandbox", "-p", "2"]));
+    as_agent(&env, &side, "sid:1")
+        .args(["start", &id])
         .assert()
         .success();
-    assert!(env.json(&side, &["show", &id])["claim"].is_null());
+    as_agent(&env, &side, "sid:1")
+        .args(["start", &other])
+        .assert()
+        .success();
+    set_pid_view(&env, "sci", &id, "0:1");
+    set_pid_view(&env, "sci", &other, "0:2");
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+
+    // Two sandboxes can both be `sid:1`, so releasing `id` must not skip `other`.
+    let release = ["release", id.as_str(), "sandbox a exited"];
+    let detail = stale_detail(&env, &main, &release);
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+    assert!(detail.contains(&other), "{detail}");
+
+    // Once `other` is released in `side`, `id`'s own `sid:1` claim is skipped as usual.
+    as_agent(&env, &side, "releaser")
+        .args(["release", &other, "sandbox b exited"])
+        .assert()
+        .success();
+    let detail = stale_detail(&env, &main, &release);
+    assert!(
+        !detail.contains("Wait for that branch to merge"),
+        "{detail}"
+    );
+    assert!(detail.contains("tasks -C "), "{detail}");
 }
 
 #[test]
@@ -27586,6 +27664,13 @@ fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_on
             list.iter().any(|w| w.contains(&hint)),
             "{command:?}: {list:?}"
         );
+        // The holder's own session never gets a `tasks release` hint, since release refuses "yours".
+        let own = json_as(&env, &sci, "sandboxed", command);
+        let own_list = warnings(&own);
+        assert!(
+            !own_list.iter().any(|w| w.contains("tasks release")),
+            "{command:?}: {own_list:?}"
+        );
     }
     for command in [
         &["retire", "--reason", "over"][..],
@@ -27597,22 +27682,53 @@ fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_on
             error["error"]["detail"].as_str().unwrap().contains(&hint),
             "{command:?}: {error}"
         );
+        let own_error = error_as(&env, &sci, "sandboxed", command);
+        assert_eq!(
+            own_error["error"]["kind"], "claimed",
+            "{command:?}: {own_error}"
+        );
+        assert!(
+            !own_error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("tasks release"),
+            "{command:?}: {own_error}"
+        );
     }
 
-    // A live claim keeps the old wording everywhere.
+    // Clear the unverifiable claim so the live-claim check below sees only `live`.
+    json_as(&env, &sci, "releaser", &["release", &held, "gone"]);
+
+    // A live claim keeps the old wording everywhere (ready, next, retire, rename).
     let live = id_of(env.json(&sci, &["add", "Live", "-p", "1"]));
     write_claim(&env, "sci", &live, "agent-b", true);
-    let list = warnings(&env.json(&sci, &["ready"]));
-    assert!(
-        list.iter().any(|w| w.contains(&format!("{live} omitted"))),
-        "{list:?}"
-    );
-    assert!(
-        !list
-            .iter()
-            .any(|w| w.contains(&format!("tasks release {live}"))),
-        "{list:?}"
-    );
+    for command in [&["ready"][..], &["next"][..]] {
+        let list = warnings(&env.json(&sci, command));
+        assert!(
+            list.iter().any(|w| w.contains(&format!("{live} omitted"))),
+            "{command:?}: {list:?}"
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|w| w.contains(&format!("tasks release {live}"))),
+            "{command:?}: {list:?}"
+        );
+    }
+    for command in [
+        &["retire", "--reason", "over"][..],
+        &["rename", "sci", "lab"][..],
+    ] {
+        let error = error_of(&env, &sci, command);
+        assert_eq!(error["error"]["kind"], "claimed", "{command:?}: {error}");
+        assert!(
+            !error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("tasks release"),
+            "{command:?}: {error}"
+        );
+    }
 }
 
 #[test]

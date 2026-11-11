@@ -45,7 +45,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         && !live.is_stale()
     {
         let me = crate::claims::resolve_identity(&ctx.source.host, &mut ctx.source.warnings);
-        let remedy = match (commands::ownership(claim, &me, &ctx.source.host)?, live) {
+        let remedy = match (commands::ownership(claim, &me, &ctx.source.host), live) {
             (commands::Ownership::Foreign, crate::claims::Liveness::Unverifiable(why)) => format!(
                 "unverifiable: {why}{}",
                 commands::release::hint(&id.to_string(), &claim.session)

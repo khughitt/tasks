@@ -15,11 +15,40 @@ pub fn hint(id: &str, session: &str) -> String {
     format!("; if session {session} is gone, run `tasks release {id} \"<why>\"`")
 }
 
+/// `hint`, omitted when this caller owns `claim` (`tasks release` would refuse "yours").
+pub(crate) fn hint_if_foreign(
+    id: &str,
+    claim: &Claim,
+    me: &crate::claims::Resolution,
+    host: &HostConfig,
+) -> String {
+    if super::ownership(claim, me, host) == Ownership::Foreign {
+        hint(id, &claim.session)
+    } else {
+        String::new()
+    }
+}
+
 /// The same, for a claim adoption finds in the old prefix's store (docs/task-model.md).
 pub fn adopting_hint(renamed: &str, session: &str, old: &str) -> String {
     format!(
         "; if session {session} is gone, run `tasks release {renamed} \"<why>\" --adopting {old}`"
     )
+}
+
+/// `adopting_hint`, omitted when this caller owns `claim`.
+pub(crate) fn adopting_hint_if_foreign(
+    renamed: &str,
+    claim: &Claim,
+    old: &str,
+    me: &crate::claims::Resolution,
+    host: &HostConfig,
+) -> String {
+    if super::ownership(claim, me, host) == Ownership::Foreign {
+        adopting_hint(renamed, &claim.session, old)
+    } else {
+        String::new()
+    }
 }
 
 /// `--adopting <old>`: the old prefix, its store, and its lock, held to the command's end.
@@ -48,8 +77,7 @@ pub fn open(
         )));
     }
     let mut ctx = super::open_id_ctx(dir, id, host.clone())?;
-    let prefix = ctx.project.prefix.clone();
-    if old == prefix {
+    if old == ctx.project.prefix {
         return Err(Error::Validation(format!(
             "--adopting {old} names this checkout's own prefix; it takes the prefix being adopted"
         )));
@@ -57,25 +85,10 @@ pub fn open(
     // A first check before locking spares a typo a lock file; only the one under both
     // locks below counts.
     eligible(&ctx, old)?;
-    let early = if old < prefix.as_str() {
-        Some(MutationLock::acquire(old)?)
-    } else {
-        None
-    };
     let routing = ctx.routing.clone();
-    super::lock_and_revalidate(&mut ctx, &routing)?;
-    if ctx.project.prefix != prefix {
-        return Err(Error::Validation(format!(
-            "--adopting {old}: this checkout's prefix changed from {prefix:?} while locking; retry"
-        )));
-    }
-    let lock = match early {
-        Some(lock) => lock,
-        None => MutationLock::acquire(old)?,
-    };
-    // Both locks are held: `init --force` and `rename` take a prefix's lock before they
-    // change its root, so a registry read now stays true to the end of the command.
-    ctx.registry = crate::registry::Registry::load()?;
+    // Both locks are acquired in sorted order and dropped together on retry if the
+    // checkout's prefix changes; `ctx.registry` is refreshed while both locks are held.
+    let lock = super::lock_pair_and_revalidate(&mut ctx, &routing, old)?;
     eligible(&ctx, old)?;
     let store = ClaimStore::load(old)?;
     Ok((
@@ -101,7 +114,7 @@ fn eligible(ctx: &Ctx, old: &str) -> Result<()> {
 }
 
 /// Current contract (docs/task-model.md): the reason is the one thing the record keeps that the tool cannot know.
-fn require_reason(why: &str) -> Result<()> {
+pub(super) fn require_reason(why: &str) -> Result<()> {
     if why.trim().is_empty() {
         return Err(Error::Validation(
             "tasks release needs a reason: why the holder is known to be gone".into(),
@@ -121,7 +134,7 @@ pub fn run(mut ctx: Ctx, adopting: Option<Adopting>, id: String, why: String) ->
                 .cloned()
                 .ok_or_else(|| Error::Validation(format!("{id} has no claim")))?;
             let live = judge(&mut ctx, &claim, &id, None)?;
-            let task = write_note(&mut ctx, &id, &claim, &live, &why)?;
+            let task = write_note(&mut ctx, &id, &claim, &live, &why, None)?;
             let store = ctx.claims_mut()?;
             store.remove(&id);
             store
@@ -137,7 +150,7 @@ pub fn run(mut ctx: Ctx, adopting: Option<Adopting>, id: String, why: String) ->
                 .cloned()
                 .ok_or_else(|| Error::Validation(format!("{key} has no claim")))?;
             let live = judge(&mut ctx, &claim, &key, Some((&adopting.old, &id)))?;
-            let task = write_note(&mut ctx, &id, &claim, &live, &why)?;
+            let task = write_note(&mut ctx, &id, &claim, &live, &why, Some(&adopting.old))?;
             adopting.store.remove(&key);
             adopting
                 .store
@@ -160,7 +173,7 @@ fn judge(
 ) -> Result<Liveness> {
     let me = crate::claims::resolve_identity(&ctx.host, &mut ctx.warnings);
     let live = crate::claims::liveness(claim);
-    let own = super::ownership(claim, &me, &ctx.host)? != Ownership::Foreign;
+    let own = super::ownership(claim, &me, &ctx.host) != Ownership::Foreign;
     match (own, matches!(live, Liveness::Live), adopting) {
         (true, _, None) => Err(Error::Validation(format!(
             "the claim on {key} is yours; `tasks park {key} \"<next step>\"` or `tasks done {key}` \
@@ -204,6 +217,7 @@ fn write_note(
     claim: &Claim,
     live: &Liveness,
     why: &str,
+    adopting: Option<&str>,
 ) -> Result<Task> {
     let (mut task, raw) = ctx
         .project
@@ -211,11 +225,19 @@ fn write_note(
         .map_err(|error| match error {
             Error::TaskNotFound(_) => Error::TaskNotFoundNext {
                 id: id.to_string(),
-                next: elsewhere(ctx, id, claim),
+                next: elsewhere(ctx, id, claim, adopting),
             },
             other => other,
         })?;
-    super::refuse_stale_copy(ctx, &task, &raw, Writer::Release(&claim.session))?;
+    super::refuse_stale_copy(
+        ctx,
+        &task,
+        &raw,
+        Writer::Release {
+            id: &task.id,
+            session: &claim.session,
+        },
+    )?;
     super::guard_write(&ctx.registry, &ctx.shorthand, &task)?;
     let owner = super::owner_name(&ctx.project)?;
     super::append_stamped_note(ctx, &mut task, &owner, &summary(claim, live, why))?;
@@ -240,18 +262,56 @@ fn summary(claim: &Claim, live: &Liveness, why: &str) -> String {
 }
 
 /// A record missing here: the claim stays, and when the holder's worktree has the record,
-/// the rerun there is the way forward (a hint elsewhere may have sent the person here).
-fn elsewhere(ctx: &Ctx, id: &TaskId, claim: &Claim) -> String {
+/// name where it lives and the way forward (a hint elsewhere may have sent the person here).
+fn elsewhere(ctx: &Ctx, id: &TaskId, claim: &Claim, adopting: Option<&str>) -> String {
+    let here = ctx.project.resume_root();
     let worktree = Path::new(&claim.worktree);
-    if worktree != ctx.project.root && worktree.join(format!("tasks/{id}.md")).is_file() {
-        format!(
+    if worktree == here {
+        return "the claim stays".to_string();
+    }
+    match adopting {
+        None if worktree.join(format!("tasks/{id}.md")).is_file() => format!(
             "the claim stays. Its record is in {}: rerun this release there with \
              `tasks -C {} release {id} \"<why>\"`",
             claim.worktree,
             crate::stale::quote(&claim.worktree)
-        )
-    } else {
-        "the claim stays".to_string()
+        ),
+        Some(old) if worktree.join(format!("tasks/{id}.md")).is_file() => {
+            let adoptable_there = crate::repo::Project::open(worktree)
+                .ok()
+                .and_then(|wt| crate::rename::adopt::accepts(&ctx.registry, &wt, old).ok())
+                == Some(None);
+            if adoptable_there {
+                format!(
+                    "the claim stays. Its record is in {}: rerun this release there with \
+                     `tasks -C {} release {id} \"<why>\" --adopting {old}`",
+                    claim.worktree,
+                    crate::stale::quote(&claim.worktree)
+                )
+            } else {
+                format!(
+                    "the claim stays. Its record `tasks/{id}.md` is in {}: merge that branch \
+                     into {}, then rerun this release",
+                    claim.worktree,
+                    here.display()
+                )
+            }
+        }
+        Some(old) => {
+            let old_id = format!("{old}-{}", id.hex);
+            if worktree.join(format!("tasks/{old_id}.md")).is_file() {
+                format!(
+                    "the claim stays. Its pre-rename record `tasks/{old_id}.md` is in {}: \
+                     rebase or merge that worktree onto the rename and merge it into {}, then \
+                     rerun this release",
+                    claim.worktree,
+                    here.display()
+                )
+            } else {
+                "the claim stays".to_string()
+            }
+        }
+        None => "the claim stays".to_string(),
     }
 }
 

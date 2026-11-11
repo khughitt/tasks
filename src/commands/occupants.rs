@@ -87,9 +87,13 @@ pub enum Writer<'a> {
     Note,
     /// A feedback recurrence: `-C` would change the reporting project.
     Feedback,
-    /// `release` of this session's claim: its non-live claims occupy no worktree, since the
-    /// caller asserts the session is gone (docs/ownership.md).
-    Release(&'a str),
+    /// `release` of this task's claim: the target's non-live claim (and, for non-`sid:<pid>`
+    /// sessions, that session's other non-live claims) occupy no worktree, since the caller
+    /// asserts the holder is gone (docs/ownership.md).
+    Release {
+        id: &'a crate::model::TaskId,
+        session: &'a str,
+    },
 }
 
 /// The record-home  check for `task` as loaded (`raw` is the bytes it was read from).
@@ -109,7 +113,7 @@ pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer<'
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
     let gone = match writer {
-        Writer::Release(session) => Some(session),
+        Writer::Release { id, session } => Some((id, session)),
         Writer::Command | Writer::Note | Writer::Feedback => None,
     };
     let (work, unknown) = match occupants(ctx, &newer.root, gone) {
@@ -147,19 +151,32 @@ struct Occupants {
 
 /// docs/task-model.md rule 1: every task that a session other than the caller holds
 /// non-stale (`Live` or `Unverifiable`) in `root`. Claims are compared by `ownership`.
-/// A parked record is not an active occupant. `gone` is the session a `release` asserts
-/// has ended: its claims that do not read `Live` occupy nothing.
-fn occupants(ctx: &mut Ctx, root: &Path, gone: Option<&str>) -> Result<Occupants> {
+/// A parked record is not an active occupant. `gone` is `(released_id, session)` for a
+/// `release`: the released task's non-live claim occupies nothing, and for a non-`sid:<pid>`
+/// session (`sid:1` can recur across sandboxes) its other non-live claims occupy nothing too.
+fn occupants(
+    ctx: &mut Ctx,
+    root: &Path,
+    gone: Option<(&crate::model::TaskId, &str)>,
+) -> Result<Occupants> {
     let snapshot =
         crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let me = crate::claims::resolve_identity(&ctx.host, &mut ctx.warnings);
+    let released_key = gone.map(|(id, _)| id.to_string());
     let mut work = Vec::new();
     for (task, (claim, liveness)) in snapshot.iter() {
-        let released = gone == Some(claim.session.as_str()) && !matches!(liveness, Liveness::Live);
+        let released = match (&released_key, gone) {
+            (Some(target), Some((_, session))) => {
+                !matches!(liveness, Liveness::Live)
+                    && (task == target
+                        || (!super::is_unix_session(session) && claim.session == session))
+            }
+            _ => false,
+        };
         if !liveness.is_stale()
             && !released
             && Path::new(&claim.worktree) == root
-            && ownership(claim, &me, &ctx.host)? == Ownership::Foreign
+            && ownership(claim, &me, &ctx.host) == Ownership::Foreign
         {
             work.push((task.clone(), claim.session.clone()));
         }

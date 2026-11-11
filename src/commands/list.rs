@@ -363,11 +363,15 @@ pub fn ready_tasks(
                 .is_some_and(|park| park.waiting_on == WaitingOn::User)
     });
     deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
+    let mut me = None;
     ready.retain(|task| match claims.get(&task.id) {
         Some((claim, live)) if !live.is_stale() => {
             let release = match live {
                 Liveness::Unverifiable(_) => {
-                    super::release::hint(&task.id.to_string(), &claim.session)
+                    let me = me.get_or_insert_with(|| {
+                        crate::claims::resolve_identity(&ctx.host, &mut Vec::new())
+                    });
+                    super::release::hint_if_foreign(&task.id.to_string(), claim, me, &ctx.host)
                 }
                 _ => String::new(),
             };

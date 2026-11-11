@@ -273,6 +273,60 @@ fn lock_and_revalidate_inner(ctx: &mut Ctx, routing: &Routing, allow_retired: bo
     ))
 }
 
+/// Acquire `peer`'s lock and `ctx.project.prefix`'s lock in sorted order, re-resolving
+/// `ctx.project` afterwards as `lock_and_revalidate` does. When `ctx.project`'s identity
+/// changes while waiting, both locks drop before the retry so sorted order holds on every
+/// attempt and `peer == ctx.project.prefix` never waits on itself.
+pub(super) fn lock_pair_and_revalidate(
+    ctx: &mut Ctx,
+    routing: &Routing,
+    peer: &str,
+) -> Result<MutationLock> {
+    for _ in 0..4 {
+        if peer == ctx.project.prefix {
+            return Err(Error::Validation(format!(
+                "--adopting {peer} names this checkout's own prefix; it takes the prefix being adopted"
+            )));
+        }
+        let (peer_lock, project_lock) = if peer < ctx.project.prefix.as_str() {
+            let first = MutationLock::acquire(peer)?;
+            let second = MutationLock::acquire(&ctx.project.prefix)?;
+            (first, second)
+        } else {
+            let first = MutationLock::acquire(&ctx.project.prefix)?;
+            let second = MutationLock::acquire(peer)?;
+            (second, first)
+        };
+        ctx.lock = Some(project_lock);
+        let registry = Registry::load()?;
+        reject_pending_rename(&ctx.project)?;
+        let project = match routing {
+            Routing::Local => Project {
+                worktree: ctx.project.worktree.clone(),
+                ..Project::open(&ctx.project.records)?
+            },
+            Routing::Registered(prefix) => {
+                let live = registry.canonical_prefix(prefix);
+                crate::scope::open_registered(&registry, live, Origin::Prefix)?
+            }
+        };
+        if project.prefix == ctx.project.prefix && project.records == ctx.project.records {
+            reject_stale_local(&registry, &project)?;
+            reject_retired(&registry, &project)?;
+            ctx.project = project;
+            ctx.registry = registry;
+            ctx.routing = routing.clone();
+            return Ok(peer_lock);
+        }
+        ctx.lock = None;
+        drop(peer_lock);
+        ctx.project = project;
+    }
+    Err(Error::Io(
+        "the project's identity kept changing while acquiring its lock; retry".into(),
+    ))
+}
+
 /// A retired project takes no writes (docs/project-operations.md). The registered copy (its
 /// `scope::config_dir`: a detached project's records directory, else its root) is the
 /// authority, but a worktree made before the retirement has no `[retired]` of its own

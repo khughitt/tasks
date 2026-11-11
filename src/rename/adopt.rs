@@ -23,6 +23,7 @@ pub fn run(
     old: &str,
     new: &str,
     explain: bool,
+    host: &crate::config::HostConfig,
 ) -> Result<RenameOut> {
     if !project.retention_lineage.is_empty() {
         crate::retained::lineage::check_live(project, &project.scan()?)?;
@@ -164,10 +165,19 @@ pub fn run(
             let live = crate::claims::liveness(claim);
             if !live.is_stale() {
                 let hint = match live {
-                    Liveness::Unverifiable(_) => {
-                        let renamed = format!("{new}-{}", TaskId::parse(id)?.hex);
-                        crate::commands::release::adopting_hint(&renamed, &claim.session, old)
-                    }
+                    Liveness::Unverifiable(_) => TaskId::parse(id)
+                        .ok()
+                        .map(|parsed| {
+                            let me = crate::claims::resolve_identity(host, &mut Vec::new());
+                            crate::commands::release::adopting_hint_if_foreign(
+                                &format!("{new}-{}", parsed.hex),
+                                claim,
+                                old,
+                                &me,
+                                host,
+                            )
+                        })
+                        .unwrap_or_default(),
                     _ => String::new(),
                 };
                 return Err(Error::Claimed(
@@ -180,7 +190,10 @@ pub fn run(
             let live = crate::claims::liveness(claim);
             if !live.is_stale() {
                 let hint = match live {
-                    Liveness::Unverifiable(_) => crate::commands::release::hint(id, &claim.session),
+                    Liveness::Unverifiable(_) => {
+                        let me = crate::claims::resolve_identity(host, &mut Vec::new());
+                        crate::commands::release::hint_if_foreign(id, claim, &me, host)
+                    }
                     _ => String::new(),
                 };
                 return Err(Error::Claimed(

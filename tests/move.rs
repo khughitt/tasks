@@ -1649,6 +1649,18 @@ fn a_foreign_claim_refuses_move_with_its_sessions_remedy() {
         "{detail}"
     );
     assert!(!detail.contains("tasks park"), "{detail}");
+
+    // Even when relay identity is enabled and this invocation cannot resolve a session,
+    // preflight still reports the foreign claim rather than an identity failure.
+    let cfg = env.home.path().join(".config/tasks");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(cfg.join("config.toml"), "[identity]\nrelay = true\n").unwrap();
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &gone, "--to", "wali"]);
+    assert_eq!(kind, "claimed");
+    assert!(
+        detail.contains(&format!("tasks release {gone} \"<why>\"")),
+        "{detail}"
+    );
 }
 
 #[test]

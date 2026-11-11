@@ -271,8 +271,7 @@ pub fn note(
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
     let mine = match &existing {
         Some(claim) => {
-            crate::commands::ownership(claim, &me, &ctx.host)?
-                != crate::commands::Ownership::Foreign
+            crate::commands::ownership(claim, &me, &ctx.host) != crate::commands::Ownership::Foreign
         }
         None => false,
     };

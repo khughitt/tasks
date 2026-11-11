@@ -106,8 +106,11 @@ An owner release, reboot evidence, or forced start can clear an unverifiable
 claim. When the operator knows a foreign holder has stopped,
 `tasks release <id> "<why>"` removes its stale/unverifiable claim and records a
 single explanatory note without changing status. It refuses a live claim and
-refuses this session's own claim (use park/done). During prefix adoption use
-the refusal's exact `release ... --adopting <old>` command for the old store.
+refuses this session's own claim (use park/done). In the stale-copy check,
+`release` skips the target's non-live claim and, for non-`sid:<pid>` sessions,
+that session's other non-live claims in the same worktree. During prefix
+adoption use the refusal's exact `release ... --adopting <old>` command for a
+foreign claim in the old store.
 Do not release a worker based on silence, timeout or a shared PID; establish
 worker-specific completion before forced controller takeover.
 

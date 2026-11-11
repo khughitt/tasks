@@ -87,7 +87,7 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             new,
             explain,
             adopt,
-        } => rename::run(dir, old, new, explain, adopt),
+        } => rename::run(dir, old, new, explain, adopt, &host),
         Command::Move { id, to, explain } => move_::run(dir, &id, &to, explain, host.clone()),
         Command::Migrate {
             list,
@@ -99,7 +99,7 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
         Command::Retire { successor, reason } => {
             let project = open_ctx(dir, host.clone())?.project;
             let prefix = project.prefix.clone();
-            let retired = retire::retire(project, successor, reason)?;
+            let retired = retire::retire(project, successor, reason, &host)?;
             Ok(Output::Retire(crate::output::RetireOut {
                 prefix,
                 retired: Some(retired),
@@ -394,6 +394,7 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             false,
         ),
         Command::Release { id, why, adopting } => {
+            release::require_reason(&why)?;
             let (ctx, adopting) = release::open(dir, &id, adopting.as_deref(), host.clone())?;
             release::run(ctx, adopting, id, why)
         }

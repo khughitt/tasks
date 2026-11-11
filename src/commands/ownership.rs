@@ -71,13 +71,10 @@ impl Ctx {
 
     /// How a task record names a claim's session: a Unix session's pid never reaches git.
     pub(crate) fn session_label(claim: &crate::claims::Claim) -> String {
-        match claim
-            .session
-            .strip_prefix("sid:")
-            .and_then(|pid| pid.parse::<u32>().ok())
-        {
-            Some(_) => "Unix session".to_string(),
-            None => format!("session {}", claim.session),
+        if is_unix_session(&claim.session) {
+            "Unix session".to_string()
+        } else {
+            format!("session {}", claim.session)
         }
     }
 
@@ -118,7 +115,7 @@ impl Ctx {
         let Some(existing) = existing else {
             return me.require().map(|_| ());
         };
-        if ownership(&existing, &me, &self.host)? != Ownership::Foreign {
+        if ownership(&existing, &me, &self.host) != Ownership::Foreign {
             return Ok(());
         }
         // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
@@ -153,7 +150,7 @@ impl Ctx {
             return Ok(());
         }
         let me = self.resolve_for_guard()?;
-        if ownership(&existing, &me, &self.host)? == Ownership::Foreign {
+        if ownership(&existing, &me, &self.host) == Ownership::Foreign {
             return Ok(());
         }
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
@@ -305,7 +302,7 @@ impl Ctx {
         if let Some(existing) = self.claims_mut()?.get(&task.id).cloned()
             && !crate::claims::liveness(&existing).is_stale()
             && holds.iter().all(|need| existing.holds.contains(need))
-            && ownership(&existing, &me, &self.host)? != Ownership::Foreign
+            && ownership(&existing, &me, &self.host) != Ownership::Foreign
         {
             return Ok(());
         }
@@ -363,7 +360,7 @@ impl Ctx {
 
         let existing = self.claims_mut()?.get(id).cloned();
         let ownership = match &existing {
-            Some(claim) => ownership(claim, &resolution, &self.host)?,
+            Some(claim) => ownership(claim, &resolution, &self.host),
             None => Ownership::Foreign,
         };
         let mine = ownership != Ownership::Foreign;
@@ -486,6 +483,13 @@ impl Ctx {
     }
 }
 
+pub(crate) fn is_unix_session(session: &str) -> bool {
+    session
+        .strip_prefix("sid:")
+        .and_then(|pid| pid.parse::<u32>().ok())
+        .is_some()
+}
+
 /// docs/task-model.md steps 2 and 3. Which of the two established the caller's right to act
 /// matters: only proof-only ownership records the claim's own identity, because only
 /// then is there no resolved identity that already agrees.
@@ -493,18 +497,18 @@ pub(crate) fn ownership(
     claim: &crate::claims::Claim,
     me: &crate::claims::Resolution,
     host: &HostConfig,
-) -> Result<Ownership> {
+) -> Ownership {
     if let Some(identity) = me.identity()
         && claim.session == identity.session
     {
-        return Ok(Ownership::ByIdentity);
+        return Ownership::ByIdentity;
     }
     // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
     // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
     // explicit mismatch is foreign however the ancestry looks. Spec constraint.
     let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
     if explicit || !host.relay_identity {
-        return Ok(Ownership::Foreign);
+        return Ownership::Foreign;
     }
     let proved = crate::claims::proves_ownership(
         claim,
@@ -513,11 +517,11 @@ pub(crate) fn ownership(
         crate::claims::boot_id().as_deref(),
         &|key| std::env::var_os(key),
     );
-    Ok(if proved {
+    if proved {
         Ownership::ByProof
     } else {
         Ownership::Foreign
-    })
+    }
 }
 
 /// docs/user-guide.md "Blocks other sessions only": the live holding claims in
@@ -529,7 +533,7 @@ pub(crate) fn own_holds(
     me: &crate::claims::Resolution,
     host: &HostConfig,
 ) -> Result<crate::holds::Mine> {
-    snapshot.mine(|claim| Ok(ownership(claim, me, host)? != Ownership::Foreign))
+    snapshot.mine(|claim| Ok(ownership(claim, me, host) != Ownership::Foreign))
 }
 
 /// Which holds a read view counts as the caller's own (docs/user-guide.md). A read view
@@ -584,21 +588,14 @@ pub(crate) fn follow_holder(
         }
     };
     let identity = match ownership(&claim, me, &ctx.host) {
-        Ok(Ownership::Foreign) => return,
+        Ownership::Foreign => return,
         // Proof-only ownership records the claim's own identity (docs/task-model.md of the relay
         // design), whose pid this write did not supply, so its evidence is kept.
-        Ok(Ownership::ByProof) => crate::claims::continuation_identity(&claim),
-        Ok(Ownership::ByIdentity) => me
+        Ownership::ByProof => crate::claims::continuation_identity(&claim),
+        Ownership::ByIdentity => me
             .identity()
             .expect("ownership by identity means the identity resolved")
             .clone(),
-        Err(error) => {
-            ctx.warnings.push(format!(
-                "{landed}, but whether this session holds the claim on {id} could not be \
-                 established ({error})"
-            ));
-            return;
-        }
     };
     // Current contract (docs/ownership.md): a heartbeat applies the evidence rules too.
     let evidence = crate::claims::evidence(
@@ -728,7 +725,7 @@ pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
             "Run tasks start {id} to re-establish the stale claim before retry"
         )));
     }
-    if ownership(&claim, &me, &ctx.host)? == Ownership::Foreign {
+    if ownership(&claim, &me, &ctx.host) == Ownership::Foreign {
         return Err(Error::Claimed(
             id.to_string(),
             Ctx::describe_claim(&claim, &crate::claims::liveness(&claim)),

@@ -104,6 +104,7 @@ pub fn run(
     new: String,
     explain: bool,
     adopt: bool,
+    host: &crate::config::HostConfig,
 ) -> Result<Output> {
     for prefix in [&old, &new] {
         if !is_valid_prefix(prefix) {
@@ -122,7 +123,7 @@ pub fn run(
         if explain {
             let mut registry = Registry::load()?;
             let project = adopt_project(&registry, &start, &old, &new)?;
-            return crate::rename::adopt::run(&mut registry, &project, &old, &new, true)
+            return crate::rename::adopt::run(&mut registry, &project, &old, &new, true, host)
                 .map(Output::Rename);
         }
         // A checkout that holds no project fails before the locks are taken.
@@ -139,7 +140,7 @@ pub fn run(
                 continue;
             }
             let project = adopt_project(&registry, &start, &old, &new)?;
-            return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
+            return crate::rename::adopt::run(&mut registry, &project, &old, &new, false, host)
                 .map(Output::Rename);
         }
         return Err(Error::Io(
@@ -150,7 +151,7 @@ pub fn run(
     let mut requested = invocation(&registry, &old, &new)?;
     if explain {
         // As the run refuses, so explain never reports a stage it would not reach.
-        return crate::rename::run(&mut registry, &requested, true).map(Output::Rename);
+        return crate::rename::run(&mut registry, &requested, true, host).map(Output::Rename);
     }
     for _ in 0..4 {
         let prefixes = rename_lock_prefixes(&registry, &requested.source, &requested.target)?;
@@ -164,7 +165,7 @@ pub fn run(
         if refreshed == requested
             && prefixes == rename_lock_prefixes(&registry, &refreshed.source, &refreshed.target)?
         {
-            return crate::rename::run(&mut registry, &requested, false).map(Output::Rename);
+            return crate::rename::run(&mut registry, &requested, false, host).map(Output::Rename);
         }
         requested = refreshed;
     }

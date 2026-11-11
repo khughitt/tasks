@@ -80,10 +80,9 @@ pub(super) fn recorded_elsewhere<'a>(
     let Some((how, worktree)) = named else {
         return Err(Error::TaskNotFound(id.to_string()));
     };
-    let unavailable = |why: String| {
-        Error::TaskNotFound(id.to_string()).with_suffix(&format!(
-            " ({how} in {worktree}, which is unavailable{why})"
-        ))
+    let unavailable = |why: String| Error::TaskNotFoundNext {
+        id: id.to_string(),
+        next: format!("{how} in {worktree}, which is unavailable{why}"),
     };
     match super::parked::open_recorded(id, Path::new(worktree)) {
         Ok(Some((project, task, all))) => Ok((worktree, project, task, all)),
