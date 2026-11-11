@@ -18,7 +18,7 @@ The accepted top-level keys/tables are exactly those below.
 | --- | --- |
 | `[[retention_lineage]]` | Rename-managed, ordered Git-anchored edges; omitted when empty. Fields and validation below. |
 | `prefix` | Required `[a-z][a-z0-9]{1,7}` project id; agrees with registration and records. |
-| `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON. |
+| `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON. `check` warns with `color_missing` when unset; it never assigns a color. |
 | `profile` | Optional single profile name using lowercase letters, digits and hyphens, with no leading hyphen. Absent means unassigned; tasks validates the grammar, not whether the profile exists. |
 | `shorthand` | Optional list of private aliases, each nonempty single-line text; defaults to empty. Uniqueness across projects is checked by consumers when routing, not by `tasks check`. |
 | `[identity]` | Optional snapshot of public identity, written only by tasks; fields described below. |
@@ -220,3 +220,13 @@ overwritten.
 An absent predecessor registration does not remove the reservation or redirect an
 old ID into the current project. See the
 [two-step handoff and its current limits](project-operations.md#reclaiming-a-retired-predecessors-prefix).
+
+### Terminal project-colour stand-in
+
+`resolve` rows (including their `entry`) and `projects` rows expose `color_256`
+next to `color`: an integer xterm-256 index, omitted when that row has no color.
+Consumers use this value instead of deriving their own terminal approximation.
+Tasks selects the nearest entry in OKLab from indices 16–255 that have at least
+3:1 contrast against both `#1e1e1e` and white; equal distances choose the lower
+index. This is a fixed fallback palette, independent of the caller's terminal.
+The authored RGB color and existing pretty output are unchanged.

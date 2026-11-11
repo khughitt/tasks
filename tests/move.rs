@@ -5,7 +5,9 @@ use common::TestEnv;
 fn move_carries_a_multipart_artifact() {
     let mut env = TestEnv::new();
     let source = env.init("dots");
+    common::configure_color(&source);
     let destination = env.init("wali");
+    common::configure_color(&destination);
     let id = id_of(env.json(&source, &["add", "Evidence"]));
     let bytes = common::multipart::seed(&env, &source, &id, "evidence.txt");
     let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));

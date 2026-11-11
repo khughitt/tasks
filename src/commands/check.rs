@@ -250,6 +250,14 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         )
     };
     let mut warnings = Vec::new();
+    if ctx.project.color.is_none() {
+        warnings.push(finding(
+            None,
+            crate::repo::CONFIG_REL.into(),
+            "color_missing",
+            format!("project {:?} has no color; choose a color and set color = \"#RRGGBB\" in its tracker config", ctx.project.prefix),
+        ));
+    }
     lifecycle_findings(&ctx, &tasks, &mut errors, &mut warnings)?;
     let threshold = ctx.project.growth_warn_bytes();
     for row in &growth_rows {

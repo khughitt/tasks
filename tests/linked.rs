@@ -1401,6 +1401,7 @@ fn projects_rows_carry_checkout_records_and_kind_on_every_reachable_row() {
 fn check_reports_a_declared_checkout_that_is_missing() {
     let env = TestEnv::new();
     let l = layout(&env);
+    common::configure_color(&l.nexc);
     let gone = project(&env, &l.overlay, "gone", Some("../../nowhere"));
     let report = env.check(&gone);
     let text = serde_json::to_string(&report).unwrap();

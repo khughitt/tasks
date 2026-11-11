@@ -910,7 +910,9 @@ fn check_refuses_related_on_a_tombstone() {
 fn check_warns_dangling_related_only_for_local_ids() {
     let mut env = TestEnv::new();
     let dir = env.init("aa");
+    common::configure_color(&dir);
     let _other_dir = env.init("bb");
+    common::configure_color(&_other_dir);
     let a = id_of(env.json(&dir, &["add", "Task A"]));
     let moved_src = id_of(env.json(&dir, &["add", "Moved Source"]));
     env.json(&dir, &["move", &moved_src, "--to", "bb"]);

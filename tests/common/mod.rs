@@ -819,3 +819,10 @@ pub fn declare_retired(root: &std::path::Path, successor: Option<&str>) {
     }
     std::fs::write(&config, text).unwrap();
 }
+
+/// Give integrity-test fixtures a colour so unrelated configuration warnings stay absent.
+pub fn configure_color(dir: &Path) {
+    let path = dir.join("tasks/.config.toml");
+    let config = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(path, format!("color = \"#2f9fb1\"\n{config}")).unwrap();
+}

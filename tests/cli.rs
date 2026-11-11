@@ -1611,6 +1611,7 @@ fn check_holds_feedback_tags_defined_on_feedback_records_in_an_accepting_project
     let mut env = TestEnv::new();
     let ai = env.init("ai");
     write_dictionary(&ai, "ai", &[("rules", "The instruction files.")]);
+    common::configure_color(&ai);
     // A report synced from a host where its source is registered; here it is not.
     let args = [
         "add",
@@ -1675,7 +1676,9 @@ fn check_holds_feedback_tags_defined_on_feedback_records_in_an_accepting_project
 fn tags_carry_the_dictionary_meaning_and_check_holds_open_work_to_it() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
+    write_project_color(&sci, "sci", "#2f9fb1");
     let fam = env.init("fam");
+    write_project_color(&fam, "fam", "#2f9fb1");
     env.json(&sci, &["add", "A", "--tag", "testing", "--tag", "perf"]);
     env.json(&fam, &["add", "C", "--tag", "testing"]);
 
@@ -1684,6 +1687,7 @@ fn tags_carry_the_dictionary_meaning_and_check_holds_open_work_to_it() {
     assert!(env.check(&sci)["warnings"].as_array().unwrap().is_empty());
 
     write_dictionary(&sci, "sci", &[("testing", "Tests, gates, and CI.")]);
+    common::configure_color(&sci);
     let local = env.json(&sci, &["tags"]);
     let row = |name: &str| {
         local["tags"]
@@ -5643,6 +5647,7 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
 fn check_reports_completed_stamp_on_an_open_record() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
+    write_project_color(&sci, "sci", "#2f9fb1");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     env.json(&sci, &["done", &id, "landed"]);
     let path = sci.join(format!("tasks/{id}.md"));
@@ -6624,6 +6629,7 @@ fn graph_renders_open_tasks() {
 fn check_passes_clean_repo_and_reports_drift() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    write_project_color(&dir, "sci", "#2f9fb1");
     write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: one\n");
     let a = env.json(
         &dir,
@@ -6895,6 +6901,7 @@ fn edit_clears_spec_plan_and_step_links() {
 fn check_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    write_project_color(&dir, "sci", "#2f9fb1");
     let a = env.json(&dir, &["add", "A"])["id"]
         .as_str()
         .unwrap()
@@ -6943,6 +6950,7 @@ fn check_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
 fn check_warns_on_plan_headings_without_a_task() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    write_project_color(&dir, "sci", "#2f9fb1");
     write_doc(
         &dir,
         "docs/plans/2026-09-03-p.md",
@@ -7008,7 +7016,9 @@ fn check_reports_unparsable_foreign_dependency_as_warning() {
 fn check_nudges_a_depends_naming_a_retired_prefix() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
+    write_project_color(&sci, "sci", "#2f9fb1");
     let fam = env.init("fam");
+    write_project_color(&fam, "fam", "#2f9fb1");
     let far = id_of(env.json(&fam, &["add", "Far", "-p", "2"]));
     let here = id_of(env.json(&sci, &["add", "Here", "-p", "2"]));
     env.json(&sci, &["dep", &here, "--on", &far]);
@@ -7248,6 +7258,7 @@ fn ready_never_lists_a_task_with_children_and_summaries_carry_counts() {
 fn check_warns_on_open_child_of_closed_parent() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    write_project_color(&dir, "sci", "#2f9fb1");
     let a = id_of(env.json(&dir, &["add", "A"]));
     let b = id_of(env.json(&dir, &["add", "B", "--parent", &a]));
     env.json(&dir, &["done", &b]);
@@ -8424,6 +8435,7 @@ fn feedback_accepts_every_registered_unretired_project_by_default() {
     let (mut env, ai, _ops, sci) = owners_env();
     let dots = env.init("dots");
     write_dictionary(&dots, "dots", &[("shell", "Shell config.")]);
+    common::configure_color(&dots);
 
     for (owner, root) in [("dots", &dots), ("ai", &ai)] {
         let out = env.json(
@@ -8851,6 +8863,8 @@ fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
             // the projects rows gain the color, normalized to lowercase; nothing else moves
             for row in json["projects"].as_array_mut().unwrap() {
                 let color = row.as_object_mut().unwrap().remove("color");
+                let index = row.as_object_mut().unwrap().remove("color_256");
+                assert_eq!(index.is_some(), color.is_some());
                 let expected = match row["prefix"].as_str().unwrap() {
                     "sci" => Some(serde_json::json!("#123456")),
                     "dots" => Some(serde_json::json!("#abcdef")),

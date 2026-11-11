@@ -6,7 +6,9 @@ use sha2::{Digest, Sha256};
 fn migrate_carries_a_multipart_artifact() {
     let mut env = TestEnv::new();
     let source = env.init("forge");
+    common::configure_color(&source);
     let destination = env.init("forge2");
+    common::configure_color(&destination);
     let id = id_of(env.json(&source, &["add", "Evidence"]));
     let bytes = common::multipart::seed(&env, &source, &id, "evidence.txt");
     let list = uniform_list(&env, &source, &[&id], "carry");
@@ -1690,10 +1692,18 @@ fn apply_until(env: &TestEnv, dir: &std::path::Path, list: &std::path::Path, pha
         .success();
 }
 
-fn assert_clean(env: &TestEnv, dir: &std::path::Path) {
+fn assert_records_clean(env: &TestEnv, dir: &std::path::Path) {
     let report = env.check(dir);
     assert_eq!(report["errors"], serde_json::json!([]), "{report}");
-    assert_eq!(report["warnings"], serde_json::json!([]), "{report}");
+    // This helper checks migrated records; missing project presentation config is separate.
+    assert!(
+        report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|warning| warning["kind"] == "color_missing"),
+        "{report}"
+    );
 }
 
 struct Mixed {
@@ -1829,8 +1839,8 @@ fn mixed_list_applies_end_to_end_and_retire_follows() {
     assert!(r_new["last_done"].is_string(), "{r_new}");
     // Review Focus 4 end to end: the replacement body reads back exactly.
     assert_eq!(shown(&env, &m.forge2, &d2)["body"], "Replacement body é.");
-    assert_clean(&env, &m.forge);
-    assert_clean(&env, &m.forge2);
+    assert_records_clean(&env, &m.forge);
+    assert_records_clean(&env, &m.forge2);
     env.json(
         &m.forge,
         &["retire", "--successor", "forge2", "--reason", "migrated"],
@@ -1984,8 +1994,8 @@ fn every_phase_resumes_to_the_same_ids() {
                 .contains(&a2),
             "{phase}"
         );
-        assert_clean(&env, &p.forge);
-        assert_clean(&env, &p.forge2);
+        assert_records_clean(&env, &p.forge);
+        assert_records_clean(&env, &p.forge2);
     }
 }
 
@@ -2524,8 +2534,8 @@ fn journal_lost_after_tombstones_refuses_until_finished_by_hand() {
     commit_all(&c.forge2);
     let out = assert_complete(&env, &c.forge, &c.list, &[&c.forge, &c.forge2]);
     assert_eq!(new_id(&out, &c.a), a2);
-    assert_clean(&env, &c.forge);
-    assert_clean(&env, &c.forge2);
+    assert_records_clean(&env, &c.forge);
+    assert_records_clean(&env, &c.forge2);
 
     // Lost after G8: only the commits remain, and they are named.
     let mut env = TestEnv::new();
@@ -2921,7 +2931,7 @@ fn every_write_in_either_project_refuses_while_pending() {
     assert_eq!(out["recovery"], "resumed", "{out}");
     env.json(&p.forge2, &["note", &t, "after the run"]);
     env.json(&p.forge, &["add", "After"]);
-    assert_clean(&env, &p.forge2);
+    assert_records_clean(&env, &p.forge2);
 }
 
 #[test]
@@ -3165,7 +3175,7 @@ fn a_parent_target_made_recurring_is_repaired() {
     assert_eq!(out["recovery"], "resumed", "{out}");
     let b2 = new_id(&out, &f.b);
     assert_eq!(shown(&env, &f.forge2, &b2)["parent"], f.s.as_str());
-    assert_clean(&env, &f.forge2);
+    assert_records_clean(&env, &f.forge2);
 }
 
 #[test]
@@ -3484,7 +3494,7 @@ fn forge_shaped_fixture_migrates_in_one_list() {
         &["retire", "--successor", "forge2", "--reason", "migrated"],
     );
     for dir in [&forge, &forge2, &ops] {
-        assert_clean(&env, dir);
+        assert_records_clean(&env, dir);
     }
 }
 
@@ -3492,7 +3502,9 @@ fn forge_shaped_fixture_migrates_in_one_list() {
 fn migrate_dropping_or_closing_dependents_of_carried_task_leaves_check_free_of_moved_dep() {
     let mut env = TestEnv::new();
     let forge = env.init("forge");
+    common::configure_color(&forge);
     let forge2 = env.init("forge2");
+    common::configure_color(&forge2);
     let a = id_of(env.json(&forge, &["add", "Carried prerequisite"]));
     let dropped = id_of(env.json(&forge, &["add", "Dropped dependent", "--depends", &a]));
     let closed = id_of(env.json(&forge, &["add", "Closed dependent", "--depends", &a]));
@@ -3504,8 +3516,8 @@ fn migrate_dropping_or_closing_dependents_of_carried_task_leaves_check_free_of_m
     std::fs::write(&list, text).unwrap();
     let out = env.json(&forge, &["migrate", list.to_str().unwrap()]);
     assert_eq!(out["recovery"], "fresh", "{out}");
-    assert_clean(&env, &forge);
-    assert_clean(&env, &forge2);
+    assert_records_clean(&env, &forge);
+    assert_records_clean(&env, &forge2);
 }
 
 #[test]
