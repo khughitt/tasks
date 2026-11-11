@@ -17,6 +17,15 @@ impl PidView {
     pub fn is_initial(&self) -> bool {
         self.ino == PROC_PID_INIT_INO
     }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        let (dev, ino) = s.split_once(':')?;
+        let parsed = Self {
+            dev: dev.parse().ok()?,
+            ino: ino.parse().ok()?,
+        };
+        (parsed.ino != 0 && parsed.to_string() == s).then_some(parsed)
+    }
 }
 
 impl std::fmt::Display for PidView {
@@ -136,5 +145,22 @@ mod tests {
     #[test]
     fn a_view_formats_as_dev_colon_ino() {
         assert_eq!(PidView { dev: 5, ino: 7 }.to_string(), "5:7");
+    }
+
+    #[test]
+    fn a_view_parses_only_canonical_nonzero_dev_colon_ino() {
+        assert_eq!(
+            PidView::parse("5:4026531836"),
+            Some(PidView {
+                dev: 5,
+                ino: 4026531836
+            })
+        );
+        assert_eq!(PidView::parse("0:1"), Some(PidView { dev: 0, ino: 1 }));
+        for bad in [
+            "", "garbage", "5", "5:", ":1", "5:0", "+5:1", "05:1", "5:1:2",
+        ] {
+            assert_eq!(PidView::parse(bad), None, "{bad:?}");
+        }
     }
 }

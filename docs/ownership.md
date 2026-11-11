@@ -93,7 +93,7 @@ only for a real long-lived process, never for the current CLI invocation.
 ## PID views and takeover
 
 A PID is judged only in the PID namespace view in which it was established.
-An unknown/different view makes the claim `unverifiable`: it remains held and
+An unknown, unreadable, or different view makes the claim `unverifiable`: it remains held and
 is neither pruned nor stripped of its resource holds. Exported PIDs establish a
 view only in the initial namespace; a number inherited into a container cannot
 prove its origin. Relay matches also need hooks and tasks to share the PID view.

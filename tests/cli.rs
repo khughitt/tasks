@@ -27108,6 +27108,19 @@ fn pid_view_heartbeat_after_the_recorded_pid_died_keeps_the_claim_held() {
         .args(["start", &id])
         .assert()
         .success();
+    assert_eq!(
+        pid_view_of(&stored_claim(&env, "sci", &id)),
+        exported_pid_view()
+    );
+    // Outside the initial namespace, an exported pid records no view; stamp this process's
+    // own view when known so killing `child` still makes the recorded evidence read Stale here.
+    let current_view = own_pid_view();
+    if exported_pid_view().is_none()
+        && let Some(view) = &current_view
+    {
+        set_pid_view(&env, "sci", &id, view);
+    }
+    assert_eq!(pid_view_of(&stored_claim(&env, "sci", &id)), current_view);
     child.kill().unwrap();
     child.wait().unwrap();
     env.cmd(&sci)
@@ -27115,6 +27128,11 @@ fn pid_view_heartbeat_after_the_recorded_pid_died_keeps_the_claim_held() {
         .args(["start", &id])
         .assert()
         .success();
+    if current_view.is_some() {
+        let refreshed = stored_claim(&env, "sci", &id);
+        assert_eq!(refreshed.get("pid"), None, "{refreshed}");
+        assert_eq!(pid_view_of(&refreshed), None, "{refreshed}");
+    }
     let out = env
         .cmd(&sci)
         .env("TASKS_SESSION", "intruder")
@@ -27128,6 +27146,43 @@ fn pid_view_heartbeat_after_the_recorded_pid_died_keeps_the_claim_held() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(text.contains("\"claimed\""), "{text}");
+}
+
+#[test]
+fn pid_view_pidless_repeated_start_keeps_live_recorded_evidence() {
+    // Review Focus 4: a repeated `start` without a pid keeps a live recorded pid, start and view.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "owner")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(
+        pid_view_of(&stored_claim(&env, "sci", &id)),
+        exported_pid_view()
+    );
+    let current_view = own_pid_view();
+    if exported_pid_view().is_none()
+        && let Some(view) = &current_view
+    {
+        set_pid_view(&env, "sci", &id, view);
+    }
+    let before = stored_claim(&env, "sci", &id);
+    assert_eq!(pid_view_of(&before), current_view, "{before}");
+    assert!(before.get("pid_start").is_some(), "{before}");
+
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "owner")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let after = stored_claim(&env, "sci", &id);
+    for field in ["pid", "pid_start", "boot_id", "pid_view"] {
+        assert_eq!(after.get(field), before.get(field), "{field}: {after}");
+    }
 }
 
 /// The one note `release` wrote on `id`.

@@ -745,3 +745,36 @@ pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::claims::{Claim, Liveness};
+
+    #[test]
+    fn describe_claim_includes_unverifiable_reason() {
+        let claim = Claim {
+            session: "agent-a".into(),
+            root_session: None,
+            owner: "main".into(),
+            host: "testhost".into(),
+            pid: Some(42),
+            pid_start: Some(900),
+            boot_id: Some("boot-a".into()),
+            pid_view: Some("5:100".into()),
+            worktree: "/tmp/wt".into(),
+            started: "2026-10-15T00:00:00Z".into(),
+            seen: "2026-10-15T00:00:00Z".into(),
+            holds: Vec::new(),
+        };
+        let shown = Ctx::describe_claim(
+            &claim,
+            &Liveness::Unverifiable("recorded in another PID view".into()),
+        );
+        assert!(
+            shown.ends_with(", unverifiable: recorded in another PID view)"),
+            "{shown}"
+        );
+        assert!(shown.contains("session agent-a (owner main, host testhost, pid 42, worktree /tmp/wt, since 2026-10-15T00:00:00Z, age "), "{shown}");
+    }
+}
