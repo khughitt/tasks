@@ -408,6 +408,7 @@ fn external_doc_show_production_deadline() {
 fn external_doc_check_reads_shared_plan_once_and_reports_drift() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    common::configure_color(&dir);
     let docs = DocFixture::new(&env, "### Task 1: one\n### Task 2: two\n");
     for step in ["Task 1: one", "Task 2: two"] {
         env.json(
@@ -451,6 +452,7 @@ fn external_doc_check_reads_shared_plan_once_and_reports_drift() {
 fn external_doc_check_unreachable_is_a_warning_and_failure_is_cached() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    common::configure_color(&dir);
     let docs = DocFixture::new(&env, "### Task 1: one\n");
     for title in ["A", "B"] {
         env.json(
@@ -498,6 +500,7 @@ fn external_doc_check_unreachable_is_a_warning_and_failure_is_cached() {
 fn external_doc_check_closed_only_failure_has_no_drift_finding() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
+    common::configure_color(&dir);
     let docs = DocFixture::new(&env, "# Plan\n");
     let id = env.json(&dir, &["add", "Closed", "--plan", "stub:plan"])["id"]
         .as_str()

@@ -21,9 +21,16 @@ pub fn seed(env: &TestEnv, root: &Path, id: &str, name: &str) -> Vec<u8> {
 }
 
 pub fn assert_intact(env: &TestEnv, root: &Path, id: &str, name: &str, bytes: &[u8]) {
-    assert_eq!(
-        env.check(root),
-        serde_json::json!({"errors": [], "warnings": []})
+    let report = env.check(root);
+    assert_eq!(report["errors"], serde_json::json!([]));
+    // Artifact integrity is independent of the project's optional presentation config.
+    assert!(
+        report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|warning| warning["kind"] == "color_missing"),
+        "{report}"
     );
     let out = env
         .cmd(root)

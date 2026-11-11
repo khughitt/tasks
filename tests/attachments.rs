@@ -927,6 +927,7 @@ fn show_and_next_list_files_with_absolute_paths() {
 fn show_warns_about_a_leftover_temp_file_and_does_not_list_it() {
     let mut env = TestEnv::new();
     let dir = env.init("dot");
+    common::configure_color(&dir);
     let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
     write(&stored(&dir, &id, ".a.png.tmp-123"), b"partial");
     let show = env.json(&dir, &["show", &id]);

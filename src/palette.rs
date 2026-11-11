@@ -37,6 +37,53 @@ impl Rgb {
         (l1.max(l2) + 0.05) / (l1.min(l2) + 0.05)
     }
 
+    /// Nearest legible xterm-256 entry in OKLab; ties choose the lower index.
+    /// Match the existing project-colour consumers on dark and light backgrounds.
+    pub(crate) fn terminal_index(self) -> u8 {
+        let lab = to_oklab(self);
+        let dark = Rgb {
+            r: 30,
+            g: 30,
+            b: 30,
+        };
+        let light = Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        (16..=255u8)
+            .filter_map(|index| {
+                let rgb = if index >= 232 {
+                    let gray = 8 + 10 * (index - 232);
+                    Rgb {
+                        r: gray,
+                        g: gray,
+                        b: gray,
+                    }
+                } else {
+                    let cube = [0, 95, 135, 175, 215, 255];
+                    let n = usize::from(index - 16);
+                    Rgb {
+                        r: cube[n / 36],
+                        g: cube[n / 6 % 6],
+                        b: cube[n % 6],
+                    }
+                };
+                if rgb.contrast_ratio(dark) < 3.0 || rgb.contrast_ratio(light) < 3.0 {
+                    return None;
+                }
+                let distance: f64 = lab
+                    .iter()
+                    .zip(to_oklab(rgb))
+                    .map(|(a, b)| (a - b).powi(2))
+                    .sum();
+                Some((index, distance))
+            })
+            .min_by(|(i, a), (j, b)| a.total_cmp(b).then(i.cmp(j)))
+            .expect("the fixed xterm palette contains legible entries")
+            .0
+    }
+
     /// Exactly `#rrggbb`, either case; anything else is `None`.
     pub fn parse_hex(hex: &str) -> Option<Rgb> {
         let digits = hex.strip_prefix('#')?;

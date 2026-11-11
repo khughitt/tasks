@@ -264,6 +264,9 @@ pub struct ResolveRow {
     /// The resolved project's identity color, when its config sets one and was read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
+    /// Derived xterm-256 stand-in; present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_256: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via: Option<crate::locations::Via>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -297,6 +300,9 @@ pub struct EntryRow {
     pub profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
+    /// Derived xterm-256 stand-in; present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_256: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retired: Option<crate::repo::Retirement>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -325,6 +331,9 @@ pub struct ProjectRow {
     /// The project's identity color. Absent when it sets none or was not read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
+    /// Derived xterm-256 stand-in; present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_256: Option<u8>,
     pub root: String,
     /// The registry's records pairing, else the root. Always present.
     pub records: String,

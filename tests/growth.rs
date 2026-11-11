@@ -36,6 +36,7 @@ fn growth_warnings(report: &Value) -> Vec<&Value> {
 fn growth_boundary_config_and_output() {
     let mut env = TestEnv::new();
     let root = env.init("dot");
+    common::configure_color(&root);
     assert_eq!(
         env.json(&root, &["check", "--growth"])["growth"],
         serde_json::json!([])

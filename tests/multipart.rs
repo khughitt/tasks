@@ -1341,6 +1341,7 @@ const DETACH_MEMBERS: [&str; 4] = [
 
 fn detach_fixture() -> (TestEnv, std::path::PathBuf, String) {
     let (env, dir, id) = attach_fixture("max_bytes = 65536\nmultipart_validators = []");
+    common::configure_color(&dir);
     enable_git(&dir);
     let out = multipart_attach(&env, &dir, &id, "evidence.txt", &vec![b'x'; 140000]);
     assert_eq!(out["publication"]["state"], "published");
