@@ -147,6 +147,13 @@ mean those documents were verified.
    Ambiguous/incomplete searches do not select a copy; explicit retries revalidate.
    Linked projects search overlays; detached projects share one records home and
    do not search historical code-tree copies.
+   Missing-record write discovery offers a write retry only for a complete unique
+   match with the same known shorthand project and known occupancy. An occupied
+   discovered home may offer an explicit `note` append; other occupied writes
+   and unknown occupancy offer inspection only. Linked code claims occupy the
+   registered overlay they map to, not every overlay branch. Main-checkout
+   handoffs lead with integration. These hints change neither write routing nor
+   the older strict claim/park missing-record remedy.
    `stale_copy` has no override. Leave records held by another live session to that session,
    except when `tasks note` offers its explicit `tasks -C <wt> note ...` remedy to append a
    note to the newer copy in place. A parked checkout with no live or unverifiable foreign

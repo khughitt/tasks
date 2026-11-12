@@ -149,6 +149,14 @@ overwrite the newer record or change the claim file to bypass the guard. The
 comparison is local across known checkouts, not proof that every host has
 synced.
 
+Missing-record discovery has a separate remedy: with a unique stable file,
+complete search and unchanged shorthand context, `note` can offer an explicit
+append into a known occupied records home. Other occupied writes and every
+unknown occupancy offer inspection only. Linked code claims map to the
+registered overlay they write to, not all overlay branches. These hints never
+route a write or move a claim; explicit retries run normal guards. The older
+claim/park missing-record path retains its strict occupied-write remedy.
+
 `claimed`, `need_held`, halt and identity errors retain the held state. Recheck
 the named task/session and supply an evidence-based override only when warranted.
 Failure to read identity on a read view owns no holds; it does not free them.

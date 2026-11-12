@@ -14,6 +14,541 @@ fn missing(env: &TestEnv, root: &Path, args: &[&str]) -> String {
     value["error"]["detail"].as_str().unwrap().to_owned()
 }
 
+fn write_missing(env: &TestEnv, root: &Path, args: &[&str]) -> String {
+    let out = as_agent(env, root, "caller").args(args).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty());
+    assert_eq!(common::err_kind(&out), "task_not_found", "{out:?}");
+    common::err_detail(&out)
+}
+
+#[test]
+fn missing_recovery_writes_unique_and_main_handoff() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(&side, &["add", "Only in side"]));
+    for args in [
+        vec!["note", &id, "it's literal"],
+        vec!["edit", &id, "--title", "New title"],
+        vec!["start", &id],
+        vec!["edit", &id, "--body", "-"],
+    ] {
+        let before = std::fs::read(side.join(format!("tasks/{id}.md"))).unwrap();
+        let detail = write_missing(&env, &main, &args);
+        assert!(detail.contains("Run it there:"), "{detail}");
+        assert!(detail.contains(side.to_str().unwrap()), "{detail}");
+        assert_eq!(
+            std::fs::read(side.join(format!("tasks/{id}.md"))).unwrap(),
+            before
+        );
+    }
+    let detail = write_missing(&env, &main, &["note", &id, "it's literal"]);
+    assert!(detail.contains("'it'\\''s literal'"), "{detail}");
+    let id = id_of(env.json(&main, &["add", "Only in main"]));
+    for command in ["note", "start"] {
+        let args = if command == "note" {
+            vec![command, &id, "hello"]
+        } else {
+            vec![command, &id]
+        };
+        let detail = write_missing(&env, &side, &args);
+        assert!(
+            detail.contains("Commit") && detail.contains("merge it into this branch"),
+            "{detail}"
+        );
+        assert!(detail.find("Commit").unwrap() < detail.rfind(&format!("{command} {id}")).unwrap());
+    }
+}
+
+#[test]
+fn missing_recovery_writes_occupied_parent_note_and_main() {
+    for occupied_main in [false, true] {
+        let mut env = TestEnv::new();
+        let (main, side, parent) = repo_with_worktree(&mut env);
+        let (here, there) = if occupied_main {
+            (&side, &main)
+        } else {
+            (&main, &side)
+        };
+        as_agent(&env, there, "holder")
+            .args(["start", &parent])
+            .assert()
+            .success();
+        let id = id_of(env.json(there, &["add", "Unclaimed child", "--parent", &parent]));
+        let store = std::fs::read(env.claim_store("sci")).unwrap();
+        let before = std::fs::read(there.join(format!("tasks/{id}.md"))).unwrap();
+        let note = write_missing(&env, here, &["note", &id, "safe append"]);
+        assert!(
+            note.contains("holder") && note.contains(&format!("note {id}")),
+            "{note}"
+        );
+        assert!(!note.contains("Wait for that branch to merge"), "{note}");
+        let edit = write_missing(&env, here, &["edit", &id, "--title", "Not yet"]);
+        assert!(
+            edit.contains("holder") && edit.contains(&format!("show {id}")),
+            "{edit}"
+        );
+        assert!(!edit.contains(&format!("edit {id}")), "{edit}");
+        assert_eq!(
+            std::fs::read(there.join(format!("tasks/{id}.md"))).unwrap(),
+            before
+        );
+        assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+        as_agent(&env, there, "caller")
+            .args(["note", &id, "safe append"])
+            .assert()
+            .success();
+        assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+        let shown = env.json(there, &["show", &id]);
+        assert_eq!(
+            shown["task"]["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|n| n["text"] == "safe append")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn missing_recovery_writes_shorthand_and_ambiguous_inspection_only() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(&side, &["add", "Only there"]));
+    let other = env.init("oth");
+    let outside = tempfile::tempdir().unwrap();
+    for here in [&other, outside.path()] {
+        let detail = write_missing(&env, here, &["edit", &id, "--related", "abcdef"]);
+        assert!(detail.contains(&format!("show {id}")), "{detail}");
+        assert!(!detail.contains(&format!("edit {id}")), "{detail}");
+        assert!(detail.contains("shorthand"), "{detail}");
+    }
+    let suffix = id.strip_prefix("sci-").unwrap();
+    assert!(
+        write_missing(&env, &main, &["note", suffix, "abcdef is text"]).contains("Run it there:")
+    );
+    let second = main.join("second");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "second",
+            second.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &main, &second);
+    std::fs::copy(
+        side.join(format!("tasks/{id}.md")),
+        second.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+    let detail = write_missing(&env, &main, &["note", &id, "no selection"]);
+    assert!(detail.contains("ambiguous"), "{detail}");
+    assert!(!detail.contains(&format!("note {id}")), "{detail}");
+}
+
+fn linked_fixture(
+    env: &mut TestEnv,
+) -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    String,
+) {
+    let (main, side, parent) = repo_with_worktree(env);
+    let code = env.home.path().join("foreign-code");
+    std::fs::create_dir(&code).unwrap();
+    git(&code, &["init", "-q", "-b", "main"]);
+    common::git_fixture::assert_repo(env.home.path(), &code);
+    std::fs::write(code.join("README"), "code").unwrap();
+    git(&code, &["add", "README"]);
+    git(&code, &["commit", "-qm", "seed"]);
+    let code_side = code.join("code-side");
+    git(
+        &code,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "code-side",
+            code_side.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &code, &code_side);
+    for root in [&main, &side] {
+        let path = root.join("tasks/.config.toml");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "{raw}\n[checkout]\npath = {:?}\n",
+                code.display().to_string()
+            ),
+        )
+        .unwrap();
+    }
+    (main, side, code, code_side, parent)
+}
+
+#[test]
+fn missing_recovery_writes_linked_code_claim_maps_to_registered_overlay() {
+    for code_worktree in [false, true] {
+        for unverifiable in [false, true] {
+            let mut env = TestEnv::new();
+            let (main, side, code, code_side, parent) = linked_fixture(&mut env);
+            let resume = if code_worktree { &code_side } else { &code };
+            as_agent(&env, resume, "holder")
+                .args(["start", &parent])
+                .assert()
+                .success();
+            if unverifiable {
+                common::set_pid_view(&env, "sci", &parent, "0:0");
+            }
+            let main_id = id_of(env.json(&main, &["add", "Registered overlay record"]));
+            let side_id = id_of(env.json(&side, &["add", "Other overlay branch record"]));
+            std::fs::write(
+                main.join("tasks/sci-badbad.md"),
+                "unrelated malformed history",
+            )
+            .unwrap();
+            let detail = write_missing(&env, &side, &["edit", &main_id, "--title", "No"]);
+            assert!(
+                detail.contains("holder") && detail.contains(resume.to_str().unwrap()),
+                "{detail}"
+            );
+            assert!(!detail.contains(&format!("edit {main_id}")), "{detail}");
+            let detail = write_missing(&env, &side, &["note", &main_id, "append"]);
+            assert!(detail.contains(&format!("note {main_id}")), "{detail}");
+            let detail = write_missing(&env, &main, &["edit", &side_id, "--title", "Elsewhere"]);
+            assert!(
+                detail.contains("Run it there:") && detail.contains(&format!("edit {side_id}")),
+                "{detail}"
+            );
+        }
+    }
+}
+
+#[test]
+fn missing_recovery_writes_linked_unknown_mapping_withholds_notes() {
+    for broken in ["gone", "git", "not-directory", "conflict", "budget"] {
+        let mut env = TestEnv::new();
+        let (main, side, code, code_side, parent) = linked_fixture(&mut env);
+        as_agent(&env, &code_side, "holder")
+            .args(["start", &parent])
+            .assert()
+            .success();
+        let id = id_of(env.json(&main, &["add", "Only on registered overlay"]));
+        match broken {
+            "gone" => std::fs::remove_dir_all(&code_side).unwrap(),
+            "not-directory" => {
+                std::fs::remove_dir_all(&code_side).unwrap();
+                std::fs::write(&code_side, "not a directory").unwrap();
+            }
+            "git" => std::fs::write(
+                code_side.join(".git"),
+                format!("gitdir: {}\n", code_side.join("missing-gitdir").display()),
+            )
+            .unwrap(),
+            "conflict" => {
+                let root = env.init("oth");
+                let config = root.join("tasks/.config.toml");
+                let raw = std::fs::read_to_string(&config).unwrap();
+                std::fs::write(
+                    config,
+                    format!(
+                        "{raw}\n[checkout]\npath = {:?}\n",
+                        code.display().to_string()
+                    ),
+                )
+                .unwrap();
+            }
+            "budget" => {
+                let path = env.home.path().join(".config/tasks/projects.toml");
+                let mut registry: toml::Value =
+                    toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                for n in 0..65 {
+                    let prefix = format!("p{n:02}");
+                    let root = env.home.path().join(&prefix);
+                    std::fs::create_dir_all(root.join("tasks")).unwrap();
+                    std::fs::write(
+                        root.join("tasks/.config.toml"),
+                        format!("prefix = {prefix:?}\n"),
+                    )
+                    .unwrap();
+                    registry["projects"]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert(prefix, toml::Value::String(root.display().to_string()));
+                }
+                std::fs::write(path, toml::to_string(&registry).unwrap()).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let detail = write_missing(&env, &side, &["note", &id, "no retry"]);
+        assert!(
+            detail.contains("occupancy") && detail.contains("unknown"),
+            "{broken}: {detail}"
+        );
+        assert!(
+            !detail.contains(&format!("note {id}")),
+            "{broken}: {detail}"
+        );
+        assert!(detail.contains(&format!("show {id}")), "{broken}: {detail}");
+    }
+}
+
+#[test]
+fn missing_recovery_writes_unknown_occupancy_limits_are_explicit() {
+    let mut env = TestEnv::new();
+    let (main, side, code, _, parent) = linked_fixture(&mut env);
+    as_agent(&env, &code, "holder")
+        .args(["start", &parent])
+        .assert()
+        .success();
+    let id = id_of(env.json(&main, &["add", "Unknown occupants"]));
+    let path = env.claim_store("sci");
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let template = store["claims"][&parent].clone();
+    store["claims"].as_table_mut().unwrap().clear();
+    for n in 1..=9 {
+        let mut claim = template.clone();
+        claim["worktree"] = toml::Value::String(
+            env.home
+                .path()
+                .join(format!("missing-code-{n}"))
+                .display()
+                .to_string(),
+        );
+        store["claims"]
+            .as_table_mut()
+            .unwrap()
+            .insert(format!("sci-{n:06x}"), claim);
+    }
+    std::fs::write(path, toml::to_string(&store).unwrap()).unwrap();
+    let detail = write_missing(&env, &side, &["note", &id, "no retry"]);
+    assert!(
+        detail.contains("1 further unresolved occupancy location omitted"),
+        "{detail}"
+    );
+    assert!(!detail.contains(&format!("note {id}")), "{detail}");
+}
+
+#[test]
+fn missing_recovery_writes_own_stale_and_parked_are_not_foreign_occupants() {
+    for mode in ["own", "stale", "park"] {
+        let mut env = TestEnv::new();
+        let (main, side, parent) = repo_with_worktree(&mut env);
+        let holder = if mode == "own" { "caller" } else { "holder" };
+        as_agent(&env, &side, holder)
+            .args(["start", &parent])
+            .assert()
+            .success();
+        let id = id_of(env.json(&side, &["add", "Unclaimed record"]));
+        if mode == "park" {
+            as_agent(&env, &side, holder)
+                .args(["park", &parent, "later"])
+                .assert()
+                .success();
+        } else if mode == "stale" {
+            let path = env.claim_store("sci");
+            let mut store: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            store["claims"][&parent]["boot_id"] = toml::Value::String("different-boot".into());
+            std::fs::write(path, toml::to_string(&store).unwrap()).unwrap();
+        }
+        let detail = write_missing(&env, &main, &["edit", &id, "--title", "Allowed retry"]);
+        assert!(detail.contains("Run it there:"), "{mode}: {detail}");
+    }
+}
+
+#[test]
+fn missing_recovery_writes_unknown_identity_is_inspection_only() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(&side, &["add", "Unknown caller"]));
+    let out = env
+        .cmd(&main)
+        .env("CODEX_THREAD_ID", "invalid\nthread")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "task_not_found");
+    let detail = common::err_detail(&out);
+    assert!(detail.contains("occupancy unknown"), "{detail}");
+    assert!(!detail.contains(&format!("note {id}")), "{detail}");
+    assert!(detail.contains(&format!("show {id}")), "{detail}");
+}
+
+#[test]
+fn missing_recovery_writes_known_occupants_remain_visible_with_uncertainty() {
+    let mut env = TestEnv::new();
+    let (main, side, code, _, parent) = linked_fixture(&mut env);
+    as_agent(&env, &code, "known-holder")
+        .args(["start", &parent])
+        .assert()
+        .success();
+    let id = id_of(env.json(&main, &["add", "Known and unknown"]));
+    let path = env.claim_store("sci");
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut unknown = store["claims"][&parent].clone();
+    unknown["session"] = toml::Value::String("unknown-holder".into());
+    unknown["worktree"] =
+        toml::Value::String(env.home.path().join("missing-code").display().to_string());
+    store["claims"]
+        .as_table_mut()
+        .unwrap()
+        .insert("sci-dead00".into(), unknown);
+    std::fs::write(path, toml::to_string(&store).unwrap()).unwrap();
+    let detail = write_missing(&env, &side, &["note", &id, "no retry"]);
+    assert!(
+        detail.contains("occupancy unknown") && detail.contains("known-holder"),
+        "{detail}"
+    );
+    assert!(!detail.contains(&format!("note {id}")), "{detail}");
+}
+
+#[test]
+fn missing_recovery_writes_direct_overlay_claims_occupy_their_own_home() {
+    let mut env = TestEnv::new();
+    let (main, side, _, _, parent) = linked_fixture(&mut env);
+    as_agent(&env, &side, "holder")
+        .args(["start", &parent])
+        .assert()
+        .success();
+    let main_id = id_of(env.json(&main, &["add", "Unoccupied registered home"]));
+    let side_id = id_of(env.json(&side, &["add", "Occupied overlay branch"]));
+    let detail = write_missing(&env, &side, &["edit", &main_id, "--title", "main"]);
+    assert!(
+        detail.contains("Commit") && detail.contains(&format!("edit {main_id}")),
+        "{detail}"
+    );
+    let detail = write_missing(&env, &main, &["edit", &side_id, "--title", "branch"]);
+    assert!(
+        detail.contains("holder") && !detail.contains(&format!("edit {side_id}")),
+        "{detail}"
+    );
+}
+
+#[test]
+fn missing_recovery_writes_different_overlay_binding_still_has_a_known_home() {
+    let mut env = TestEnv::new();
+    let (main, side, code, _, parent) = linked_fixture(&mut env);
+    let third = main.join("third-overlay");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "third-overlay",
+            third.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &main, &third);
+    let config = third.join("tasks/.config.toml");
+    let raw = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        config,
+        format!(
+            "{raw}\n[checkout]\npath = {:?}\n",
+            code.display().to_string()
+        ),
+    )
+    .unwrap();
+    let alternate_code = env.home.path().join("alternate-code");
+    std::fs::create_dir(&alternate_code).unwrap();
+    let config = side.join("tasks/.config.toml");
+    let raw = std::fs::read_to_string(&config).unwrap().replace(
+        &code.display().to_string(),
+        &alternate_code.display().to_string(),
+    );
+    std::fs::write(config, raw).unwrap();
+    as_agent(&env, &side, "holder")
+        .args(["start", &parent])
+        .assert()
+        .success();
+    let id = id_of(env.json(&third, &["add", "Known unrelated home"]));
+    let detail = write_missing(&env, &main, &["edit", &id, "--title", "retry"]);
+    assert!(detail.contains("Run it there:"), "{detail}");
+    assert!(!detail.contains("occupancy unknown"), "{detail}");
+}
+
+#[test]
+fn missing_recovery_writes_guard_editor_and_body_stdin() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(&side, &["add", "Inputs remain unread"]));
+    let sentinel = env.home.path().join("editor-called");
+    let out = as_agent(&env, &main, "caller")
+        .env("EDITOR", format!("touch {}", sentinel.display()))
+        .args(["edit", &id, "--editor"])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "task_not_found");
+    assert!(!sentinel.exists());
+    let mut child = env
+        .raw(&main)
+        .env("TASKS_SESSION", "caller")
+        .args(["edit", &id, "--body", "-"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pipe = child.stdin.take().unwrap();
+    let out = common::reap(child, common::REAP).expect("refusal must not wait for stdin EOF");
+    assert_eq!(common::err_kind(&out), "task_not_found");
+    assert!(common::err_detail(&out).contains("supply the same input on stdin"));
+    drop(pipe);
+}
+
+#[test]
+fn missing_recovery_writes_feedback_stays_on_registered_records() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(
+        &side,
+        &[
+            "add",
+            "Feedback only in branch",
+            "--status",
+            "idea",
+            "--tag",
+            "feedback",
+            "--tag",
+            "gap",
+            "--tag",
+            "from:sci",
+        ],
+    ));
+    let file = side.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&file).unwrap();
+    let out = env
+        .cmd(&main)
+        .args([
+            "feedback",
+            "--project",
+            "sci",
+            "Feedback only in branch",
+            "--category",
+            "gap",
+            "--recur",
+            &id,
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "validation");
+    assert!(!common::err_detail(&out).contains(side.to_str().unwrap()));
+    assert_eq!(std::fs::read(file).unwrap(), before);
+    assert!(!main.join(format!("tasks/{id}.md")).exists());
+}
+
 #[test]
 fn missing_recovery_reads_both_directions() {
     let mut env = TestEnv::new();

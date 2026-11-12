@@ -97,6 +97,29 @@ require manual inspection. Symlinks/special files in the config or record
 position are unresolved. This is bounded file observation, not an atomic
 snapshot or a wall-clock bound on blocked filesystem I/O.
 
+Missing-record writes use the same observations when no exact-task claim or park
+names a checkout. An exact write retry requires one stable match, a complete
+search, the same known original shorthand project, and known occupancy. Unknown
+occupancy or foreign/unknown shorthand offers canonical show inspection only;
+changing `-C` must not rebind secondary bare task IDs. Nothing is written or
+consumed from command inputs during the refusal.
+
+Another session's Live or Unverifiable claim on any task in the discovered
+records home withholds ordinary write retries. `note` may instead name an explicit
+in-place append alternative, retaining the holder's claim. For a main records
+checkout seen from its Git worktree, unoccupied guidance leads with integrating
+the record into the caller's branch before offering the explicit main write.
+Occupied main calls for coordination, not waiting for main to merge elsewhere.
+This more helpful discovery guidance is distinct from the existing strict
+claim/park missing-record remedy, which retains its behavior.
+
+For linked projects, a code checkout/worktree claim occupies the registered
+overlay records home that current routing opens. It does not occupy every
+overlay branch with the same code binding. Mapping reads no task histories and
+shares the discovery location/config-byte limits; incomplete mapping withholds
+all write retries, including notes. Known occupants remain visible alongside
+uncertainty. Feedback recurrence does not enter missing-record discovery.
+
 ## Identity snapshots
 
 `tasks identity refresh [<prefix>...]` refreshes records-entry snapshots from each

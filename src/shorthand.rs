@@ -16,6 +16,10 @@ pub struct Shorthand {
 }
 
 impl Shorthand {
+    /// The original invocation context, without discovering or rebinding a prefix.
+    pub(crate) fn local_prefix(&self) -> Option<&str> {
+        self.local.get().map(String::as_str)
+    }
     /// Locates the local project only when a bare suffix needs it, so commands that never
     /// see one behave exactly as before outside a project or with `--project`.
     pub fn new(start: PathBuf) -> Self {

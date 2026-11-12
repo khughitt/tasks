@@ -29,7 +29,7 @@ fn load_with_raw_for(ctx: &mut Ctx, id: &TaskId, writer: Writer<'_>) -> Result<(
         Err(Error::TaskNotFound(_)) => {
             // An id a pending run reserves but has not written yet is frozen too.
             crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(id))?;
-            return Err(missing_record(ctx, id)?);
+            return Err(missing_record(ctx, id, writer)?);
         }
         Err(error) => return Err(error),
     };
@@ -39,10 +39,18 @@ fn load_with_raw_for(ctx: &mut Ctx, id: &TaskId, writer: Writer<'_>) -> Result<(
 }
 
 /// A missing local record names its recorded checkout, but never routes a write there.
-fn missing_record(ctx: &mut Ctx, id: &TaskId) -> Result<Error> {
+fn missing_record(ctx: &mut Ctx, id: &TaskId, writer: Writer<'_>) -> Result<Error> {
     let snapshot =
         crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
-    let (worktree, _, _, _) = show::recorded_elsewhere(id, &snapshot)?;
+    let (worktree, _, _, _) = match show::recorded_elsewhere(id, &snapshot) {
+        Err(Error::TaskNotFound(_)) => {
+            let scan = crate::recovery::discover(&ctx.project, id);
+            return Ok(super::recovery::write_error(
+                ctx, id, writer, scan, &snapshot,
+            ));
+        }
+        result => result?,
+    };
     let root = Path::new(worktree);
     let args: Vec<String> = std::env::args_os()
         .skip(1)
