@@ -775,6 +775,278 @@ fn front_door_ci_workflow_structure_and_pins() {
 }
 
 #[test]
+fn front_door_ci_prepare_seeds_evidence_before_later_steps_and_record_appends() {
+    let source = workflow();
+    let prepare = workflow_run(
+        &source,
+        "Prepare isolated Git config and evidence directory",
+    );
+    let record = workflow_run(&source, "Record tool versions");
+    let fixture = FrontDoorFixture::new(None);
+    let root = fixture.dir.path();
+    let runner_temp = root.join("runner-temp");
+    std::fs::create_dir(&runner_temp).unwrap();
+    let github_env = root.join("github.env");
+    std::fs::write(&github_env, "").unwrap();
+
+    let out = fixture
+        .command("bash")
+        .args(["-e", "-o", "pipefail", "-c", &prepare])
+        .env("RUNNER_TEMP", &runner_temp)
+        .env("GITHUB_ENV", &github_env)
+        .env("GITHUB_SHA", "0123456789abcdef")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(runner_temp.join("gitconfig").is_file());
+    let env_text = std::fs::read_to_string(&github_env).unwrap();
+    let evidence = runner_temp.join("ci-evidence");
+    assert!(env_text.contains(&format!(
+        "GIT_CONFIG_GLOBAL={}\n",
+        runner_temp.join("gitconfig").display()
+    )));
+    assert!(env_text.contains(&format!("EVIDENCE_DIR={}\n", evidence.display())));
+
+    let seeded = std::fs::read_to_string(evidence.join("setup-report.txt"))
+        .expect("Prepare step must seed setup-report.txt before Checkout/toolchain steps can fail");
+    assert!(
+        seeded.starts_with("tasks revision: 0123456789abcdef\n"),
+        "{seeded}"
+    );
+    assert!(seeded.contains("Python "), "{seeded}");
+    assert!(seeded.contains("git version "), "{seeded}");
+
+    fixture.script("rustc", "#!/bin/sh\necho 'rustc 1.99.1-stub'\n");
+    fixture.script(
+        "cargo",
+        "#!/bin/sh\nif [ \"$1\" = clippy ]; then echo 'clippy 0.1.99-stub'; else echo 'cargo 1.99.1-stub'; fi\n",
+    );
+    fixture.script("rustfmt", "#!/bin/sh\necho 'rustfmt 1.99.1-stub'\n");
+    fixture.script("just", "#!/bin/sh\necho 'just 1.59.0-stub'\n");
+    fixture.script("zsh", "#!/bin/sh\necho 'zsh 5.9-stub'\n");
+
+    let out = fixture
+        .command("bash")
+        .args(["-e", "-o", "pipefail", "-c", &record])
+        .env("EVIDENCE_DIR", &evidence)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let full = std::fs::read_to_string(evidence.join("setup-report.txt")).unwrap();
+    assert!(
+        full.starts_with(&seeded),
+        "Record step overwrote seeded report:\n{full}"
+    );
+    for expected in [
+        "rustc 1.99.1-stub\n",
+        "cargo 1.99.1-stub\n",
+        "rustfmt 1.99.1-stub\n",
+        "clippy 0.1.99-stub\n",
+        "just 1.59.0-stub\n",
+        "zsh 5.9-stub\n",
+    ] {
+        assert!(full.contains(expected), "missing {expected:?} in:\n{full}");
+    }
+}
+
+#[test]
+fn front_door_ci_toolchain_step_configures_apt_fallbacks_retries_and_logs_failures() {
+    let install = workflow_run(&workflow(), "Install zsh and Rust toolchain");
+    let fixture = FrontDoorFixture::new(None);
+    let root = fixture.dir.path();
+    let evidence = root.join("evidence");
+    std::fs::create_dir(&evidence).unwrap();
+    let mirrors = root.join("apt-mirrors.txt");
+
+    fixture.script(
+        "dpkg",
+        "#!/bin/sh\n[ \"$1\" = --print-architecture ] || exit 9\nprintf '%s\\n' \"${TEST_ARCH:-amd64}\"\n",
+    );
+    fixture.script(
+        "sleep",
+        r#"#!/usr/bin/env python3
+import json, sys
+with open('calls.jsonl', 'a') as f:
+    f.write(json.dumps(['sleep', *sys.argv[1:]]) + '\n')
+"#,
+    );
+    fixture.script(
+        "rustup",
+        r#"#!/usr/bin/env python3
+import json, os, sys
+with open('calls.jsonl', 'a') as f:
+    f.write(json.dumps(['rustup', *sys.argv[1:]]) + '\n')
+if sys.argv[1:3] == ['toolchain', 'install'] and os.environ.get('TEST_RUSTUP_EXIT'):
+    sys.exit(int(os.environ['TEST_RUSTUP_EXIT']))
+"#,
+    );
+    fixture.script(
+        "sudo",
+        r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys
+
+args = sys.argv[1:]
+if args and args[0] == 'python3':
+    assert '/etc/apt/apt-mirrors.txt' in args, args
+    rewritten = [os.environ['TEST_APT_MIRRORS'] if a == '/etc/apt/apt-mirrors.txt' else a for a in args]
+    sys.exit(subprocess.call(rewritten))
+if args and args[0] == 'apt-get':
+    with open('calls.jsonl', 'a') as f:
+        f.write(json.dumps(args) + '\n')
+    if args[1] == 'update':
+        counter = pathlib.Path('apt-update-count.txt')
+        n = int(counter.read_text()) + 1 if counter.exists() else 1
+        counter.write_text(str(n))
+        exits = [int(x) for x in os.environ.get('TEST_APT_UPDATE_EXITS', '0').split(',')]
+        code = exits[min(n - 1, len(exits) - 1)]
+        if code:
+            sys.stderr.write(f'simulated apt-get update failure on attempt {n}\n')
+        sys.exit(code)
+    sys.exit(int(os.environ.get('TEST_APT_INSTALL_EXIT', '0')))
+raise SystemExit(f'unexpected sudo invocation: {args!r}')
+"#,
+    );
+
+    let default_mirrors = concat!(
+        "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n",
+        "http://archive.ubuntu.com/ubuntu/\tpriority:2\n",
+        "http://security.ubuntu.com/ubuntu/\tpriority:3\n",
+    );
+    let expected_mirrors = concat!(
+        "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n",
+        "http://archive.ubuntu.com/ubuntu/\tpriority:2\n",
+        "http://security.ubuntu.com/ubuntu/\tpriority:3\n",
+        "https://mirrors.mit.edu/ubuntu/\tpriority:4\n",
+        "https://mirrors.ocf.berkeley.edu/ubuntu/\tpriority:5\n",
+    );
+    let run_step = |arch: &str, update_exits: &str, rustup_exit: Option<&str>| {
+        for file in ["calls.jsonl", "apt-update-count.txt"] {
+            let p = root.join(file);
+            if p.exists() {
+                std::fs::remove_file(p).unwrap();
+            }
+        }
+        let log = evidence.join("toolchain-setup.log");
+        if log.exists() {
+            std::fs::remove_file(log).unwrap();
+        }
+        let mut cmd = fixture.command("bash");
+        cmd.args(["-e", "-o", "pipefail", "-c", &install])
+            .env("EVIDENCE_DIR", &evidence)
+            .env("TEST_APT_MIRRORS", &mirrors)
+            .env("TEST_ARCH", arch)
+            .env("TEST_APT_UPDATE_EXITS", update_exits);
+        if let Some(code) = rustup_exit {
+            cmd.env("TEST_RUSTUP_EXIT", code);
+        }
+        cmd.output().unwrap()
+    };
+    let read_calls = || -> Vec<Vec<String>> {
+        let p = root.join("calls.jsonl");
+        if !p.exists() {
+            return Vec::new();
+        }
+        std::fs::read_to_string(p)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+
+    // Case 1: amd64 appends non-ubuntu.com HTTPS mirrors, passes --error-on=any, and recovers on retry.
+    std::fs::write(&mirrors, default_mirrors).unwrap();
+    let out = run_step("amd64", "100,0", None);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(std::fs::read_to_string(&mirrors).unwrap(), expected_mirrors);
+    assert_eq!(
+        read_calls(),
+        vec![
+            vec!["apt-get", "update", "--error-on=any"],
+            vec!["sleep", "5"],
+            vec!["apt-get", "update", "--error-on=any"],
+            vec!["apt-get", "install", "--no-install-recommends", "-y", "zsh"],
+            vec![
+                "rustup",
+                "toolchain",
+                "install",
+                "1.99.1",
+                "--profile",
+                "minimal",
+                "--component",
+                "rustfmt",
+                "--component",
+                "clippy",
+            ],
+            vec!["rustup", "default", "1.99.1"],
+        ]
+    );
+    let setup_log = std::fs::read_to_string(evidence.join("toolchain-setup.log")).unwrap();
+    assert!(
+        setup_log.contains("simulated apt-get update failure on attempt 1"),
+        "{setup_log}"
+    );
+
+    // Case 2: rerunning on amd64 is idempotent and adds no duplicate mirror entries.
+    let out = run_step("amd64", "0", None);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(std::fs::read_to_string(&mirrors).unwrap(), expected_mirrors);
+
+    // Case 3: non-amd64 architectures do not add amd64-only Ubuntu archive mirrors.
+    std::fs::write(
+        &mirrors,
+        "http://ports.ubuntu.com/ubuntu-ports/\tpriority:1\n",
+    )
+    .unwrap();
+    let out = run_step("arm64", "0", None);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        std::fs::read_to_string(&mirrors).unwrap(),
+        "http://ports.ubuntu.com/ubuntu-ports/\tpriority:1\n"
+    );
+
+    // Case 4: persistent apt failure exits with apt's status, skips rustup, and leaves log evidence.
+    std::fs::write(&mirrors, default_mirrors).unwrap();
+    let out = run_step("amd64", "100,100", None);
+    assert_eq!(out.status.code(), Some(100), "{out:?}");
+    assert_eq!(
+        read_calls(),
+        vec![
+            vec!["apt-get", "update", "--error-on=any"],
+            vec!["sleep", "5"],
+            vec!["apt-get", "update", "--error-on=any"],
+        ]
+    );
+    let fail_log = std::fs::read_to_string(evidence.join("toolchain-setup.log")).unwrap();
+    assert!(
+        fail_log.contains("simulated apt-get update failure on attempt 2"),
+        "{fail_log}"
+    );
+
+    // Case 5: errexit remains active inside the tee pipeline when rustup fails.
+    let out = run_step("amd64", "0", Some("23"));
+    assert_eq!(out.status.code(), Some(23), "{out:?}");
+    assert_eq!(
+        read_calls(),
+        vec![
+            vec!["apt-get", "update", "--error-on=any"],
+            vec!["apt-get", "install", "--no-install-recommends", "-y", "zsh"],
+            vec![
+                "rustup",
+                "toolchain",
+                "install",
+                "1.99.1",
+                "--profile",
+                "minimal",
+                "--component",
+                "rustfmt",
+                "--component",
+                "clippy",
+            ],
+        ]
+    );
+}
+
+#[test]
 fn front_door_ci_coverage_verifier_enforces_dynamic_metadata_targets() {
     let shell = workflow_run(&workflow(), "Run full test suite and verify coverage");
     let fixture = FrontDoorFixture::new(None);
