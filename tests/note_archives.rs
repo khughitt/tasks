@@ -1158,17 +1158,30 @@ fn archive_stale_claim_and_policy() {
             std::fs::write(path, toml::to_string(&store).unwrap()).unwrap();
         }
         let p = env.json(&root, &["archive-notes", &id]);
+        let out = env
+            .cmd(&root)
+            .env("TASKS_SESSION", "caller")
+            .args([
+                "archive-notes",
+                &id,
+                "--expect",
+                p["source_sha256"].as_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(common::err_kind(&out), "claimed", "{state}");
+        let detail = common::err_detail(&out);
+        assert!(
+            detail.contains(&format!(
+                "tasks start --force {id} --reason \"continued from session other\""
+            )),
+            "{state}: {detail}"
+        );
+        assert!(detail.contains("before retrying"), "{state}: {detail}");
         assert_eq!(
-            env.fail(
-                &root,
-                &[
-                    "archive-notes",
-                    &id,
-                    "--expect",
-                    p["source_sha256"].as_str().unwrap()
-                ]
-            ),
-            "claimed"
+            detail.contains(&format!("tasks release {id} \"<why>\"")),
+            state == "unverifiable",
+            "{state}: {detail}"
         );
     }
     std::fs::remove_file(env.claim_store("arc")).unwrap();

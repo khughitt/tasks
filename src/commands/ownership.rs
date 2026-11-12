@@ -97,7 +97,51 @@ impl Ctx {
             claim.session, claim.owner, claim.host, claim.worktree, claim.started
         )
     }
+    pub(crate) fn foreign_claim_detail(
+        &self,
+        id: &TaskId,
+        claim: &crate::claims::Claim,
+        live: &Liveness,
+        include_continuation: bool,
+    ) -> String {
+        format_foreign_claim(
+            id,
+            claim,
+            live,
+            self.project.resume_root(),
+            include_continuation,
+        )
+    }
+}
 
+pub(crate) fn format_foreign_claim(
+    id: &TaskId,
+    claim: &crate::claims::Claim,
+    live: &Liveness,
+    resume_root: &std::path::Path,
+    include_continuation: bool,
+) -> String {
+    let description = Ctx::describe_claim(claim, live);
+    let task_id = id.to_string();
+    let continuation =
+        if include_continuation && std::path::Path::new(&claim.worktree) == resume_root {
+            let holder = Ctx::session_label(claim);
+            format!(
+                "; if this conversation continued from {holder}, take it over with \
+             `tasks start --force {task_id} --reason \"continued from {holder}\"` \
+             before retrying"
+            )
+        } else {
+            String::new()
+        };
+    let release = match live {
+        Liveness::Unverifiable(_) => crate::commands::release::hint(&task_id, &claim.session),
+        _ => String::new(),
+    };
+    format!("{description}{continuation}{release}")
+}
+
+impl Ctx {
     /// Resolve identity, keeping a relay-level failure carryable so  can defer it. A
     /// failure with relay off is raised here, exactly where `identity` raised it before,
     /// which is what holds the relay-off guarantee at every call site rather than at some.
@@ -110,6 +154,14 @@ impl Ctx {
     }
 
     pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
+        self.refuse_foreign_claim(id, true)
+    }
+
+    pub(crate) fn refuse_foreign_claim(
+        &mut self,
+        id: &TaskId,
+        include_continuation: bool,
+    ) -> Result<()> {
         let me = self.resolve_for_guard()?;
         let existing = self.claims_mut()?.get(id).cloned();
         let Some(existing) = existing else {
@@ -129,7 +181,7 @@ impl Ctx {
         if !live.is_stale() {
             return Err(Error::Claimed(
                 id.to_string(),
-                Ctx::describe_claim(&existing, &live),
+                self.foreign_claim_detail(id, &existing, &live, include_continuation),
             ));
         }
         Ok(())
@@ -390,7 +442,7 @@ impl Ctx {
                 (false, false) if !(force && to == Status::Doing) => {
                     return Err(Error::Claimed(
                         id.to_string(),
-                        Ctx::describe_claim(existing, &live),
+                        self.foreign_claim_detail(id, existing, &live, to != Status::Doing),
                     ));
                 }
                 (false, false) => {
@@ -720,15 +772,19 @@ pub fn retained_owner(ctx: &mut Ctx, id: &TaskId) -> Result<()> {
             "Run tasks start {id} to establish ownership before retained publication"
         ))
     })?;
-    if crate::claims::liveness(&claim).is_stale() {
+    let live = crate::claims::liveness(&claim);
+    if live.is_stale() {
         return Err(Error::RetainedInput(format!(
             "Run tasks start {id} to re-establish the stale claim before retry"
         )));
     }
     if ownership(&claim, &me, &ctx.host) == Ownership::Foreign {
+        let held = claim.session.clone();
+        me.require()
+            .map_err(|error| crate::claims::name_the_claim(error, Some(&held)))?;
         return Err(Error::Claimed(
             id.to_string(),
-            Ctx::describe_claim(&claim, &crate::claims::liveness(&claim)),
+            ctx.foreign_claim_detail(id, &claim, &live, true),
         ));
     }
     follow_holder(ctx, id, Some(&me), "retained ownership was checked");
@@ -773,5 +829,144 @@ mod tests {
             "{shown}"
         );
         assert!(shown.contains("session agent-a (owner main, host testhost, pid 42, worktree /tmp/wt, since 2026-10-15T00:00:00Z, age "), "{shown}");
+    }
+
+    #[test]
+    fn foreign_claim_detail_gates_continuation_and_release_hints() {
+        let id = TaskId::parse("sci-123456").unwrap();
+        let claim = Claim {
+            session: "agent-a".into(),
+            root_session: None,
+            owner: "main".into(),
+            host: "testhost".into(),
+            pid: Some(42),
+            pid_start: Some(900),
+            boot_id: Some("boot-a".into()),
+            pid_view: Some("5:100".into()),
+            worktree: "/tmp/wt".into(),
+            started: "2026-10-15T00:00:00Z".into(),
+            seen: "2026-10-15T00:00:00Z".into(),
+            holds: Vec::new(),
+        };
+        let unverifiable = Liveness::Unverifiable("recorded in another PID view".into());
+
+        // 1. Non-acquisition + same worktree + Live: continuation hint, no release hint.
+        let same_live = format_foreign_claim(
+            &id,
+            &claim,
+            &Liveness::Live,
+            std::path::Path::new("/tmp/wt"),
+            true,
+        );
+        assert!(
+            same_live.contains(
+                "; if this conversation continued from session agent-a, take it over with \
+                 `tasks start --force sci-123456 --reason \"continued from session agent-a\"` \
+                 before retrying"
+            ),
+            "{same_live}"
+        );
+        assert!(!same_live.contains("before parking"), "{same_live}");
+        assert!(!same_live.contains("tasks release"), "{same_live}");
+
+        // 2. Non-acquisition + different worktree + Live: bare claim description only.
+        let cross_live = format_foreign_claim(
+            &id,
+            &claim,
+            &Liveness::Live,
+            std::path::Path::new("/tmp/other"),
+            true,
+        );
+        assert!(!cross_live.contains("continued from"), "{cross_live}");
+        assert!(!cross_live.contains("tasks release"), "{cross_live}");
+
+        // 3. Non-acquisition + same worktree + Unix session + Live: sanitizes sid:<pid> in --reason.
+        let mut unix_claim = claim.clone();
+        unix_claim.session = "sid:4242".into();
+        let unix_live = format_foreign_claim(
+            &id,
+            &unix_claim,
+            &Liveness::Live,
+            std::path::Path::new("/tmp/wt"),
+            true,
+        );
+        assert!(
+            unix_live.contains(
+                "; if this conversation continued from Unix session, take it over with \
+                 `tasks start --force sci-123456 --reason \"continued from Unix session\"` \
+                 before retrying"
+            ),
+            "{unix_live}"
+        );
+        assert!(
+            !unix_live.contains("continued from session sid:4242"),
+            "{unix_live}"
+        );
+        assert!(!unix_live.contains("tasks release"), "{unix_live}");
+
+        // 4. Non-acquisition + same worktree + Unverifiable: both continuation and release hints.
+        let same_unverifiable = format_foreign_claim(
+            &id,
+            &claim,
+            &unverifiable,
+            std::path::Path::new("/tmp/wt"),
+            true,
+        );
+        assert!(
+            same_unverifiable
+                .contains("--reason \"continued from session agent-a\"` before retrying"),
+            "{same_unverifiable}"
+        );
+        assert!(
+            same_unverifiable
+                .contains("; if session agent-a is gone, run `tasks release sci-123456 \"<why>\"`"),
+            "{same_unverifiable}"
+        );
+
+        // 5. Non-acquisition + different worktree + Unverifiable: release hint only.
+        let cross_unverifiable = format_foreign_claim(
+            &id,
+            &claim,
+            &unverifiable,
+            std::path::Path::new("/tmp/other"),
+            true,
+        );
+        assert!(
+            !cross_unverifiable.contains("continued from"),
+            "{cross_unverifiable}"
+        );
+        assert!(
+            cross_unverifiable
+                .contains("; if session agent-a is gone, run `tasks release sci-123456 \"<why>\"`"),
+            "{cross_unverifiable}"
+        );
+
+        // 6. Acquisition (start / edit --status doing) + same worktree: never continuation, release only if unverifiable.
+        let acq_live = format_foreign_claim(
+            &id,
+            &claim,
+            &Liveness::Live,
+            std::path::Path::new("/tmp/wt"),
+            false,
+        );
+        assert!(!acq_live.contains("continued from"), "{acq_live}");
+        assert!(!acq_live.contains("tasks release"), "{acq_live}");
+
+        let acq_unverifiable = format_foreign_claim(
+            &id,
+            &claim,
+            &unverifiable,
+            std::path::Path::new("/tmp/wt"),
+            false,
+        );
+        assert!(
+            !acq_unverifiable.contains("continued from"),
+            "{acq_unverifiable}"
+        );
+        assert!(
+            acq_unverifiable
+                .contains("; if session agent-a is gone, run `tasks release sci-123456 \"<why>\"`"),
+            "{acq_unverifiable}"
+        );
     }
 }

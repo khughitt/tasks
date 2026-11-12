@@ -366,7 +366,7 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     if let Some(status) = args.status {
         let to = Status::parse(&status)?;
         if to == task.status {
-            ctx.refuse_foreign_live_claim(&task.id)?;
+            ctx.refuse_foreign_claim(&task.id, to != Status::Doing)?;
             ctx.preserve_claim_store(&task.id);
         } else {
             if to == Status::Shelved {

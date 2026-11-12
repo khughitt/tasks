@@ -1471,3 +1471,182 @@ fn review_retained_checkpoint_refuses_multipart_artifact_name() {
     assert!(out.status.success());
     assert_eq!(out.stdout, b"{}");
 }
+
+#[test]
+fn retained_checkpoint_foreign_claim_hints_and_identity_precedence() {
+    let f = RetainedEnv::new("detached");
+    std::fs::write(f.dir.join(".gitignore"), ".worktrees/\nrequest.json\n").unwrap();
+    common::git(&f.dir, &["add", ".gitignore"]);
+    common::git(&f.dir, &["commit", "-qm", "ignore worktrees"]);
+    let side = f.dir.join(".worktrees/side");
+    common::git(
+        &f.dir,
+        &["worktree", "add", "-qb", "side", side.to_str().unwrap()],
+    );
+    common::git_fixture::assert_worktree(f.env.home.path(), &f.dir, &side);
+
+    // 1. Same-worktree foreign Live claim: continuation hint, no release hint, state unchanged.
+    f.env
+        .cmd(&f.dir)
+        .env("TASKS_SESSION", "holder")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &f.id])
+        .assert()
+        .success();
+    let request = checkpoint_request(&f, 1, json!([]));
+    let req_path = f.request("request.json", &request);
+    let basis_before = f.basis();
+    let claims_before = std::fs::read_to_string(f.env.claim_store("sci")).unwrap();
+
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(common::err_kind(&out), "claimed");
+    let detail = common::err_detail(&out);
+    assert!(
+        detail.contains(&format!(
+            "tasks start --force {} --reason \"continued from session holder\"",
+            f.id
+        )),
+        "{detail}"
+    );
+    assert!(detail.contains("before retrying"), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+    assert_eq!(f.basis(), basis_before);
+    assert_eq!(
+        std::fs::read_to_string(f.env.claim_store("sci")).unwrap(),
+        claims_before
+    );
+
+    // 2. Same-worktree foreign Unverifiable claim: both continuation and release hints.
+    let store_path = f.env.claim_store("sci");
+    let mut store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    store["claims"][&f.id]
+        .as_table_mut()
+        .unwrap()
+        .insert("pid_view".into(), toml::Value::String("0:1".into()));
+    std::fs::write(&store_path, toml::to_string(&store).unwrap()).unwrap();
+
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "claimed");
+    let detail = common::err_detail(&out);
+    assert!(
+        detail.contains("--reason \"continued from session holder\"` before retrying"),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks release {} \"<why>\"", f.id)),
+        "{detail}"
+    );
+    assert_eq!(f.basis(), basis_before);
+
+    // 3. Identity-error precedence: when relay identity fails without proof, surface the
+    //    identity error rather than a `claimed` refusal that could suggest `tasks release`.
+    let host_cfg = f.env.home.path().join(".config/tasks/config.toml");
+    std::fs::create_dir_all(host_cfg.parent().unwrap()).unwrap();
+    std::fs::write(&host_cfg, "[identity]\nrelay = true\n").unwrap();
+    let out = f
+        .env
+        .cmd(&f.dir)
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "config", "{out:?}");
+    let id_detail = common::err_detail(&out);
+    assert!(
+        id_detail.contains("inspect tasks show for the existing claim's exact session identity"),
+        "{id_detail}"
+    );
+    assert!(!id_detail.contains("tasks release"), "{id_detail}");
+    std::fs::remove_file(&host_cfg).unwrap();
+
+    // 4. Cross-worktree foreign Live vs Unverifiable claim: omits `continued from`, includes
+    //    `tasks release` only when Unverifiable.
+    f.env
+        .cmd(&side)
+        .env("TASKS_SESSION", "side-holder")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", "--force", &f.id, "--reason", "move to side"])
+        .assert()
+        .success();
+    let request = checkpoint_request(&f, 2, json!([]));
+    let req_path = f.request("request.json", &request);
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "claimed");
+    let detail = common::err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+
+    let mut store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    store["claims"][&f.id]
+        .as_table_mut()
+        .unwrap()
+        .insert("pid_view".into(), toml::Value::String("0:1".into()));
+    std::fs::write(&store_path, toml::to_string(&store).unwrap()).unwrap();
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&out), "claimed");
+    let detail = common::err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(
+        detail.contains(&format!("tasks release {} \"<why>\"", f.id)),
+        "{detail}"
+    );
+
+    // 5. Explicit takeover followed by retry of `retained checkpoint` succeeds.
+    f.json(&[
+        "start",
+        "--force",
+        &f.id,
+        "--reason",
+        "continued from session side-holder",
+    ]);
+    let request = checkpoint_request(&f, 3, json!([]));
+    assert_eq!(checkpoint(&f, &request)["outcome"], "no_local_items");
+}

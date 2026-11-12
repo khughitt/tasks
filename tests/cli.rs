@@ -29643,6 +29643,8 @@ fn park_foreign_claim_hints_same_worktree_continuation_and_unverifiable_release(
         "tasks start --force {id} --reason \"continued from session claude-code:old-session\""
     );
     assert!(detail.contains(&expected_takeover), "{detail}");
+    assert!(detail.contains("before retrying"), "{detail}");
+    assert!(!detail.contains("before parking"), "{detail}");
     assert!(!detail.contains("tasks release"), "{detail}");
 
     // Running that exact takeover command followed by `park` succeeds.
@@ -29748,6 +29750,327 @@ fn park_foreign_claim_hints_same_worktree_continuation_and_unverifiable_release(
         .output()
         .unwrap();
     assert_eq!(err_kind(&out), "claimed", "{out:?}");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains("--reason \"continued from Unix session\""),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks release {unix} \"<why>\"")),
+        "{detail}"
+    );
+}
+
+#[test]
+fn foreign_claim_hints_cover_guarded_writes_start_and_ordinary_writes() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    hold_vocab(&main);
+    hold_vocab(&side);
+
+    // 1. Same-worktree foreign Live claim: non-acquisition guarded writes include the
+    //    continuation hint (`before retrying`), omit `tasks release`, and leave state untouched.
+    as_agent(&env, &main, "claude-code:old-session")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let task_before = env.read(&main, &format!("tasks/{id}.md"));
+    let claims_before = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    let expected_takeover = format!(
+        "tasks start --force {id} --reason \"continued from session claude-code:old-session\""
+    );
+
+    for args in [
+        vec!["done", id.as_str(), "ship it"],
+        vec!["done", "--force", id.as_str(), "ship it"],
+        vec!["drop", id.as_str(), "obsolete"],
+        vec!["shelve", id.as_str(), "revisit", "--defer", "2030-01-01"],
+        vec!["edit", id.as_str(), "--status", "done"],
+        vec!["edit", id.as_str(), "--need", "quiet"],
+    ] {
+        let out = as_agent(&env, &main, "claude-code:bg-session")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+        let detail = err_detail(&out);
+        assert!(detail.contains(&expected_takeover), "{args:?}: {detail}");
+        assert!(detail.contains("before retrying"), "{args:?}: {detail}");
+        assert!(!detail.contains("tasks release"), "{args:?}: {detail}");
+    }
+
+    for script in [
+        "sed -i 's/^# /# Edited /' \"$1\"",
+        "sed -i 's/^status: doing$/status: done/' \"$1\"",
+    ] {
+        let editor = editor_script(&main, script);
+        let out = as_agent(&env, &main, "claude-code:bg-session")
+            .env("EDITOR", editor)
+            .args(["edit", &id, "--editor"])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed", "{script}");
+        let detail = err_detail(&out);
+        assert!(detail.contains(&expected_takeover), "{script}: {detail}");
+        assert!(detail.contains("before retrying"), "{script}: {detail}");
+        assert!(detail.contains("(edit kept at "), "{script}: {detail}");
+        assert!(!detail.contains("tasks release"), "{script}: {detail}");
+    }
+
+    assert_eq!(env.read(&main, &format!("tasks/{id}.md")), task_before);
+    assert_eq!(
+        std::fs::read_to_string(env.claim_store("sci")).unwrap(),
+        claims_before
+    );
+
+    // 2. Refused transitions to Doing (`start` without `--force`, `edit --status doing` on
+    //    doing or todo, and `--editor` changing todo -> doing) omit the non-start continuation
+    //    hint and include `tasks release` only when the foreign claim is Unverifiable.
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["edit", id.as_str(), "--status", "doing"],
+    ] {
+        let out = as_agent(&env, &main, "claude-code:bg-session")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+        let detail = err_detail(&out);
+        assert!(!detail.contains("continued from"), "{args:?}: {detail}");
+        assert!(!detail.contains("tasks release"), "{args:?}: {detail}");
+    }
+
+    let todo_held = id_of(env.json(&main, &["add", "Held while todo", "-p", "2"]));
+    as_agent(&env, &main, "claude-code:old-session")
+        .args(["start", &todo_held])
+        .assert()
+        .success();
+    let raw = env
+        .read(&main, &format!("tasks/{todo_held}.md"))
+        .replace("status: doing", "status: todo");
+    std::fs::write(main.join(format!("tasks/{todo_held}.md")), raw).unwrap();
+
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["edit", &todo_held, "--status", "doing"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+
+    let to_doing_editor = editor_script(&main, "sed -i 's/^status: todo$/status: doing/' \"$1\"");
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .env("EDITOR", &to_doing_editor)
+        .args(["edit", &todo_held, "--editor"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(!detail.contains("tasks release"), "{detail}");
+
+    set_pid_view(&env, "sci", &todo_held, "0:1");
+    for (label, out) in [
+        (
+            "start",
+            as_agent(&env, &main, "claude-code:bg-session")
+                .args(["start", &todo_held])
+                .output()
+                .unwrap(),
+        ),
+        (
+            "edit-status-doing-from-todo",
+            as_agent(&env, &main, "claude-code:bg-session")
+                .args(["edit", &todo_held, "--status", "doing"])
+                .output()
+                .unwrap(),
+        ),
+        (
+            "editor-doing-from-todo",
+            as_agent(&env, &main, "claude-code:bg-session")
+                .env("EDITOR", &to_doing_editor)
+                .args(["edit", &todo_held, "--editor"])
+                .output()
+                .unwrap(),
+        ),
+    ] {
+        assert_eq!(err_kind(&out), "claimed", "{label}");
+        let detail = err_detail(&out);
+        assert!(!detail.contains("continued from"), "{label}: {detail}");
+        assert!(
+            detail.contains(&format!("tasks release {todo_held} \"<why>\"")),
+            "{label}: {detail}"
+        );
+    }
+
+    // Also check `edit --status doing` on an already-doing task with an Unverifiable claim.
+    set_pid_view(&env, "sci", &id, "0:1");
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["edit", &id, "--status", "doing"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    assert!(!detail.contains("continued from"), "{detail}");
+    assert!(
+        detail.contains(&format!("tasks release {id} \"<why>\"")),
+        "{detail}"
+    );
+
+    // Restore `id` to a Live claim for permitted ordinary writes + takeover check.
+    as_agent(&env, &main, "claude-code:old-session")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let claim_before_ordinary = env.json(&main, &["show", &id])["claim"].clone();
+
+    // 3. Permitted ordinary edits and attachment writes succeed under a foreign claim
+    //    without taking over or refreshing the foreign holder's claim.
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args([
+            "edit",
+            &id,
+            "--title",
+            "Retitled while foreign claim active",
+        ])
+        .assert()
+        .success();
+    let sample = main.join("sample.txt");
+    std::fs::write(&sample, "attachment payload\n").unwrap();
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args([
+            "attach",
+            &id,
+            sample.to_str().unwrap(),
+            "--caption",
+            "diagnostic log",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args(["detach", &id, "sample.txt", "no longer needed"])
+        .assert()
+        .success();
+    let shown_after_ordinary = env.json(&main, &["show", &id]);
+    assert_eq!(
+        shown_after_ordinary["task"]["title"],
+        "Retitled while foreign claim active"
+    );
+    assert_eq!(shown_after_ordinary["claim"], claim_before_ordinary);
+
+    // 4. Explicit takeover followed by retry of `done` succeeds and records the reason.
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args([
+            "start",
+            "--force",
+            &id,
+            "--reason",
+            "continued from session claude-code:old-session",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &main, "claude-code:bg-session")
+        .args(["done", &id, "completed after continuation"])
+        .assert()
+        .success();
+    let closed = env.json(&main, &["show", &id]);
+    assert!(closed["claim"].is_null(), "{closed}");
+    assert_eq!(closed["task"]["status"], "done", "{closed}");
+    assert!(
+        closed["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("continued from session claude-code:old-session")),
+        "{closed}"
+    );
+
+    // 5. Cross-worktree foreign Live vs Unverifiable on `done` and `edit --need`:
+    //    omits `continued from`, includes `tasks release` only when Unverifiable.
+    let cross = id_of(env.json(&main, &["add", "Cross wt close", "-p", "2"]));
+    std::fs::copy(
+        main.join(format!("tasks/{cross}.md")),
+        side.join(format!("tasks/{cross}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &side, "claude-code:other-wt")
+        .args(["start", &cross])
+        .assert()
+        .success();
+    stamp(
+        &main,
+        &cross,
+        "2026-09-01T00:00:00Z",
+        "2099-01-01T00:00:00Z",
+    );
+    for args in [
+        vec!["done", cross.as_str(), "wrong wt"],
+        vec!["edit", cross.as_str(), "--need", "quiet"],
+    ] {
+        let out = as_agent(&env, &main, "claude-code:bg-session")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+        let detail = err_detail(&out);
+        assert!(!detail.contains("continued from"), "{args:?}: {detail}");
+        assert!(!detail.contains("tasks release"), "{args:?}: {detail}");
+    }
+    set_pid_view(&env, "sci", &cross, "0:1");
+    for args in [
+        vec!["done", cross.as_str(), "wrong wt"],
+        vec!["edit", cross.as_str(), "--need", "quiet"],
+    ] {
+        let out = as_agent(&env, &main, "claude-code:bg-session")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+        let detail = err_detail(&out);
+        assert!(!detail.contains("continued from"), "{args:?}: {detail}");
+        assert!(
+            detail.contains(&format!("tasks release {cross} \"<why>\"")),
+            "{args:?}: {detail}"
+        );
+    }
+
+    // 6. Unix-session (`sid:<pid>`) holder in same worktree: never suggests raw PID in `--reason`.
+    let unix = id_of(env.json(&main, &["add", "Unix close", "-p", "2"]));
+    as_agent(&env, &main, "sid:424242")
+        .args(["start", &unix])
+        .assert()
+        .success();
+    for args in [
+        vec!["done", unix.as_str(), "after shell"],
+        vec!["edit", unix.as_str(), "--need", "quiet"],
+    ] {
+        let out = as_agent(&env, &main, "claude-code:bg-session")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+        let detail = err_detail(&out);
+        assert!(
+            detail.contains("--reason \"continued from Unix session\""),
+            "{args:?}: {detail}"
+        );
+        assert!(
+            !detail.contains("continued from session sid:424242"),
+            "{args:?}: {detail}"
+        );
+        assert!(!detail.contains("tasks release"), "{args:?}: {detail}");
+    }
+    set_pid_view(&env, "sci", &unix, "0:1");
+    let out = as_agent(&env, &main, "claude-code:bg-session")
+        .args(["done", &unix, "unverifiable unix"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
     let detail = err_detail(&out);
     assert!(
         detail.contains("--reason \"continued from Unix session\""),

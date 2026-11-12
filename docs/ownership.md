@@ -23,9 +23,17 @@ descriptive; it grants no authority over a worker's claim.
 
 `tasks start <id>` acquires/resumes a claim, records doing/owner and a started or
 resumed note, and clears that host's park. Repeated starts by the owner refresh
-the claim. Ordinary writes enforce the same ownership and stale-copy guards;
-they do not make a foreign session the owner. Claim and record writes can fail
-separately: inspect the named landed paths before retrying.
+the claim. Guarded operations — lifecycle and status transitions (`start`, `done`,
+`drop`, `park`, `block`, `unblock`, `shelve`, `unshelve`, `edit --status`), `edit`s
+that change `needs` or open `$EDITOR` / `--editor`, `archive-notes --expect`, and
+`retained` lifecycle writes (`checkpoint`, `transfer`, `reconcile`) — refuse a
+live or unverifiable foreign claim with `claimed`. Append-style and ordinary
+metadata writes (`note`, `attach`, `detach`, `dep`, and flag-based `edit`s that do
+not touch `status` or `needs`) enforce `stale_copy` and record-write guards
+without entering the foreign-claim refusal guard: they prune dead claims and
+refresh or follow a live claim only when the caller already owns it, never making
+a foreign session the owner. Claim and record writes can fail separately: inspect
+the named landed paths before retrying.
 
 Live or unverifiable foreign claims block work. `ready`, `next` and `prime` omit
 held choices and explain why. Exclusive needs and lanes also block other
@@ -92,10 +100,13 @@ only for a real long-lived process, never for the current CLI invocation. When a
 harness continues one conversation under a new native session id (Claude Code
 `/background` hand-off or `--resume` copy, or Codex `/new`, `/resume` or
 `/fork` in one process), `tasks` receives no verified predecessor lineage and
-refuses non-`start` writes as foreign; after confirming the claim's session is
-the predecessor of this conversation, take it over explicitly with
-`tasks start --force <id> --reason "continued from session <old>"` before
-parking or continuing.
+guarded non-acquisition writes read the earlier claim as foreign. When that
+refusal occurs in the claim's recorded worktree, the `claimed` detail appends a
+conditional continuation hint (`tasks start --force <id> --reason "continued from <holder>"`
+before retrying, redacting `sid:<pid>` holders as `Unix session`); refused
+transitions to `doing` (`start` without `--force` and `edit --status doing`) omit
+that continuation text. Confirm the claim's session is this conversation's
+predecessor before running the forced takeover.
 
 ## PID views and takeover
 
@@ -113,7 +124,11 @@ An owner release, reboot evidence, or forced start can clear an unverifiable
 claim. When the operator knows a foreign holder has stopped,
 `tasks release <id> "<why>"` removes its stale/unverifiable claim and records a
 single explanatory note without changing status. It refuses a live claim and
-refuses this session's own claim (use park/done). In the stale-copy check,
+refuses this session's own claim (use park/done). Foreign `unverifiable` `claimed`
+refusals (including refused `start` without `--force` and `edit --status doing`)
+append a conditional `tasks release <id> "<why>"` hint; `live` and caller-owned
+claims never suggest `release`, and unresolved relay identity errors take
+precedence over `claimed`. In the stale-copy check,
 `release` skips the target's non-live claim and, for non-`sid:<pid>` sessions,
 that session's other non-live claims in the same worktree. During prefix
 adoption use the refusal's exact `release ... --adopting <old>` command for a

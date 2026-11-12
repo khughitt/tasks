@@ -60,33 +60,17 @@ pub fn run(
     let takeover = match (&existing, ownership) {
         (Some(existing), Some(crate::commands::Ownership::Foreign)) => {
             let live = crate::claims::liveness(existing);
-            let description = Ctx::describe_claim(existing, &live);
             match live {
                 Liveness::Live | Liveness::Unverifiable(_) => {
-                    let task_id = task.id.to_string();
-                    let continuation =
-                        if std::path::Path::new(&existing.worktree) == ctx.project.resume_root() {
-                            let holder = Ctx::session_label(existing);
-                            format!(
-                                "; if this conversation continued from {holder}, take it over with \
-                             `tasks start --force {task_id} --reason \"continued from {holder}\"` \
-                             before parking"
-                            )
-                        } else {
-                            String::new()
-                        };
-                    let release = match live {
-                        Liveness::Unverifiable(_) => {
-                            crate::commands::release::hint(&task_id, &existing.session)
-                        }
-                        _ => String::new(),
-                    };
                     return Err(Error::Claimed(
-                        task_id,
-                        format!("{description}{continuation}{release}"),
+                        task.id.to_string(),
+                        ctx.foreign_claim_detail(&task.id, existing, &live, true),
                     ));
                 }
-                Liveness::Stale(_) => Some(format!("took over {description}")),
+                Liveness::Stale(_) => Some(format!(
+                    "took over {}",
+                    Ctx::describe_claim(existing, &live)
+                )),
             }
         }
         _ => None,
