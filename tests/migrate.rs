@@ -674,6 +674,62 @@ fn close_on_a_recurrence_refuses() {
 }
 
 #[test]
+fn claimed_refusals_offer_only_applicable_remedies() {
+    for (session, unverifiable, expected) in [
+        ("other", false, "that session must park it first"),
+        ("other", true, "release"),
+        ("mine", false, "park"),
+        ("mine", true, "park"),
+    ] {
+        let mut env = TestEnv::new();
+        let source = env.init("forge");
+        env.init("forge2");
+        let id = id_of(env.json(&source, &["add", "Claimed task"]));
+        let list = uniform_list(&env, &source, &[&id], "carry");
+        common::write_claim(&env, "forge", &id, session, true);
+        if unverifiable {
+            common::set_pid_view(&env, "forge", &id, "different-view");
+        }
+        let before = snapshot(&source);
+        let claims_before = std::fs::read(env.claim_store("forge")).unwrap();
+        let output = env
+            .cmd(&source)
+            .env("TASKS_SESSION", "mine")
+            .args(["migrate", list.to_str().unwrap(), "--explain"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let out: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(rules(&out), vec![("claimed".to_string(), id.clone())]);
+        let settle = out["refusals"][0]["settle"].as_str().unwrap();
+        match expected {
+            "release" => assert!(
+                settle.contains(&format!(
+                    "if session other is gone, run `tasks release {id} \"<why>\"`"
+                )),
+                "{settle}"
+            ),
+            "park" => {
+                assert!(
+                    settle.contains(&format!("tasks park {id} \"<next step>\"")),
+                    "{settle}"
+                );
+                assert!(!settle.contains("tasks release"), "{settle}");
+            }
+            _ => {
+                assert!(settle.contains(expected), "{settle}");
+                assert!(!settle.contains("tasks release"), "{settle}");
+            }
+        }
+        assert_eq!(snapshot(&source), before);
+        assert_eq!(
+            std::fs::read(env.claim_store("forge")).unwrap(),
+            claims_before
+        );
+    }
+}
+
+#[test]
 fn live_claim_and_other_checkout_refuse() {
     let mut env = TestEnv::new();
     let forge = env.init("forge");

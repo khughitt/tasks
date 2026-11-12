@@ -94,7 +94,7 @@ fn name_entry(
 }
 
 /// Every refusal the list earns against the source as it stands. Reads only.
-pub fn check_list(ctx: &MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>> {
+pub fn check_list(ctx: &mut MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>> {
     let source = &ctx.source.project;
     crate::retained::publish::project_permission(source, true)?;
     let mut refusals = Vec::new();
@@ -245,15 +245,32 @@ pub fn check_list(ctx: &MigrateCtx, list: &LoadedList) -> Result<Vec<RefusalOut>
 
     // Live claims on any listed task.
     let store = ClaimStore::load(&source.prefix)?;
+    let mut identity = None;
     for (id, claim) in store.iter() {
         if covered.contains(id) {
             let live = crate::claims::liveness(claim);
             if !live.is_stale() {
+                let me = identity.get_or_insert_with(|| {
+                    crate::claims::resolve_identity(&ctx.source.host, &mut ctx.source.warnings)
+                });
+                let remedy = match (
+                    crate::commands::ownership(claim, me, &ctx.source.host),
+                    &live,
+                ) {
+                    (
+                        crate::commands::Ownership::Foreign,
+                        crate::claims::Liveness::Unverifiable(_),
+                    ) => crate::commands::release::hint(id, &claim.session),
+                    (crate::commands::Ownership::Foreign, _) => {
+                        "; that session must park it first".to_string()
+                    }
+                    _ => format!("; park it with `tasks park {id} \"<next step>\"` first"),
+                };
                 refusals.push(refuse(
                     id,
                     "claimed",
                     format!(
-                        "{}; wait for it to finish, or release it with `tasks release {id}`",
+                        "{}{remedy}",
                         crate::commands::Ctx::describe_claim(claim, &live)
                     ),
                 ));
