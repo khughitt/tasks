@@ -213,12 +213,13 @@ pub fn read_notes(reader: impl std::io::BufRead) -> Result<Vec<String>> {
 pub fn note(
     mut ctx: Ctx,
     id: String,
-    texts: Vec<String>,
+    read_texts: impl FnOnce() -> Result<Vec<String>>,
     stamp: bool,
     review: crate::review::Review,
     awaiting: crate::review::Awaiting,
 ) -> Result<Output> {
     let mut task = super::load_for_writer(&mut ctx, &id, super::Writer::Note)?;
+    let texts = read_texts()?;
     crate::review::apply(&mut task, review, awaiting, &mut ctx.warnings)?;
     let owner = owner_name(&ctx.project)?;
     let at = crate::time::now();

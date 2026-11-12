@@ -187,6 +187,9 @@ mean those documents were verified.
    with TEXT. Empty input or any invalid line, including a blank or whitespace-only
    line, refuses the whole batch before writing; errors name the line number.
    Notes share one whole-second `at` timestamp, which is not a unique note identifier.
+   `note --stdin` guards the target before reading input; a missing/stale record
+   refuses without consuming the stream. Supply the same input again when
+   following a printed retry.
    `--stamp` stamps each note; review and awaiting-user flags apply once to the write.
    Use [Artifact placement and retention](#artifact-placement-and-retention) for
    bulky evidence and retention checkpoints; keep required audit and review notes.

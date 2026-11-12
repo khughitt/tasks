@@ -23,6 +23,156 @@ fn write_missing(env: &TestEnv, root: &Path, args: &[&str]) -> String {
 }
 
 #[test]
+fn missing_recovery_stdin_guarded_before_reading() {
+    for mode in [
+        "new-retry",
+        "inspection-only",
+        "recorded",
+        "recorded-retry",
+        "stale",
+    ] {
+        let mut env = TestEnv::new();
+        let (main, side, shared) = repo_with_worktree(&mut env);
+        let id = if mode == "stale" {
+            env.json(&side, &["note", &shared, "newer"]);
+            shared
+        } else {
+            id_of(env.json(&side, &["add", "Refuse before stdin"]))
+        };
+        if mode.starts_with("recorded") {
+            as_agent(&env, &side, "holder")
+                .args(["start", &id])
+                .assert()
+                .success();
+            if mode == "recorded-retry" {
+                as_agent(&env, &side, "holder")
+                    .args(["park", &id, "later"])
+                    .assert()
+                    .success();
+            }
+        }
+        let here = if mode == "inspection-only" {
+            env.init("oth")
+        } else {
+            main
+        };
+        let file = side.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&file).unwrap();
+        let store = std::fs::read(env.claim_store("sci")).ok();
+        let mut child = env
+            .raw(&here)
+            .env("TASKS_SESSION", "caller")
+            .args(["note", &id, "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pipe = child.stdin.take().unwrap();
+        let out = common::reap(child, common::REAP)
+            .unwrap_or_else(|| panic!("{mode}: refused note --stdin waited for EOF"));
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty());
+        assert_eq!(
+            common::err_kind(&out),
+            if mode == "stale" {
+                "stale_copy"
+            } else {
+                "task_not_found"
+            }
+        );
+        if matches!(mode, "new-retry" | "recorded-retry" | "stale") {
+            assert!(
+                common::err_detail(&out).contains("supply the same input on stdin"),
+                "{mode}: {out:?}"
+            );
+        }
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+        assert_eq!(std::fs::read(env.claim_store("sci")).ok(), store);
+        drop(pipe);
+    }
+}
+
+#[test]
+fn missing_recovery_stdin_retry_reminds_and_appends_batch() {
+    for occupied in [false, true] {
+        let mut env = TestEnv::new();
+        let (main, side, parent) = repo_with_worktree(&mut env);
+        if occupied {
+            as_agent(&env, &side, "holder")
+                .args(["start", &parent])
+                .assert()
+                .success();
+        }
+        let id = id_of(env.json(&side, &["add", "Batch retry"]));
+        let file = side.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&file).unwrap();
+        let store = std::fs::read(env.claim_store("sci")).ok();
+        let out = as_agent(&env, &main, "caller")
+            .args(["note", &id, "--stdin"])
+            .write_stdin("first\nsecond\n")
+            .output()
+            .unwrap();
+        assert_eq!(common::err_kind(&out), "task_not_found");
+        let detail = common::err_detail(&out);
+        assert!(
+            detail.contains("supply the same input on stdin"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+        assert_eq!(std::fs::read(env.claim_store("sci")).ok(), store);
+        let command = &detail[detail.rfind("tasks -C ").unwrap()..];
+        let command = command
+            .split("; supply the same input on stdin")
+            .next()
+            .unwrap();
+        let bin = env.home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink(assert_cmd::cargo::cargo_bin("tasks"), bin.join("tasks"))
+            .unwrap();
+        let out = assert_cmd::Command::new("sh")
+            .env_clear()
+            .envs(common::isolated_env(env.home.path()))
+            .env("TASKS_SESSION", "caller")
+            .env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            )
+            .current_dir(&main)
+            .args(["-c", command])
+            .write_stdin("first\nsecond\n")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{command}: {out:?}");
+        let shown = env.json(&side, &["show", &id]);
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        let last = &notes[notes.len() - 2..];
+        assert_eq!(last[0]["text"], "first");
+        assert_eq!(last[1]["text"], "second");
+        assert_eq!(last[0]["at"], last[1]["at"]);
+        let after = std::fs::read(env.claim_store("sci")).unwrap_or_default();
+        assert_eq!(after, store.unwrap_or_default());
+    }
+}
+
+#[test]
+fn missing_recovery_stdin_invalid_loaded_task_stays_atomic() {
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let id = id_of(env.json(&root, &["add", "Atomic batch", "--status", "idea"]));
+    let file = root.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&file).unwrap();
+    for input in ["", "first\n\nlast\n", "first\n \n"] {
+        let out = env
+            .cmd(&root)
+            .args(["note", &id, "--stdin", "--reviewed"])
+            .write_stdin(input)
+            .output()
+            .unwrap();
+        assert_eq!(common::err_kind(&out), "validation");
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+    }
+}
+
+#[test]
 fn missing_recovery_writes_unique_and_main_handoff() {
     let mut env = TestEnv::new();
     let (main, side, _) = repo_with_worktree(&mut env);

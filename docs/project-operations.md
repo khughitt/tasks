@@ -120,6 +120,11 @@ shares the discovery location/config-byte limits; incomplete mapping withholds
 all write retries, including notes. Known occupants remain visible alongside
 uncertainty. Feedback recurrence does not enter missing-record discovery.
 
+`note --stdin` checks the target record before reading the stream. A missing or
+stale-record refusal does not wait for input or EOF. When a retry is offered,
+supply the same input again; the printed command cannot transport stdin. Batch
+validation remains all-or-nothing, including review flags and empty-line errors.
+
 ## Identity snapshots
 
 `tasks identity refresh [<prefix>...]` refreshes records-entry snapshots from each

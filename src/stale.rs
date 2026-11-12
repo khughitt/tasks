@@ -191,11 +191,13 @@ fn occupied_text(
     )
 }
 
-/// `-` is how every command here names stdin, which a printed line cannot carry.
+/// A printed retry cannot carry the input consumed from stdin.
 pub(crate) fn stdin_hint(args: &[String]) -> &'static str {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "-" | "--body=-" | "-b-"))
+    if args.iter().any(|arg| arg == "-")
+        || args
+            .iter()
+            .take_while(|arg| arg.as_str() != "--")
+            .any(|arg| matches!(arg.as_str(), "--stdin" | "--body=-" | "-b-"))
     {
         "; supply the same input on stdin"
     } else {
@@ -246,6 +248,24 @@ pub(crate) fn quote(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stdin_flags_stop_at_delimiter() {
+        for flag in ["--stdin", "-", "--body=-", "-b-"] {
+            assert_eq!(
+                stdin_hint(&args(&["note", "sci-000001", flag])),
+                "; supply the same input on stdin"
+            );
+        }
+        assert_eq!(
+            stdin_hint(&args(&["note", "sci-000001", "--", "--stdin"])),
+            ""
+        );
+        assert_eq!(
+            stdin_hint(&args(&["attach", "sci-000001", "--", "-"])),
+            "; supply the same input on stdin"
+        );
+    }
 
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|word| word.to_string()).collect()

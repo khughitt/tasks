@@ -315,21 +315,20 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             reviewed,
             no_reviewed,
             awaiting_user,
-        } => {
-            let texts = if stdin {
-                status::read_notes(std::io::stdin().lock())?
-            } else {
-                vec![text.expect("clap requires text unless --stdin")]
-            };
-            status::note(
-                open_id_write_ctx(dir, &id, host.clone())?,
-                id,
-                texts,
-                stamp,
-                crate::review::Review::from_flags(reviewed, no_reviewed),
-                crate::review::Awaiting::from_flags(awaiting_user, false),
-            )
-        }
+        } => status::note(
+            open_id_write_ctx(dir, &id, host.clone())?,
+            id,
+            move || {
+                if stdin {
+                    status::read_notes(std::io::stdin().lock())
+                } else {
+                    Ok(vec![text.expect("clap requires text unless --stdin")])
+                }
+            },
+            stamp,
+            crate::review::Review::from_flags(reviewed, no_reviewed),
+            crate::review::Awaiting::from_flags(awaiting_user, false),
+        ),
         Command::Attach {
             id,
             source,
