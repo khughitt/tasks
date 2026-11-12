@@ -125,6 +125,84 @@ stale-record refusal does not wait for input or EOF. When a retry is offered,
 supply the same input again; the printed command cannot transport stdin. Batch
 validation remains all-or-nothing, including review flags and empty-line errors.
 
+## Publish records for cross-project dependencies
+
+Foreign dependencies use the upstream project's **registered records**, including
+when the command runs in an upstream worktree but routes a write to another
+project. Same-project dependencies use the invoking checkout's records. Inspect
+`tasks projects --paths` and `tasks where` to distinguish these layouts:
+
+- **In-tree:** code worktrees have separate records. Publish a new upstream
+  record into its registered checkout before adding the foreign edge. Publish
+  its completion there before expecting downstream readiness.
+- **Linked:** the registered overlay holds the records. Integrate records from
+  an overlay branch into that overlay, rather than into the foreign code tree.
+- **Detached:** code worktrees share one records home. Write and commit there;
+  no record-only code-branch integration is needed. Follow any commit warnings.
+
+A direct `show` may read a missing record from its claim or park location, or
+offer an inspection hint from worktree discovery. Neither publishes the record
+or changes dependency authority. Check a refused ID and the registered storage
+first: an unregistered project or unavailable storage is not evidence that the
+task exists in a worktree. Restore registration/storage before trying publication.
+
+### Publish an in-tree or overlay record
+
+Coordinate with the upstream owner before Git operations in either checkout;
+the CLI's host-local mutation lock does not serialize manual Git, editor writes
+or another host. Commit both histories first and inspect the publication diff.
+Include only the needed task records (including required parents and prerequisites),
+their required archive segments, attachments and linked documents. Preserve
+attachment ledgers and exact payload versions.
+Do not include runtime/configuration changes just to expose a dependency.
+
+If the registered paths are unchanged since the branch point (or since the last
+publication incorporated by the feature branch), restoring those paths from the
+committed feature branch and making a path-scoped commit publishes them:
+
+```sh
+git -C <registered-checkout> restore --source=<feature-branch> -- tasks/<id>.md
+git -C <registered-checkout> add -- tasks/<id>.md
+git -C <registered-checkout> commit -m "chore(tasks): publish dependency record" -- tasks/<id>.md
+```
+
+Add needed artifact paths to each command. Verify their registered working tree
+and index are clean before restoring, and compare those paths against the known
+branch point or publication revision; a clean working tree alone does not prove
+the registered history is unchanged. A restore replaces the whole file and is
+unsafe when newer or divergent registered content would be lost.
+
+For divergent histories, first merge the registered branch into the upstream
+feature branch with its owner. Resolve the same task's record by retaining both
+note histories and needed artifacts, with deliberately chosen authoritative
+frontmatter. Do not fabricate a newer `updated` stamp. Same-stamp sibling records
+must have identical resolved bytes before retrying a CLI write. Commit the
+resolution, then publish just the reconciled paths, checking that registered
+content has not advanced again. Run `tasks check` in both record homes and
+verify the downstream dependency view and readiness after publication.
+
+Keep the record-only publication as an ordinary commit, rather than a Git merge
+that claims to have integrated omitted runtime changes. The eventual code merge
+is a separate operation. A newly added task whose final bytes were published
+identically merges cleanly. If the two copies differ, the later merge can have an
+add/add conflict; resolve the same record's histories together, preserving newer
+registered notes and metadata. This is not a collision between two different
+tasks and does not call for a new ID. Merge the registered branch back into the
+feature branch when practical to reconcile published records before code
+integration. Do not overwrite another owner's active copy to make the merge pass.
+
+### Publication and approval
+
+Publishing a proposed plan's child is bookkeeping and does not approve the plan,
+authorize implementation or activate runtime changes. Preserve its proposed
+status and review context, and block each unapproved execution task with the
+existing `tasks block` command before publication; record the actual review wait
+on the task that owns the review. A foreign edge to that child waits for its
+completion; creating the edge grants no execution or rollout authority. If the
+upstream owner cannot publish it yet, keep the consumer blocked with a note
+naming the intended prerequisite and link it after publication. A failed `dep`
+write creates no edge and does not block the consumer by itself.
+
 ## Identity snapshots
 
 `tasks identity refresh [<prefix>...]` refreshes records-entry snapshots from each

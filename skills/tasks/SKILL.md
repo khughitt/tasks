@@ -894,6 +894,22 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `doing` list before dispatching. Re-examine a task's marker whenever its scope changes;
   a stale marker is a wrong assertion. `--no-parallel` clears it.
 - Blocking on another project: `tasks dep <id> --on <prefix>-<hex>`; the other project must be registered (`tasks init` there).
+  Foreign dependencies use that project's registered records, even when the command
+  runs in its worktree but routes a write elsewhere. For in-tree/overlay records,
+  coordinate with the upstream owner to publish the record and necessary artifacts
+  before linking, and publish completion before expecting downstream readiness.
+  `show`'s claim/park fallback and discovery hints do not publish dependency authority.
+  Detached code worktrees already share one records home; commit records there.
+  Follow [record publication](../../docs/project-operations.md#publish-records-for-cross-project-dependencies)
+  for path-scoped publication, divergent histories and the later code-branch merge.
+  Restore from a feature branch only when registered paths have not changed since
+  the branch point or incorporated publication; otherwise reconcile both histories
+  with the owner first. Preserve newer notes, metadata and artifacts.
+  A proposed plan child may be published with its review context, but each unapproved
+  execution task stays blocked until approval. Publication grants no implementation
+  or rollout authority. If publication must wait, keep the consumer blocked with a
+  note naming the prerequisite; add the edge when it becomes resolvable. A refused
+  dependency write creates no edge and does not itself block the consumer.
 - Informational links: `related` holds non-blocking task ids the record cites; it never gates execution, review, or done. Writers link new citations automatically on write (from body text, notes, park next steps, shelve wake text, and close messages). Use `tasks edit <id> --related <id>` for links the prose does not name, and `--rm-related <id>` to remove one; `--no-related` clears the list.
 - Work spanning projects: a goal in the hub project, then one
   `tasks add "<piece>" --project <prefix>` per affected project and one

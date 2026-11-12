@@ -197,7 +197,11 @@ explicit scopes. An explicit scope wins over an id's prefix for scoped reads;
 otherwise a foreign full id can route through the registry. Id-directed writes
 lock and mutate the target project. A malformed local config is an error, not a
 reason to retry against some other root. Foreign reads normally see the registered
-main checkout, which can differ from an unmerged worktree.
+records home, which can differ from an unmerged in-tree or overlay worktree.
+Publish an upstream record and its completion there before relying on a foreign
+dependency; detached code worktrees already share records. See
+[record publication](project-operations.md#publish-records-for-cross-project-dependencies)
+for safe Git integration and the separate plan-review gate.
 
 `projects --paths`, `where`, `root <full-id>` and `resolve` explain roots and paths.
 `root` requires a real full task id, not a bare project prefix. An explicitly named

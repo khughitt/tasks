@@ -121,6 +121,7 @@ Color is opt-in for pretty output; JSON remains unstyled.
 | Which settings apply? | [Configuration](docs/configuration.md) |
 | Who holds a task, and how is it released? | [Ownership](docs/ownership.md) |
 | How do I adopt, move, rename or recover projects? | [Project operations](docs/project-operations.md) |
+| Why can show find a task that a foreign dependency cannot? | [Publish registered records](docs/project-operations.md#publish-records-for-cross-project-dependencies) |
 | How do document links and providers resolve? | [Documents](docs/documents.md) |
 | Are attachment bytes intact and portable? | [Attachments](docs/attachments.md) |
 | How is retained custody observed or transferred? | [Retention](docs/retention.md) |
