@@ -140,6 +140,13 @@ mean those documents were verified.
    Treat `unverifiable` claims as held; use `tasks release <id> "<why>"` only when you know the
    holder is gone.
    Follow `stale_copy` and `task_not_found` recovery guidance for the recorded checkout;
+   when neither a claim nor a park names a missing task, `show` and `doc` may name
+   record files observed in other records worktrees and offer canonical `show`
+   inspection. The failed command still returns `task_not_found`; it does not
+   read that sibling record's history/documents or publish dependency authority.
+   Ambiguous/incomplete searches do not select a copy; explicit retries revalidate.
+   Linked projects search overlays; detached projects share one records home and
+   do not search historical code-tree copies.
    `stale_copy` has no override. Leave records held by another live session to that session,
    except when `tasks note` offers its explicit `tasks -C <wt> note ...` remedy to append a
    note to the newer copy in place. A parked checkout with no live or unverifiable foreign

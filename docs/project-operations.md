@@ -73,6 +73,30 @@ registry metadata only: it never reads task records, writes or takes mutation
 locks. Without `--freshness`, it runs no git except the existing fallback for an
 unregistered path.
 
+## Missing record files
+
+`show` and `doc` read a local task first, then the checkout named by that
+exact task's held claim or park. An unavailable recorded checkout stays an error;
+discovery does not bypass it. With no recorded location, `task_not_found` may
+name physical record files observed in other Git worktrees of the same records
+repository. Each hint offers explicit canonical `tasks -C <project> show <id>`
+inspection; the failed command never returns a sibling task or reads a document.
+The retry performs ordinary history, attachment and document validation afresh.
+
+In-tree searches preserve the project's nested offset. Linked projects search
+overlay worktrees, not code worktrees. Detached projects already share records
+and never resurrect historical code-tree copies. Multiple matches remain
+ambiguous, including identical files. Missing listed roots, malformed/unreadable
+files, observed changes and exhausted limits make the search incomplete, never
+proof that the task was deleted. No dependency or readiness authority changes.
+
+Discovery inspects at most 64 other locations, reads at most 64 KiB per config,
+1 MiB per physical record and 8 MiB total (including rechecks), and displays eight
+matches and eight unresolved locations with omitted counts. Non-UTF-8 paths
+require manual inspection. Symlinks/special files in the config or record
+position are unresolved. This is bounded file observation, not an atomic
+snapshot or a wall-clock bound on blocked filesystem I/O.
+
 ## Identity snapshots
 
 `tasks identity refresh [<prefix>...]` refreshes records-entry snapshots from each

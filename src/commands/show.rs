@@ -40,7 +40,13 @@ pub(super) fn read_record(
     let found = match ctx.project.read_task(id) {
         Ok(task) => (None, task, ctx.project.scan()?),
         Err(Error::TaskNotFound(_)) => {
-            let (worktree, project, task, all) = recorded_elsewhere(id, claims)?;
+            let (worktree, project, task, all) = match recorded_elsewhere(id, claims) {
+                Err(Error::TaskNotFound(_)) => {
+                    let scan = crate::recovery::discover(&ctx.project, id);
+                    return Err(super::recovery::inspection_error(id, &scan));
+                }
+                result => result?,
+            };
             ctx.warnings.push(format!(
                 "{id} exists only in {worktree}; shown from that checkout"
             ));

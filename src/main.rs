@@ -45,6 +45,7 @@ mod proposal;
 mod provenance;
 mod query;
 mod record_commit;
+mod recovery;
 mod refs;
 mod registry;
 mod related;

@@ -29,6 +29,7 @@ pub mod park;
 pub mod parked;
 pub mod projects;
 pub mod quiet;
+mod recovery;
 pub mod release;
 pub mod rename;
 mod resolver;
