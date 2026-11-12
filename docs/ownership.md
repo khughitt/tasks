@@ -142,12 +142,24 @@ worker-specific completion before forced controller takeover.
 the same stamp. A parked worktree with no live or unverifiable foreign claim
 offers the `-C` retry. When another session actively works in the newer
 checkout, non-note writes withhold `-C` while `tasks note` (excluding feedback
-recurrence and same-second forks) still names the occupant and appends an
+recurrence and equal-stamp conflicts) still names the occupant and appends an
 in-place `tasks -C <wt> note ...` alternative. Follow the remedy: wait or merge
 conflicting history, or rerun in the named checkout when offered. Do not
 overwrite the newer record or change the claim file to bypass the guard. The
 comparison is local across known checkouts, not proof that every host has
 synced.
+
+Equal stamps with different bytes can result from same-second writes or Git
+conflict resolution that retains one side's stamp. A one-sided union of both
+histories still refuses while another sibling has different bytes at that stamp.
+Coordinate with active owners before changing their checkouts. Resolve the
+divergent record through Git, preserving both note histories, required artifacts
+and deliberately chosen authoritative frontmatter. Commit the resolution and
+integrate identical resolved record bytes into every equal-stamp sibling, then
+retry in the intended checkout. Keep the authoritative `updated` stamp; the CLI
+advances it on the successful retry. Do not manufacture a newer timestamp or
+take over a live claim to bypass the refusal. Ordinary behind-only copies still
+use the merge or retry guidance printed by the CLI.
 
 Missing-record discovery has a separate remedy: with a unique stable file,
 complete search and unchanged shorthand context, `note` can offer an explicit

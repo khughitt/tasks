@@ -158,6 +158,12 @@ mean those documents were verified.
    except when `tasks note` offers its explicit `tasks -C <wt> note ...` remedy to append a
    note to the newer copy in place. A parked checkout with no live or unverifiable foreign
    claim is not occupied and offers the `-C` retry.
+   Equal stamps with different bytes can follow same-second writes or Git conflict
+   resolution. Coordinate with active owners to resolve divergent histories through Git,
+   preserving notes, artifacts and authoritative frontmatter. Integrate identical resolved
+   record bytes into every equal-stamp sibling before retrying in the intended checkout;
+   a one-sided union still refuses. Keep the authoritative `updated` stamp: the successful
+   CLI retry advances it. Never edit a timestamp or take over a live claim to bypass this.
    An open task tagged `halt` in the registered checkout stops new lower-priority starts
    in that project, including from older worktrees. `prime`, `ready`, and `next` name
    the halt and show eligible work; an already doing task may resume. To override a

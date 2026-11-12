@@ -9,7 +9,7 @@ pub struct Newer {
     pub root: PathBuf,
     /// Its `updated` stamp.
     pub theirs: String,
-    /// The stamps are equal but the bytes differ: a same-second fork.
+    /// The stamps are equal but the bytes differ, including after Git conflict resolution.
     pub same_stamp: bool,
     /// Every other sibling that also refuses, named after `root`.
     pub others: Vec<PathBuf>,
@@ -20,7 +20,7 @@ pub struct Newer {
 pub enum Remedy<'a> {
     /// Rule 1: another session works in the newer checkout, as `(task id, session)` pairs.
     Occupied(Vec<(String, String)>),
-    /// Rule 1 for `note` when the copies are not a same-second fork: names the occupying
+    /// Rule 1 for `note` when the copies do not conflict at the same stamp: names the occupying
     /// work and appends the explicit `-C` note alternative.
     OccupiedNote(Vec<(String, String)>, &'a [String]),
     /// Rule 2: the same stamp with different bytes.
@@ -113,7 +113,7 @@ pub fn refusal(
     let head = if newer.same_stamp {
         format!(
             "tasks/{id}.md in {root} has the same stamp as this copy ({ours}) but different \
-             content, so both were written in the same second"
+             content; same-second writes or Git conflict resolution can cause this"
         )
     } else {
         format!(
@@ -131,8 +131,18 @@ pub fn refusal(
             .collect();
         format!(" (also newer in: {})", others.join(", "))
     };
+    let (remedy, occupied) = match remedy {
+        Remedy::Occupied(work) if newer.same_stamp => (
+            Remedy::Merge,
+            format!(
+                "{}. Coordinate with the named session owners before changing their checkout. ",
+                occupation(&root, &work)
+            ),
+        ),
+        remedy => (remedy, String::new()),
+    };
     let next = self::remedy(id, &newer.root, remedy, unknown);
-    format!("{head}{also}; nothing was written. {next}")
+    format!("{head}{also}; nothing was written. {occupied}{next}")
 }
 
 /// Recovery shared by stale copies and records found only in a recorded checkout.
@@ -151,9 +161,10 @@ pub fn remedy(
             rerun_line(root, args),
             stdin_hint(args)
         ),
-        Remedy::Merge => {
-            format!("Merge that copy of tasks/{id}.md into this checkout, then rerun here")
-        }
+        Remedy::Merge => "Resolve the divergent histories through Git, preserving notes and \
+            authoritative frontmatter. Integrate identical resolved bytes into every equal-stamp \
+            sibling before rerunning here; do not edit updated to bypass the guard"
+            .to_string(),
         Remedy::Handoff(args) => format!(
             "Commit tasks/{id}.md in {display} if it has changes, merge it into this branch, then \
              rerun here; the merge may conflict where both copies changed. Or, to write in \
@@ -180,13 +191,20 @@ fn occupied_text(
     id: &TaskId,
     work: &[(String, String)],
 ) -> String {
+    format!(
+        "{}. Wait for that branch to merge, or merge its copy of tasks/{id}.md into this \
+         checkout, then rerun here",
+        occupation(display, work)
+    )
+}
+
+fn occupation(display: &std::path::Display<'_>, work: &[(String, String)]) -> String {
     let work: Vec<String> = work
         .iter()
         .map(|(task, session)| format!("{task} (session {session})"))
         .collect();
     format!(
-        "{display} is where another session works: {}. Wait for that branch to merge, \
-         or merge its copy of tasks/{id}.md into this checkout, then rerun here",
+        "{display} is where another session works: {}",
         work.join(", ")
     )
 }
@@ -401,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn the_same_stamp_remedy_is_the_merge_alone() {
+    fn the_same_stamp_remedy_integrates_every_equal_stamp_sibling() {
         assert_eq!(
             refusal(
                 &id(),
@@ -411,9 +429,11 @@ mod tests {
                 None
             ),
             "tasks/sci-1a2b3c.md in /wt has the same stamp as this copy \
-             (2026-09-05T09:00:00Z) but different content, so both were written in the same \
-             second; nothing was written. Merge that copy of tasks/sci-1a2b3c.md into this \
-             checkout, then rerun here"
+             (2026-09-05T09:00:00Z) but different content; same-second writes or Git conflict \
+             resolution can cause this; nothing was written. Resolve the divergent histories \
+             through Git, preserving notes and authoritative frontmatter. Integrate identical \
+             resolved bytes into every equal-stamp sibling before rerunning here; do not edit \
+             updated to bypass the guard"
         );
     }
 

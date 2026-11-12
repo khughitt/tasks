@@ -13025,8 +13025,10 @@ fn equal_stamps_with_different_bytes_refuse_with_the_merge_only() {
         detail,
         format!(
             "tasks/{id}.md in {} has the same stamp as this copy (2026-09-05T09:00:00Z) but \
-             different content, so both were written in the same second; nothing was \
-             written. Merge that copy of tasks/{id}.md into this checkout, then rerun here",
+             different content; same-second writes or Git conflict resolution can cause this; \
+             nothing was written. Resolve the divergent histories through Git, preserving notes \
+             and authoritative frontmatter. Integrate identical resolved bytes into every \
+             equal-stamp sibling before rerunning here; do not edit updated to bypass the guard",
             side.display()
         )
     );
