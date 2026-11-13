@@ -446,10 +446,25 @@ pub fn stop(boundary: &str) {
         std::process::exit(86)
     }
 }
+fn commuting_progress(old: &Task, new: &Task) -> bool {
+    let mut allowed = old.clone();
+    allowed.updated = new.updated.clone();
+    allowed.owner = new.owner.clone();
+    allowed.complexity = new.complexity;
+    allowed.notes = new.notes.clone();
+    allowed == *new
+        && new.notes.len() > old.notes.len()
+        && new.notes.starts_with(&old.notes)
+        && !new.notes[old.notes.len()..]
+            .iter()
+            .any(|note| reserved(&note.text))
+}
+
 fn preimage(
     project: &Project,
     id: &crate::model::TaskId,
     input: &Basis,
+    key: &OperationKey,
     metrics: &mut super::verify::Metrics,
 ) -> Result<()> {
     let original = super::basis::read_exact(project, id, input)?;
@@ -457,11 +472,23 @@ fn preimage(
     let fresh = super::freshness::context(project)?;
     let current = super::basis::read(&fresh, id, Some("HEAD"))?;
     metrics.history_bytes_read += current.history_bytes_read;
-    super::freshness::unchanged(project, id, input, &current.basis, &original.task)?;
-    if current.task != original.task || current.basis.retained_ref != input.retained_ref {
-        return Err(Error::RetainedStaleBasis(
-            "Committed task or publishing branch changed between phases".into(),
-        ));
+    let mut published = false;
+    for note in &original.task.notes {
+        if let Some(raw) = note.text.strip_prefix("retention operation: ") {
+            published |= decode_operation(raw)?.key == *key;
+        }
+    }
+    if published {
+        super::freshness::phase_unchanged(
+            project,
+            id,
+            input,
+            &current.basis,
+            &original.task,
+            commuting_progress,
+        )?;
+    } else {
+        super::freshness::unchanged(project, id, input, &current.basis, &original.task)?;
     }
     for (name, state) in crate::attachments::ledger(&original.task) {
         if state == crate::attachments::Ledger::Attached {
@@ -501,7 +528,7 @@ impl OperationCtx {
         for id in self.tasks.keys().cloned().collect::<Vec<_>>() {
             let project = self.project(&id).clone();
             let phase = self.preimage_basis(&id)?.clone();
-            preimage(&project, &id, &phase, &mut self.metrics)?;
+            preimage(&project, &id, &phase, &self.key, &mut self.metrics)?;
             if project.read_task(&id)? != self.tasks[&id].task {
                 return Err(Error::RetainedStaleBasis(
                     "Participant changed between retained phases".into(),
@@ -529,7 +556,7 @@ pub fn batch(
         .expect("participant context");
     crate::commands::retained_owner(context, id)?;
     crate::attachments::check_storage(&context.project, id)?;
-    preimage(&context.project, id, &input, &mut ctx.metrics)?;
+    preimage(&context.project, id, &input, &ctx.key, &mut ctx.metrics)?;
     let mut task = context.project.read_task(id)?;
     if task != *expected {
         return Err(Error::RetainedStaleBasis(
@@ -1076,7 +1103,7 @@ pub fn validate_since(
             }
         } else {
             let phase = ctx.preimage_basis(&id)?.clone();
-            preimage(&project, &id, &phase, &mut ctx.metrics)?;
+            preimage(&project, &id, &phase, &ctx.key, &mut ctx.metrics)?;
             let current = &ctx.tasks.get(&id).expect("participant").task;
             let mut expected = old.task.clone();
             expected.notes = current.notes.clone();
@@ -2127,6 +2154,10 @@ mod tests {
                 &cached,
                 &id,
                 &pinned.basis,
+                &OperationKey {
+                    coordinator: id.to_string(),
+                    operation_id: "0".repeat(32)
+                },
                 &mut super::super::verify::Metrics::default()
             )
             .is_err(),
@@ -2161,6 +2192,10 @@ mod tests {
                     &p,
                     &id,
                     &pinned.basis,
+                    &OperationKey {
+                        coordinator: id.to_string(),
+                        operation_id: "0".repeat(32)
+                    },
                     &mut super::super::verify::Metrics::default()
                 )
                 .is_err(),

@@ -635,8 +635,11 @@ accounting after an owned start, with Git-backed auto-commit records and a
 participant-fresh input basis. An ancestor basis is usable only if branch,
 pairing and protected task/archive/attachment paths stayed unchanged through every
 intervening commit, including merge parents. Request terms keep the original basis;
-phase checks use the last successfully committed/read-back phase. It includes every
-known local kept identity even when omitted from declarations. Keep request/manifest metadata outside the inventoried container.
+phase checks use the last successfully committed/read-back phase. Permitted pending
+ordinary notes and park/start remain resumable without rewriting that phase basis;
+reserved evidence edits still refuse. It includes every known local kept identity
+even when omitted from declarations. Keep request/manifest metadata outside the
+inventoried container.
 Retry the same operation id with the same parsed request; preserve prior changed
 payloads through explicit immutable locators. `accounted_unknown` is successful
 accounting, not verification. A completed retry returns historical publication

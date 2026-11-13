@@ -902,8 +902,40 @@ fn retained_reconcile_consumer_fixture() {
 
 #[test]
 fn retained_phase_freshness_checkpoint_restart() {
-    for case in ["unrelated", "participant", "ABA"] {
+    for case in [
+        "unrelated",
+        "participant",
+        "ABA",
+        "note",
+        "park_start",
+        "archived_note",
+        "metadata_ABA",
+        "note_then_ABA",
+        "attachment_ABA",
+        "reserved",
+    ] {
         let f = checkpoint_fixture();
+        let payload = f.dir.join("attachment");
+        std::fs::write(&payload, "original").unwrap();
+        f.json(&[
+            "attach",
+            &f.id,
+            payload.to_str().unwrap(),
+            "--name",
+            "evidence",
+        ]);
+        if case == "archived_note" {
+            f.json(&["note", &f.id, &"Prelude one ".repeat(80)]);
+            f.json(&["note", &f.id, &"Prelude two ".repeat(80)]);
+            let preview = f.json(&["archive-notes", &f.id]);
+            assert_eq!(preview["eligible"], true, "{preview}");
+            f.json(&[
+                "archive-notes",
+                &f.id,
+                "--expect",
+                preview["source_sha256"].as_str().unwrap(),
+            ]);
+        }
         let request = checkpoint_request(&f, 94, json!([]));
         let path = f.request("request.json", &request);
         let args = [
@@ -920,31 +952,68 @@ fn retained_phase_freshness_checkpoint_restart() {
             .output()
             .unwrap();
         assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
-        let target = if case == "unrelated" {
-            f.records.join("unrelated")
-        } else {
-            f.records.join(format!("tasks/{}.md", f.id))
-        };
-        let old = std::fs::read(&target).unwrap_or_default();
-        let mut new = old.clone();
-        new.push(b'\n');
-        std::fs::write(&target, new).unwrap();
-        common::git(&f.records, &["add", target.to_str().unwrap()]);
-        common::git(&f.records, &["commit", "-qm", "between invocations"]);
-        if case == "ABA" {
-            std::fs::write(&target, old).unwrap();
+        if matches!(
+            case,
+            "note" | "archived_note" | "metadata_ABA" | "note_then_ABA" | "attachment_ABA"
+        ) {
+            f.json(&["note", &f.id, "Ordinary progress"]);
+        }
+        if case == "park_start" {
+            f.json(&["park", &f.id, "Resume the original checkpoint"]);
+            f.json(&["start", &f.id]);
+        }
+        if case == "reserved" {
+            f.note(f.record());
+        }
+        if matches!(case, "unrelated" | "participant" | "ABA" | "note_then_ABA") {
+            let target = if case == "unrelated" {
+                f.records.join("unrelated")
+            } else {
+                f.records.join(format!("tasks/{}.md", f.id))
+            };
+            let old = std::fs::read(&target).unwrap_or_default();
+            let mut new = old.clone();
+            new.push(b'\n');
+            std::fs::write(&target, new).unwrap();
             common::git(&f.records, &["add", target.to_str().unwrap()]);
-            common::git(&f.records, &["commit", "-qm", "revert"]);
+            common::git(&f.records, &["commit", "-qm", "between invocations"]);
+            if case == "ABA" || case == "note_then_ABA" {
+                std::fs::write(&target, old).unwrap();
+                common::git(&f.records, &["add", target.to_str().unwrap()]);
+                common::git(&f.records, &["commit", "-qm", "revert"]);
+            }
+        }
+        if case == "metadata_ABA" {
+            let path = f.records.join(format!("tasks/{}.md", f.id));
+            let old = std::fs::read_to_string(&path).unwrap();
+            let owner = old
+                .lines()
+                .find(|line| line.starts_with("owner: "))
+                .unwrap();
+            let edited = old.replacen(owner, "owner: foreign", 1);
+            for raw in [&edited, &old] {
+                std::fs::write(&path, raw).unwrap();
+                common::git(&f.records, &["add", path.to_str().unwrap()]);
+                common::git(&f.records, &["commit", "-qm", "unbound metadata edit"]);
+            }
+        }
+        if case == "attachment_ABA" {
+            use std::os::unix::fs::PermissionsExt;
+            let file = f.records.join(format!("tasks/files/{}/evidence", f.id));
+            for mode in [0o755, 0o644] {
+                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+                common::git(&f.records, &["add", file.to_str().unwrap()]);
+                common::git(&f.records, &["commit", "-qm", "attachment mode"]);
+            }
         }
         let retry = f.cmd().args(args).output().unwrap();
         assert_eq!(
             retry.status.success(),
-            case == "unrelated",
+            matches!(case, "unrelated" | "note" | "park_start" | "archived_note"),
             "{case}: {retry:?}"
         );
-        let state = f.state();
         assert_eq!(
-            state["operations"][0]["note"]["input_bases"],
+            f.state()["operations"][0]["note"]["input_bases"],
             request["inputs"]
         );
     }
@@ -986,7 +1055,7 @@ fn retained_historical_in_tree_operations() {
 #[test]
 fn retained_phase_freshness_transfer_restart() {
     for cross in [false, true] {
-        for edit in [false, true] {
+        for case in ["unrelated", "ABA", "note", "park_start"] {
             let (f, mut to, _) = transfer_fixture();
             let receiver_records = if cross {
                 let (root, id) = cross_receiver(&f, false);
@@ -1012,32 +1081,43 @@ fn retained_phase_freshness_transfer_restart() {
                 .output()
                 .unwrap();
             assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
-            let path = if edit {
-                receiver_records.join(format!("tasks/{to}.md"))
+            if case == "note" {
+                for id in [&f.id, &to] {
+                    f.json(&["note", id, "Ordinary progress"]);
+                }
+            } else if case == "park_start" {
+                for id in [&f.id, &to] {
+                    f.json(&["park", id, "Resume original transfer"]);
+                    f.json(&["start", id]);
+                }
             } else {
-                receiver_records.join("unrelated")
-            };
-            let old = std::fs::read(&path).unwrap_or_default();
-            let mut new = old.clone();
-            new.push(b'\n');
-            std::fs::write(&path, new).unwrap();
-            common::git(&receiver_records, &["add", path.to_str().unwrap()]);
-            common::git(
-                &receiver_records,
-                &["commit", "-qm", "between transfer invocations"],
-            );
-            if edit {
-                std::fs::write(&path, old).unwrap();
+                let path = if case == "ABA" {
+                    receiver_records.join(format!("tasks/{to}.md"))
+                } else {
+                    receiver_records.join("unrelated")
+                };
+                let old = std::fs::read(&path).unwrap_or_default();
+                let mut new = old.clone();
+                new.push(b'\n');
+                std::fs::write(&path, new).unwrap();
                 common::git(&receiver_records, &["add", path.to_str().unwrap()]);
-                common::git(&receiver_records, &["commit", "-qm", "revert participant"]);
+                common::git(
+                    &receiver_records,
+                    &["commit", "-qm", "between transfer invocations"],
+                );
+                if case == "ABA" {
+                    std::fs::write(&path, old).unwrap();
+                    common::git(&receiver_records, &["add", path.to_str().unwrap()]);
+                    common::git(&receiver_records, &["commit", "-qm", "revert participant"]);
+                }
             }
             let result = f.cmd().args(args).output().unwrap();
             assert_eq!(
                 result.status.success(),
-                !edit,
-                "cross={cross}, ABA={edit}: {result:?}"
+                case != "ABA",
+                "cross={cross}, {case}: {result:?}"
             );
-            if edit {
+            if case == "ABA" {
                 assert_eq!(f.state()["items"][0]["record"]["state"], "kept");
             }
         }

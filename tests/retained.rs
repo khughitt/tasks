@@ -1724,6 +1724,7 @@ fn retained_admission_changed_inputs() {
     use std::os::unix::fs::PermissionsExt;
     for case in [
         "record",
+        "note",
         "ABA",
         "content",
         "mode",
@@ -1746,6 +1747,9 @@ fn retained_admission_changed_inputs() {
         let request = checkpoint_request(&f, 92, json!([]));
         let files = f.records.join(format!("tasks/files/{}", f.id));
         match case {
+            "note" => {
+                f.json(&["note", &f.id, "Progress after request"]);
+            }
             "record" | "ABA" => {
                 let path = f.records.join(format!("tasks/{}.md", f.id));
                 let old = std::fs::read(&path).unwrap();

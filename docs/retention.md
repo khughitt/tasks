@@ -137,6 +137,13 @@ become P while original operation B stays unchanged. Existing retry/preimage che
 still apply; a completed replay remains historical, and a committed sender release
 permits its missing receipts to finish despite later receiver work.
 
+For a pending operation, ordinary appended notes and their accompanying owner,
+complexity and update metadata changes from park/start may commute. Each intervening edge
+must fit those retry rules, keep attachment/archive trees and task mode unchanged,
+and match the task writer's exact serialized output. Reserved retention/evidence
+notes, byte-only edits and their reverts still refuse. This exception never changes
+P or weakens new admission.
+
 New admission also compares live task/archive files and the complete attachment
 tree against committed bytes and modes, including index changes, ignored/untracked
 additions and unexpected directories or symlinks. These checks do not replace full

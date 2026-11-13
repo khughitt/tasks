@@ -57,6 +57,81 @@ pub(super) fn unchanged(
     to: &Basis,
     task: &Task,
 ) -> Result<()> {
+    validate_range(project, id, from, to, task, None)
+}
+
+pub(super) fn phase_unchanged(
+    project: &Project,
+    id: &TaskId,
+    from: &Basis,
+    to: &Basis,
+    task: &Task,
+    permitted: fn(&Task, &Task) -> bool,
+) -> Result<()> {
+    validate_range(project, id, from, to, task, Some(permitted))
+}
+
+fn compare_edge(
+    project: &Project,
+    id: &TaskId,
+    context: &Basis,
+    from: &str,
+    to: &str,
+    paths: &[String],
+    permitted: Option<fn(&Task, &Task) -> bool>,
+) -> Result<()> {
+    match equal_trees(project, from, to, paths) {
+        Ok(()) => return Ok(()),
+        Err(Error::RetainedStaleBasis(_)) if permitted.is_some() => {}
+        Err(error) => return Err(error),
+    }
+    equal_trees(project, from, to, &paths[1..])?;
+    let mut before = context.clone();
+    before.commit = from.into();
+    let mut after = context.clone();
+    after.commit = to.into();
+    let mut bytes = 0;
+    let old = basis::task_at(project, id, &before, &mut bytes)?;
+    let new = basis::task_at(project, id, &after, &mut bytes)?;
+    if !permitted.expect("progress policy")(&old, &new) {
+        return Err(stale());
+    }
+    let old_entry = basis::git(project, &["ls-tree", "-z", from, "--", &context.task_path])?;
+    let new_entry = basis::git(project, &["ls-tree", "-z", to, "--", &context.task_path])?;
+    if old_entry.get(..7) != new_entry.get(..7) {
+        return Err(stale());
+    }
+    let physical = crate::history::physical_for_save(&new, |archive| {
+        let path = format!(
+            "{}/tasks/files/{}/{}",
+            context.records_subdir,
+            new.id,
+            archive.file_name()
+        );
+        basis::blob(
+            project,
+            to,
+            path.trim_start_matches("./"),
+            Some(project.attachments_max_bytes),
+            &mut bytes,
+        )
+    })?;
+    // Parsed equality alone would hide byte-only edits; accept only writer output.
+    let raw = basis::blob(project, to, &context.task_path, None, &mut bytes)?;
+    if raw != crate::format::serialize_physical(&physical).as_bytes() {
+        return Err(stale());
+    }
+    Ok(())
+}
+
+fn validate_range(
+    project: &Project,
+    id: &TaskId,
+    from: &Basis,
+    to: &Basis,
+    task: &Task,
+    permitted: Option<fn(&Task, &Task) -> bool>,
+) -> Result<()> {
     from.validate()?;
     to.validate()?;
     if from.project != to.project
@@ -76,7 +151,15 @@ pub(super) fn unchanged(
     basis::validate_locator(&fresh, id, from)?;
     basis::validate_locator(&fresh, id, to)?;
     let paths = paths(id, from, task);
-    equal_trees(&fresh, &from.commit, &to.commit, &paths)?;
+    compare_edge(
+        &fresh,
+        id,
+        from,
+        &from.commit,
+        &to.commit,
+        &paths,
+        permitted,
+    )?;
     // No path-limited traversal: it can hide reverted side-branch and merge-parent edits.
     let range = format!("{}..{}", from.commit, to.commit);
     let commits = basis::git(&fresh, &["rev-list", "--parents", &range])?;
@@ -87,7 +170,7 @@ pub(super) fn unchanged(
             .next()
             .ok_or_else(|| super::model::invalid("empty commit range entry"))?;
         for parent in oids {
-            equal_trees(&fresh, parent, commit, &paths)?;
+            compare_edge(&fresh, id, from, parent, commit, &paths, permitted)?;
         }
     }
     Ok(())
