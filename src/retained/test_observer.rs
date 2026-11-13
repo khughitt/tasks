@@ -156,6 +156,19 @@ mod tests {
 
 /// Command classification only; no environment, input bytes or general process tracing.
 pub(crate) fn git_start(source: &str, repository: &std::path::Path, args: &[&str]) -> Result<()> {
+    query_event("git_start", source, repository, args)
+}
+
+pub(crate) fn query_admitted(repository: &std::path::Path, args: &[&str]) -> Result<()> {
+    query_event("query_admitted", "immutable_read", repository, args)
+}
+
+fn query_event(
+    name: &str,
+    source: &str,
+    repository: &std::path::Path,
+    args: &[&str],
+) -> Result<()> {
     #[cfg(debug_assertions)]
     if std::env::var_os("TASKS_RETAINED_TEST_SOCKET").is_some() {
         // Mutable starts need only a verb; commit messages and other inputs stay out.
@@ -165,13 +178,13 @@ pub(crate) fn git_start(source: &str, repository: &std::path::Path, args: &[&str
             &args[..args.len().min(1)]
         };
         event(
-            "git_start",
+            name,
             &serde_json::to_string(
                 &serde_json::json!({"source":source,"repository":repository,"argv":args}),
             )
             .map_err(super::model::invalid)?,
         )?;
     }
-    let _ = (source, repository, args);
+    let _ = (name, source, repository, args);
     Ok(())
 }

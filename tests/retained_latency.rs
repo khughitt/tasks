@@ -674,13 +674,22 @@ struct Timing {
     guarded_git_starts: usize,
     repeated_old_edge_starts: usize,
     cache_saturated: usize,
+    query_admissions: usize,
+}
+impl Timing {
+    fn require_admitted_reuse(&self) -> Result<()> {
+        require(
+            self.repeated_old_edge_starts == 0,
+            "admitted old-edge reads repeated guarded Git starts",
+        )
+    }
 }
 fn timing(frames: &[Value]) -> Result<Timing> {
     let mut out = Timing::default();
     let mut waits = BTreeMap::new();
     let mut locks = BTreeMap::new();
     let mut guard = None;
-    let mut reads = BTreeSet::new();
+    let mut admitted = BTreeSet::new();
     for frame in frames {
         let name = frame["event"].as_str().ok_or("frame event")?;
         let phase = frame["phase"].as_str().ok_or("frame phase")?;
@@ -720,12 +729,24 @@ fn timing(frames: &[Value]) -> Result<Timing> {
                 let command: Value = serde_json::from_str(phase).map_err(failure)?;
                 if guard.is_some() {
                     out.guarded_git_starts += 1;
-                    if command["source"] == "immutable_read" && reads.contains(phase) {
+                    if command["source"] == "immutable_read" && admitted.contains(phase) {
                         out.repeated_old_edge_starts += 1;
                     }
-                } else if command["source"] == "immutable_read" {
-                    reads.insert(phase.to_string());
                 }
+            }
+            "query_admitted" => {
+                let command: Value = serde_json::from_str(phase).map_err(failure)?;
+                require(
+                    command["source"] == "immutable_read",
+                    "query admission must name an immutable query",
+                )?;
+                // The producer's shared cache admits at most 2,048 entries across all kinds.
+                require(
+                    admitted.len() < 2048 || admitted.contains(phase),
+                    "query admission observations exceed cache bound",
+                )?;
+                admitted.insert(phase.to_string());
+                out.query_admissions += 1;
             }
             "cache_saturated" => out.cache_saturated += 1,
             "inspection" | "prechecked" | "before_write" | "readback" | "commit_wait"
@@ -1266,16 +1287,14 @@ fn smallest(settings: &Settings) -> Result<Value> {
         !checkpoint.timing.holds.is_empty() && !checkpoint.timing.guards_ns.is_empty(),
         "missing instrumented hold intervals",
     )?;
-    require(
-        checkpoint.timing.repeated_old_edge_starts == 0,
-        "old-edge reads repeated under guard",
-    )?;
+    checkpoint.timing.require_admitted_reuse()?;
     let transfer = f.transfer(Some((&socket, 1, 1)))?;
     f.validate(&transfer.result)?;
     require(
-        !transfer.timing.holds.is_empty() && transfer.timing.repeated_old_edge_starts == 0,
+        !transfer.timing.holds.is_empty(),
         "transfer hold protocol failed",
     )?;
+    transfer.timing.require_admitted_reuse()?;
     fs::write(
         logs.join("smallest-matrix.json"),
         serde_json::to_vec_pretty(&json!([checkpoint, transfer])).map_err(failure)?,
@@ -1550,19 +1569,20 @@ fn measure_inner(settings: &Settings, artifact: &Path) -> Result<()> {
             let checkpoint = f.checkpoint(0, 100, true, Some((&socket, 0, 0)))?;
             let mut reference = vec![f.validate(&checkpoint.result)?];
             require(
-                !checkpoint.timing.holds.is_empty()
-                    && checkpoint.timing.repeated_old_edge_starts == 0,
+                !checkpoint.timing.holds.is_empty(),
                 "matrix checkpoint pilot failed",
             )?;
+            checkpoint.timing.require_admitted_reuse()?;
             cells.push(
                 json!({"pilot":true,"layout":layout,"operation":"checkpoint","sample":checkpoint}),
             );
             let transfer = f.transfer(Some((&socket, 0, 0)))?;
             reference.push(f.validate(&transfer.result)?);
             require(
-                !transfer.timing.holds.is_empty() && transfer.timing.repeated_old_edge_starts == 0,
+                !transfer.timing.holds.is_empty(),
                 "matrix transfer pilot failed",
             )?;
+            transfer.timing.require_admitted_reuse()?;
             cells.push(
                 json!({"pilot":true,"layout":layout,"operation":"transfer","sample":transfer}),
             );
@@ -1580,20 +1600,14 @@ fn measure_inner(settings: &Settings, artifact: &Path) -> Result<()> {
                             f.validate(&sample.result)? == reference[0],
                             "matrix checkpoint projection differs from pilot",
                         )?;
-                        require(
-                            sample.timing.repeated_old_edge_starts == 0,
-                            "warm old-edge reads repeated guarded Git starts",
-                        )?;
+                        sample.timing.require_admitted_reuse()?;
                         cells.push(json!({"layout":layout,"during_inspection":during,"after_precheck":after,"repetition":repetition,"operation":"checkpoint","sample":sample}));
                         let sample = f.transfer(Some((&socket, during, after)))?;
                         require(
                             f.validate(&sample.result)? == reference[1],
                             "matrix transfer projection differs from pilot",
                         )?;
-                        require(
-                            sample.timing.repeated_old_edge_starts == 0,
-                            "warm old-edge reads repeated guarded Git starts",
-                        )?;
+                        sample.timing.require_admitted_reuse()?;
                         cells.push(json!({"layout":layout,"during_inspection":during,"after_precheck":after,"repetition":repetition,"operation":"transfer","sample":sample}));
                         copy_tree(
                             &f.root,
@@ -1675,4 +1689,61 @@ fn tree_manifest(root: &Path) -> Result<Value> {
     walk(root, root, &mut entries)?;
     entries.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
     Ok(json!({"version":1,"entries":entries}))
+}
+
+#[test]
+fn retained_latency_admission_gate() {
+    let signature=serde_json::to_string(&json!({"source":"immutable_read","repository":"/fixture/records","argv":["cat-file","blob",format!("{}:tasks/sci-000001.md","a".repeat(40))]})).unwrap();
+    let frame = |name: &str, phase: &str, n: u64| json!({"event":name,"phase":phase,"elapsed_ns":n,"barrier":false});
+    let uncached = vec![
+        frame("git_start", &signature, 0),
+        frame("cache_saturated", "entries_or_bytes", 1),
+        frame("guard_acquired", "", 2),
+        frame("git_start", &signature, 3),
+        frame("cache_saturated", "entries_or_bytes", 4),
+        frame("guard_released", "", 5),
+    ];
+    let permitted = timing(&uncached).unwrap();
+    assert_eq!(permitted.guarded_git_starts, 1);
+    assert_eq!(permitted.cache_saturated, 2);
+    assert_eq!(permitted.query_admissions, 0);
+    assert_eq!(
+        permitted.repeated_old_edge_starts, 0,
+        "cache eligibility alone cannot imply admission"
+    );
+    assert!(permitted.require_admitted_reuse().is_ok());
+    let admitted = vec![
+        frame("git_start", &signature, 0),
+        frame("query_admitted", &signature, 1),
+        frame("guard_acquired", "", 2),
+        frame("git_start", &signature, 3),
+        frame("guard_released", "", 4),
+    ];
+    let forbidden = timing(&admitted).unwrap();
+    assert_eq!(forbidden.guarded_git_starts, 1);
+    assert_eq!(forbidden.cache_saturated, 0);
+    assert_eq!(forbidden.query_admissions, 1);
+    assert_eq!(forbidden.repeated_old_edge_starts, 1);
+    assert!(forbidden.require_admitted_reuse().is_err());
+    let other = signature.replace("/fixture/records", "/fixture/peer");
+    let distinct = vec![
+        frame("query_admitted", &other, 0),
+        frame("guard_acquired", "", 1),
+        frame("git_start", &signature, 2),
+        frame("guard_released", "", 3),
+    ];
+    assert!(timing(&distinct).unwrap().require_admitted_reuse().is_ok());
+    let too_many = (0..=2048)
+        .map(|index| {
+            frame(
+                "query_admitted",
+                &signature.replace("sci-000001", &format!("sci-{index:06x}")),
+                index,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        timing(&too_many).is_err(),
+        "admission evidence remains bounded by the shared cache cap"
+    );
 }

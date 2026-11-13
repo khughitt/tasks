@@ -566,6 +566,8 @@ impl Session {
                 }
             {
                 state.queries.insert(key, output.clone());
+                drop(state);
+                super::test_observer::query_admitted(&snapshot.root, args)?;
             }
         }
         Ok(ReadOutput { output, bytes_read })

@@ -1115,3 +1115,120 @@ fn retained_range_warm_query_admission() {
         "failed enumerations are not cached"
     );
 }
+
+#[test]
+fn validation_read_query_admission_observer() {
+    if isolated("retained::read::tests::validation_read_query_admission_observer") {
+        return;
+    }
+    use std::{
+        io::{BufRead, BufReader, Read},
+        os::unix::net::UnixListener,
+    };
+    let (dir, p) = fixture();
+    let p = start(&p).unwrap();
+    let session = p.retention_reads.as_ref().unwrap();
+    let snapshot = session.snapshot(&p).unwrap();
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let socket = dir.path().join("query.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    // isolated() runs this exact test alone in its own credential-free subprocess.
+    unsafe {
+        std::env::set_var("TASKS_RETAINED_TEST_SOCKET", &socket);
+    }
+    let object = format!("{head}:tasks/.config.toml");
+    let cached = ["cat-file", "blob", object.as_str()];
+    assert!(
+        session
+            .query(&snapshot, &cached)
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    assert!(
+        session
+            .query(&snapshot, &cached)
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    session.lock().unwrap().max_entries = 0;
+    assert!(
+        session
+            .query(&snapshot, &cached)
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    let uncached = ["ls-tree", "-z", head.as_str(), "--", "tasks/.config.toml"];
+    for _ in 0..2 {
+        assert!(
+            session
+                .query(&snapshot, &uncached)
+                .unwrap()
+                .output
+                .status
+                .success()
+        );
+    }
+    let missing = format!("{}:missing", "0".repeat(40));
+    assert!(
+        !session
+            .query(&snapshot, &["cat-file", "blob", &missing])
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    unsafe {
+        std::env::remove_var("TASKS_RETAINED_TEST_SOCKET");
+    }
+    let mut frames = Vec::new();
+    loop {
+        let (stream, _) = match listener.accept() {
+            Ok(pair) => pair,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(e) => panic!("{e}"),
+        };
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(stream)
+            .take(4096)
+            .read_line(&mut line)
+            .unwrap();
+        frames.push(serde_json::from_str::<serde_json::Value>(&line).unwrap());
+    }
+    let admissions = frames
+        .iter()
+        .filter(|f| f["event"] == "query_admitted")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        admissions.len(),
+        1,
+        "only the completed retained query is admitted: {frames:?}"
+    );
+    let signature: serde_json::Value =
+        serde_json::from_str(admissions[0]["phase"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        signature,
+        serde_json::json!({"source":"immutable_read","repository":snapshot.root,"argv":cached})
+    );
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|f| f["event"] == "cache_saturated")
+            .count(),
+        2
+    );
+    assert_eq!(
+        frames.iter().filter(|f| f["event"] == "git_start").count(),
+        4,
+        "cache hit adds no Git start, failed/unadmitted queries do"
+    );
+}
