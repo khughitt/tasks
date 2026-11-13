@@ -429,7 +429,13 @@ impl Fixture {
         let path = records.join("tasks/.config.toml");
         let mut value: toml::Value =
             toml::from_str(&fs::read_to_string(&path).map_err(failure)?).map_err(failure)?;
-        value["git"] = toml::Value::try_from(json!({"commit":true})).map_err(failure)?;
+        value
+            .as_table_mut()
+            .ok_or("fixture configuration must be a table")?
+            .insert(
+                "git".into(),
+                toml::Value::try_from(json!({"commit":true})).map_err(failure)?,
+            );
         fs::write(path, toml::to_string(&value).map_err(failure)?).map_err(failure)?;
         self.git(records, &["add", "."])?;
         self.git(records, &["commit", "-qm", "configure records"])?;
@@ -533,16 +539,43 @@ impl Fixture {
                 &["commit", "-qm", "stable future record clock"],
             )?;
         }
+        let mut verified = Vec::new();
         for n in 0..history {
             for index in 0..2 {
+                let op = 1 + (n * 2 + index) as u64;
+                let previous = if n == 0 {
+                    Vec::new()
+                } else {
+                    vec![f.preserve_payload(index, op)?]
+                };
                 fs::write(
                     root.join(format!("payload-{index}")),
                     vec![b'a' + n as u8; 64],
                 )
                 .map_err(failure)?;
-                f.checkpoint(index, 1 + (n * 2 + index) as u64, false, None)?;
+                let sample = f.checkpoint_preserving(index, op, false, None, previous)?;
+                require_seed_result(&sample.result)?;
+                let projection = f.validate(&sample.result)?;
+                let item = projection.tasks[index]
+                    .items
+                    .first()
+                    .ok_or("seed checkpoint lacks custody")?;
+                require(
+                    item.record.state == "kept"
+                        && item.record.verification == "verified"
+                        && item.record.next_owner == format!("task:{}", f.ids[index])
+                        && item.identity.path
+                            == root.join(format!("payload-{index}")).to_str().unwrap(),
+                    "seed checkpoint custody mismatch",
+                )?;
+                verified.push(sample.result);
             }
         }
+        fs::write(
+            f.logs.join("verified-seed-checkpoints.json"),
+            serde_json::to_vec_pretty(&verified).map_err(failure)?,
+        )
+        .map_err(failure)?;
         if history == 0 {
             for index in 0..2 {
                 fs::write(root.join(format!("payload-{index}")), vec![b'a'; 64])
@@ -566,9 +599,75 @@ impl Fixture {
         measured: bool,
         observer: Option<(&Path, usize, usize)>,
     ) -> Result<Sample> {
+        self.checkpoint_preserving(index, op, measured, observer, Vec::new())
+    }
+    fn preserve_payload(&mut self, index: usize, op: u64) -> Result<Value> {
+        let id = self.ids[index].clone();
+        let prior = self.state(&id)?;
+        require(
+            prior["complete"] == true,
+            "cannot preserve an incomplete seed",
+        )?;
+        let item = prior["items"]
+            .as_array()
+            .and_then(|items| items.first())
+            .ok_or("seed predecessor missing")?;
+        let bytes = fs::read(self.root.join(format!("payload-{index}"))).map_err(failure)?;
+        let sha = digest(&bytes);
+        require(
+            item["record"]["verification"] == "verified" && item["record"]["sha256"] == sha,
+            "seed predecessor is not the exact verified payload",
+        )?;
+        let prefix = id.split('-').next().unwrap();
+        let records = self.records[prefix].clone();
+        let top = PathBuf::from(
+            String::from_utf8(self.git(&records, &["rev-parse", "--show-toplevel"])?)
+                .map_err(failure)?
+                .trim(),
+        );
+        common::git_fixture::assert_repo(&self.home, &top);
+        require(
+            top.starts_with(&self.root),
+            "seed preservation repository escaped fixture",
+        )?;
+        let relative = format!("seed-history/payload-{index}-before-{op}.bin");
+        fs::create_dir_all(records.join("seed-history")).map_err(failure)?;
+        fs::write(records.join(&relative), &bytes).map_err(failure)?;
+        self.git(&records, &["add", "--", &relative])?;
+        self.git(
+            &records,
+            &["commit", "-qm", "preserve exact seed predecessor"],
+        )?;
+        let basis = self.state(&id)?["basis"].clone();
+        let subdir = basis["records_subdir"]
+            .as_str()
+            .ok_or("preservation records subdir")?;
+        let path = if subdir == "." {
+            relative
+        } else {
+            format!("{subdir}/{relative}")
+        };
+        let artifact = json!({"type":"git","basis":basis,"path":path,"sha256":sha});
+        require(
+            self.locator(&artifact, &basis)? == bytes,
+            "seed predecessor immutable readback mismatch",
+        )?;
+        Ok(json!({"identity":item["identity"],"artifact":artifact}))
+    }
+    fn checkpoint_preserving(
+        &mut self,
+        index: usize,
+        op: u64,
+        measured: bool,
+        observer: Option<(&Path, usize, usize)>,
+        preserved_previous: Vec<Value>,
+    ) -> Result<Sample> {
         let id = self.ids[index].clone();
         let basis = self.state(&id)?["basis"].clone();
-        let request = json!({"version":1,"operation_id":format!("{op:032x}"),"host":common::retained::host(),"inputs":[{"task":id,"basis":basis}],"declarations":[common::retained::declaration(&self.root.join(format!("payload-{index}")),"evidence")]});
+        let mut request = json!({"version":1,"operation_id":format!("{op:032x}"),"host":common::retained::host(),"inputs":[{"task":id,"basis":basis}],"declarations":[common::retained::declaration(&self.root.join(format!("payload-{index}")),"evidence")]});
+        if !preserved_previous.is_empty() {
+            request["preserved_previous"] = json!(preserved_previous);
+        }
         let path = self.request(&format!("checkpoint-{op}.json"), &request)?;
         self.run(
             &[
@@ -1538,6 +1637,28 @@ fn measure(settings: &Settings) -> Result<()> {
     }
     result
 }
+fn require_seed_result(result: &Value) -> Result<()> {
+    require(
+        result["outcome"] == "verified"
+            && result["counts"] == json!({"kept_verified":1,"kept_unknown":0,"released":0})
+            && result["actions"] == json!([])
+            && result["warnings"] == json!([]),
+        "seed checkpoint is not complete verified accounting",
+    )
+}
+fn require_verified_seed(results: &Value, history: usize) -> Result<()> {
+    let results = results
+        .as_array()
+        .ok_or("seed lacks verified checkpoint evidence; create a fresh output root")?;
+    require(
+        results.len() == history * 2,
+        "seed checkpoint evidence count mismatch",
+    )?;
+    for result in results {
+        require_seed_result(result)?;
+    }
+    Ok(())
+}
 fn prepare_seed(
     settings: &Settings,
     shared: bool,
@@ -1553,12 +1674,12 @@ fn prepare_seed(
         !logs.exists(),
         "this mode already has evidence; preserve it and choose a fresh output root to retry",
     )?;
-    fs::create_dir_all(&logs).map_err(failure)?;
     let mut f;
     let metadata;
     if metadata_path.exists() {
         metadata = serde_json::from_slice::<Value>(&fs::read(&metadata_path).map_err(failure)?)
             .map_err(failure)?;
+        require_verified_seed(&metadata["verified_seed_checkpoints"], history)?;
         require(
             metadata["baseline_sha256"] == digest(&fs::read(&settings.baseline).map_err(failure)?),
             "baseline changed since canonical seed creation",
@@ -1567,6 +1688,7 @@ fn prepare_seed(
             metadata["manifest"] == tree_manifest(&seed)?,
             "canonical seed manifest mismatch",
         )?;
+        fs::create_dir_all(&logs).map_err(failure)?;
         f = Fixture {
             root: layout_root.join("active"),
             home: layout_root.join("active/home"),
@@ -1585,6 +1707,11 @@ fn prepare_seed(
             shared,
             history,
         )?;
+        let verified_seed_checkpoints: Value = serde_json::from_slice(
+            &fs::read(f.logs.join("verified-seed-checkpoints.json")).map_err(failure)?,
+        )
+        .map_err(failure)?;
+        require_verified_seed(&verified_seed_checkpoints, history)?;
         copy_tree(&f.root, &seed)?;
         let mut starting = BTreeMap::new();
         let mut commits = BTreeMap::new();
@@ -1604,12 +1731,13 @@ fn prepare_seed(
                     .to_owned(),
             );
         }
-        metadata = json!({"layout":layout,"seed_operations":history*2,"seed_commit_counts":commits,"starting_commits":starting,"baseline_sha256":digest(&fs::read(&settings.baseline).map_err(failure)?),"records":f.records,"ids":f.ids,"manifest":tree_manifest(&seed)?});
+        metadata = json!({"layout":layout,"seed_operations":history*2,"verified_seed_checkpoints":verified_seed_checkpoints,"seed_commit_counts":commits,"starting_commits":starting,"baseline_sha256":digest(&fs::read(&settings.baseline).map_err(failure)?),"records":f.records,"ids":f.ids,"manifest":tree_manifest(&seed)?});
         fs::write(
             &metadata_path,
             serde_json::to_vec_pretty(&metadata).map_err(failure)?,
         )
         .map_err(failure)?;
+        fs::create_dir_all(&logs).map_err(failure)?;
         f.logs = logs;
         f.sequence = 0;
     }
@@ -1995,4 +2123,123 @@ print('{{}}',flush=True)
         raw,
         "injection continued after incomplete return"
     );
+}
+
+#[test]
+fn retained_latency_seed_history() {
+    let candidate = assert_cmd::cargo::cargo_bin("tasks");
+    for shared in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let settings = Settings {
+            baseline: candidate.clone(),
+            out: root.path().into(),
+            mode: Mode::Pilot,
+        };
+        let (mut fixture, _, metadata) = prepare_seed(&settings, shared, 3).unwrap();
+        let layout = if shared { "shared" } else { "separate" };
+        let seed_logs = root.path().join(layout).join("seed-logs");
+        let mut results = BTreeMap::new();
+        for entry in fs::read_dir(&seed_logs).unwrap() {
+            let path = entry.unwrap().path();
+            if !path.to_string_lossy().ends_with(".stdout.json") {
+                continue;
+            }
+            let result: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+            if let Some(op) = result["operation"]["operation_id"]
+                .as_str()
+                .and_then(|x| u64::from_str_radix(x, 16).ok())
+            {
+                if (1..=6).contains(&op) {
+                    results.insert(op, result);
+                }
+            }
+        }
+        assert_eq!(results.len(), 6);
+        for (op, result) in &results {
+            assert_eq!(
+                result["outcome"], "verified",
+                "{layout} seed operation {op}: {result}"
+            );
+            assert_eq!(
+                result["counts"],
+                json!({"kept_verified":1,"kept_unknown":0,"released":0})
+            );
+            assert_eq!(result["actions"], json!([]));
+            fixture.validate(result).unwrap();
+            let request: Value = serde_json::from_slice(
+                &fs::read(fixture.root.join(format!("checkpoint-{op}.json"))).unwrap(),
+            )
+            .unwrap();
+            if *op > 2 {
+                let previous = request["preserved_previous"]
+                    .as_array()
+                    .expect("changed seeds require prior locators");
+                assert_eq!(previous.len(), 1);
+                let artifact = &previous[0]["artifact"];
+                assert_eq!(
+                    fixture
+                        .locator(artifact, &request["inputs"][0]["basis"])
+                        .unwrap(),
+                    vec![b'a' + ((*op - 3) / 2) as u8; 64]
+                );
+                let mut corrupt = artifact.clone();
+                corrupt["sha256"] = json!("0".repeat(64));
+                assert!(
+                    fixture
+                        .locator(&corrupt, &request["inputs"][0]["basis"])
+                        .is_err()
+                );
+            }
+        }
+        assert_eq!(
+            metadata["verified_seed_checkpoints"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        for index in 0..2 {
+            let socket_dir = tempfile::tempdir().unwrap();
+            let socket = socket_dir.path().join("history.sock");
+            let checkpoint = fixture
+                .checkpoint(index, 100 + index as u64, true, Some((&socket, 0, 0)))
+                .unwrap();
+            checkpoint.timing.require_admitted_reuse().unwrap();
+            assert!(!checkpoint.timing.holds.is_empty());
+            assert_eq!(checkpoint.result["outcome"], "verified");
+            let projection = fixture.validate(&checkpoint.result).unwrap();
+            assert_eq!(
+                projection.tasks[index].items[0].record.verification,
+                "verified"
+            );
+            assert_eq!(
+                projection.tasks[index].items[0].payload_sha256,
+                digest(&vec![b'c'; 64])
+            );
+        }
+        let path = root.path().join(layout).join("seed-inputs.json");
+        let original = fs::read(&path).unwrap();
+        let mut unchecked = metadata.clone();
+        unchecked
+            .as_object_mut()
+            .unwrap()
+            .remove("verified_seed_checkpoints");
+        fs::write(&path, serde_json::to_vec(&unchecked).unwrap()).unwrap();
+        let reuse = Settings {
+            mode: Mode::Repeat,
+            ..settings
+        };
+        assert!(
+            prepare_seed(&reuse, shared, 3).is_err(),
+            "an unchecked/unknown seed cannot be reused"
+        );
+        let mut unknown = metadata.clone();
+        unknown["verified_seed_checkpoints"][0]["outcome"] = json!("accounted_unknown");
+        fs::write(&path, serde_json::to_vec(&unknown).unwrap()).unwrap();
+        assert!(
+            prepare_seed(&reuse, shared, 3).is_err(),
+            "an unknown checkpoint cannot qualify a canonical seed"
+        );
+        fs::write(path, original).unwrap();
+    }
 }
