@@ -143,8 +143,7 @@ fn validate_range(
         return Err(stale());
     }
     // Refs and pairing are live observations, even when a caller owns a read session.
-    let mut fresh = project.clone();
-    fresh.retention_reads = None;
+    let fresh = super::read::live(project);
     if !super::read::ancestor(&fresh, &from.commit, &to.commit)? {
         return Err(stale());
     }
@@ -284,7 +283,7 @@ pub(super) fn context(project: &Project) -> Result<Project> {
     {
         return Err(stale());
     }
-    Ok(fresh)
+    super::read::inherit(&super::read::live(project), fresh)
 }
 
 pub(crate) fn current(

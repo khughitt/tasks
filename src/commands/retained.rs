@@ -17,6 +17,8 @@ pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> 
         return Err(invalid("host must be a nonempty line"));
     }
     let id = parse_id(&ctx.registry, &ctx.shorthand, &id)?;
+    let mut ctx = ctx;
+    ctx.project = crate::retained::read::start(&ctx.project)?;
     let pinned = basis::read(&ctx.project, &id, at.as_deref())?;
     crate::retained::proof::validate_history(&ctx.project, &pinned, host.as_deref())?;
     crate::retained::reconcile::validate_terminal_history(&ctx.project, &pinned)?;

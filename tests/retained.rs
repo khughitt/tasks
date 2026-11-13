@@ -1964,3 +1964,43 @@ fn retained_admission_staged_in_tree_intent() {
     );
     assert_eq!(f.basis(), input);
 }
+
+#[test]
+fn retained_state_shared_reads() {
+    let f = checkpoint_fixture();
+    let request = checkpoint_request(&f, 987, json!([]));
+    checkpoint(&f, &request);
+    let trace = f.env.home.path().join("state-git-trace.jsonl");
+    let out = f
+        .cmd()
+        .env("GIT_TRACE2_EVENT", &trace)
+        .args(["retained", "state", &f.id])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let state: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(state["complete"], true);
+    assert!(state.get("metrics").is_none());
+    let mut blobs = std::collections::BTreeSet::new();
+    for line in std::fs::read_to_string(trace).unwrap().lines() {
+        let event: serde_json::Value = serde_json::from_str(line).unwrap();
+        if event["event"] != "start" {
+            continue;
+        }
+        let argv = event["argv"].as_array().unwrap();
+        if let Some(index) = argv.iter().position(|a| a == "cat-file")
+            && argv.get(index + 1).is_some_and(|a| a == "blob")
+        {
+            assert!(
+                blobs.insert(argv[index + 2].as_str().unwrap().to_string()),
+                "state reread an immutable blob: {argv:?}"
+            );
+        }
+    }
+    assert!(!blobs.is_empty());
+    assert_eq!(state, f.state());
+}

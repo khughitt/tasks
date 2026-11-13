@@ -438,3 +438,250 @@ fn validation_read_poisoned_session_is_typed() {
         Err(crate::error::Error::RetainedHistoryBlocked(_))
     ));
 }
+
+#[test]
+fn validation_read_live_views_share_immutable_entries() {
+    if isolated("retained::read::tests::validation_read_live_views_share_immutable_entries") {
+        return;
+    }
+    let (dir, original) = fixture();
+    let pinned = start(&original).unwrap();
+    let live = live(&pinned);
+    let pinned_head_before = basis::resolve(&pinned, "HEAD").unwrap();
+    let object = format!("{pinned_head_before}:tasks/.config.toml");
+    let first_blob = run(&pinned, &["cat-file", "blob", &object]).unwrap();
+    assert!(first_blob.bytes_read > 0);
+    let cached_blob = run(&live, &["cat-file", "blob", &object]).unwrap();
+    assert_eq!(cached_blob.bytes_read, 0);
+    std::fs::write(dir.path().join("unrelated"), "next").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "next"]);
+    let live_head_after = basis::resolve(&live, "HEAD").unwrap();
+    let pinned_head_after = basis::resolve(&pinned, "HEAD").unwrap();
+    assert_ne!(live_head_after, pinned_head_before);
+    assert_eq!(pinned_head_after, pinned_head_before);
+    let alias_dir = tempfile::tempdir().unwrap();
+    let alias_path = alias_dir.path().join("records");
+    std::os::unix::fs::symlink(dir.path(), &alias_path).unwrap();
+    let mut alias = original.clone();
+    alias.records = alias_path;
+    let alias = inherit(&live, alias).unwrap();
+    assert_eq!(basis::resolve(&alias, "HEAD").unwrap(), live_head_after);
+    let before = starts("cat-file");
+    assert_eq!(
+        run(&alias, &["cat-file", "blob", &object])
+            .unwrap()
+            .bytes_read,
+        0
+    );
+    assert_eq!(starts("cat-file"), before);
+    let (other_dir, other) = fixture();
+    let other = inherit(&live, other).unwrap();
+    let oid = git(other_dir.path(), &["rev-parse", "HEAD:tasks/.config.toml"]);
+    std::fs::remove_file(
+        other_dir
+            .path()
+            .join(".git/objects")
+            .join(&oid[..2])
+            .join(&oid[2..]),
+    )
+    .unwrap();
+    assert!(
+        basis::blob(
+            &other,
+            &pinned_head_before,
+            "tasks/.config.toml",
+            None,
+            &mut 0
+        )
+        .is_err()
+    );
+    git(dir.path(), &["branch", "-m", "renamed"]);
+    assert_eq!(
+        basis::git(&live, &["symbolic-ref", "-q", "HEAD"]).unwrap(),
+        b"refs/heads/renamed\n"
+    );
+    assert!(basis::git(&live, &["show-ref", "--verify", "refs/heads/main"]).is_err());
+    remember_lineage(&pinned).unwrap();
+    assert!(lineage_cached(&pinned).unwrap());
+    assert!(!lineage_cached(&live).unwrap());
+    refresh(&live).unwrap();
+    assert!(!lineage_cached(&pinned).unwrap());
+    assert_eq!(basis::resolve(&pinned, "HEAD").unwrap(), pinned_head_before);
+    assert_eq!(
+        run(&live, &["cat-file", "blob", &object])
+            .unwrap()
+            .bytes_read,
+        0
+    );
+    let separate = start_live(&original).unwrap();
+    assert_eq!(basis::resolve(&separate, "HEAD").unwrap(), live_head_after);
+    assert!(super::live(&original).retention_reads.is_none());
+    std::fs::write(
+        dir.path().join("tasks/.config.toml"),
+        "prefix = \"other\"\n",
+    )
+    .unwrap();
+    assert!(crate::retained::freshness::context(&live).is_err());
+}
+
+#[test]
+fn validation_read_memo_budget() {
+    if isolated("retained::read::tests::validation_read_memo_budget") {
+        return;
+    }
+    let (_dir, original) = fixture();
+    let p = start(&original).unwrap();
+    let permits = (0..2049)
+        .filter_map(|_| reserve_memo(&p, 1).unwrap())
+        .collect::<Vec<_>>();
+    {
+        let state = p.retention_reads.as_ref().unwrap().lock().unwrap();
+        let entries = state.memo_entries;
+        let charged_bytes = state.used_bytes;
+        assert!(entries <= 2048 && charged_bytes <= 32 * 1024 * 1024);
+        assert_eq!(entries, 2048);
+        assert_eq!(charged_bytes, 2048 * 65);
+    }
+    assert!(reserve_memo(&p, 1).unwrap().is_none());
+    let head = basis::resolve(&p, "HEAD").unwrap();
+    let object = format!("{head}:tasks/.config.toml");
+    for _ in 0..2 {
+        let out = run(&p, &["cat-file", "blob", &object]).unwrap();
+        assert_eq!(out.output.stdout, b"prefix = \"sci\"\n");
+        assert!(out.bytes_read > 0);
+        assert!(basis::resolve(&p, &"0".repeat(40)).is_err());
+    }
+    drop(permits);
+    assert_eq!(
+        p.retention_reads
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .used_bytes,
+        0
+    );
+    let permit = reserve_memo(&p, 32 * 1024 * 1024 - 64).unwrap().unwrap();
+    assert!(reserve_memo(&p, 0).unwrap().is_none());
+    drop(permit);
+    assert!(reserve_memo(&p, usize::MAX).unwrap().is_none());
+    assert!(reserve_memo(&original, 1).unwrap().is_none());
+    p.retention_reads
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .max_entries = 2;
+    let permit = reserve_memo(&p, 1).unwrap().unwrap();
+    run(&p, &["cat-file", "blob", &object]).unwrap();
+    let charged = p
+        .retention_reads
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .used_bytes;
+    assert_eq!(
+        run(&p, &["cat-file", "blob", &object]).unwrap().bytes_read,
+        0
+    );
+    assert_eq!(
+        p.retention_reads
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .used_bytes,
+        charged
+    );
+    assert!(reserve_memo(&p, 1).unwrap().is_none());
+    drop(permit);
+    assert!(reserve_memo(&p, 1).unwrap().is_some());
+}
+
+#[test]
+fn validation_read_exact_queries_and_errors() {
+    if isolated("retained::read::tests::validation_read_exact_queries_and_errors") {
+        return;
+    }
+    let (dir, original) = fixture();
+    let old = git(dir.path(), &["rev-parse", "HEAD"]);
+    std::fs::write(dir.path().join("unrelated"), "next").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "next"]);
+    let new = git(dir.path(), &["rev-parse", "HEAD"]);
+    let p = start_live(&original).unwrap();
+    let range = format!("{old}..{new}");
+    let commit = format!("{new}^{{commit}}");
+    let bad = "0".repeat(40);
+    let missing_commit = format!("{bad}^{{commit}}");
+    let queries = [
+        vec!["rev-parse", "--verify", "--end-of-options", &commit],
+        vec![
+            "diff",
+            "--quiet",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            &old,
+            &new,
+            "--",
+            "unrelated",
+        ],
+        vec![
+            "diff",
+            "--quiet",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            &old,
+            &new,
+            "--",
+            "tasks",
+        ],
+        vec!["rev-list", "--parents", &range],
+        vec!["rev-list", "--parents", &new],
+    ];
+    for args in queries {
+        let before = starts(args[0]);
+        let first = run(&p, &args).unwrap().output;
+        let second = run(&p, &args).unwrap().output;
+        assert_eq!(first.status, second.status);
+        assert_eq!(first.stdout, second.stdout);
+        assert_eq!(starts(args[0]) - before, 1, "{args:?}");
+    }
+    for args in [
+        vec!["rev-parse", "--verify", "--end-of-options", &bad],
+        vec!["rev-parse", "--verify", "--end-of-options", &missing_commit],
+        vec![
+            "diff",
+            "--quiet",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            &bad,
+            &new,
+            "--",
+            "tasks",
+        ],
+        vec!["rev-list", "--parents", &bad],
+        vec!["rev-list", "--parents", "HEAD"],
+        vec!["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
+    ] {
+        let before = starts(args[0]);
+        for _ in 0..2 {
+            run(&p, &args).unwrap();
+        }
+        assert_eq!(starts(args[0]) - before, 2, "{args:?}");
+    }
+    for args in [
+        vec!["rev-list", "--parents", "HEAD"],
+        vec!["rev-list", "--parents", "HEAD..main"],
+        vec!["rev-list", "--parents", &format!("{old}...{new}")],
+        vec!["rev-list", "--parents", &format!("{new}^1")],
+        vec!["diff", "--quiet", &old, &new, "--", "tasks"],
+    ] {
+        assert!(!cacheable(&args), "{args:?}");
+    }
+}

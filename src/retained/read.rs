@@ -5,24 +5,34 @@ use crate::{
     repo::Project,
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     os::unix::process::ExitStatusExt,
     path::PathBuf,
     process::{Command, ExitStatus, Output},
     sync::{Arc, Mutex, MutexGuard},
 };
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ReadView {
+    #[default]
+    Pinned,
+    Live,
+}
 #[derive(Clone, Default)]
-pub(crate) struct Session(Arc<Mutex<SessionState>>);
+pub(crate) struct Session(Arc<Mutex<SessionState>>, ReadView, Arc<Mutex<Views>>);
+#[derive(Default)]
+struct Views {
+    aliases: BTreeMap<PathBuf, RepoKey>,
+    repositories: BTreeMap<RepoKey, Arc<Snapshot>>,
+}
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Session")
     }
 }
 struct SessionState {
-    aliases: BTreeMap<PathBuf, RepoKey>,
-    repositories: BTreeMap<RepoKey, Arc<Snapshot>>,
-    lineages: BTreeSet<String>,
+    lineages: BTreeMap<String, usize>,
+    memo_entries: usize,
     max_entries: usize,
     max_bytes: usize,
     used_bytes: usize,
@@ -35,9 +45,8 @@ type TaskKey = (RepoKey, String, String, u64);
 impl Default for SessionState {
     fn default() -> Self {
         Self {
-            aliases: BTreeMap::new(),
-            repositories: BTreeMap::new(),
-            lineages: BTreeSet::new(),
+            lineages: BTreeMap::new(),
+            memo_entries: 0,
             queries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             max_entries: 2048,
@@ -48,7 +57,9 @@ impl Default for SessionState {
 }
 impl SessionState {
     fn admit(&mut self, charge: usize) -> bool {
-        if self.queries.len() + self.tasks.len() + self.lineages.len() >= self.max_entries {
+        if self.queries.len() + self.tasks.len() + self.lineages.len() + self.memo_entries
+            >= self.max_entries
+        {
             return false;
         }
         let Some(total) = self.used_bytes.checked_add(charge) else {
@@ -81,9 +92,15 @@ impl Session {
             .lock()
             .map_err(|_| invalid("validation read session lock poisoned"))
     }
+    fn views(&self) -> Result<MutexGuard<'_, Views>> {
+        self.2
+            .lock()
+            .map_err(|_| invalid("validation read view lock poisoned"))
+    }
     fn snapshot(&self, p: &Project) -> Result<Arc<Snapshot>> {
+        drop(self.lock()?);
         {
-            let state = self.lock()?;
+            let state = self.views()?;
             if let Some(key) = state.aliases.get(&p.records) {
                 return Ok(state.repositories[key].clone());
             }
@@ -106,13 +123,25 @@ impl Session {
         }
         let key = (paths[0].clone(), paths[1].clone(), paths[2].clone());
         {
-            let mut state = self.lock()?;
+            let mut state = self.views()?;
             if let Some(found) = state.repositories.get(&key).cloned() {
                 state.aliases.insert(p.records.clone(), key);
                 return Ok(found);
             }
         }
         let root = paths[0].clone();
+        if self.1 == ReadView::Live {
+            let snapshot = Arc::new(Snapshot {
+                identity: key.clone(),
+                root,
+                head: String::new(),
+                symbolic_head: None,
+                branches: Vec::new(),
+            });
+            let mut views = self.views()?;
+            views.aliases.insert(p.records.clone(), key.clone());
+            return Ok(views.repositories.entry(key).or_insert(snapshot).clone());
+        }
         let head = text(checked(raw(
             &root,
             &["rev-parse", "--verify", "HEAD^{commit}"],
@@ -155,7 +184,7 @@ impl Session {
             symbolic_head,
             branches,
         });
-        let mut state = self.lock()?;
+        let mut state = self.views()?;
         let snapshot = state
             .repositories
             .entry(key.clone())
@@ -222,6 +251,70 @@ pub(crate) fn start(project: &Project) -> Result<Project> {
         .snapshot(&p)?;
     Ok(p)
 }
+pub(crate) fn start_live(project: &Project) -> Result<Project> {
+    let mut p = project.clone();
+    p.retention_reads = Some(Session(Arc::default(), ReadView::Live, Arc::default()));
+    p.retention_reads
+        .as_ref()
+        .expect("installed session")
+        .snapshot(&p)?;
+    Ok(p)
+}
+pub(crate) fn live(project: &Project) -> Project {
+    let mut p = project.clone();
+    p.retention_reads = project.retention_reads.as_ref().map(|s| {
+        if s.1 == ReadView::Live {
+            s.clone()
+        } else {
+            Session(s.0.clone(), ReadView::Live, Arc::default())
+        }
+    });
+    p
+}
+pub(crate) fn refresh(project: &Project) -> Result<()> {
+    if let Some(session) = &project.retention_reads {
+        let mut views = session.views()?;
+        if let Some(key) = views.aliases.remove(&project.records) {
+            views.aliases.retain(|_, value| value != &key);
+            views.repositories.remove(&key);
+        }
+        let mut state = session.lock()?;
+        let charge: usize = state.lineages.values().sum();
+        state.used_bytes -= charge;
+        state.lineages.clear();
+    }
+    Ok(())
+}
+#[derive(Debug)]
+pub(crate) struct MemoPermit {
+    session: Session,
+    charge: usize,
+}
+impl Drop for MemoPermit {
+    fn drop(&mut self) {
+        let mut state = self.session.0.lock().unwrap_or_else(|e| e.into_inner());
+        state.used_bytes -= self.charge;
+        state.memo_entries -= 1;
+    }
+}
+/// Reserve serialized memo key/value bytes plus the shared per-entry overhead.
+pub(crate) fn reserve_memo(project: &Project, bytes: usize) -> Result<Option<MemoPermit>> {
+    let Some(session) = &project.retention_reads else {
+        return Ok(None);
+    };
+    let Some(charge) = bytes.checked_add(64) else {
+        return Ok(None);
+    };
+    let mut state = session.lock()?;
+    if !state.admit(charge) {
+        return Ok(None);
+    }
+    state.memo_entries += 1;
+    Ok(Some(MemoPermit {
+        session: session.clone(),
+        charge,
+    }))
+}
 pub(crate) fn inherit(from: &Project, mut peer: Project) -> Result<Project> {
     peer.retention_reads = from.retention_reads.clone();
     if let Some(session) = &peer.retention_reads {
@@ -268,13 +361,13 @@ pub(crate) fn run(p: &Project, args: &[&str]) -> Result<ReadOutput> {
         return Ok(ReadOutput { output, bytes_read });
     };
     let snapshot = session.snapshot(p)?;
+    if session.1 == ReadView::Live {
+        return session.query(&snapshot, args);
+    }
     match args {
         ["rev-parse", "--verify", "--end-of-options", rev] => {
             if oid_is_full(rev.strip_suffix("^{commit}").unwrap_or(rev)) {
-                return Ok(ReadOutput {
-                    output: raw(&snapshot.root, args)?,
-                    bytes_read: 0,
-                });
+                return session.query(&snapshot, args);
             }
             return Ok(reply(0, format!("{}\n", snapshot.resolve(rev)?)));
         }
@@ -360,22 +453,49 @@ fn lineage_key(p: &Project) -> Result<String> {
 }
 pub(crate) fn lineage_cached(p: &Project) -> Result<bool> {
     match &p.retention_reads {
-        Some(s) => Ok(s.lock()?.lineages.contains(&lineage_key(p)?)),
+        Some(s) if s.1 == ReadView::Pinned => Ok(s.lock()?.lineages.contains_key(&lineage_key(p)?)),
+        Some(_) => Ok(false),
         None => Ok(false),
     }
 }
 pub(crate) fn remember_lineage(p: &Project) -> Result<()> {
-    if let Some(s) = &p.retention_reads {
+    if let Some(s) = &p.retention_reads
+        && s.1 == ReadView::Pinned
+    {
         let key = lineage_key(p)?;
         let mut state = s.lock()?;
-        if !state.lineages.contains(&key) && state.admit(key.len().saturating_add(64)) {
-            state.lineages.insert(key);
+        let Some(charge) = key.len().checked_add(64) else {
+            return Ok(());
+        };
+        if !state.lineages.contains_key(&key) && state.admit(charge) {
+            state.lineages.insert(key, charge);
         }
     }
     Ok(())
 }
+fn full_range(revision: &str) -> bool {
+    revision
+        .split_once("..")
+        .is_some_and(|(a, b)| oid_is_full(a) && oid_is_full(b))
+}
 fn cacheable(args: &[&str]) -> bool {
     match args {
+        ["rev-parse", "--verify", "--end-of-options", oid] => {
+            // A bare full OID can succeed even when its object does not exist.
+            oid.strip_suffix("^{commit}").is_some_and(oid_is_full)
+        }
+        [
+            "diff",
+            "--quiet",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            a,
+            b,
+            "--",
+            paths @ ..,
+        ] => oid_is_full(a) && oid_is_full(b) && !paths.is_empty(),
+        ["rev-list", "--parents", revision] => full_range(revision) || oid_is_full(revision),
         ["ls-tree", "-z", oid, "--", _] => oid_is_full(oid),
         ["cat-file", "blob" | "-s", object] => oid_is_full(object.split(':').next().unwrap_or("")),
         ["merge-base", "--is-ancestor", a, b] => oid_is_full(a) && oid_is_full(b),
@@ -411,17 +531,18 @@ impl Session {
             0
         };
         let complete = output.status.success()
-            || (args.starts_with(&["merge-base", "--is-ancestor"])
+            || ((args.starts_with(&["merge-base", "--is-ancestor"])
+                || args.starts_with(&["diff", "--quiet"]))
                 && output.status.code() == Some(1));
         if allowed && complete {
             let charge = serde_json::to_vec(&key)
                 .map_err(invalid)?
                 .len()
-                .saturating_add(output.stdout.len())
-                .saturating_add(output.stderr.len())
-                .saturating_add(64);
+                .checked_add(output.stdout.len())
+                .and_then(|n| n.checked_add(output.stderr.len()))
+                .and_then(|n| n.checked_add(64));
             let mut state = self.lock()?;
-            if !state.queries.contains_key(&key) && state.admit(charge) {
+            if !state.queries.contains_key(&key) && charge.is_some_and(|n| state.admit(n)) {
                 state.queries.insert(key, output.clone());
             }
         }
@@ -457,10 +578,10 @@ pub(crate) fn remember_task(p: &Project, b: &super::model::Basis, task: &Task) -
     let charge = serde_json::to_vec(&key)
         .map_err(invalid)?
         .len()
-        .saturating_add(serde_json::to_vec(task).map_err(invalid)?.len())
-        .saturating_add(64);
+        .checked_add(serde_json::to_vec(task).map_err(invalid)?.len())
+        .and_then(|n| n.checked_add(64));
     let mut state = session.lock()?;
-    if !state.tasks.contains_key(&key) && state.admit(charge) {
+    if !state.tasks.contains_key(&key) && charge.is_some_and(|n| state.admit(n)) {
         state.tasks.insert(key, task.clone());
     }
     Ok(())
