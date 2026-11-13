@@ -183,7 +183,7 @@ fn preflight(
         let manifest = record
             .manifest
             .value()
-            .map(|_| super::lineage::manifest_path(ctx.project(from), &ctx.tasks[from], &record))
+            .map(|_| verify::manifest_path(ctx.project(from), &ctx.tasks[from], &record))
             .transpose()?;
         verify::preflight(ctx.project(from), &record, manifest.as_deref())?;
         let path = verify::current_path(ctx.project(from), &record.path)?;

@@ -637,3 +637,50 @@ fn retained_observer_git_frames_bound_mutable_arguments() {
     }
     finish(&listener, child);
 }
+
+#[test]
+fn migration_recovery_config_changes_at_phase_boundary() {
+    let f = common::retained_migration::migration_fixture(HistoricalScenario::CheckpointCompleted);
+    let request = json!({"version":1,"operation_id":"d".repeat(32),"host":host(),"inputs":[{"task":f.f.id,"basis":f.f.state()["basis"]}]});
+    let request = f.f.request("recovery-race.json", &request);
+    let socket = f.f.dir.join("recovery-race.sock");
+    let listener = listener(&socket);
+    let mut child = Running(Some(
+        f.f.env
+            .raw(&f.f.dir)
+            .env("TASKS_SESSION", "retained-fixture")
+            .env("TASKS_RETAINED_TEST_SOCKET", &socket)
+            .args([
+                "retained",
+                "checkpoint",
+                &f.f.id,
+                "--request",
+                request.to_str().unwrap(),
+            ])
+            .spawn()
+            .unwrap(),
+    ));
+    let inspection = event(&listener, &mut child, "inspection");
+    let path = f.f.records.join("tasks/.config.toml");
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let mut config: toml::Value = toml::from_str(&raw).unwrap();
+    config["retention_recovery"]["source_ref"] = toml::Value::String("refs/heads/missing".into());
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    inspection.resume();
+    let out = drain(&listener, child);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("stale"),
+        "{out:?}"
+    );
+    std::fs::write(path, raw).unwrap();
+    let current = f.f.state();
+    assert!(
+        !current["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["note"]["key"]["operation_id"] == "d".repeat(32)
+                && o["note"]["phase"] == "completed")
+    );
+}

@@ -173,7 +173,7 @@ fn inventory(
         let manifest = record
             .manifest
             .value()
-            .map(|_| super::lineage::manifest_path(ctx.project(id), &ctx.tasks[id], record))
+            .map(|_| verify::manifest_path(ctx.project(id), &ctx.tasks[id], record))
             .transpose()?;
         verify::preflight(ctx.project(id), record, manifest.as_deref())?;
         let path = verify::current_path(ctx.project(id), &record.path)?;

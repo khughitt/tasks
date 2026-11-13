@@ -788,6 +788,41 @@ fn references(
     active.remove(&key);
     result
 }
+pub(super) fn manifest_path(
+    project: &Project,
+    pinned: &basis::PinnedTask,
+    record: &RetentionRecord,
+) -> Result<std::path::PathBuf> {
+    if project.retention_recovery.is_some() {
+        // Use the note that supplies the required immutable manifest fields, even when
+        // a new declaration changes purpose or verification falls back to a prior version.
+        let ordinal = pinned
+            .task
+            .notes
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, n)| {
+                let r = n
+                    .text
+                    .strip_prefix("retained: ")
+                    .and_then(|raw| decode_record(raw).ok())?;
+                (r.identity() == record.identity()
+                    && r.sha256 == record.sha256
+                    && r.manifest == record.manifest)
+                    .then_some(i as u64 + 1)
+            })
+            .ok_or_else(|| invalid("manifest requirement has no exact retained source"))?;
+        let source = Source {
+            basis: pinned.basis.clone(),
+            ordinal,
+        };
+        if let Some(path) = super::recovery::manifest_path(project, pinned, &source)? {
+            return Ok(path);
+        }
+    }
+    super::lineage::manifest_path(project, pinned, record)
+}
 pub fn inspect_history(
     project: &Project,
     pinned: &basis::PinnedTask,
@@ -820,7 +855,7 @@ pub fn inspect_history(
     let manifest = required
         .manifest
         .value()
-        .map(|_| super::lineage::manifest_path(project, pinned, &required))
+        .map(|_| manifest_path(project, pinned, &required))
         .transpose()?;
     let mut observation = inspect(project, &required, provided, manifest.as_deref(), metrics)?;
     let mut proved = std::collections::BTreeSet::new();

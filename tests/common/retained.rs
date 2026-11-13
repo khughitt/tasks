@@ -290,6 +290,7 @@ pub fn cross_receiver_layout(
 pub enum HistoricalScenario {
     CheckpointPending,
     CheckpointCompleted,
+    CheckpointDirectory,
     TransferReceiverPublished,
     TransferSenderReleased,
     Reconciled,
@@ -378,11 +379,28 @@ pub fn seed_historical_operation(
         id
     });
     let payload = f.dir.join("payload");
-    std::fs::write(&payload, "original").unwrap();
+    let directory = matches!(scenario, HistoricalScenario::CheckpointDirectory);
+    let manifest_bytes=serde_json::to_vec(&json!({"version":1,"entries":[{"type":"file","path":"entry","sha256":digest(b"original")}]})).unwrap();
+    let manifest_digest = digest(&manifest_bytes);
+    let manifest_name = format!("retained-manifest-{manifest_digest}.json");
+    if directory {
+        std::fs::create_dir(&payload).unwrap();
+        std::fs::write(payload.join("entry"), "original").unwrap();
+    } else {
+        std::fs::write(&payload, "original").unwrap();
+    }
     let mut record = f.record();
     record["host"] = json!(host());
     record["path"] = json!(payload);
     record["sha256"] = json!(digest(b"original"));
+    if directory {
+        record["kind"] = json!("scratch");
+        record["sha256"] = json!(manifest_digest);
+        record["manifest"] = json!(
+            f.records
+                .join(format!("tasks/files/{}/{manifest_name}", f.id))
+        );
+    }
     record["cleanup_trigger"] = json!("Review completes");
     if transfer {
         f.note(record.clone());
@@ -416,7 +434,10 @@ pub fn seed_historical_operation(
         request["purpose"] = json!("Continue review");
         request["cleanup_trigger"] = json!("Review completes");
     } else {
-        request["declarations"] = json!([declaration(&payload, "evidence")]);
+        request["declarations"] = json!([declaration(
+            &payload,
+            if directory { "scratch" } else { "evidence" }
+        )]);
     }
     let bytes = serde_json::to_vec(&request).unwrap();
     f.request("request.json", &request);
@@ -443,18 +464,29 @@ pub fn seed_historical_operation(
     let mut reconciliation = None;
     match scenario {
         HistoricalScenario::CheckpointPending => {}
-        HistoricalScenario::CheckpointCompleted => {
+        HistoricalScenario::CheckpointCompleted | HistoricalScenario::CheckpointDirectory => {
             let ordinal = f.json(&["show", &f.id])["task"]["notes"]
                 .as_array()
                 .unwrap()
                 .len()
-                + 1;
+                + 1
+                + usize::from(directory);
             let time = at();
+            let artifacts = if directory {
+                vec![(manifest_name.as_str(), manifest_bytes.as_slice())]
+            } else {
+                vec![]
+            };
+            let locators = if directory {
+                json!([{"type":"attachment","task":f.id,"name":manifest_name,"sha256":manifest_digest}])
+            } else {
+                json!([])
+            };
             historical_batch(
                 f,
                 &f.id,
                 &time,
-                &[],
+                &artifacts,
                 &[
                     format!("retained: {record}"),
                     historical_phase(
@@ -462,7 +494,7 @@ pub fn seed_historical_operation(
                         &locator,
                         "items_published",
                         &time,
-                        json!({"items":[ordinal],"artifacts":[],"resolutions":[]}),
+                        json!({"items":[ordinal],"artifacts":locators,"resolutions":[]}),
                     ),
                 ],
             );

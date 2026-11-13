@@ -423,3 +423,137 @@ pub(crate) fn require_current(project: &Project, id: &TaskId, basis: &Basis) -> 
     }
     Ok(())
 }
+
+pub(crate) fn manifest_path(
+    project: &Project,
+    pinned: &basis::PinnedTask,
+    source: &Source,
+) -> Result<Option<std::path::PathBuf>> {
+    let Some(d) = &project.retention_recovery else {
+        return Ok(None);
+    };
+    let id = &pinned.task.id;
+    if source.basis != pinned.basis {
+        return Err(invalid(
+            "manifest Source differs from its pinned read context",
+        ));
+    }
+    let ordinal = usize::try_from(source.ordinal).map_err(invalid)?;
+    let note = ordinal
+        .checked_sub(1)
+        .and_then(|i| pinned.task.notes.get(i))
+        .ok_or_else(|| invalid("manifest source ordinal unavailable"))?;
+    let record = note
+        .text
+        .strip_prefix("retained: ")
+        .ok_or_else(|| invalid("manifest source is not a retained note"))
+        .and_then(decode_record)?;
+    let raw = record
+        .manifest
+        .value()
+        .ok_or_else(|| invalid("manifest source has no manifest"))?;
+    let original = super::verify::current_path(project, raw)?;
+    let name = original
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| invalid("manifest source filename"))?;
+    let local = crate::attachments::task_dir(project, id).join(name);
+    let binding = d
+        .manifest_bindings
+        .iter()
+        .find(|b| b.task == id.to_string() && b.ordinal == source.ordinal);
+    let Some(binding) = binding else {
+        if original != local && original.ends_with(format!("tasks/files/{id}/{name}")) {
+            return Err(invalid(
+                "migrated manifest source has no explicit recovery binding",
+            ));
+        }
+        return Ok(None);
+    };
+    if name != binding.attachment
+        || !original.ends_with(format!("tasks/files/{id}/{}", binding.attachment))
+    {
+        return Err(invalid(
+            "recovery binding does not name the original attached manifest string",
+        ));
+    }
+    let boundary = validate_boundary(project, None)?;
+    let b = source_basis(
+        &project.prefix,
+        &id.to_string(),
+        &d.source_cutover,
+        &d.source_ref,
+    );
+    let mut old = basis::load_task(&boundary.source, &b, &mut 0)?;
+    if old.notes.get(ordinal - 1) != Some(note) {
+        return Err(invalid(
+            "manifest binding does not match its exact source-cutover note",
+        ));
+    }
+    let digest = record
+        .sha256
+        .value()
+        .ok_or_else(|| invalid("bound manifest lacks a digest"))?;
+    let path = format!("tasks/files/{id}/{}", binding.attachment);
+    let bytes = basis::blob(
+        &boundary.source,
+        &d.source_cutover,
+        &path,
+        Some(project.attachments_max_bytes),
+        &mut 0,
+    )?;
+    if super::verify::hash_bytes(&bytes, &mut super::verify::Metrics::default()) != digest {
+        return Err(invalid("source recovery manifest digest mismatch"));
+    }
+    // A generated name requires its original observation phase, unlike a manual attachment.
+    if binding.attachment == format!("retained-manifest-{digest}.json") {
+        let mut observed = false;
+        for phase in &old.notes {
+            let Some(raw) = phase.text.strip_prefix("retention operation: ") else {
+                continue;
+            };
+            let Ok(phase) = decode_operation(raw) else {
+                continue;
+            };
+            let ordinals = match &phase.outputs {
+                PhaseOutputs::Items(out) => &out.items,
+                PhaseOutputs::Receiver(out) => &out.items,
+                PhaseOutputs::Ready(out) => &out.items,
+                _ => continue,
+            };
+            if !ordinals.contains(&source.ordinal) {
+                continue;
+            }
+            observed=super::publish::observation_artifacts(project,&old,&phase)?.iter().any(|a|matches!(a,ArtifactLocator::Attachment{task,name,sha256,..} if task==&id.to_string()&&name==&binding.attachment&&sha256==digest));
+            if observed {
+                break;
+            }
+        }
+        if !observed {
+            return Err(invalid(
+                "generated recovery manifest lacks its source observation binding",
+            ));
+        }
+    }
+    old.notes.truncate(ordinal - 1);
+    if crate::attachments::ledger(&old).get(&binding.attachment)
+        != Some(&crate::attachments::Ledger::Attached)
+    {
+        return Err(invalid(
+            "source manifest was not attached before its observation",
+        ));
+    }
+    crate::attachments::check_storage(project, id)?;
+    if crate::attachments::ledger(&pinned.task).get(&binding.attachment)
+        != Some(&crate::attachments::Ledger::Attached)
+    {
+        return Err(invalid("bound manifest lacks its current attached ledger"));
+    }
+    let current = super::verify::read_local(&local, project.attachments_max_bytes)?;
+    if current != bytes {
+        return Err(invalid(
+            "current recovery manifest differs from its original bytes",
+        ));
+    }
+    Ok(Some(local))
+}

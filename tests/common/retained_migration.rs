@@ -35,8 +35,15 @@ fn oid(f: &RetainedEnv, root: &Path) -> String {
     String::from_utf8(out.stdout).unwrap().trim().into()
 }
 pub fn migration_fixture(scenario: HistoricalScenario) -> MigrationFixture {
+    migration_fixture_with(scenario, |_| {})
+}
+pub fn migration_fixture_with(
+    scenario: HistoricalScenario,
+    prepare: impl FnOnce(&RetainedEnv),
+) -> MigrationFixture {
     let mut f = RetainedEnv::new("in-tree");
     seed_historical_operation(&f, scenario);
+    prepare(&f);
     let original = f.state();
     let source = f.dir.clone();
     let cutover = oid(&f, &source);
@@ -169,5 +176,58 @@ impl MigrationFixture {
         std::fs::write(config_path, config).unwrap();
         self.declaration["destination_import"] = json!(self.import);
         self.write_declaration(&self.declaration);
+    }
+}
+pub fn manual_manifest(f: &RetainedEnv, external: bool) {
+    use sha2::{Digest, Sha256};
+    let directory = f.dir.join("manual-tree");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("entry"), "original").unwrap();
+    let sha = format!("{:x}", Sha256::digest(b"original"));
+    let bytes = serde_json::to_vec(
+        &json!({"version":1,"entries":[{"type":"file","path":"entry","sha256":sha}]}),
+    )
+    .unwrap();
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let file = f.dir.join("manual-manifest.json");
+    std::fs::write(&file, &bytes).unwrap();
+    let path = if external {
+        file
+    } else {
+        f.json(&["attach", &f.id, file.to_str().unwrap()]);
+        f.records
+            .join(format!("tasks/files/{}/manual-manifest.json", f.id))
+    };
+    let mut record = f.record();
+    record["host"] = json!(super::retained::host());
+    record["kind"] = json!("scratch");
+    record["path"] = json!(directory);
+    record["sha256"] = json!(digest);
+    record["manifest"] = json!(path);
+    f.note(record);
+}
+impl MigrationFixture {
+    pub fn bind_manifests(&mut self) {
+        let bindings=self.original["items"].as_array().unwrap().iter().filter_map(|item| {
+            let path=item["record"]["manifest"].as_str()?;
+            Some(json!({"task":self.f.id,"ordinal":item["source"]["ordinal"],"attachment":Path::new(path).file_name().unwrap().to_str().unwrap()}))
+        }).collect::<Vec<_>>();
+        self.declaration["manifest_bindings"] = json!(bindings);
+        self.write_declaration(&self.declaration);
+    }
+    pub fn checkpoint(&self) -> std::process::Output {
+        let request = json!({"version":1,"operation_id":"d".repeat(32),"host":super::retained::host(),"inputs":[{"task":self.f.id,"basis":self.f.state()["basis"]}]});
+        let path = self.f.request("new-checkpoint.json", &request);
+        self.f
+            .cmd()
+            .args([
+                "retained",
+                "checkpoint",
+                &self.f.id,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
     }
 }

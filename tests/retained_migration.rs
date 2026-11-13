@@ -175,3 +175,153 @@ fn migration_mixed_epoch_refuses() {
         "{out:?}"
     );
 }
+use common::retained_migration::{manual_manifest, migration_fixture_with};
+#[test]
+fn migration_generated_manifest() {
+    let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+    f.bind_manifests();
+    let head = f.git(&f.source, &["rev-parse", "HEAD"]);
+    let original = f.f.state()["items"][0]["record"].clone();
+    let out = f.checkpoint();
+    assert!(out.status.success(), "{out:?}");
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["outcome"], "verified", "{result}");
+    let current = f.f.state();
+    assert_eq!(current["basis"]["layout"], "detached");
+    assert_eq!(
+        current["items"][0]["record"]["manifest"],
+        serde_json::json!(f.f.records.join(format!(
+                "tasks/files/{}/{}",
+                f.f.id,
+                f.declaration["manifest_bindings"][0]["attachment"]
+                    .as_str()
+                    .unwrap()
+            )))
+    );
+    assert_ne!(
+        current["items"][0]["record"]["manifest"],
+        original["manifest"]
+    );
+    assert_eq!(f.git(&f.source, &["rev-parse", "HEAD"]), head);
+}
+#[test]
+fn migration_manual_attachment_binding() {
+    let mut f = migration_fixture_with(HistoricalScenario::CheckpointCompleted, |f| {
+        manual_manifest(f, false)
+    });
+    f.bind_manifests();
+    let out = f.checkpoint();
+    assert!(out.status.success(), "{out:?}");
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["outcome"], "verified", "{result}");
+}
+#[test]
+fn migration_external_manifest_literal() {
+    let f = migration_fixture_with(HistoricalScenario::CheckpointCompleted, |f| {
+        manual_manifest(f, true)
+    });
+    let out = f.checkpoint();
+    assert!(out.status.success(), "{out:?}");
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["outcome"], "verified", "{result}");
+}
+#[test]
+fn migration_new_checkpoint() {
+    let f = migration_fixture(HistoricalScenario::CheckpointCompleted);
+    let out = f.checkpoint();
+    assert!(out.status.success(), "{out:?}");
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["outcome"], "verified", "{result}");
+    let state = f.f.state();
+    let operations = state["operations"].as_array().unwrap();
+    let new = operations
+        .iter()
+        .filter(|o| o["note"]["key"]["operation_id"] == "d".repeat(32))
+        .collect::<Vec<_>>();
+    assert_eq!(new.len(), 3);
+    for operation in new {
+        assert_eq!(
+            operation["note"]["input_bases"][0]["basis"]["layout"],
+            "detached"
+        );
+    }
+}
+#[test]
+fn migration_new_transfer() {
+    let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+    f.bind_manifests();
+    let to = f.f.json(&["add", "New custodian"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.f.json(&["start", &to]);
+    let request = serde_json::json!({"version":1,"operation_id":"e".repeat(32),"host":common::retained::host(),"inputs":[{"task":f.f.id,"basis":f.f.state()["basis"]},{"task":to,"basis":f.f.json(&["retained","state",&to])["basis"]}],"items":[f.original["items"][0]["identity"]],"purpose":"Continue review","cleanup_trigger":"Review complete"});
+    let path = f.f.request("new-transfer.json", &request);
+    let head = f.git(&f.source, &["rev-parse", "HEAD"]);
+    let out =
+        f.f.cmd()
+            .args([
+                "retained",
+                "transfer",
+                &f.f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["outcome"], "transferred", "{result}");
+    assert_eq!(f.git(&f.source, &["rev-parse", "HEAD"]), head);
+    assert_eq!(f.f.state()["items"][0]["record"]["state"], "released");
+    let receiver = f.f.json(&["retained", "state", &to]);
+    assert_eq!(receiver["items"][0]["record"]["verification"], "verified");
+}
+#[test]
+fn migration_missing_manifest() {
+    for case in ["missing", "changed", "unbound"] {
+        let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+        if case != "unbound" {
+            f.bind_manifests();
+        }
+        let path = f.f.records.join(format!(
+            "tasks/files/{}/{}",
+            f.f.id,
+            std::path::Path::new(
+                f.original["items"][0]["record"]["manifest"]
+                    .as_str()
+                    .unwrap()
+            )
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+        ));
+        match case {
+            "missing" => std::fs::remove_file(path).unwrap(),
+            "changed" => std::fs::write(path, b"changed").unwrap(),
+            _ => {}
+        }
+        let before = f.f.state();
+        let out = f.checkpoint();
+        assert!(!out.status.success(), "accepted {case}: {out:?}");
+        assert_eq!(
+            f.f.state()["operations"],
+            before["operations"],
+            "refusal published a phase for {case}"
+        );
+    }
+}
+#[test]
+fn migration_suffix_and_config_change() {
+    let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+    f.bind_manifests();
+    let mut record = f.original["items"][0]["record"].clone();
+    record["purpose"] = serde_json::json!("Later source-style reference");
+    f.f.note(record);
+    let before = f.f.state();
+    let out = f.checkpoint();
+    assert!(!out.status.success(), "{out:?}");
+    assert_eq!(f.f.state()["operations"], before["operations"]);
+}
