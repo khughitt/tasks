@@ -928,6 +928,14 @@ pub fn inspect_history(
             Err(e) => observation = unknown(record.clone(), e),
         }
     }
+    if project.retention_recovery.is_some()
+        && observation.record.manifest.value().is_some()
+        && let (Some(original), Some(resolved)) = (required.manifest.value(), manifest)
+        && current_path(project, original)? != resolved
+    {
+        // Unknown observations still name the authorized destination attachment.
+        observation.record.manifest = FieldString::Text(resolved.to_string_lossy().into_owned());
+    }
     observation.preservations = used;
     Ok(observation)
 }

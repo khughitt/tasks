@@ -492,3 +492,28 @@ fn migration_destination_named_ref_with_detached_head() {
     let out = f.f.cmd().args(["check"]).output().unwrap();
     assert!(out.status.success(), "{out:?}");
 }
+#[test]
+fn migration_missing_payload_remains_accounted_unknown() {
+    let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+    f.bind_manifests();
+    let previous = f.f.state()["items"][0]["record"].clone();
+    std::fs::remove_dir_all(f.source.join("payload")).unwrap();
+    let out = f.checkpoint();
+    assert!(out.status.success(), "{out:?}");
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["outcome"], "accounted_unknown");
+    let state = f.f.state();
+    let record = &state["items"][0]["record"];
+    assert_eq!(record["verification"], "unknown");
+    assert_eq!(record["sha256"], serde_json::Value::Null);
+    let expected = f.f.records.join(format!(
+        "tasks/files/{}/{}",
+        f.f.id,
+        std::path::Path::new(previous["manifest"].as_str().unwrap())
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+    ));
+    assert_eq!(record["manifest"], serde_json::json!(expected));
+}

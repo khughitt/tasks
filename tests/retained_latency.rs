@@ -929,8 +929,17 @@ fn timing(frames: &[Value]) -> Result<Timing> {
                 out.query_admissions += 1;
             }
             "cache_saturated" => out.cache_saturated += 1,
-            "inspection" | "prechecked" | "before_write" | "readback" | "commit_wait"
-            | "prefix_wait" => {}
+            "inspection"
+            | "prechecked"
+            | "before_write"
+            | "readback"
+            | "commit_wait"
+            | "prefix_wait"
+            | "proof_history"
+            | "proof_terminal"
+            | "publication_discovery"
+            | "publication_found"
+            | "recovery_prefix" => {}
             _ => return Err(format!("unknown observation {name}")),
         }
     }

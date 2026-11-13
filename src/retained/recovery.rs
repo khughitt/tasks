@@ -400,6 +400,9 @@ pub(crate) fn same_epoch(
 
 /// Check declared operands before immutable proof reads can issue ancestry queries.
 pub(crate) fn operation_epochs(project: &Project, task: &Task) -> Result<()> {
+    if project.retention_recovery.is_none() {
+        return Ok(());
+    }
     let resolver = super::proof::Resolver::new(project);
     let mut seen = std::collections::BTreeMap::new();
     for note in &task.notes {
