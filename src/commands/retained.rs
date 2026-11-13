@@ -17,7 +17,14 @@ pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> 
         return Err(invalid("host must be a nonempty line"));
     }
     let id = parse_id(&ctx.registry, &ctx.shorthand, &id)?;
-    let pinned = basis::read(&ctx.project, &id, at.as_deref())?;
+    // Resolve user revision expressions live before pinning immutable proof reads.
+    let at_commit = at
+        .as_deref()
+        .map(|revision| basis::resolve(&ctx.project, revision))
+        .transpose()?;
+    let mut ctx = ctx;
+    ctx.project = crate::retained::read::start(&ctx.project)?;
+    let pinned = basis::read(&ctx.project, &id, at_commit.as_deref())?;
     crate::retained::proof::validate_history(&ctx.project, &pinned, host.as_deref())?;
     crate::retained::reconcile::validate_terminal_history(&ctx.project, &pinned)?;
     let mut out = history::replay(&ctx.project, &pinned.task, &pinned.basis, host.as_deref())?;

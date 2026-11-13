@@ -242,7 +242,10 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
 
 fn lock_and_revalidate_inner(ctx: &mut Ctx, routing: &Routing, allow_retired: bool) -> Result<()> {
     for _ in 0..4 {
-        ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
+        ctx.lock = Some(MutationLock::acquire_project(
+            &ctx.project.prefix,
+            Some(&ctx.project.records),
+        )?);
         let registry = Registry::load()?;
         reject_pending_rename(&ctx.project)?;
         let project = match routing {
@@ -288,12 +291,24 @@ pub(super) fn lock_pair_and_revalidate(
             return Err(on_same_prefix(peer));
         }
         let (peer_lock, project_lock) = if peer < ctx.project.prefix.as_str() {
-            let first = MutationLock::acquire(peer)?;
-            let second = MutationLock::acquire(&ctx.project.prefix)?;
+            let first = MutationLock::acquire_project(
+                peer,
+                ctx.registry
+                    .records_dir(peer)
+                    .or_else(|| ctx.registry.project_root(peer)),
+            )?;
+            let second =
+                MutationLock::acquire_project(&ctx.project.prefix, Some(&ctx.project.records))?;
             (first, second)
         } else {
-            let first = MutationLock::acquire(&ctx.project.prefix)?;
-            let second = MutationLock::acquire(peer)?;
+            let first =
+                MutationLock::acquire_project(&ctx.project.prefix, Some(&ctx.project.records))?;
+            let second = MutationLock::acquire_project(
+                peer,
+                ctx.registry
+                    .records_dir(peer)
+                    .or_else(|| ctx.registry.project_root(peer)),
+            )?;
             (second, first)
         };
         ctx.lock = Some(project_lock);

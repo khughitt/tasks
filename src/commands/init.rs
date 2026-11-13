@@ -26,7 +26,10 @@ pub fn run(
     }
     // Lock order (retired-projects plan): the project lock, then the registry lock, as
     // rename takes them. `init --force` repoints the root `retire` and every writer consult.
-    let _project_lock = crate::claims::MutationLock::acquire(&prefix)?;
+    let _project_lock = match records.as_deref() {
+        Some(records) => crate::claims::MutationLock::acquire_project(&prefix, Some(records))?,
+        None => crate::claims::MutationLock::acquire(&prefix)?,
+    };
     let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
     for inventory in crate::rename::inventory::Inventory::pending()? {

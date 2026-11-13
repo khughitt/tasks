@@ -164,6 +164,8 @@ pub fn recovery_warning(left_uncommitted: &[PathBuf]) -> Option<String> {
 }
 
 fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
+    crate::retained::test_observer::git_start("commit", dir, args)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     crate::git::at(dir)
         .arg("--literal-pathspecs")
         .args(args)
@@ -234,11 +236,18 @@ fn discover(dir: &Path, git: Git) -> Result<Option<Repo>, String> {
     }))
 }
 
-fn lock_for(common: &Path, state: &Path) -> Result<MutationLock, String> {
+fn lock_for(common: &Path, state: &Path, records: &Path) -> Result<MutationLock, String> {
     let digest = crate::history::sha256(common.as_os_str().as_encoded_bytes());
     let hex = &digest[..16];
     let path = state.join(format!("tasks/claims/.commit-{hex}.lock"));
-    MutationLock::acquire_at(&path).map_err(|error| error.to_string())
+    crate::retained::test_observer::event("commit_wait", &common.to_string_lossy())
+        .map_err(|error| error.to_string())?;
+    MutationLock::acquire_with_notice(
+        &path,
+        &format!("commit {}", common.display()),
+        Some(records),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn in_progress(git_dir: &Path) -> Option<&'static str> {
@@ -433,7 +442,7 @@ fn commit_paths_report_in(
         Ok(None) => return (vec![unavailable(dir, paths)], Vec::new(), None),
         Err(error) => return (vec![failed(dir, paths, &error, None)], Vec::new(), None),
     };
-    let _lock = match lock_for(&repo.common, state) {
+    let _lock = match lock_for(&repo.common, state, &repo.toplevel) {
         Ok(lock) => lock,
         Err(error) => return (vec![failed(dir, paths, &error, None)], Vec::new(), None),
     };
@@ -1077,7 +1086,7 @@ pub fn try_lock(dir: &Path) -> Result<Option<CommitLock>, String> {
         return Ok(None);
     };
     let state = state_home()?;
-    let guard = lock_for(&repo.common, &state)?;
+    let guard = lock_for(&repo.common, &state, &repo.toplevel)?;
     Ok(Some(CommitLock {
         common: repo.common,
         state,
@@ -1087,7 +1096,7 @@ pub fn try_lock(dir: &Path) -> Result<Option<CommitLock>, String> {
 pub fn lock(dir: &Path) -> Result<CommitLock, String> {
     let common = common_dir(dir)?;
     let state = state_home()?;
-    let guard = lock_for(&common, &state)?;
+    let guard = lock_for(&common, &state, dir)?;
     Ok(CommitLock {
         common,
         state,
@@ -2249,7 +2258,7 @@ mod tests {
         let commit_lock = CommitLock {
             common: repo_git_dir(&root),
             state: state.path().to_path_buf(),
-            _guard: lock_for(&repo_git_dir(&root), state.path()).unwrap(),
+            _guard: lock_for(&repo_git_dir(&root), state.path(), &root).unwrap(),
         };
         let recovery = commit_lock.recover(&root).unwrap();
         assert!(recovery.unstaged.is_empty() && recovery.warnings.is_empty());

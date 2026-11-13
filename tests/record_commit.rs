@@ -1233,3 +1233,227 @@ fn tasks_commit_expands_bare_hex_suffix_unless_file_exists_in_records() {
     assert_eq!(out2["paths"], serde_json::json!([hex]));
     assert_eq!(subjects(&root)[0], "chore: hex file");
 }
+
+// A missing notice, polling delay, incorrect lock identity or JSON warning blocks this test.
+#[test]
+fn lock_wait_prefix_and_commit() {
+    use sha2::{Digest, Sha256};
+    use std::{
+        io::{BufRead, BufReader, Read},
+        time::Duration,
+    };
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let id = add(&env, &root, "Wait fixture");
+    for prefix in [true, false] {
+        let common = git(&root, &["rev-parse", "--git-common-dir"]);
+        let common = root.join(common.trim()).canonicalize().unwrap();
+        let digest = format!(
+            "{:x}",
+            Sha256::digest(common.as_os_str().as_encoded_bytes())
+        );
+        let name = if prefix {
+            "tst.lock".to_string()
+        } else {
+            format!(".commit-{}.lock", &digest[..16])
+        };
+        let path = env.home.path().join(".local/state/tasks/claims").join(name);
+        let held = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        held.lock().unwrap();
+        assert_eq!(
+            held.metadata().unwrap().len(),
+            0,
+            "old empty lock remains compatible"
+        );
+        let mut command = env.raw(&root);
+        command.args([
+            "note",
+            &id,
+            if prefix {
+                "Prefix wait publication"
+            } else {
+                "Commit wait publication"
+            },
+        ]);
+        let mut child = command.spawn().unwrap();
+        struct Reap<'a>(&'a mut std::process::Child);
+        impl Drop for Reap<'_> {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let cleanup = Reap(&mut child);
+        let stderr = cleanup.0.stderr.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut input = BufReader::new(stderr);
+            let mut notice = String::new();
+            input.read_line(&mut notice).unwrap();
+            let _ = tx.send(notice.clone());
+            input.read_to_string(&mut notice).unwrap();
+            notice
+        });
+        let notice = rx.recv_timeout(Duration::from_secs(6)).unwrap();
+        assert!(
+            notice.contains(if prefix { "prefix tst" } else { "commit " }),
+            "{notice}"
+        );
+        assert!(notice.contains("elapsed=2s"), "{notice}");
+        assert!(
+            notice.contains(&format!("holder PID {}", std::process::id()))
+                || notice.contains("holder unavailable"),
+            "{notice}"
+        );
+        assert!(notice.contains(root.to_str().unwrap()), "{notice}");
+        drop(held);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while cleanup.0.try_wait().unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut bytes = Vec::new();
+        cleanup
+            .0
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let normal_json = serde_json::json!({"id":id,"warnings":[]});
+        assert_eq!(parsed, normal_json);
+        assert_eq!(reader.join().unwrap().matches("acquired ").count(), 1);
+        drop(cleanup);
+    }
+}
+
+#[test]
+fn lock_wait_failure_keeps_publication() {
+    use sha2::{Digest, Sha256};
+    use std::{
+        io::Write,
+        os::fd::{AsRawFd, FromRawFd},
+        time::{Duration, Instant},
+    };
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let id = add(&env, &root, "Broken diagnostic sink");
+    for prefix in [true, false] {
+        let common = root
+            .join(git(&root, &["rev-parse", "--git-common-dir"]).trim())
+            .canonicalize()
+            .unwrap();
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(common.as_os_str().as_encoded_bytes())
+        );
+        let name = if prefix {
+            "tst.lock".into()
+        } else {
+            format!(".commit-{}.lock", &hash[..16])
+        };
+        let path = env.home.path().join(".local/state/tasks/claims").join(name);
+        let held = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        held.lock().unwrap();
+        let mut reader = None;
+        let sink = if prefix {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap()
+        } else {
+            let mut fds = [0; 2];
+            assert_eq!(
+                unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
+                0
+            );
+            reader = Some(unsafe { std::fs::File::from_raw_fd(fds[0]) });
+            let mut writer = unsafe { std::fs::File::from_raw_fd(fds[1]) };
+            while writer.write(&[0; 4096]).is_ok() {}
+            let flags = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_GETFL) };
+            assert!(flags >= 0);
+            assert_eq!(
+                unsafe {
+                    libc::fcntl(writer.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK)
+                },
+                0
+            );
+            writer
+        };
+        let text = if prefix {
+            "Published despite broken stderr"
+        } else {
+            "Committed despite full stderr pipe"
+        };
+        let mut child = env
+            .raw(&root)
+            .stderr(sink)
+            .args(["note", &id, text])
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(2200));
+        drop(held);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("reporter blocked publication");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["warnings"], serde_json::json!([]));
+        assert_eq!(subjects(&root)[0], format!("chore(tasks): note {id}"));
+        drop(reader);
+    }
+}
+
+#[test]
+fn lock_wait_redirected_stderr_preserves_log() {
+    use std::{
+        io::Write,
+        time::{Duration, Instant},
+    };
+    let mut env = TestEnv::new();
+    let root = project(&mut env, "tst", true);
+    let id = add(&env, &root, "Redirected diagnostic log");
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(env.home.path().join(".local/state/tasks/claims/tst.lock"))
+        .unwrap();
+    held.lock().unwrap();
+    let path = env.home.path().join("stderr.log");
+    let mut log = std::fs::File::create(&path).unwrap();
+    log.write_all(b"Existing diagnostic evidence\n").unwrap();
+    let mut child = env
+        .raw(&root)
+        .stderr(log)
+        .args(["note", &id, "Redirected log publication"])
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    drop(held);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("reporter blocked");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(child.wait_with_output().unwrap().status.success());
+    let log = std::fs::read_to_string(path).unwrap();
+    assert!(log.starts_with("Existing diagnostic evidence\n"), "{log}");
+    assert_eq!(log.matches("waiting ").count(), 1, "{log}");
+    assert_eq!(log.matches("acquired ").count(), 1, "{log}");
+}

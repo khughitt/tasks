@@ -1,3 +1,5 @@
+//! Host-local ownership claims and serialized record mutations.
+mod wait;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;
@@ -691,21 +693,44 @@ impl MutationLock {
     }
 
     pub fn acquire(prefix: &str) -> Result<MutationLock> {
-        Self::acquire_at(&Self::path_for(prefix)?)
+        Self::acquire_project(prefix, None)
+    }
+
+    pub fn acquire_project(prefix: &str, records: Option<&Path>) -> Result<MutationLock> {
+        Self::acquire_with_notice(
+            &Self::path_for(prefix)?,
+            &format!("prefix {prefix}"),
+            records,
+        )
+    }
+
+    pub fn acquire_with_notice(
+        path: &Path,
+        scope: &str,
+        records: Option<&Path>,
+    ) -> Result<MutationLock> {
+        let file = Self::open(path)?;
+        wait::lock(&file, path, scope, records)
+            .map_err(|error| Error::Io(format!("locking {}: {error}", path.display())))?;
+        Ok(MutationLock { _file: file })
     }
 
     pub fn acquire_at(path: &Path) -> Result<MutationLock> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(path)?;
+        let file = Self::open(path)?;
         file.lock()
             .map_err(|error| Error::Io(format!("locking {}: {error}", path.display())))?;
         Ok(MutationLock { _file: file })
+    }
+
+    fn open(path: &Path) -> Result<std::fs::File> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        Ok(std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)?)
     }
 }
 

@@ -291,16 +291,32 @@ were not inspected. An uncommitted completion is preserved before a fresh inspec
 Conflicting bytes/branches/stale bases or missing history refuse; journals lost
 locally do not authorize reconstructing success from current files.
 
-Prefix locks and common-Git-directory commit locks stay held through observation
-and immediate publication; foreign staging, Git operations and dirty required
-evidence refuse. Only unrelated appended ordinary notes can commute. Pending
-intent permits queries, unrelated notes, normal claim refresh/start and park;
+Prefix and common-directory lock waits report bounded stderr diagnostics after
+2 seconds and then at most every 30 seconds, with an acquired line after a shown
+notice. Holder PID observations are advisory kernel snapshots; unavailable
+observations and diagnostic failures never enter publication warnings or prevent
+a target-only incomplete receipt. Locks retain their kernel blocking semantics.
+
+Prefix locks span the operation, so same-project writers still wait during payload
+inspection. Common-Git-directory commit locks cover only initial preflight and
+individual publication windows, through exact committed readback. Payload inspection
+and the immutable range precheck run outside those commit locks. Each window locks
+the deduplicated repositories of its mutable participants: both transfer peers until
+proved sender release, then only the missing receipt's target; incomplete receipts
+and reconciliation intent/ready check only their target, while reconciliation's
+terminal checks every participant. Mixed recovery batches take the union of their
+phases. Fresh context, ownership, range delta and required working bytes are checked
+under the guard; foreign staging, Git operations and dirty required evidence refuse.
+Only unrelated appended ordinary notes can commute. Pending intent permits queries,
+unrelated notes, normal claim refresh/start and park;
 closure, archival and competing task/evidence changes wait for finish/reconcile.
 Move/migrate still refuse operation history and protected retained-op requests,
 retained-manifests/checkpoints. Project rename has the verified lineage route
 below. Protected evidence cannot be detached. No force bypass is provided.
 
-Metrics wall_ns measures held-lock duration; hash_ns/bytes_hashed count cumulative
+Metrics wall_ns measures the operation's elapsed interval, including prefix-lock
+waits and payload inspection; it is not the sum of commit-lock hold intervals.
+Metrics hash_ns/bytes_hashed count cumulative
 thread SHA256 work, including repeated verification/archive/recovery; history_bytes_read
 counts repeated task/archive/metadata reads. Git private I/O is excluded and
 channels can overlap. Count CLI calls and actual UTF-8 stdout separately. No

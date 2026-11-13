@@ -418,6 +418,10 @@ fn finish(ctx: &mut OperationCtx, from: &TaskId, to: &TaskId, binding: &Binding)
         if ctx.phase(id)?.is_some_and(|p| p.1.phase == "completed") {
             continue;
         }
+        ctx.refresh_completion_target(id)?;
+        if ctx.phase(id)?.is_some_and(|p| p.1.phase == "completed") {
+            continue;
+        }
         let at = crate::time::after(&ctx.tasks[id].task.updated)?;
         let note = publish::receipt(
             ctx,

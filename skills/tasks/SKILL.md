@@ -675,6 +675,14 @@ notes through `tasks note`.
 
 ### Record commits
 
+Prefix and records commit-lock waits print stderr notices after 2 seconds and
+then at most every 30 seconds, identifying the scope, known records location and
+lock path. Linux holder PIDs are advisory `/proc/locks` snapshots; unavailable
+observations grant no permission to steal a lock or kill its holder. One acquired
+line follows a displayed wait notice. Diagnostic failure never enters JSON
+warnings or blocks publication. Prefix locks still span the operation, including
+payload inspection, so same-prefix writers remain serialized.
+
 Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
 Each write commits the records and attachments it wrote, plus whatever the repository's own pre-commit hook stages, once per git working tree. Staging another git process makes while the commit runs can land in it.
 Configuration changes (`init`, `retire`, `unretire`) are not committed automatically; commit `tasks/.config.toml` with `tasks commit tasks/.config.toml -m "chore(tasks): update config"`. `init --records` warns when it left such a config uncommitted.

@@ -303,6 +303,18 @@ path commits; task IDs, task directories and ordinary no-target sweeps remain re
 Git repository selection ignores inherited hook GIT_DIR/COMMON_DIR/WORK_TREE/
 INDEX_FILE, except the migration guard deliberately checks the committing index.
 
+Prefix and records commit locks remain blocking kernel locks. A contended lock
+prints a stderr notice after 2 seconds, then no more often than every 30 seconds,
+identifying the project or records repository, lock path and elapsed seconds.
+Known records/common-directory labels are bounded and control characters escaped.
+Linux holder PIDs come from a device-and-inode match in `/proc/locks`; a PID is a
+kernel snapshot, while unavailable, malformed or mismatching observations stay
+explicitly unavailable. Neither is permission to steal, unlink or kill a holder.
+One acquired-after-wait line follows a displayed notice. Diagnostic failures are
+nonfatal and never enter JSON warnings or prevent a record commit; no holder
+sidecar or timeout is introduced. Same-prefix writers remain serialized for the
+whole operation, including retained payload inspection.
+
 ## Move tasks and resume
 
 `tasks move <id> --to <prefix> --explain` diagnoses without locks/writes. Fresh
