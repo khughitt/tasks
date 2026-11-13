@@ -211,6 +211,14 @@ fn retained_locking_unrelated_writer_during_inspection() {
                 .spawn()
                 .unwrap(),
         ));
+        event(&prefix_listener, &mut prefix_writer, "prefix_wait").resume();
+        let lock =
+            std::fs::File::open(f.env.home.path().join(".local/state/tasks/claims/sci.lock"))
+                .unwrap();
+        assert!(matches!(
+            lock.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
         assert!(!prefix_writer.finished());
         inspection.resume();
         let out = finish(&listener, child);
@@ -530,4 +538,102 @@ fn retained_observer_final_release_disconnect_refuses_success() {
         !child.output().status.success(),
         "final release observation failure must fail the test invocation"
     );
+}
+
+#[test]
+fn lock_wait_failure_keeps_target_only_incomplete() {
+    use sha2::{Digest, Sha256};
+    let (f, _, payload) = transfer_fixture();
+    let (_, to) = cross_receiver(&f, false);
+    let socket = f.dir.join("broken-notice.sock");
+    let listener = listener(&socket);
+    let request = f.request("transfer.json", &transfer_request(&f, &to));
+    let mut child = Running(Some(
+        f.env
+            .raw(&f.dir)
+            .env("TASKS_SESSION", "retained-fixture")
+            .env("TASKS_RETAINED_TEST_SOCKET", &socket)
+            .stderr(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            )
+            .args([
+                "retained",
+                "transfer",
+                &f.id,
+                &to,
+                "--request",
+                request.to_str().unwrap(),
+            ])
+            .spawn()
+            .unwrap(),
+    ));
+    let inspection = event(&listener, &mut child, "inspection");
+    // The receiver is stale and cannot become an implicit participant in the sender's receipt.
+    let receiver_path = f.dir.parent().unwrap().join(format!("other/tasks/{to}.md"));
+    let receiver = std::fs::read_to_string(&receiver_path).unwrap();
+    std::fs::write(
+        &receiver_path,
+        receiver.replace("Foreign receiver", "Changed receiver"),
+    )
+    .unwrap();
+    std::fs::remove_file(payload).unwrap();
+    let output = common::git_fixture::command(f.env.home.path(), &f.records)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let common = String::from_utf8(output.stdout).unwrap();
+    let common = common.trim();
+    let digest = format!("{:x}", Sha256::digest(common.as_bytes()));
+    let path = f.env.home.path().join(format!(
+        ".local/state/tasks/claims/.commit-{}.lock",
+        &digest[..16]
+    ));
+    let held = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    held.lock().unwrap();
+    inspection.resume();
+    event(&listener, &mut child, "commit_wait").resume();
+    std::thread::sleep(Duration::from_millis(2200));
+    drop(held);
+    let out = drain(&listener, child);
+    assert!(
+        !out.status.success(),
+        "the original inspection failure remains an error"
+    );
+    let state = f.state();
+    let phases = state["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["note"]["phase"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(phases.contains(&"incomplete"), "{state}");
+    assert!(!phases.contains(&"sender_released"));
+}
+
+#[test]
+fn retained_observer_git_frames_bound_mutable_arguments() {
+    let (f, to, _) = transfer_fixture();
+    let socket = f.dir.join("argument-observer.sock");
+    let listener = listener(&socket);
+    let mut child = transfer_child(&f, &to, &socket);
+    loop {
+        let observation = event(&listener, &mut child, "git_start");
+        let command: Value =
+            serde_json::from_str(observation.value["phase"].as_str().unwrap()).unwrap();
+        if command["source"] != "immutable_read" {
+            assert_eq!(
+                command["argv"].as_array().unwrap().len(),
+                1,
+                "mutable observations expose only the command verb: {command}"
+            );
+            observation.resume();
+            break;
+        }
+        observation.resume();
+    }
+    finish(&listener, child);
 }

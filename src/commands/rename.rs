@@ -129,10 +129,16 @@ pub fn run(
         // A checkout that holds no project fails before the locks are taken.
         adopt_project(&Registry::load()?, &start, &old, &new)?;
         for _ in 0..4 {
-            let prefixes = rename_lock_prefixes(&Registry::load()?, &old, &new)?;
+            let registry = Registry::load()?;
+            let prefixes = rename_lock_prefixes(&registry, &old, &new)?;
             let _locks = prefixes
                 .iter()
-                .map(|p| MutationLock::acquire(p))
+                .map(|p| {
+                    MutationLock::acquire_project(
+                        p,
+                        registry.records_dir(p).or_else(|| registry.project_root(p)),
+                    )
+                })
                 .collect::<Result<Vec<_>>>()?;
             let _registry_lock = Registry::lock()?;
             let mut registry = Registry::load()?;
@@ -157,7 +163,12 @@ pub fn run(
         let prefixes = rename_lock_prefixes(&registry, &requested.source, &requested.target)?;
         let _locks = prefixes
             .iter()
-            .map(|p| MutationLock::acquire(p))
+            .map(|p| {
+                MutationLock::acquire_project(
+                    p,
+                    registry.records_dir(p).or_else(|| registry.project_root(p)),
+                )
+            })
             .collect::<Result<Vec<_>>>()?;
         let _registry_lock = Registry::lock()?;
         registry = Registry::load()?;

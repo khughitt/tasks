@@ -56,20 +56,23 @@ impl Default for SessionState {
     }
 }
 impl SessionState {
-    fn admit(&mut self, charge: usize) -> bool {
+    fn admit(&mut self, charge: usize) -> Result<bool> {
         if self.queries.len() + self.tasks.len() + self.lineages.len() + self.memo_entries
             >= self.max_entries
         {
-            return false;
+            super::test_observer::event("cache_saturated", "entries_or_bytes")?;
+            return Ok(false);
         }
         let Some(total) = self.used_bytes.checked_add(charge) else {
-            return false;
+            super::test_observer::event("cache_saturated", "entries_or_bytes")?;
+            return Ok(false);
         };
         if total > self.max_bytes {
-            return false;
+            super::test_observer::event("cache_saturated", "entries_or_bytes")?;
+            return Ok(false);
         }
         self.used_bytes = total;
-        true
+        Ok(true)
     }
 }
 struct Snapshot {
@@ -105,15 +108,16 @@ impl Session {
                 return Ok(state.repositories[key].clone());
             }
         }
-        let discovery = crate::git::at(&p.records)
-            .args([
+        let discovery = raw(
+            &p.records,
+            &[
                 "rev-parse",
                 "--path-format=absolute",
                 "--show-toplevel",
                 "--absolute-git-dir",
                 "--git-common-dir",
-            ])
-            .output()?;
+            ],
+        )?;
         let paths = text(checked(discovery)?)?
             .lines()
             .map(PathBuf::from)
@@ -210,6 +214,15 @@ fn oid_is_full(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 fn raw(root: &std::path::Path, args: &[&str]) -> Result<Output> {
+    super::test_observer::git_start(
+        if cacheable(args) {
+            "immutable_read"
+        } else {
+            "read"
+        },
+        root,
+        args,
+    )?;
     Ok(crate::git::at(root)
         .arg("--literal-pathspecs")
         .args(args)
@@ -306,7 +319,7 @@ pub(crate) fn reserve_memo(project: &Project, bytes: usize) -> Result<Option<Mem
         return Ok(None);
     };
     let mut state = session.lock()?;
-    if !state.admit(charge) {
+    if !state.admit(charge)? {
         return Ok(None);
     }
     state.memo_entries += 1;
@@ -329,7 +342,9 @@ pub(crate) fn root(p: &Project) -> Result<PathBuf> {
     crate::record_commit::working_tree(&p.records).map_err(Error::Io)?.ok_or_else(|| Error::RetainedPublicationUnsupported("Retained state needs a Git-backed records basis; use the manual immutable-snapshot recovery route for non-Git records".into()))
 }
 pub(crate) fn command(p: &Project, args: &[&str]) -> Result<Command> {
-    let mut command = crate::git::at(&root(p)?);
+    let root = root(p)?;
+    super::test_observer::git_start("stream", &root, args)?;
+    let mut command = crate::git::at(&root);
     command.arg("--literal-pathspecs").args(args);
     Ok(command)
 }
@@ -467,7 +482,7 @@ pub(crate) fn remember_lineage(p: &Project) -> Result<()> {
         let Some(charge) = key.len().checked_add(64) else {
             return Ok(());
         };
-        if !state.lineages.contains_key(&key) && state.admit(charge) {
+        if !state.lineages.contains_key(&key) && state.admit(charge)? {
             state.lineages.insert(key, charge);
         }
     }
@@ -544,7 +559,12 @@ impl Session {
                 .and_then(|n| n.checked_add(output.stderr.len()))
                 .and_then(|n| n.checked_add(64));
             let mut state = self.lock()?;
-            if !state.queries.contains_key(&key) && charge.is_some_and(|n| state.admit(n)) {
+            if !state.queries.contains_key(&key)
+                && match charge {
+                    Some(n) => state.admit(n)?,
+                    None => false,
+                }
+            {
                 state.queries.insert(key, output.clone());
             }
         }
@@ -583,7 +603,12 @@ pub(crate) fn remember_task(p: &Project, b: &super::model::Basis, task: &Task) -
         .checked_add(serde_json::to_vec(task).map_err(invalid)?.len())
         .and_then(|n| n.checked_add(64));
     let mut state = session.lock()?;
-    if !state.tasks.contains_key(&key) && charge.is_some_and(|n| state.admit(n)) {
+    if !state.tasks.contains_key(&key)
+        && match charge {
+            Some(n) => state.admit(n)?,
+            None => false,
+        }
+    {
         state.tasks.insert(key, task.clone());
     }
     Ok(())

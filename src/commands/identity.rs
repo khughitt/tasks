@@ -219,7 +219,12 @@ pub fn run(
     let mut _project_locks = Vec::new();
     let mut project_lock_errors = BTreeMap::new();
     for prefix in lock_prefixes {
-        match crate::claims::MutationLock::acquire(prefix) {
+        match crate::claims::MutationLock::acquire_project(
+            prefix,
+            registry
+                .records_dir(prefix)
+                .or_else(|| registry.project_root(prefix)),
+        ) {
             Ok(lock) => _project_locks.push(lock),
             Err(error) => {
                 project_lock_errors.insert(prefix.clone(), error);

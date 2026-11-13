@@ -1324,6 +1324,8 @@ impl Project {
     }
 
     fn git(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        crate::retained::test_observer::git_start("project", &self.records, args)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         crate::git::at(&self.records).args(args).output()
     }
 

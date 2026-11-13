@@ -124,8 +124,22 @@ pub fn run(
     for _ in 0..4 {
         let mut prefixes = [&requested.source_id.prefix, &requested.target.prefix];
         prefixes.sort();
-        let _first = MutationLock::acquire(prefixes[0])?;
-        let _second = MutationLock::acquire(prefixes[1])?;
+        let _first = MutationLock::acquire_project(
+            prefixes[0],
+            Some(if prefixes[0] == &requested.source.project.prefix {
+                &requested.source.project.records
+            } else {
+                &requested.target.records
+            }),
+        )?;
+        let _second = MutationLock::acquire_project(
+            prefixes[1],
+            Some(if prefixes[1] == &requested.source.project.prefix {
+                &requested.source.project.records
+            } else {
+                &requested.target.records
+            }),
+        )?;
         let _registry = Registry::lock()?;
         let mut refreshed = open(dir, id, to, host.clone())?;
         if identity(&refreshed)? == identity(&requested)? {

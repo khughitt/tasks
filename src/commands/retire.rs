@@ -17,7 +17,7 @@ pub fn retire(
     reason: String,
     host: &HostConfig,
 ) -> Result<Retirement> {
-    let _lock = MutationLock::acquire(&here.prefix)?;
+    let _lock = MutationLock::acquire_project(&here.prefix, Some(&here.records))?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
     crate::retained::publish::project_permission(&project, false)?;
@@ -63,7 +63,7 @@ pub fn retire(
 }
 
 pub fn unretire(here: Project) -> Result<()> {
-    let _lock = MutationLock::acquire(&here.prefix)?;
+    let _lock = MutationLock::acquire_project(&here.prefix, Some(&here.records))?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
     if project.retired.is_some() {

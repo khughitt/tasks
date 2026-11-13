@@ -291,6 +291,12 @@ were not inspected. An uncommitted completion is preserved before a fresh inspec
 Conflicting bytes/branches/stale bases or missing history refuse; journals lost
 locally do not authorize reconstructing success from current files.
 
+Prefix and common-directory lock waits report bounded stderr diagnostics after
+2 seconds and then at most every 30 seconds, with an acquired line after a shown
+notice. Holder PID observations are advisory kernel snapshots; unavailable
+observations and diagnostic failures never enter publication warnings or prevent
+a target-only incomplete receipt. Locks retain their kernel blocking semantics.
+
 Prefix locks span the operation, so same-project writers still wait during payload
 inspection. Common-Git-directory commit locks cover only initial preflight and
 individual publication windows, through exact committed readback. Payload inspection

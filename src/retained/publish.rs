@@ -326,7 +326,10 @@ pub fn open(
         resolved.insert(id);
     }
     for ctx in contexts.values_mut() {
-        ctx.lock = Some(crate::claims::MutationLock::acquire(&ctx.project.prefix)?);
+        ctx.lock = Some(crate::claims::MutationLock::acquire_project(
+            &ctx.project.prefix,
+            Some(&ctx.project.records),
+        )?);
     }
     for ctx in contexts.values_mut() {
         crate::commands::revalidate_retained_ctx(ctx)?;

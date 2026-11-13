@@ -153,3 +153,25 @@ mod tests {
         );
     }
 }
+
+/// Command classification only; no environment, input bytes or general process tracing.
+pub(crate) fn git_start(source: &str, repository: &std::path::Path, args: &[&str]) -> Result<()> {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("TASKS_RETAINED_TEST_SOCKET").is_some() {
+        // Mutable starts need only a verb; commit messages and other inputs stay out.
+        let args = if source == "immutable_read" {
+            args
+        } else {
+            &args[..args.len().min(1)]
+        };
+        event(
+            "git_start",
+            &serde_json::to_string(
+                &serde_json::json!({"source":source,"repository":repository,"argv":args}),
+            )
+            .map_err(super::model::invalid)?,
+        )?;
+    }
+    let _ = (source, repository, args);
+    Ok(())
+}
