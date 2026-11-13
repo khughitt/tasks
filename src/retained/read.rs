@@ -7,7 +7,7 @@ use crate::{
 use std::{
     collections::BTreeMap,
     os::unix::process::ExitStatusExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, ExitStatus, Output},
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -86,6 +86,158 @@ pub(crate) struct ReadOutput {
     pub output: Output,
     pub bytes_read: u64,
 }
+#[derive(Clone)]
+pub(crate) struct ReadContext {
+    root: PathBuf,
+    reads: Option<(Session, Arc<Snapshot>)>,
+    attachments_max_bytes: u64,
+}
+pub(crate) fn at(project: &Project, records: &Path) -> Result<ReadContext> {
+    let (root, reads) = match &project.retention_reads {
+        Some(session) => {
+            let snapshot = session.snapshot(records)?;
+            (snapshot.root.clone(), Some((session.clone(), snapshot)))
+        }
+        None => {
+            let root = crate::record_commit::working_tree(records)
+                .map_err(Error::Io)?
+                .ok_or_else(|| Error::RetainedPublicationUnsupported(
+                    "Retained state needs a Git-backed records basis; use the manual immutable-snapshot recovery route for non-Git records".into()
+                ))?;
+            (root, None)
+        }
+    };
+    Ok(ReadContext {
+        root,
+        reads,
+        attachments_max_bytes: project.attachments_max_bytes,
+    })
+}
+impl ReadContext {
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+    pub(crate) fn command(&self, args: &[&str]) -> Result<Command> {
+        let root = self.root();
+        super::test_observer::git_start("stream", root, args)?;
+        let mut command = crate::git::at(root);
+        command.arg("--literal-pathspecs").args(args);
+        Ok(command)
+    }
+    pub(crate) fn ancestor(&self, older: &str, newer: &str) -> Result<bool> {
+        let args = ["merge-base", "--is-ancestor", older, newer];
+        let out = if let Some((session, snapshot)) = &self.reads {
+            session.query(snapshot, &args)?.output
+        } else {
+            raw(self.root(), &args)?
+        };
+        match out.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(invalid(format!(
+                "Git ancestry failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ))),
+        }
+    }
+    pub(crate) fn run(&self, args: &[&str]) -> Result<ReadOutput> {
+        let Some((session, snapshot)) = &self.reads else {
+            let output = raw(self.root(), args)?;
+            let bytes_read = if args.starts_with(&["cat-file", "blob"]) {
+                output.stdout.len() as u64
+            } else {
+                0
+            };
+            return Ok(ReadOutput { output, bytes_read });
+        };
+        if session.1 == ReadView::Live {
+            return session.query(snapshot, args);
+        }
+        match args {
+            ["rev-parse", "--verify", "--end-of-options", rev] => {
+                if oid_is_full(rev.strip_suffix("^{commit}").unwrap_or(rev)) {
+                    return session.query(snapshot, args);
+                }
+                return Ok(reply(0, format!("{}\n", snapshot.resolve(rev)?)));
+            }
+            ["symbolic-ref", "-q", "HEAD"] => {
+                return Ok(match &snapshot.symbolic_head {
+                    Some(name) => reply(0, format!("{name}\n")),
+                    None => reply(1, String::new()),
+                });
+            }
+            ["show-ref", "--verify", rest @ ..] => {
+                let name = rest.last().ok_or_else(|| invalid("missing ref name"))?;
+                let found = snapshot.branches.iter().find(|(n, _)| n == name);
+                return Ok(match found {
+                    Some((name, oid)) => reply(
+                        0,
+                        if rest.contains(&"--quiet") {
+                            String::new()
+                        } else {
+                            format!("{oid} {name}\n")
+                        },
+                    ),
+                    None => {
+                        let quiet = rest.contains(&"--quiet");
+                        let mut result = reply(if quiet { 1 } else { 128 }, String::new());
+                        if !quiet {
+                            result.output.stderr =
+                                format!("fatal: '{name}' - not a valid ref\n").into_bytes();
+                        }
+                        result
+                    }
+                });
+            }
+            [
+                "for-each-ref",
+                "--contains",
+                commit,
+                "--format=%(refname)",
+                "refs/heads/",
+            ] => {
+                let commit = snapshot.resolve(commit)?;
+                let mut result = String::new();
+                for (name, tip) in &snapshot.branches {
+                    if self.ancestor(&commit, tip)? {
+                        result.push_str(name);
+                        result.push('\n');
+                    }
+                }
+                return Ok(reply(0, result));
+            }
+            ["merge-base", "--is-ancestor", older, newer] => {
+                return Ok(reply(
+                    if self.ancestor(&snapshot.resolve(older)?, &snapshot.resolve(newer)?)? {
+                        0
+                    } else {
+                        1
+                    },
+                    String::new(),
+                ));
+            }
+            _ => {}
+        }
+        let mut normalized = args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        match args {
+            ["ls-tree", "-z", revision, "--", _] => normalized[2] = snapshot.resolve(revision)?,
+            [
+                "log",
+                "--first-parent",
+                "--reverse",
+                "--format=%H",
+                revision,
+                "--",
+                _,
+            ] => normalized[4] = snapshot.resolve(revision)?,
+            ["diff", "--quiet", "HEAD", "--", ..] => normalized[2] = snapshot.head.clone(),
+            _ => {}
+        }
+        let args = normalized.iter().map(String::as_str).collect::<Vec<_>>();
+        session.query(snapshot, &args)
+    }
+}
+
 fn invalid(message: impl std::fmt::Display) -> Error {
     Error::RetainedHistoryBlocked(message.to_string())
 }
@@ -100,16 +252,16 @@ impl Session {
             .lock()
             .map_err(|_| invalid("validation read view lock poisoned"))
     }
-    fn snapshot(&self, p: &Project) -> Result<Arc<Snapshot>> {
+    fn snapshot(&self, records: &Path) -> Result<Arc<Snapshot>> {
         drop(self.lock()?);
         {
             let state = self.views()?;
-            if let Some(key) = state.aliases.get(&p.records) {
+            if let Some(key) = state.aliases.get(records) {
                 return Ok(state.repositories[key].clone());
             }
         }
         let discovery = raw(
-            &p.records,
+            records,
             &[
                 "rev-parse",
                 "--path-format=absolute",
@@ -129,7 +281,7 @@ impl Session {
         {
             let mut state = self.views()?;
             if let Some(found) = state.repositories.get(&key).cloned() {
-                state.aliases.insert(p.records.clone(), key);
+                state.aliases.insert(records.to_path_buf(), key);
                 return Ok(found);
             }
         }
@@ -143,7 +295,7 @@ impl Session {
                 branches: Vec::new(),
             });
             let mut views = self.views()?;
-            views.aliases.insert(p.records.clone(), key.clone());
+            views.aliases.insert(records.to_path_buf(), key.clone());
             return Ok(views.repositories.entry(key).or_insert(snapshot).clone());
         }
         let head = text(checked(raw(
@@ -194,7 +346,7 @@ impl Session {
             .entry(key.clone())
             .or_insert(snapshot)
             .clone();
-        state.aliases.insert(p.records.clone(), key);
+        state.aliases.insert(records.to_path_buf(), key);
         Ok(snapshot)
     }
 }
@@ -261,7 +413,7 @@ pub(crate) fn start(project: &Project) -> Result<Project> {
     p.retention_reads
         .as_ref()
         .expect("installed session")
-        .snapshot(&p)?;
+        .snapshot(&p.records)?;
     Ok(p)
 }
 pub(crate) fn start_live(project: &Project) -> Result<Project> {
@@ -270,7 +422,7 @@ pub(crate) fn start_live(project: &Project) -> Result<Project> {
     p.retention_reads
         .as_ref()
         .expect("installed session")
-        .snapshot(&p)?;
+        .snapshot(&p.records)?;
     Ok(p)
 }
 pub(crate) fn live(project: &Project) -> Project {
@@ -331,137 +483,23 @@ pub(crate) fn reserve_memo(project: &Project, bytes: usize) -> Result<Option<Mem
 pub(crate) fn inherit(from: &Project, mut peer: Project) -> Result<Project> {
     peer.retention_reads = from.retention_reads.clone();
     if let Some(session) = &peer.retention_reads {
-        session.snapshot(&peer)?;
+        session.snapshot(&peer.records)?;
     }
     Ok(peer)
 }
 pub(crate) fn root(p: &Project) -> Result<PathBuf> {
-    if let Some(session) = &p.retention_reads {
-        return Ok(session.snapshot(p)?.root.clone());
-    }
-    crate::record_commit::working_tree(&p.records).map_err(Error::Io)?.ok_or_else(|| Error::RetainedPublicationUnsupported("Retained state needs a Git-backed records basis; use the manual immutable-snapshot recovery route for non-Git records".into()))
+    Ok(at(p, &p.records)?.root.clone())
 }
 pub(crate) fn command(p: &Project, args: &[&str]) -> Result<Command> {
-    let root = root(p)?;
-    super::test_observer::git_start("stream", &root, args)?;
-    let mut command = crate::git::at(&root);
-    command.arg("--literal-pathspecs").args(args);
-    Ok(command)
+    at(p, &p.records)?.command(args)
 }
 pub(crate) fn ancestor(p: &Project, older: &str, newer: &str) -> Result<bool> {
-    let args = ["merge-base", "--is-ancestor", older, newer];
-    let out = if let Some(session) = &p.retention_reads {
-        let snapshot = session.snapshot(p)?;
-        session.query(&snapshot, &args)?.output
-    } else {
-        raw(&root(p)?, &args)?
-    };
-    match out.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(invalid(format!(
-            "Git ancestry failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ))),
-    }
+    at(p, &p.records)?.ancestor(older, newer)
 }
 pub(crate) fn run(p: &Project, args: &[&str]) -> Result<ReadOutput> {
-    let Some(session) = &p.retention_reads else {
-        let output = raw(&root(p)?, args)?;
-        let bytes_read = if args.starts_with(&["cat-file", "blob"]) {
-            output.stdout.len() as u64
-        } else {
-            0
-        };
-        return Ok(ReadOutput { output, bytes_read });
-    };
-    let snapshot = session.snapshot(p)?;
-    if session.1 == ReadView::Live {
-        return session.query(&snapshot, args);
-    }
-    match args {
-        ["rev-parse", "--verify", "--end-of-options", rev] => {
-            if oid_is_full(rev.strip_suffix("^{commit}").unwrap_or(rev)) {
-                return session.query(&snapshot, args);
-            }
-            return Ok(reply(0, format!("{}\n", snapshot.resolve(rev)?)));
-        }
-        ["symbolic-ref", "-q", "HEAD"] => {
-            return Ok(match &snapshot.symbolic_head {
-                Some(name) => reply(0, format!("{name}\n")),
-                None => reply(1, String::new()),
-            });
-        }
-        ["show-ref", "--verify", rest @ ..] => {
-            let name = rest.last().ok_or_else(|| invalid("missing ref name"))?;
-            let found = snapshot.branches.iter().find(|(n, _)| n == name);
-            return Ok(match found {
-                Some((name, oid)) => reply(
-                    0,
-                    if rest.contains(&"--quiet") {
-                        String::new()
-                    } else {
-                        format!("{oid} {name}\n")
-                    },
-                ),
-                None => {
-                    let quiet = rest.contains(&"--quiet");
-                    let mut result = reply(if quiet { 1 } else { 128 }, String::new());
-                    if !quiet {
-                        result.output.stderr =
-                            format!("fatal: '{name}' - not a valid ref\n").into_bytes();
-                    }
-                    result
-                }
-            });
-        }
-        [
-            "for-each-ref",
-            "--contains",
-            commit,
-            "--format=%(refname)",
-            "refs/heads/",
-        ] => {
-            let commit = snapshot.resolve(commit)?;
-            let mut result = String::new();
-            for (name, tip) in &snapshot.branches {
-                if ancestor(p, &commit, tip)? {
-                    result.push_str(name);
-                    result.push('\n');
-                }
-            }
-            return Ok(reply(0, result));
-        }
-        ["merge-base", "--is-ancestor", older, newer] => {
-            return Ok(reply(
-                if ancestor(p, &snapshot.resolve(older)?, &snapshot.resolve(newer)?)? {
-                    0
-                } else {
-                    1
-                },
-                String::new(),
-            ));
-        }
-        _ => {}
-    }
-    let mut normalized = args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    match args {
-        ["ls-tree", "-z", revision, "--", _] => normalized[2] = snapshot.resolve(revision)?,
-        [
-            "log",
-            "--first-parent",
-            "--reverse",
-            "--format=%H",
-            revision,
-            "--",
-            _,
-        ] => normalized[4] = snapshot.resolve(revision)?,
-        ["diff", "--quiet", "HEAD", "--", ..] => normalized[2] = snapshot.head.clone(),
-        _ => {}
-    }
-    let args = normalized.iter().map(String::as_str).collect::<Vec<_>>();
-    session.query(&snapshot, &args)
+    at(p, &p.records)?.run(args)
 }
+
 fn lineage_key(p: &Project) -> Result<String> {
     serde_json::to_string(&(&p.records, &p.prefix, p.kind.as_str(), &p.retention_lineage))
         .map_err(invalid)
@@ -572,33 +610,37 @@ impl Session {
         }
         Ok(ReadOutput { output, bytes_read })
     }
-    fn task_key(&self, p: &Project, b: &super::model::Basis) -> Result<TaskKey> {
-        Ok((
-            self.snapshot(p)?.identity.clone(),
+    fn task_key(&self, snapshot: &Snapshot, b: &super::model::Basis, cap: u64) -> TaskKey {
+        (
+            snapshot.identity.clone(),
             b.commit.clone(),
             b.task_path.clone(),
-            p.attachments_max_bytes,
-        ))
+            cap,
+        )
     }
 }
-pub(crate) fn task_cached(p: &Project, b: &super::model::Basis) -> Result<Option<Task>> {
-    let Some(session) = &p.retention_reads else {
+pub(crate) fn task_cached(context: &ReadContext, b: &super::model::Basis) -> Result<Option<Task>> {
+    let Some((session, snapshot)) = &context.reads else {
         return Ok(None);
     };
     if !oid_is_full(&b.commit) {
         return Ok(None);
     }
-    let key = session.task_key(p, b)?;
+    let key = session.task_key(snapshot, b, context.attachments_max_bytes);
     Ok(session.lock()?.tasks.get(&key).cloned())
 }
-pub(crate) fn remember_task(p: &Project, b: &super::model::Basis, task: &Task) -> Result<()> {
-    let Some(session) = &p.retention_reads else {
+pub(crate) fn remember_task(
+    context: &ReadContext,
+    b: &super::model::Basis,
+    task: &Task,
+) -> Result<()> {
+    let Some((session, snapshot)) = &context.reads else {
         return Ok(());
     };
     if !oid_is_full(&b.commit) {
         return Ok(());
     }
-    let key = session.task_key(p, b)?;
+    let key = session.task_key(snapshot, b, context.attachments_max_bytes);
     let charge = serde_json::to_vec(&key)
         .map_err(invalid)?
         .len()

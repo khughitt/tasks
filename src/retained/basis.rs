@@ -102,7 +102,8 @@ pub(crate) fn task_at(
     bytes_read: &mut u64,
 ) -> Result<Task> {
     let original = super::lineage::historical_id(basis)?;
-    if let Some(task) = super::read::task_cached(project, basis)? {
+    let context = super::read::at(project, &project.records)?;
+    if let Some(task) = super::read::task_cached(&context, basis)? {
         return Ok(task);
     }
     let id = &original;
@@ -131,7 +132,7 @@ pub(crate) fn task_at(
             "Pinned task has a different id; restore the declared pairing".into(),
         ));
     }
-    super::read::remember_task(project, basis, &task)?;
+    super::read::remember_task(&context, basis, &task)?;
     Ok(task)
 }
 pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result<()> {

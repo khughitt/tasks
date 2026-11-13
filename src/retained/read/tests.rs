@@ -73,6 +73,76 @@ fn validation_read_project_remains_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Project>();
 }
+
+#[test]
+fn explicit_context_reads_selected_repository_without_repointing_owner() {
+    if isolated(
+        "retained::read::tests::explicit_context_reads_selected_repository_without_repointing_owner",
+    ) {
+        return;
+    }
+    let (_destination, owner) = fixture();
+    let (source_dir, source) = fixture();
+    std::fs::write(
+        source_dir.path().join("source-only"),
+        b"original source bytes",
+    )
+    .unwrap();
+    git(source_dir.path(), &["add", "."]);
+    git(source_dir.path(), &["commit", "-qm", "source payload"]);
+    let owner = start(&owner).unwrap();
+    let destination_records = owner.records.clone();
+    let context = at(&owner, &source.records).unwrap();
+    let commit = git(source_dir.path(), &["rev-parse", "HEAD"]);
+    let object = format!("{commit}:source-only");
+    let read = context.run(&["cat-file", "blob", &object]).unwrap();
+    assert!(read.output.status.success());
+    assert_eq!(read.output.stdout, b"original source bytes");
+    assert_eq!(context.root(), source_dir.path().canonicalize().unwrap());
+    assert_eq!(owner.records, destination_records);
+}
+
+#[test]
+fn explicit_context_does_not_reuse_equal_object_from_owner_repository() {
+    if isolated(
+        "retained::read::tests::explicit_context_does_not_reuse_equal_object_from_owner_repository",
+    ) {
+        return;
+    }
+    let (destination_dir, owner) = fixture();
+    let (source_dir, source) = fixture();
+    let owner = start(&owner).unwrap();
+    let destination = at(&owner, &owner.records).unwrap();
+    let commit = git(destination_dir.path(), &["rev-parse", "HEAD"]);
+    assert_eq!(commit, git(source_dir.path(), &["rev-parse", "HEAD"]));
+    let object = format!("{commit}:tasks/.config.toml");
+    assert!(
+        destination
+            .run(&["cat-file", "blob", &object])
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    let blob = git(source_dir.path(), &["rev-parse", "HEAD:tasks/.config.toml"]);
+    std::fs::remove_file(
+        source_dir
+            .path()
+            .join(".git/objects")
+            .join(&blob[..2])
+            .join(&blob[2..]),
+    )
+    .unwrap();
+    let context = at(&owner, &source.records).unwrap();
+    assert!(
+        !context
+            .run(&["cat-file", "blob", &object])
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+}
 #[test]
 fn validation_read_snapshot_survives_ref_changes() {
     if isolated("retained::read::tests::validation_read_snapshot_survives_ref_changes") {
@@ -1128,7 +1198,7 @@ fn validation_read_query_admission_observer() {
     let (dir, p) = fixture();
     let p = start(&p).unwrap();
     let session = p.retention_reads.as_ref().unwrap();
-    let snapshot = session.snapshot(&p).unwrap();
+    let snapshot = session.snapshot(&p.records).unwrap();
     let head = git(dir.path(), &["rev-parse", "HEAD"]);
     let socket = dir.path().join("query.sock");
     let listener = UnixListener::bind(&socket).unwrap();
