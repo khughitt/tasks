@@ -544,6 +544,7 @@ pub fn inspect(
     manifest: Option<&Path>,
     metrics: &mut Metrics,
 ) -> Result<Observation> {
+    super::test_observer::observe("inspection", &record.path)?;
     record.validate()?;
     if record.host != crate::claims::hostname() {
         return Err(invalid("inspection is restricted to the executing host"));

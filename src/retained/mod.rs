@@ -20,3 +20,5 @@ pub mod lineage;
 pub(crate) mod read;
 
 pub(crate) mod freshness;
+
+pub(crate) mod test_observer;

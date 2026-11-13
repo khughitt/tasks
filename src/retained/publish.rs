@@ -276,7 +276,7 @@ pub struct OperationCtx {
     pub metrics: super::verify::Metrics,
     pub warnings: Vec<String>,
     contexts: BTreeMap<String, crate::commands::Ctx>,
-    locks: BTreeMap<std::path::PathBuf, crate::record_commit::CommitLock>,
+    repositories: BTreeMap<String, Vec<u8>>,
 }
 struct OriginalPublication {
     basis: Basis,
@@ -333,26 +333,26 @@ pub fn open(
             return Err(Error::RetainedPublicationUnsupported("Retained publication requires Git records with [git] commit = true; use the manual immutable-publication route".into()));
         }
     }
-    let mut repositories = BTreeMap::new();
-    for ctx in contexts.values() {
-        let common = crate::record_commit::common_dir(&ctx.project.records)
-            .map_err(Error::RetainedPublicationUnsupported)?;
-        repositories
-            .entry(common)
-            .or_insert_with(|| ctx.project.records.clone());
-    }
-    let mut locks = BTreeMap::new();
+    let repositories = contexts
+        .iter()
+        .map(|(prefix, ctx)| {
+            repository_identity(&ctx.project).map(|identity| (prefix.clone(), identity))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let records = contexts
+        .values()
+        .map(|ctx| ctx.project.records.clone())
+        .collect::<Vec<_>>();
+    let guard = PhaseGuard::acquire(&records)?;
     let mut op_warnings = Vec::new();
-    for (common, records) in repositories {
-        let lock =
-            crate::record_commit::lock(&records).map_err(Error::RetainedPublicationUnsupported)?;
-        let (refused, warnings) =
-            lock.commit_paths(&records, &[], "chore(tasks): retained preflight");
-        if !refused.is_empty() {
-            return Err(Error::RetainedHistoryBlocked(refused.join("; ")));
+    for (prefix, ctx) in &contexts {
+        if repository_identity(&ctx.project)? != repositories[prefix] {
+            return Err(invalid("publication repository identity changed"));
         }
-        op_warnings.extend(warnings);
-        locks.insert(common, lock);
+    }
+    guard.recover(&records, &mut op_warnings)?;
+    for ctx in contexts.values_mut() {
+        crate::commands::revalidate_retained_ctx(ctx)?;
     }
     let mut reads = None;
     for ctx in contexts.values_mut() {
@@ -433,6 +433,7 @@ pub fn open(
         ));
     }
     metrics.track(owners);
+    drop(guard);
     Ok(OperationCtx {
         key: key.clone(),
         started,
@@ -445,7 +446,7 @@ pub fn open(
         tasks,
         warnings: op_warnings,
         contexts,
-        locks,
+        repositories,
         metrics,
     })
 }
@@ -479,6 +480,16 @@ fn preimage(
     key: &OperationKey,
     metrics: &mut super::verify::Metrics,
 ) -> Result<()> {
+    preimage_checked(project, id, input, key, metrics, None)
+}
+fn preimage_checked(
+    project: &Project,
+    id: &crate::model::TaskId,
+    input: &Basis,
+    key: &OperationKey,
+    metrics: &mut super::verify::Metrics,
+    warm: Option<&super::freshness::WarmRange>,
+) -> Result<()> {
     let original = super::basis::read_exact(project, id, input)?;
     metrics.history_bytes_read += original.history_bytes_read;
     let fresh = super::freshness::context(project)?;
@@ -490,10 +501,22 @@ fn preimage(
             published |= decode_operation(raw)?.key == *key;
         }
     }
-    if published {
+    if published && warm.is_none() {
         super::freshness::phase_unchanged(project, id, input, &current.basis, &original.task)?;
     } else {
-        super::freshness::unchanged(project, id, input, &current.basis, &original.task)?;
+        super::freshness::check(
+            project,
+            id,
+            input,
+            &current.basis,
+            &original.task,
+            if published {
+                super::freshness::ProgressPolicy::PendingNotes
+            } else {
+                super::freshness::ProgressPolicy::Exact
+            },
+            warm,
+        )?;
     }
     for (name, state) in crate::attachments::ledger(&original.task) {
         if state == crate::attachments::Ledger::Attached {
@@ -528,6 +551,28 @@ impl OperationCtx {
             .get(id)
             .ok_or_else(|| invalid("durable participant phase basis was not recovered"))
     }
+    pub(super) fn refresh_completion_target(&mut self, id: &crate::model::TaskId) -> Result<()> {
+        if !self.committed_release {
+            return Err(invalid("completion refresh requires proved sender release"));
+        }
+        let previous = &self.tasks[id];
+        let project = super::freshness::context(self.project(id))?;
+        super::read::refresh(&project)?;
+        super::basis::validate_locator(&project, id, &previous.basis)?;
+        let current = super::basis::read(&project, id, Some("HEAD"))?;
+        if current.basis.retained_ref != previous.basis.retained_ref
+            || !current.task.notes.starts_with(&previous.task.notes)
+        {
+            return Err(Error::RetainedStaleBasis(
+                "Completion target changed its branch or published operation history".into(),
+            ));
+        }
+        super::freshness::current(&project, id, &current, true)?;
+        self.metrics.history_bytes_read += current.history_bytes_read;
+        // Post-release receipts use current work, without changing the last durable P.
+        self.tasks.insert(id.clone(), current);
+        Ok(())
+    }
     pub fn revalidate(&mut self) -> Result<()> {
         self.heartbeat()?;
         for id in self.tasks.keys().cloned().collect::<Vec<_>>() {
@@ -552,11 +597,137 @@ pub fn batch(
     let result = batch_inner(ctx, id, artifacts, notes);
     if result.is_err() {
         ctx.retry = true;
-        if let Some(context) = ctx.contexts.get(&id.prefix) {
+        for context in ctx.contexts.values() {
             super::read::refresh(&context.project)?;
         }
     }
     result
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PhaseScope {
+    Target,
+    All,
+}
+
+pub(super) fn phase_scope(
+    notes: &[GeneratedNote],
+    target: &crate::model::TaskId,
+    committed_release: bool,
+) -> Result<PhaseScope> {
+    let mut previous: Option<OperationNote> = None;
+    let mut scope = PhaseScope::Target;
+    for note in notes {
+        let Some(raw) = note.text.strip_prefix("retention operation: ") else {
+            continue;
+        };
+        let operation = decode_operation(raw)?;
+        if !operation
+            .input_bases
+            .iter()
+            .any(|input| input.task == target.to_string())
+        {
+            return Err(invalid("phase target is not an operation participant"));
+        }
+        if let Some(prior) = &previous {
+            if prior.key != operation.key {
+                return Err(invalid("publication carries multiple operations"));
+            }
+            validate_transition(Some(prior), &operation)?;
+        }
+        let all = match operation.phase.as_str() {
+            "intent" => operation.input_bases.len() > 1,
+            "receiver_published" | "sender_released" | "reconciled" => true,
+            "completed" => operation.input_bases.len() > 1 && !committed_release,
+            "items_published" if operation.input_bases.len() != 1 => {
+                return Err(invalid("checkpoint phase requires one participant"));
+            }
+            "items_published" | "incomplete" | "reconcile_intent" | "reconcile_ready" => false,
+            _ => return Err(invalid("unknown publication phase")),
+        };
+        if all {
+            scope = PhaseScope::All;
+        }
+        previous = Some(operation);
+    }
+    if previous.is_none() {
+        return Err(invalid("every publication requires its phase receipt"));
+    }
+    Ok(scope)
+}
+
+fn repository_identity(project: &Project) -> Result<Vec<u8>> {
+    super::basis::git(
+        project,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--absolute-git-dir",
+            "--git-common-dir",
+        ],
+    )
+}
+
+struct PhaseGuard {
+    locks: BTreeMap<std::path::PathBuf, crate::record_commit::CommitLock>,
+}
+impl PhaseGuard {
+    fn acquire(records: &[std::path::PathBuf]) -> Result<Self> {
+        let mut repositories = BTreeMap::new();
+        for records in records {
+            let common = crate::record_commit::common_dir(records)
+                .map_err(Error::RetainedPublicationUnsupported)?;
+            repositories.entry(common).or_insert(records);
+        }
+        let mut guard = Self {
+            locks: BTreeMap::new(),
+        };
+        for (common, records) in repositories {
+            super::test_observer::observe("lock_wait", &common.to_string_lossy())?;
+            let lock = crate::record_commit::lock(records)
+                .map_err(Error::RetainedPublicationUnsupported)?;
+            guard.locks.insert(common.clone(), lock);
+            super::test_observer::observe("lock_acquired", &common.to_string_lossy())?;
+        }
+        super::test_observer::observe("guard_acquired", "")?;
+        Ok(guard)
+    }
+    fn recover(&self, records: &[std::path::PathBuf], warnings: &mut Vec<String>) -> Result<bool> {
+        let mut changed = false;
+        for records in records.iter().collect::<std::collections::BTreeSet<_>>() {
+            let common = crate::record_commit::common_dir(records)
+                .map_err(Error::RetainedPublicationUnsupported)?;
+            let lock = self
+                .locks
+                .get(&common)
+                .ok_or_else(|| invalid("publication repository changed under held lock"))?;
+            let recovery = lock
+                .recover(records)
+                .map_err(Error::RetainedHistoryBlocked)?;
+            changed |= !recovery.unstaged.is_empty();
+            if let Some(warning) = crate::record_commit::recovery_warning(&recovery.unstaged) {
+                warnings.push(warning);
+            }
+            warnings.extend(recovery.warnings);
+            let (refused, notes) =
+                lock.commit_paths(records, &[], "chore(tasks): retained preflight");
+            warnings.extend(notes);
+            if !refused.is_empty() {
+                return Err(Error::RetainedHistoryBlocked(refused.join("; ")));
+            }
+        }
+        Ok(changed)
+    }
+}
+impl Drop for PhaseGuard {
+    fn drop(&mut self) {
+        for (common, lock) in std::mem::take(&mut self.locks) {
+            drop(lock);
+            let _ = super::test_observer::observe("lock_released", &common.to_string_lossy());
+        }
+        let _ = super::test_observer::observe("guard_released", "");
+    }
 }
 
 fn batch_inner(
@@ -565,19 +736,124 @@ fn batch_inner(
     artifacts: &[NewArtifact],
     notes: &[GeneratedNote],
 ) -> Result<Published> {
+    let scope = phase_scope(notes, id, ctx.committed_release)?;
+    for note in notes {
+        if let Some(raw) = note.text.strip_prefix("retention operation: ") {
+            let operation = decode_operation(raw)?;
+            if operation.key != ctx.key
+                || operation.input_bases.len() != ctx.tasks.len()
+                || operation
+                    .input_bases
+                    .iter()
+                    .any(|input| !ctx.tasks.keys().any(|id| id.to_string() == input.task))
+            {
+                return Err(invalid(
+                    "publication operation differs from opened participants",
+                ));
+            }
+        }
+    }
+    let ids = match scope {
+        PhaseScope::Target => vec![id.clone()],
+        PhaseScope::All => ctx.tasks.keys().cloned().collect(),
+    };
+    let mut warmed = BTreeMap::new();
+    for participant in &ids {
+        let project = ctx.project(participant);
+        let input = ctx.preimage_basis(participant)?.clone();
+        let original = super::basis::read_exact(project, participant, &input)?;
+        ctx.metrics.history_bytes_read += original.history_bytes_read;
+        let project = ctx.project(participant);
+        let current = super::basis::read(project, participant, Some("HEAD"))?;
+        let mut published = false;
+        for note in &original.task.notes {
+            if let Some(raw) = note.text.strip_prefix("retention operation: ") {
+                published |= decode_operation(raw)?.key == ctx.key;
+            }
+        }
+        let policy = if published {
+            super::freshness::ProgressPolicy::PendingNotes
+        } else {
+            super::freshness::ProgressPolicy::Exact
+        };
+        let warm = super::freshness::warm(
+            project,
+            participant,
+            &input,
+            &current.basis,
+            &original.task,
+            policy,
+        )?;
+        if let Some(warm) = warm {
+            warmed.insert(participant.clone(), warm);
+        }
+    }
+    super::test_observer::observe("prechecked", &id.to_string())?;
+    let records = ids
+        .iter()
+        .map(|id| ctx.project(id).records.clone())
+        .collect::<Vec<_>>();
+    let guard = PhaseGuard::acquire(&records)?;
+    for participant in &ids {
+        if repository_identity(ctx.project(participant))? != ctx.repositories[&participant.prefix] {
+            return Err(invalid("publication repository identity changed"));
+        }
+    }
+    if guard.recover(&records, &mut ctx.warnings)? {
+        warmed.clear();
+        ctx.retry = true;
+    }
+    for participant in &ids {
+        let context = ctx
+            .contexts
+            .get_mut(&participant.prefix)
+            .expect("participant context");
+        let old = context.project.clone();
+        crate::commands::revalidate_retained_ctx(context)?;
+        super::freshness::context(&old)?;
+        context.project = super::read::inherit(&super::read::live(&old), context.project.clone())?;
+        if repository_identity(&context.project)? != ctx.repositories[&participant.prefix] {
+            return Err(invalid("publication repository identity changed"));
+        }
+        super::read::refresh(&context.project)?;
+        crate::commands::retained_owner(context, participant)?;
+        let project = context.project.clone();
+        let input = ctx.preimage_basis(participant)?.clone();
+        preimage_checked(
+            &project,
+            participant,
+            &input,
+            &ctx.key,
+            &mut ctx.metrics,
+            warmed.get(participant),
+        )?;
+        if project.read_task(participant)? != ctx.tasks[participant].task {
+            return Err(Error::RetainedStaleBasis(
+                "Participant changed between retained phases".into(),
+            ));
+        }
+    }
+    batch_guarded(ctx, id, artifacts, notes, &guard)
+}
+
+fn batch_guarded(
+    ctx: &mut OperationCtx,
+    id: &crate::model::TaskId,
+    artifacts: &[NewArtifact],
+    notes: &[GeneratedNote],
+    guard: &PhaseGuard,
+) -> Result<Published> {
     let expected = &ctx
         .tasks
         .get(id)
         .ok_or_else(|| invalid("publication names a nonparticipant"))?
         .task;
-    let input = ctx.preimage_basis(id)?.clone();
     let context = ctx
         .contexts
         .get_mut(&id.prefix)
         .expect("participant context");
     crate::commands::retained_owner(context, id)?;
     crate::attachments::check_storage(&context.project, id)?;
-    preimage(&context.project, id, &input, &ctx.key, &mut ctx.metrics)?;
     let locked_tip = super::basis::resolve(&context.project, "HEAD")?;
     let mut task = context.project.read_task(id)?;
     if task != *expected {
@@ -634,7 +910,14 @@ fn batch_inner(
                 .and_then(|s| decode_operation(s).ok())
                 .filter(|n| n.key == ctx.key)
         });
-        validate_transition(previous.as_ref(), &operation)?;
+        let mut previous = previous;
+        for generated in notes {
+            if let Some(raw) = generated.text.strip_prefix("retention operation: ") {
+                let note = decode_operation(raw)?;
+                validate_transition(previous.as_ref(), &note)?;
+                previous = Some(note);
+            }
+        }
     }
 
     for artifact in artifacts {
@@ -764,7 +1047,7 @@ fn batch_inner(
         .unwrap_or_default();
     let common = crate::record_commit::common_dir(&context.project.records)
         .map_err(Error::RetainedPublicationUnsupported)?;
-    let (refused, warnings) = ctx
+    let (refused, warnings) = guard
         .locks
         .get(&common)
         .ok_or_else(|| invalid("publication repository changed under held lock"))?
@@ -819,6 +1102,9 @@ fn batch_inner(
         phase: operation.phase,
         basis: pinned.basis.clone(),
     };
+    if publication.phase == "sender_released" {
+        ctx.committed_release = true;
+    }
     if may_seed && reused.is_none() && pinned.basis.commit != locked_tip {
         let parents = super::basis::git(
             &context.project,
@@ -854,6 +1140,7 @@ fn batch_inner(
     }
     ctx.phase_bases.insert(id.clone(), pinned.basis.clone());
     ctx.tasks.insert(id.clone(), pinned);
+    super::test_observer::observe("readback", &publication.phase)?;
     Ok(Published {
         publication,
         sources,
@@ -1939,7 +2226,7 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
         let extra = tempfile::tempdir().unwrap();
-        let second = if test.ends_with("same_git_lock") {
+        let second = if test.ends_with("same_git_lock") || test.contains("retained_phase_scope") {
             git(home.path(), extra.path(), &["init", "-qb", "main"]);
             assert_repo(home.path(), extra.path());
             run_cli(
@@ -1996,7 +2283,7 @@ mod tests {
             }
             c
         };
-        if second.is_some() {
+        if test.ends_with("same_git_lock") {
             let mut children = vec![
                 command()
                     .env("TASKS_PUBLICATION_REVERSE", "0")
@@ -3063,7 +3350,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ctx.contexts.len(), 1);
-        assert_eq!(ctx.locks.len(), 1);
+        assert_eq!(
+            ctx.repositories
+                .values()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            1
+        );
         let before = super::super::basis::resolve(&p, "HEAD").unwrap();
         let result = batch(&mut ctx, &id, &[a], &[n]);
         if case == "warning" {
@@ -3148,9 +3441,28 @@ mod tests {
             std::sync::Arc::new(crate::config::HostConfig::default()),
         )
         .unwrap();
-        let (_, a, n) = example(&id);
+        let (_, a, mut n) = example(&id);
+        let mut note =
+            decode_operation(n.text.strip_prefix("retention operation: ").unwrap()).unwrap();
+        let second_id = crate::model::TaskId::parse(&second).unwrap();
+        if !note.input_bases.iter().any(|input| input.task == second) {
+            note.input_bases.push(Input {
+                task: second.clone(),
+                basis: ctx.tasks[&second_id].basis.clone(),
+            });
+        }
+        n.text = format!(
+            "retention operation: {}",
+            serde_json::to_string(&note).unwrap()
+        );
         assert_eq!(ctx.contexts.len(), 2);
-        assert_eq!(ctx.locks.len(), 1);
+        assert_eq!(
+            ctx.repositories
+                .values()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            1
+        );
         let path = dir.join("fam/unrelated.txt");
         if !path.exists() {
             std::fs::write(&path, "unrelated").unwrap();
@@ -3195,5 +3507,460 @@ mod tests {
             "retained::publish::tests::retained_publish_receipt_without_ledger",
             "missing_ledger",
         )
+    }
+    fn generated(operation: &OperationNote, outputs: PhaseOutputs) -> GeneratedNote {
+        let mut operation = operation.clone();
+        operation.phase = outputs.phase().into();
+        operation.outputs = outputs;
+        GeneratedNote {
+            at: operation.at.clone(),
+            text: format!(
+                "retention operation: {}",
+                serde_json::to_string(&operation).unwrap()
+            ),
+        }
+    }
+    fn pair(
+        ctx: &OperationCtx,
+        id: &crate::model::TaskId,
+    ) -> (NewArtifact, OperationNote, crate::model::TaskId) {
+        let (_, artifact, note) = example(id);
+        let mut operation =
+            decode_operation(note.text.strip_prefix("retention operation: ").unwrap()).unwrap();
+        let peer = ctx.tasks.keys().find(|peer| *peer != id).unwrap().clone();
+        operation.input_bases.push(Input {
+            task: peer.to_string(),
+            basis: ctx.tasks[&peer].basis.clone(),
+        });
+        (artifact, operation, peer)
+    }
+    #[test]
+    fn retained_phase_scope_failure_and_reconcile() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_phase_scope_failure_and_reconcile")
+        else {
+            return;
+        };
+        let (key, _, _) = example(&id);
+        let second = std::env::var("TASKS_PUBLICATION_SECOND").unwrap();
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string(), second],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let (artifact, operation, peer) = pair(&ctx, &id);
+        batch(
+            &mut ctx,
+            &id,
+            &[artifact],
+            &[generated(&operation, PhaseOutputs::Intent(Empty {}))],
+        )
+        .unwrap();
+        let project = ctx.project(&peer);
+        let path = project.task_path(&peer);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, raw.replace("Second participant", "Changed peer")).unwrap();
+        let incomplete = || {
+            generated(
+                &operation,
+                PhaseOutputs::Incomplete(IncompleteOutput {
+                    attempt: 1,
+                    previous_phase: "intent".into(),
+                    checkpoint: None,
+                    action: "Original peer failure".into(),
+                }),
+            )
+        };
+        let receiver = generated(
+            &operation,
+            PhaseOutputs::Receiver(ReceiverOutput {
+                items: vec![],
+                artifacts: vec![],
+                mapping: vec![],
+            }),
+        );
+        assert!(
+            batch(&mut ctx, &id, &[], &[receiver]).is_err(),
+            "receiver checks both participants"
+        );
+        let release = generated(
+            &operation,
+            PhaseOutputs::Sender(SenderOutput {
+                items: vec![],
+                receiver_basis: ctx.tasks[&peer].basis.clone(),
+                mapping: vec![],
+            }),
+        );
+        assert!(
+            batch(&mut ctx, &id, &[], &[release]).is_err(),
+            "release checks both participants"
+        );
+        batch(&mut ctx, &id, &[], &[incomplete()]).expect("stale peer cannot prevent incomplete");
+        std::fs::write(&path, "malformed peer record\n").unwrap();
+        let directive = operation.request.clone();
+        let recon = generated(
+            &operation,
+            PhaseOutputs::ReconcileIntent(ReconcileIntentOutput {
+                directive: directive.clone(),
+                reconciliation_id: "b".repeat(32),
+            }),
+        );
+        batch(&mut ctx, &id, &[], &[recon]).expect("reconcile intent checks target only");
+        let ready = generated(
+            &operation,
+            PhaseOutputs::Ready(ReadyOutput {
+                directive: directive.clone(),
+                reconciliation_id: "b".repeat(32),
+                items: vec![],
+                unresolved: vec![],
+            }),
+        );
+        batch(&mut ctx, &id, &[], &[ready]).expect("ready checks target only");
+        let terminal = generated(
+            &operation,
+            PhaseOutputs::Reconciled(ReconciledOutput {
+                directive,
+                reconciliation_id: "b".repeat(32),
+                ready_bases: vec![],
+                unresolved: vec![],
+            }),
+        );
+        assert!(
+            batch(&mut ctx, &id, &[], &[terminal]).is_err(),
+            "terminal checks every participant"
+        );
+        let path = ctx.project(&id).task_path(&id);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, raw.replace("Retained fixture", "Changed target")).unwrap();
+        assert!(
+            batch(&mut ctx, &id, &[], &[incomplete()]).is_err(),
+            "stale target refuses incomplete"
+        );
+    }
+    #[test]
+    fn retained_phase_scope_release_readback() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_phase_scope_release_readback")
+        else {
+            return;
+        };
+        let (key, _, _) = example(&id);
+        let second = std::env::var("TASKS_PUBLICATION_SECOND").unwrap();
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string(), second],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let (artifact, operation, peer) = pair(&ctx, &id);
+        batch(
+            &mut ctx,
+            &id,
+            &[artifact],
+            &[generated(&operation, PhaseOutputs::Intent(Empty {}))],
+        )
+        .unwrap();
+        let release = generated(
+            &operation,
+            PhaseOutputs::Sender(SenderOutput {
+                items: vec![],
+                receiver_basis: ctx.tasks[&peer].basis.clone(),
+                mapping: vec![],
+            }),
+        );
+        let hook = dir.join(".git/hooks/pre-commit");
+        let original_hook = std::fs::read(&hook).unwrap();
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        assert!(
+            batch(
+                &mut ctx,
+                &id,
+                &[],
+                &[GeneratedNote {
+                    at: release.at.clone(),
+                    text: release.text.clone()
+                }]
+            )
+            .is_err()
+        );
+        assert!(
+            !ctx.committed_release,
+            "failed readback must not prove release"
+        );
+        // Retry the same saved phase: it becomes proven only after exact readback.
+        let working = ctx.project(&id).read_task(&id).unwrap();
+        ctx.tasks.get_mut(&id).unwrap().task = working;
+        std::fs::write(&hook, original_hook).unwrap();
+        batch(&mut ctx, &id, &[], &[release]).unwrap();
+        assert!(
+            ctx.committed_release,
+            "successful release readback applies in-process"
+        );
+        let path = ctx.project(&peer).task_path(&peer);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            raw.replace("Second participant", "Changed peer after release"),
+        )
+        .unwrap();
+        let completed = generated(
+            &operation,
+            PhaseOutputs::Completed(CompletedOutput {
+                outcome: "transferred".into(),
+                publications: vec![],
+                checkpoint: None,
+            }),
+        );
+        batch(&mut ctx, &id, &[], &[completed])
+            .expect("proved release completion checks only its target");
+    }
+    #[test]
+    fn retained_phase_scope_release_failed_readback() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_phase_scope_release_failed_readback")
+        else {
+            return;
+        };
+        let (key, _, _) = example(&id);
+        let second = std::env::var("TASKS_PUBLICATION_SECOND").unwrap();
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string(), second],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let (artifact, operation, peer) = pair(&ctx, &id);
+        batch(
+            &mut ctx,
+            &id,
+            &[artifact],
+            &[generated(&operation, PhaseOutputs::Intent(Empty {}))],
+        )
+        .unwrap();
+        let before = ctx.phase_bases[&id].clone();
+        let release = generated(
+            &operation,
+            PhaseOutputs::Sender(SenderOutput {
+                items: vec![],
+                receiver_basis: ctx.tasks[&peer].basis.clone(),
+                mapping: vec![],
+            }),
+        );
+        std::fs::write(dir.join(".git/hooks/pre-commit"), format!("#!/bin/sh\nprintf '%s\\n' '- 2026-11-03T00:00:01Z (fixture): hook changed readback' >> 'tasks/{id}.md'\ngit add -- 'tasks/{id}.md'\n")).unwrap();
+        assert!(batch(&mut ctx, &id, &[], &[release]).is_err());
+        assert!(
+            !ctx.committed_release,
+            "failed exact readback cannot prove release"
+        );
+        assert_eq!(
+            ctx.phase_bases[&id], before,
+            "failed exact readback cannot advance P"
+        );
+    }
+    #[test]
+    fn retained_phase_scope_table_and_mixed_recovery() {
+        let id = crate::model::TaskId::parse("sci-000001").unwrap();
+        let basis = Basis {
+            commit: "a".repeat(40),
+            retained_ref: "refs/heads/main".into(),
+            project: "sci".into(),
+            layout: "in-tree".into(),
+            records_subdir: ".".into(),
+            task_path: "tasks/sci-000001.md".into(),
+        };
+        let operation = OperationNote {
+            version: 1,
+            key: OperationKey {
+                coordinator: id.to_string(),
+                operation_id: "a".repeat(32),
+            },
+            phase: "intent".into(),
+            request: ArtifactLocator::Attachment {
+                task: id.to_string(),
+                name: "retained-op-a.request.json".into(),
+                basis: None,
+                sha256: "a".repeat(64),
+            },
+            input_bases: vec![
+                Input {
+                    task: id.to_string(),
+                    basis: basis.clone(),
+                },
+                Input {
+                    task: "sci-000002".into(),
+                    basis: Basis {
+                        task_path: "tasks/sci-000002.md".into(),
+                        ..basis.clone()
+                    },
+                },
+            ],
+            host: "fixture".into(),
+            at: "2026-11-03T00:00:00Z".into(),
+            observer: None,
+            outputs: PhaseOutputs::Intent(Empty {}),
+            diagnostics: vec![],
+        };
+        let directive = operation.request.clone();
+        let cases = vec![
+            (PhaseOutputs::Intent(Empty {}), PhaseScope::All),
+            (
+                PhaseOutputs::Receiver(ReceiverOutput {
+                    items: vec![],
+                    artifacts: vec![],
+                    mapping: vec![],
+                }),
+                PhaseScope::All,
+            ),
+            (
+                PhaseOutputs::Sender(SenderOutput {
+                    items: vec![],
+                    receiver_basis: basis.clone(),
+                    mapping: vec![],
+                }),
+                PhaseScope::All,
+            ),
+            (
+                PhaseOutputs::Incomplete(IncompleteOutput {
+                    attempt: 1,
+                    previous_phase: "intent".into(),
+                    checkpoint: None,
+                    action: "preserve".into(),
+                }),
+                PhaseScope::Target,
+            ),
+            (
+                PhaseOutputs::ReconcileIntent(ReconcileIntentOutput {
+                    directive: directive.clone(),
+                    reconciliation_id: "b".repeat(32),
+                }),
+                PhaseScope::Target,
+            ),
+            (
+                PhaseOutputs::Ready(ReadyOutput {
+                    directive: directive.clone(),
+                    reconciliation_id: "b".repeat(32),
+                    items: vec![],
+                    unresolved: vec![],
+                }),
+                PhaseScope::Target,
+            ),
+            (
+                PhaseOutputs::Reconciled(ReconciledOutput {
+                    directive,
+                    reconciliation_id: "b".repeat(32),
+                    ready_bases: vec![],
+                    unresolved: vec![],
+                }),
+                PhaseScope::All,
+            ),
+        ];
+        for (outputs, expected) in cases {
+            assert_eq!(
+                phase_scope(&[generated(&operation, outputs)], &id, false).unwrap(),
+                expected
+            );
+        }
+        let mut checkpoint = operation.clone();
+        checkpoint.input_bases.truncate(1);
+        for outputs in [
+            PhaseOutputs::Intent(Empty {}),
+            PhaseOutputs::Items(ItemsOutput {
+                items: vec![],
+                artifacts: vec![],
+                resolutions: vec![],
+            }),
+            PhaseOutputs::Completed(CompletedOutput {
+                outcome: "no_local_items".into(),
+                publications: vec![],
+                checkpoint: None,
+            }),
+        ] {
+            assert_eq!(
+                phase_scope(&[generated(&checkpoint, outputs)], &id, false).unwrap(),
+                PhaseScope::Target
+            );
+        }
+        let intent = generated(&operation, PhaseOutputs::Intent(Empty {}));
+        let incomplete = generated(
+            &operation,
+            PhaseOutputs::Incomplete(IncompleteOutput {
+                attempt: 1,
+                previous_phase: "intent".into(),
+                checkpoint: None,
+                action: "preserve".into(),
+            }),
+        );
+        let completed = generated(
+            &operation,
+            PhaseOutputs::Completed(CompletedOutput {
+                outcome: "transferred".into(),
+                publications: vec![],
+                checkpoint: None,
+            }),
+        );
+        assert_eq!(
+            phase_scope(&[intent, incomplete], &id, true).unwrap(),
+            PhaseScope::All,
+            "mixed recovery unions every phase"
+        );
+        assert_eq!(
+            phase_scope(&[completed], &id, false).unwrap(),
+            PhaseScope::All
+        );
+        let completed = generated(
+            &operation,
+            PhaseOutputs::Completed(CompletedOutput {
+                outcome: "transferred".into(),
+                publications: vec![],
+                checkpoint: None,
+            }),
+        );
+        assert_eq!(
+            phase_scope(&[completed], &id, true).unwrap(),
+            PhaseScope::Target
+        );
+        let mut foreign = operation.clone();
+        foreign.key.operation_id = "b".repeat(32);
+        assert!(
+            phase_scope(
+                &[
+                    generated(&operation, PhaseOutputs::Intent(Empty {})),
+                    generated(
+                        &foreign,
+                        PhaseOutputs::Incomplete(IncompleteOutput {
+                            attempt: 1,
+                            previous_phase: "intent".into(),
+                            checkpoint: None,
+                            action: "preserve".into()
+                        })
+                    )
+                ],
+                &id,
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            phase_scope(
+                &[
+                    generated(
+                        &operation,
+                        PhaseOutputs::Completed(CompletedOutput {
+                            outcome: "transferred".into(),
+                            publications: vec![],
+                            checkpoint: None
+                        })
+                    ),
+                    generated(&operation, PhaseOutputs::Intent(Empty {}))
+                ],
+                &id,
+                false
+            )
+            .is_err()
+        );
     }
 }
