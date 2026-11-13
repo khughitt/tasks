@@ -1697,6 +1697,161 @@ mod tests {
         assert!(out.status.success(), "{out:?}");
         None
     }
+    #[test]
+    fn retained_freshness_commit_range() {
+        let Some((dir, id)) = fixture("retained::publish::tests::retained_freshness_commit_range")
+        else {
+            return;
+        };
+        // This predicate fixture deliberately commits raw trees, not attachment ledgers.
+        std::fs::remove_file(dir.join(".git/hooks/pre-commit")).unwrap();
+        let home = std::env::var_os("HOME").unwrap();
+        let home = Path::new(&home);
+        let project = Project::open(&dir).unwrap();
+        let files = crate::attachments::task_dir(&project, &id);
+        std::fs::create_dir_all(&files).unwrap();
+        std::fs::write(files.join("evidence"), "original").unwrap();
+        git(home, &dir, &["add", "."]);
+        git(home, &dir, &["commit", "-qm", "protected file"]);
+        let pinned = super::super::basis::read(&project, &id, None).unwrap();
+        let from = &pinned.basis;
+        let check = || {
+            let mut to = from.clone();
+            to.commit = super::super::basis::resolve(&project, "HEAD").unwrap();
+            super::super::freshness::unchanged(&project, &id, from, &to, &pinned.task)
+        };
+        assert!(check().is_ok(), "same basis");
+        for case in [
+            "unrelated",
+            "record_bytes",
+            "attachment_content",
+            "attachment_mode",
+            "attachment_add",
+            "attachment_delete",
+            "archive_change",
+            "ABA",
+            "merged_side_edit",
+            "merge_other_parent",
+        ] {
+            git(home, &dir, &["reset", "--hard", &from.commit]);
+            git(home, &dir, &["clean", "-fd"]);
+            let path = match case {
+                "unrelated" => dir.join("README.md"),
+                "record_bytes" => project.task_path(&id),
+                "attachment_add" => files.join("extra"),
+                "archive_change" => files.join(format!("notes-{}.notes", "a".repeat(64))),
+                _ => files.join("evidence"),
+            };
+            if case == "attachment_delete" {
+                std::fs::remove_file(&path).unwrap();
+            } else if case == "attachment_mode" {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            } else if case == "merged_side_edit" || case == "merge_other_parent" {
+                git(home, &dir, &["checkout", "-B", "side"]);
+                std::fs::write(&path, "changed").unwrap();
+                git(home, &dir, &["add", "."]);
+                git(home, &dir, &["commit", "-qm", "side edit"]);
+                if case == "merged_side_edit" {
+                    std::fs::write(&path, "original").unwrap();
+                    git(home, &dir, &["add", "."]);
+                    git(home, &dir, &["commit", "-qm", "side revert"]);
+                }
+                git(home, &dir, &["checkout", "main"]);
+                std::fs::write(dir.join("README.md"), "unrelated main").unwrap();
+                git(home, &dir, &["add", "."]);
+                git(home, &dir, &["commit", "-qm", "main edit"]);
+                git(
+                    home,
+                    &dir,
+                    &[
+                        "merge",
+                        "--no-ff",
+                        "-s",
+                        "ours",
+                        "side",
+                        "-m",
+                        "merge retaining main",
+                    ],
+                );
+            } else {
+                let old = std::fs::read(&path).unwrap_or_default();
+                let mut bytes = old.clone();
+                bytes.extend_from_slice(b"\n");
+                std::fs::write(&path, bytes).unwrap();
+                if case == "ABA" {
+                    git(home, &dir, &["add", "."]);
+                    git(home, &dir, &["commit", "-qm", "intervening edit"]);
+                    std::fs::write(&path, old).unwrap();
+                }
+            }
+            if !case.starts_with("merge") {
+                git(home, &dir, &["add", "."]);
+                git(home, &dir, &["commit", "-qm", case]);
+            }
+            let result = check();
+            if case == "unrelated" {
+                assert!(result.is_ok(), "{case}: {result:?}");
+            } else {
+                assert!(
+                    matches!(result, Err(Error::RetainedStaleBasis(_))),
+                    "{case}: {result:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn retained_freshness_refusal() {
+        let Some((dir, id)) = fixture("retained::publish::tests::retained_freshness_refusal")
+        else {
+            return;
+        };
+        let home = std::env::var_os("HOME").unwrap();
+        let home = Path::new(&home);
+        let project = Project::open(&dir).unwrap();
+        let pinned = super::super::basis::read(&project, &id, None).unwrap();
+        for field in ["branch", "project", "layout", "subdir", "path", "missing"] {
+            let mut to = pinned.basis.clone();
+            match field {
+                "branch" => to.retained_ref = "refs/heads/other".into(),
+                "project" => to.project = "other".into(),
+                "layout" => to.layout = "detached".into(),
+                "subdir" => to.records_subdir = "other".into(),
+                "path" => to.task_path = "tasks/sci-000002.md".into(),
+                "missing" => to.commit = "0".repeat(40),
+                _ => unreachable!(),
+            }
+            assert!(
+                super::super::freshness::unchanged(&project, &id, &pinned.basis, &to, &pinned.task)
+                    .is_err(),
+                "{field}"
+            );
+        }
+        git(home, &dir, &["checkout", "-qb", "divergent"]);
+        std::fs::write(dir.join("side"), "side").unwrap();
+        git(home, &dir, &["add", "."]);
+        git(home, &dir, &["commit", "-qm", "side"]);
+        let mut from = pinned.basis.clone();
+        from.commit = super::super::basis::resolve(&project, "HEAD").unwrap();
+        git(home, &dir, &["checkout", "main"]);
+        assert!(
+            super::super::freshness::unchanged(&project, &id, &from, &pinned.basis, &pinned.task)
+                .is_err()
+        );
+        std::fs::rename(dir.join(".git"), dir.join("hidden-git")).unwrap();
+        assert!(
+            super::super::freshness::unchanged(
+                &project,
+                &id,
+                &pinned.basis,
+                &pinned.basis,
+                &pinned.task
+            )
+            .is_err()
+        );
+    }
+
     fn example(id: &crate::model::TaskId) -> (OperationKey, NewArtifact, GeneratedNote) {
         let key = OperationKey {
             coordinator: id.to_string(),
