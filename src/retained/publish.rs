@@ -56,7 +56,7 @@ pub(crate) fn pending_here(project: &Project, task: &Task) -> Result<Option<Pend
     }
     one_pending(live.into_iter())
 }
-fn reserved(text: &str) -> bool {
+pub(super) fn reserved(text: &str) -> bool {
     [
         "retained:",
         "retention operation:",
@@ -446,20 +446,6 @@ pub fn stop(boundary: &str) {
         std::process::exit(86)
     }
 }
-fn commuting_progress(old: &Task, new: &Task) -> bool {
-    let mut allowed = old.clone();
-    allowed.updated = new.updated.clone();
-    allowed.owner = new.owner.clone();
-    allowed.complexity = new.complexity;
-    allowed.notes = new.notes.clone();
-    allowed == *new
-        && new.notes.len() > old.notes.len()
-        && new.notes.starts_with(&old.notes)
-        && !new.notes[old.notes.len()..]
-            .iter()
-            .any(|note| reserved(&note.text))
-}
-
 fn preimage(
     project: &Project,
     id: &crate::model::TaskId,
@@ -479,14 +465,7 @@ fn preimage(
         }
     }
     if published {
-        super::freshness::phase_unchanged(
-            project,
-            id,
-            input,
-            &current.basis,
-            &original.task,
-            commuting_progress,
-        )?;
+        super::freshness::phase_unchanged(project, id, input, &current.basis, &original.task)?;
     } else {
         super::freshness::unchanged(project, id, input, &current.basis, &original.task)?;
     }

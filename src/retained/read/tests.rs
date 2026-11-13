@@ -685,3 +685,432 @@ fn validation_read_exact_queries_and_errors() {
         assert!(!cacheable(&args), "{args:?}");
     }
 }
+
+fn range_fixture() -> (
+    tempfile::TempDir,
+    Project,
+    crate::model::TaskId,
+    basis::PinnedTask,
+) {
+    let (dir, p) = fixture();
+    let raw = "---\nid: sci-000001\ntitle: Tiny\nstatus: idea\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n";
+    std::fs::write(dir.path().join("tasks/sci-000001.md"), raw).unwrap();
+    std::fs::create_dir_all(dir.path().join("tasks/files/sci-000001")).unwrap();
+    std::fs::write(
+        dir.path().join("tasks/files/sci-000001/evidence"),
+        "original",
+    )
+    .unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "participant"]);
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let pinned = basis::read(&p, &id, None).unwrap();
+    (dir, start_live(&p).unwrap(), id, pinned)
+}
+fn range_tip(p: &Project, b: &crate::retained::model::Basis) -> crate::retained::model::Basis {
+    let mut b = b.clone();
+    b.commit = basis::resolve(p, "HEAD").unwrap();
+    b
+}
+fn commit_file(dir: &Path, path: &str, bytes: &str) {
+    std::fs::write(dir.join(path), bytes).unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "change"]);
+}
+#[test]
+fn retained_range_warm_delta() {
+    if isolated("retained::read::tests::retained_range_warm_delta") {
+        return;
+    }
+    use crate::retained::freshness::{ProgressPolicy::Exact, check, warm};
+    let (dir, p, id, pinned) = range_fixture();
+    commit_file(dir.path(), "unrelated", "H0");
+    let h0 = range_tip(&p, &pinned.basis);
+    let proof = warm(&p, &id, &pinned.basis, &h0, &pinned.task, Exact)
+        .unwrap()
+        .unwrap();
+    for advance in [false, true] {
+        if advance {
+            commit_file(dir.path(), "unrelated", "H");
+        }
+        let h = range_tip(&p, &h0);
+        let diff_starts = starts("diff");
+        let warm_verdict = check(
+            &p,
+            &id,
+            &pinned.basis,
+            &h,
+            &pinned.task,
+            Exact,
+            Some(&proof),
+        )
+        .map_err(|e| e.to_string());
+        let new_diffs = starts("diff") - diff_starts;
+        // Same-tip endpoints are already immutable cached queries; an advance checks its endpoint and new edge.
+        assert_eq!(new_diffs, if advance { 2 } else { 0 });
+        let full_verdict = check(
+            &Project::open(dir.path()).unwrap(),
+            &id,
+            &pinned.basis,
+            &h,
+            &pinned.task,
+            Exact,
+            None,
+        )
+        .map_err(|e| e.to_string());
+        assert_eq!(warm_verdict, full_verdict);
+        assert!(warm_verdict.is_ok());
+        let range_starts = starts("rev-list");
+        check(
+            &p,
+            &id,
+            &pinned.basis,
+            &h,
+            &pinned.task,
+            Exact,
+            Some(&proof),
+        )
+        .unwrap();
+        assert_eq!(
+            starts("rev-list"),
+            range_starts,
+            "full-OID delta enumeration is reusable"
+        );
+    }
+    let raw = Project::open(dir.path()).unwrap();
+    assert!(
+        warm(&raw, &id, &pinned.basis, &h0, &pinned.task, Exact)
+            .unwrap()
+            .is_none()
+    );
+    p.retention_reads
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .max_entries = 0;
+    assert!(
+        warm(&p, &id, &pinned.basis, &h0, &pinned.task, Exact)
+            .unwrap()
+            .is_none()
+    );
+    check(
+        &p,
+        &id,
+        &pinned.basis,
+        &range_tip(&p, &h0),
+        &pinned.task,
+        Exact,
+        None,
+    )
+    .unwrap();
+    commit_file(dir.path(), "tasks/files/sci-000001/evidence", "changed");
+    assert!(
+        warm(
+            &p,
+            &id,
+            &pinned.basis,
+            &range_tip(&p, &h0),
+            &pinned.task,
+            Exact
+        )
+        .is_err(),
+        "saturation must not turn failed validation into None"
+    );
+}
+#[test]
+fn retained_range_warm_merge_edges() {
+    if isolated("retained::read::tests::retained_range_warm_merge_edges") {
+        return;
+    }
+    use crate::retained::freshness::{ProgressPolicy::Exact, check, warm};
+    let (dir, p, id, pinned) = range_fixture();
+    commit_file(dir.path(), "unrelated", "H0");
+    let h0 = range_tip(&p, &pinned.basis);
+    let proof = warm(&p, &id, &pinned.basis, &h0, &pinned.task, Exact)
+        .unwrap()
+        .unwrap();
+    // Every parent edge counts, even when that parent is excluded as an old H0 ancestor.
+    let old_parent = git(
+        dir.path(),
+        &["rev-parse", &format!("{}^", pinned.basis.commit)],
+    );
+    let tree = git(
+        dir.path(),
+        &["rev-parse", &format!("{}^{{tree}}", h0.commit)],
+    );
+    let merge = git(
+        dir.path(),
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            &h0.commit,
+            "-p",
+            &old_parent,
+            "-m",
+            "boundary parent",
+        ],
+    );
+    git(dir.path(), &["reset", "--hard", &merge]);
+    let boundary = range_tip(&p, &h0);
+    let warm_verdict = check(
+        &p,
+        &id,
+        &pinned.basis,
+        &boundary,
+        &pinned.task,
+        Exact,
+        Some(&proof),
+    )
+    .map_err(|e| e.to_string());
+    let full_verdict = check(&p, &id, &pinned.basis, &boundary, &pinned.task, Exact, None)
+        .map_err(|e| e.to_string());
+    assert_eq!(warm_verdict, full_verdict);
+    assert!(
+        warm_verdict.is_err(),
+        "old parent at the boundary must still be compared"
+    );
+    for revert in [false, true] {
+        git(dir.path(), &["reset", "--hard", &h0.commit]);
+        git(
+            dir.path(),
+            &["checkout", "-B", "side", &pinned.basis.commit],
+        );
+        commit_file(dir.path(), "tasks/files/sci-000001/evidence", "changed");
+        if revert {
+            commit_file(dir.path(), "tasks/files/sci-000001/evidence", "original");
+        }
+        git(dir.path(), &["checkout", "main"]);
+        git(
+            dir.path(),
+            &["merge", "--no-ff", "-s", "ours", "side", "-m", "merge"],
+        );
+        let h = range_tip(&p, &h0);
+        let warm_verdict = check(
+            &p,
+            &id,
+            &pinned.basis,
+            &h,
+            &pinned.task,
+            Exact,
+            Some(&proof),
+        )
+        .map_err(|e| e.to_string());
+        let full_verdict =
+            check(&p, &id, &pinned.basis, &h, &pinned.task, Exact, None).map_err(|e| e.to_string());
+        assert_eq!(warm_verdict, full_verdict);
+        assert!(
+            warm_verdict.is_err(),
+            "newly reachable side history and boundary parents must be checked"
+        );
+    }
+}
+#[test]
+fn retained_range_warm_invalidation() {
+    if isolated("retained::read::tests::retained_range_warm_invalidation") {
+        return;
+    }
+    use crate::retained::freshness::{
+        ProgressPolicy::{Exact, PendingNotes},
+        check, warm,
+    };
+    let (dir, p, id, pinned) = range_fixture();
+    let h0 = pinned.basis.clone();
+    let proof = warm(&p, &id, &h0, &h0, &pinned.task, Exact)
+        .unwrap()
+        .unwrap();
+    for path in ["tasks/sci-000001.md", "tasks/files/sci-000001/evidence"] {
+        let original = std::fs::read_to_string(dir.path().join(path)).unwrap();
+        commit_file(dir.path(), path, &format!("{original}\n"));
+        commit_file(dir.path(), path, &original);
+        let h = range_tip(&p, &h0);
+        assert!(
+            check(&p, &id, &h0, &h, &pinned.task, Exact, Some(&proof)).is_err(),
+            "ABA {path}"
+        );
+        git(dir.path(), &["reset", "--hard", &h0.commit]);
+    }
+    use std::os::unix::fs::PermissionsExt;
+    for path in ["tasks/sci-000001.md", "tasks/files/sci-000001/evidence"] {
+        std::fs::set_permissions(
+            dir.path().join(path),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-qm", "mode change"]);
+        assert!(
+            check(
+                &p,
+                &id,
+                &h0,
+                &range_tip(&p, &h0),
+                &pinned.task,
+                PendingNotes,
+                Some(&proof)
+            )
+            .is_err()
+        );
+        git(dir.path(), &["reset", "--hard", &h0.commit]);
+    }
+    let mut appended = pinned.task.clone();
+    appended.notes.push(crate::model::Note {
+        at: "2026-11-10T00:00:00Z".into(),
+        by: "fixture".into(),
+        text: "ordinary progress".into(),
+        provenance: None,
+        occurrence: Default::default(),
+    });
+    let physical = crate::history::physical_for_save(&appended, |_| unreachable!()).unwrap();
+    let serialized = crate::format::serialize_physical(&physical);
+    commit_file(dir.path(), "tasks/sci-000001.md", &serialized);
+    let pending = range_tip(&p, &h0);
+    let progress = warm(&p, &id, &h0, &pending, &pinned.task, PendingNotes)
+        .unwrap()
+        .unwrap();
+    check(
+        &p,
+        &id,
+        &h0,
+        &pending,
+        &pinned.task,
+        PendingNotes,
+        Some(&progress),
+    )
+    .unwrap();
+    assert!(
+        check(&p, &id, &h0, &pending, &pinned.task, Exact, Some(&progress)).is_err(),
+        "changed policy must check full old range"
+    );
+    // A parsed-equal byte edit is not writer output, even under PendingNotes.
+    commit_file(
+        dir.path(),
+        "tasks/sci-000001.md",
+        &format!("{serialized}\n"),
+    );
+    assert!(
+        check(
+            &p,
+            &id,
+            &h0,
+            &range_tip(&p, &pending),
+            &pinned.task,
+            PendingNotes,
+            Some(&progress)
+        )
+        .is_err()
+    );
+    git(dir.path(), &["reset", "--hard", &h0.commit]);
+    let mut changed = h0.clone();
+    changed.task_path = "tasks/sci-000002.md".into();
+    assert!(check(&p, &id, &h0, &changed, &pinned.task, Exact, Some(&proof)).is_err());
+    changed = h0.clone();
+    changed.retained_ref = "refs/heads/other".into();
+    assert!(check(&p, &id, &h0, &changed, &pinned.task, Exact, Some(&proof)).is_err());
+    // Policy mismatch must fall back to exact validation of its requested policy.
+    check(&p, &id, &h0, &h0, &pinned.task, PendingNotes, Some(&proof)).unwrap();
+    let mut task = pinned.task.clone();
+    task.title = "changed input".into();
+    check(&p, &id, &h0, &h0, &task, Exact, Some(&proof)).unwrap();
+    // Rebinding P cannot reuse a proof that starts after a protected ABA.
+    commit_file(dir.path(), "tasks/files/sci-000001/evidence", "changed");
+    commit_file(dir.path(), "tasks/files/sci-000001/evidence", "original");
+    let later = range_tip(&p, &h0);
+    let later_proof = warm(&p, &id, &later, &later, &pinned.task, Exact)
+        .unwrap()
+        .unwrap();
+    assert!(
+        check(
+            &p,
+            &id,
+            &h0,
+            &later,
+            &pinned.task,
+            Exact,
+            Some(&later_proof)
+        )
+        .is_err()
+    );
+    git(dir.path(), &["reset", "--hard", &h0.commit]);
+    // H0 on a divergent branch is not a proof of the new tip's history.
+    commit_file(dir.path(), "unrelated", "divergent warm");
+    let side = range_tip(&p, &h0);
+    let side_proof = warm(&p, &id, &h0, &side, &pinned.task, Exact)
+        .unwrap()
+        .unwrap();
+    git(dir.path(), &["reset", "--hard", &h0.commit]);
+    commit_file(dir.path(), "tasks/files/sci-000001/evidence", "changed");
+    commit_file(dir.path(), "tasks/files/sci-000001/evidence", "original");
+    assert!(
+        check(
+            &p,
+            &id,
+            &h0,
+            &range_tip(&p, &h0),
+            &pinned.task,
+            Exact,
+            Some(&side_proof)
+        )
+        .is_err()
+    );
+    git(dir.path(), &["reset", "--hard", &h0.commit]);
+    git(dir.path(), &["checkout", "-qb", "other"]);
+    assert!(check(&p, &id, &h0, &h0, &pinned.task, Exact, Some(&proof)).is_err());
+    git(dir.path(), &["checkout", "main"]);
+    std::fs::write(
+        dir.path().join("tasks/.config.toml"),
+        "prefix = \"other\"\n",
+    )
+    .unwrap();
+    assert!(check(&p, &id, &h0, &h0, &pinned.task, Exact, Some(&proof)).is_err());
+}
+
+#[test]
+fn retained_range_warm_query_admission() {
+    if isolated("retained::read::tests::retained_range_warm_query_admission") {
+        return;
+    }
+    let (dir, p, _, pinned) = range_fixture();
+    commit_file(dir.path(), "unrelated", "tip");
+    let head = basis::resolve(&p, "HEAD").unwrap();
+    let args = [
+        "rev-list",
+        "--parents",
+        &head,
+        "--not",
+        &pinned.basis.commit,
+    ];
+    let before = starts("rev-list");
+    let first = run(&p, &args).unwrap();
+    assert!(first.output.status.success());
+    assert_eq!(run(&p, &args).unwrap().output.stdout, first.output.stdout);
+    assert_eq!(starts("rev-list") - before, 1);
+    let mutable_args = [
+        "rev-list",
+        "--parents",
+        "HEAD",
+        "--not",
+        &pinned.basis.commit,
+    ];
+    let before = starts("rev-list");
+    let initial = run(&p, &mutable_args).unwrap().output.stdout;
+    commit_file(dir.path(), "unrelated", "advance");
+    assert_ne!(run(&p, &mutable_args).unwrap().output.stdout, initial);
+    assert_eq!(
+        starts("rev-list") - before,
+        2,
+        "mutable refs are never query cache keys"
+    );
+    let missing = "0".repeat(40);
+    let args = ["rev-list", "--parents", &head, "--not", &missing];
+    let before = starts("rev-list");
+    for _ in 0..2 {
+        assert!(!run(&p, &args).unwrap().output.status.success());
+    }
+    assert_eq!(
+        starts("rev-list") - before,
+        2,
+        "failed enumerations are not cached"
+    );
+}
