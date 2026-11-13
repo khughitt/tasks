@@ -1650,3 +1650,55 @@ fn retained_checkpoint_foreign_claim_hints_and_identity_precedence() {
     let request = checkpoint_request(&f, 3, json!([]));
     assert_eq!(checkpoint(&f, &request)["outcome"], "no_local_items");
 }
+
+#[test]
+fn retained_state_working_input_scope() {
+    let f = RetainedEnv::new("in-tree");
+    f.note(f.record());
+    let payload = f.dir.join("payload");
+    std::fs::write(&payload, "original").unwrap();
+    f.json(&[
+        "attach",
+        &f.id,
+        payload.to_str().unwrap(),
+        "--name",
+        "evidence",
+    ]);
+    let before = f.state();
+    std::fs::write(
+        f.records.join(format!("tasks/files/{}/evidence", f.id)),
+        "dirty",
+    )
+    .unwrap();
+    assert_eq!(
+        f.state(),
+        before,
+        "ordinary attachments remain pinned history"
+    );
+    let path = f.records.join(format!("tasks/{}.md", f.id));
+    let bytes = std::fs::read(&path).unwrap();
+    let mut changed = bytes.clone();
+    changed.push(b'\n');
+    std::fs::write(&path, changed).unwrap();
+    common::git(&f.records, &["add", path.to_str().unwrap()]);
+    std::fs::write(&path, bytes).unwrap();
+    assert!(
+        !f.cmd()
+            .args(["retained", "state", &f.id])
+            .output()
+            .unwrap()
+            .status
+            .success(),
+        "staged changes must refuse even with original working bytes"
+    );
+    assert_eq!(
+        f.json(&[
+            "retained",
+            "state",
+            &f.id,
+            "--at",
+            before["basis"]["commit"].as_str().unwrap()
+        ]),
+        before
+    );
+}

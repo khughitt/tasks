@@ -92,3 +92,45 @@ pub(super) fn unchanged(
     }
     Ok(())
 }
+
+pub(crate) fn current(
+    project: &Project,
+    id: &TaskId,
+    pinned: &basis::PinnedTask,
+    attachments: bool,
+) -> Result<Basis> {
+    let fresh = Project::locate(&project.records)?;
+    if fresh.records != project.records
+        || fresh.prefix != project.prefix
+        || fresh.kind != project.kind
+        || fresh.checkout != project.checkout
+        || fresh.retention_lineage != project.retention_lineage
+    {
+        return Err(stale());
+    }
+    let branch = basis::git(&fresh, &["symbolic-ref", "-q", "HEAD"])?;
+    if branch.strip_suffix(b"\n").unwrap_or(&branch) != pinned.basis.retained_ref.as_bytes() {
+        return Err(stale());
+    }
+    let mut now = pinned.basis.clone();
+    now.commit = basis::resolve(&fresh, "HEAD")?;
+    unchanged(&fresh, id, &pinned.basis, &now, &pinned.task)?;
+    basis::read_exact(&fresh, id, &now)?;
+    let mut paths = paths(id, &now, &pinned.task);
+    if !attachments {
+        paths.remove(1);
+    }
+    let mut args = vec![
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignored",
+        "--",
+    ];
+    args.extend(paths.iter().map(String::as_str));
+    if !basis::git(&fresh, &args)?.is_empty() {
+        return Err(Error::RetainedStaleBasis("Task or required history has unpublished changes; publish them before querying current retained state, or explicitly select a historical --at basis".into()));
+    }
+    Ok(now)
+}

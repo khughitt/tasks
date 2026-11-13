@@ -1852,6 +1852,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn retained_state_concurrent_unrelated() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_state_concurrent_unrelated")
+        else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let project = Project::open(&dir).unwrap();
+        let original = super::super::basis::read(&project, &id, None).unwrap();
+        for case in ["unrelated", "participant", "ABA", "branch"] {
+            git(&home, &dir, &["checkout", "main"]);
+            git(&home, &dir, &["reset", "--hard", &original.basis.commit]);
+            let cli = <crate::cli::Cli as clap::Parser>::try_parse_from([
+                "tasks",
+                "-C",
+                dir.to_str().unwrap(),
+                "retained",
+                "state",
+                &id.to_string(),
+            ])
+            .unwrap();
+            let dir_copy = dir.clone();
+            let home_copy = home.clone();
+            let path = project.task_path(&id);
+            crate::commands::retained::BEFORE_STATE_RETURN.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || {
+                    if case == "branch" {
+                        git(&home_copy, &dir_copy, &["checkout", "-B", "other"]);
+                        return;
+                    }
+                    let path = if case == "unrelated" {
+                        dir_copy.join("README.md")
+                    } else {
+                        path
+                    };
+                    let original = std::fs::read(&path).unwrap();
+                    let mut edited = original.clone();
+                    edited.push(b'\n');
+                    std::fs::write(&path, edited).unwrap();
+                    git(&home_copy, &dir_copy, &["add", "."]);
+                    git(
+                        &home_copy,
+                        &dir_copy,
+                        &["commit", "-qm", "concurrent commit"],
+                    );
+                    if case == "ABA" {
+                        std::fs::write(&path, original).unwrap();
+                        git(&home_copy, &dir_copy, &["add", "."]);
+                        git(&home_copy, &dir_copy, &["commit", "-qm", "revert"]);
+                    }
+                }))
+            });
+            let result = crate::commands::run(cli, Some(Arc::new(HostConfig::default())));
+            if case == "unrelated" {
+                let crate::output::Output::RetainedState(out) = result.unwrap() else {
+                    panic!("state output")
+                };
+                let historical =
+                    super::super::state::replay(&project, &original.task, &original.basis, None)
+                        .unwrap();
+                assert_eq!(
+                    serde_json::to_value(out).unwrap(),
+                    serde_json::to_value(historical).unwrap()
+                );
+            } else {
+                assert!(
+                    matches!(result, Err(Error::RetainedStaleBasis(_))),
+                    "{case} must refuse"
+                );
+            }
+        }
+    }
+
     fn example(id: &crate::model::TaskId) -> (OperationKey, NewArtifact, GeneratedNote) {
         let key = OperationKey {
             coordinator: id.to_string(),

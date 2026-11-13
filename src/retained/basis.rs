@@ -236,23 +236,6 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
         }
     };
     let mut pinned = read_exact(project, id, &basis)?;
-    if at.is_none() {
-        let paths = std::iter::once(basis.task_path.clone())
-            .chain(pinned.task.note_archives.iter().map(|a| {
-                format!(
-                    "{}/tasks/files/{id}/{}",
-                    basis.records_subdir,
-                    a.file_name()
-                )
-            }))
-            .collect::<Vec<_>>();
-        let mut args = vec!["diff", "--quiet", "HEAD", "--"];
-        args.extend(paths.iter().map(String::as_str));
-        let out = super::read::run(project, &args)?.output;
-        if !out.status.success() {
-            return Err(Error::RetainedStaleBasis("Task or required history has unpublished changes; publish them before querying current retained state, or explicitly select a historical --at basis".into()));
-        }
-    }
     // A correction must identify actual bad bytes, not merely an ordinal at a guessed commit.
     for (index, note) in pinned.task.notes.iter().enumerate() {
         if let Some(raw) = note.text.strip_prefix("retention operation: ")
@@ -358,10 +341,8 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
     if !ancestor.status.success() {
         pinned.warnings.push("Historical basis is outside current HEAD ancestry; it remains reachable through its named retained ref".into())
     }
-    if at.is_none() && resolve(project, "HEAD")? != head {
-        return Err(Error::RetainedStaleBasis(
-            "Records HEAD changed during pinned read; retry".into(),
-        ));
+    if at.is_none() {
+        super::freshness::current(project, id, &pinned, false)?;
     }
     Ok(pinned)
 }

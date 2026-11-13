@@ -7,6 +7,11 @@ use crate::retained::{basis, model::*, state as history};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static BEFORE_STATE_RETURN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> Result<Output> {
     if host.as_deref().is_some_and(|h| !line(h)) {
         return Err(invalid("host must be a nonempty line"));
@@ -16,6 +21,15 @@ pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> 
     crate::retained::proof::validate_history(&ctx.project, &pinned, host.as_deref())?;
     crate::retained::reconcile::validate_terminal_history(&ctx.project, &pinned)?;
     let mut out = history::replay(&ctx.project, &pinned.task, &pinned.basis, host.as_deref())?;
+    #[cfg(test)]
+    BEFORE_STATE_RETURN.with(|hook| {
+        if let Some(action) = hook.borrow_mut().take() {
+            action();
+        }
+    });
+    if at.is_none() {
+        crate::retained::freshness::current(&ctx.project, &id, &pinned, false)?;
+    }
     out.warnings.extend(ctx.warnings);
     out.warnings.extend(pinned.warnings);
     Ok(Output::RetainedState(out))
