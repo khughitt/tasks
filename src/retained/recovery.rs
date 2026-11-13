@@ -219,12 +219,7 @@ pub(crate) fn validate_boundary(
             return Err(invalid(format!("invalid recovery import trailer {key}")));
         }
     }
-    let sub = super::lineage::subdir(project)?;
-    if sub != project.prefix {
-        return Err(invalid(
-            "recovery import prefix differs from current pairing",
-        ));
-    }
+    let sub = &project.prefix;
     let config_path = "tasks/.config.toml";
     let old_config = basis::blob(s, &d.source_cutover, config_path, None, &mut 0)?;
     let config = std::str::from_utf8(&old_config).map_err(invalid)?;
@@ -318,9 +313,10 @@ fn epoch(project: &Project, id: &TaskId, b: &Basis) -> Result<Epoch> {
     {
         return Ok(Epoch::Source);
     }
+    let sub = super::lineage::subdir(project)?;
     if b.layout == "detached"
-        && b.records_subdir == project.prefix
-        && b.task_path == format!("{}/tasks/{id}.md", project.prefix)
+        && b.records_subdir == sub
+        && b.task_path == super::lineage::task_path(&sub, id)
     {
         return Ok(Epoch::Destination);
     }

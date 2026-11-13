@@ -458,3 +458,27 @@ fn migration_check_source_archive() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(f.f.state()["complete"], true);
 }
+#[test]
+fn migration_actual_current_pairing_paths() {
+    let mut f = migration_fixture(HistoricalScenario::CheckpointCompleted);
+    f.git(&f.destination, &["mv", "sci", "recovered-sci"]);
+    f.git(
+        &f.destination,
+        &["commit", "-qm", "fixture current pairing"],
+    );
+    f.f.records = f.destination.join("recovered-sci");
+    let registry = f.f.env.home.path().join(".config/tasks/projects.toml");
+    let mut value: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry).unwrap()).unwrap();
+    value["records"]["sci"] = toml::Value::String(f.f.records.to_str().unwrap().into());
+    std::fs::write(registry, toml::to_string(&value).unwrap()).unwrap();
+    let state = f.f.state();
+    assert_eq!(state["complete"], true);
+    assert_eq!(state["basis"]["records_subdir"], "recovered-sci");
+    assert_eq!(
+        records(&state["operations"]),
+        records(&f.original["operations"])
+    );
+    let out = f.f.cmd().args(["check"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
