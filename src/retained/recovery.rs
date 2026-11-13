@@ -240,7 +240,28 @@ pub(crate) fn validate_boundary(
         return Err(invalid("recovery imported config blob differs"));
     }
     let head = basis::resolve(project, "HEAD")?;
-    let reference = text(t, &["symbolic-ref", "-q", "HEAD"])?.trim().to_string();
+    let symbolic = t.run(&["symbolic-ref", "-q", "HEAD"])?;
+    let reference = match symbolic.output.status.code() {
+        Some(0) => String::from_utf8(symbolic.output.stdout)
+            .map_err(invalid)?
+            .trim()
+            .to_string(),
+        Some(1) => text(
+            t,
+            &[
+                "for-each-ref",
+                "--contains",
+                &head,
+                "--format=%(refname)",
+                "refs/heads/",
+            ],
+        )?
+        .lines()
+        .next()
+        .ok_or_else(|| invalid("recovery current history has no retaining named branch"))?
+        .to_string(),
+        _ => return Err(invalid("cannot resolve destination retention branch")),
+    };
     ancestor(t, &d.destination_import, &reference)?;
     for task in &d.tasks {
         for path in [format!("tasks/{task}.md"), format!("tasks/files/{task}")] {

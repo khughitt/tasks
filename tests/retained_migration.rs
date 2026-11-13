@@ -482,3 +482,13 @@ fn migration_actual_current_pairing_paths() {
     let out = f.f.cmd().args(["check"]).output().unwrap();
     assert!(out.status.success(), "{out:?}");
 }
+#[test]
+fn migration_destination_named_ref_with_detached_head() {
+    let f = migration_fixture(HistoricalScenario::CheckpointCompleted);
+    f.git(&f.destination, &["checkout", "--detach", "-q", "HEAD"]);
+    let state = f.f.json(&["retained", "state", &f.f.id, "--at", "HEAD"]);
+    assert_eq!(state["complete"], true);
+    assert_eq!(state["basis"]["retained_ref"], "refs/heads/main");
+    let out = f.f.cmd().args(["check"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
