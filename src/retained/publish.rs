@@ -268,6 +268,9 @@ pub struct OperationCtx {
     started: std::time::Instant,
     staged_recovery: Option<(crate::model::TaskId, StagedRecovery)>,
     pub tasks: BTreeMap<crate::model::TaskId, super::basis::PinnedTask>,
+    phase_bases: BTreeMap<crate::model::TaskId, Basis>,
+    durable_phase: bool,
+    pub(super) committed_release: bool,
     pub metrics: super::verify::Metrics,
     pub warnings: Vec<String>,
     contexts: BTreeMap<String, crate::commands::Ctx>,
@@ -410,6 +413,9 @@ pub fn open(
         key: key.clone(),
         started,
         staged_recovery: None,
+        phase_bases: BTreeMap::new(),
+        durable_phase: false,
+        committed_release: false,
         tasks,
         warnings: op_warnings,
         contexts,
@@ -448,8 +454,10 @@ fn preimage(
 ) -> Result<()> {
     let original = super::basis::read_exact(project, id, input)?;
     metrics.history_bytes_read += original.history_bytes_read;
-    let current = super::basis::read(project, id, Some("HEAD"))?;
+    let fresh = super::freshness::context(project)?;
+    let current = super::basis::read(&fresh, id, Some("HEAD"))?;
     metrics.history_bytes_read += current.history_bytes_read;
+    super::freshness::unchanged(project, id, input, &current.basis, &original.task)?;
     if current.task != original.task || current.basis.retained_ref != input.retained_ref {
         return Err(Error::RetainedStaleBasis(
             "Committed task or publishing branch changed between phases".into(),
@@ -479,11 +487,21 @@ fn preimage(
     Ok(())
 }
 impl OperationCtx {
+    fn preimage_basis(&self, id: &crate::model::TaskId) -> Result<&Basis> {
+        if self.committed_release {
+            // A proven sender release permits only missing receipts against current work.
+            return Ok(&self.tasks[id].basis);
+        }
+        self.phase_bases
+            .get(id)
+            .ok_or_else(|| invalid("durable participant phase basis was not recovered"))
+    }
     pub fn revalidate(&mut self) -> Result<()> {
         self.heartbeat()?;
         for id in self.tasks.keys().cloned().collect::<Vec<_>>() {
             let project = self.project(&id).clone();
-            preimage(&project, &id, &self.tasks[&id].basis, &mut self.metrics)?;
+            let phase = self.preimage_basis(&id)?.clone();
+            preimage(&project, &id, &phase, &mut self.metrics)?;
             if project.read_task(&id)? != self.tasks[&id].task {
                 return Err(Error::RetainedStaleBasis(
                     "Participant changed between retained phases".into(),
@@ -504,14 +522,14 @@ pub fn batch(
         .get(id)
         .ok_or_else(|| invalid("publication names a nonparticipant"))?
         .task;
+    let input = ctx.preimage_basis(id)?.clone();
     let context = ctx
         .contexts
         .get_mut(&id.prefix)
         .expect("participant context");
     crate::commands::retained_owner(context, id)?;
     crate::attachments::check_storage(&context.project, id)?;
-    let input = &ctx.tasks.get(id).expect("participant").basis;
-    preimage(&context.project, id, input, &mut ctx.metrics)?;
+    preimage(&context.project, id, &input, &mut ctx.metrics)?;
     let mut task = context.project.read_task(id)?;
     if task != *expected {
         return Err(Error::RetainedStaleBasis(
@@ -744,6 +762,7 @@ pub fn batch(
         phase: operation.phase,
         basis: pinned.basis.clone(),
     };
+    ctx.phase_bases.insert(id.clone(), pinned.basis.clone());
     ctx.tasks.insert(id.clone(), pinned);
     Ok(Published {
         publication,
@@ -905,6 +924,110 @@ pub fn binding<T: serde::de::DeserializeOwned + PartialEq>(
         host: host.into(),
     })
 }
+// Recover P from published history, never from open's current HEAD or a staged phase.
+pub(super) fn recover_phase_bases(ctx: &mut OperationCtx, binding: &Binding) -> Result<()> {
+    recover_bases(ctx, binding, None)
+}
+pub(super) fn recover_reconciliation_bases(
+    ctx: &mut OperationCtx,
+    binding: &Binding,
+    inputs: &[Input],
+) -> Result<()> {
+    recover_bases(ctx, binding, Some(inputs))
+}
+fn recover_bases(
+    ctx: &mut OperationCtx,
+    binding: &Binding,
+    reconciliation: Option<&[Input]>,
+) -> Result<()> {
+    let mut bases = BTreeMap::new();
+    let mut durable = false;
+    for input in &binding.inputs {
+        let id = crate::model::TaskId::parse(&input.task)?;
+        let project = ctx.project(&id).clone();
+        let head = super::basis::read_exact(&project, &id, &ctx.tasks[&id].basis)?;
+        ctx.metrics.history_bytes_read += head.history_bytes_read;
+        let mut phase = None;
+        for (index, entry) in head.task.notes.iter().enumerate() {
+            if let Some(raw) = entry.text.strip_prefix("retention operation: ") {
+                let note = decode_operation(raw)?;
+                if note.key == ctx.key {
+                    if note.input_bases != binding.inputs || note.host != binding.host {
+                        return Err(invalid(
+                            "durable phase differs from its immutable request binding",
+                        ));
+                    }
+                    phase = Some((index, note));
+                }
+            }
+        }
+        let reconciling = phase.as_ref().is_some_and(|(_, note)| {
+            matches!(
+                note.phase.as_str(),
+                "reconcile_intent" | "reconcile_ready" | "reconciled"
+            )
+        });
+        let mut basis = if let Some((index, note)) = phase {
+            let basis = super::basis::publication_basis(
+                &project,
+                &id,
+                &input.basis,
+                &head.task.notes[..=index],
+                &mut ctx.metrics.history_bytes_read,
+            )?;
+            let publication = super::basis::read_exact(&project, &id, &basis)?;
+            ctx.metrics.history_bytes_read += publication.history_bytes_read;
+            if publication.task.notes.get(index) != head.task.notes.get(index) {
+                return Err(invalid(
+                    "durable phase readback differs from its publication",
+                ));
+            }
+            let locator = note.request.pinned(&id.to_string(), &basis)?;
+            if super::verify::artifact(&project, &locator, &mut ctx.metrics)? != binding.bytes {
+                return Err(invalid(
+                    "durable phase request differs from its original exact bytes",
+                ));
+            }
+            durable = true;
+            basis
+        } else {
+            input.basis.clone()
+        };
+        if let Some(inputs) = reconciliation
+            && !reconciling
+        {
+            // A fresh directive explicitly pins the state being reconciled. Its own
+            // durable phases subsequently become P, without changing original B.
+            basis = inputs
+                .iter()
+                .find(|input| input.task == id.to_string())
+                .ok_or_else(|| invalid("reconciliation participant missing"))?
+                .basis
+                .clone();
+        }
+        bases.insert(id, basis);
+    }
+    ctx.phase_bases = bases;
+    ctx.durable_phase = durable;
+    Ok(())
+}
+
+pub(super) fn new_admission(ctx: &OperationCtx) -> Result<()> {
+    if ctx.durable_phase {
+        return Ok(());
+    }
+    for id in ctx.tasks.keys() {
+        let project = ctx.project(id);
+        if project.kind == crate::repo::Kind::InTree {
+            return Err(Error::RetainedPublicationUnsupported(format!(
+                "New native retained custody for {id} at {} is unsupported in an in-tree records layout; use detached or linked records for new operations, or the manual route where supported. Existing retained history blocks records migration until supported recovery; manual accounting cannot bypass a pending operation or publication failure",
+                project.records.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_bases(ctx: &OperationCtx, inputs: &[Input]) -> Result<()> {
     if inputs.len() != ctx.tasks.len() {
         return Err(invalid("request inputs differ from locked participants"));
@@ -945,10 +1068,15 @@ pub fn validate_since(
         let old = super::basis::read_exact(&project, &id, &input.basis)?;
         ctx.metrics.history_bytes_read += old.history_bytes_read;
         if !retry {
-            if input.basis != pinned.basis || pinned.task != old.task {
-                return Err(Error::RetainedStaleBasis("A new operation requires exact current committed inputs; refresh its basis before retry".into()));
+            super::freshness::current(&project, &id, &old, true)?;
+            if pinned.task != old.task {
+                return Err(Error::RetainedStaleBasis(
+                    "A new operation requires unchanged committed participant inputs".into(),
+                ));
             }
         } else {
+            let phase = ctx.preimage_basis(&id)?.clone();
+            preimage(&project, &id, &phase, &mut ctx.metrics)?;
             let current = &ctx.tasks.get(&id).expect("participant").task;
             let mut expected = old.task.clone();
             expected.notes = current.notes.clone();
@@ -1421,6 +1549,21 @@ pub fn replay(
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+
+    fn open_test(
+        dir: Option<&Path>,
+        ids: &[String],
+        key: &OperationKey,
+        config: Arc<HostConfig>,
+    ) -> Result<OperationCtx> {
+        let mut ctx = super::open(dir, ids, key, config)?;
+        ctx.phase_bases = ctx
+            .tasks
+            .iter()
+            .map(|(id, task)| (id.clone(), task.basis.clone()))
+            .collect();
+        Ok(ctx)
+    }
 
     const CLI_HELPER_TEST: &str = "retained::publish::tests::retained_publish_cli_helper";
     const CLI_JSON_PREFIX: &str = "TASKS_PUBLICATION_CLI_JSON:";
@@ -1926,6 +2069,212 @@ mod tests {
         }
     }
 
+    #[test]
+    fn retained_admission_no_history_walk() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_admission_no_history_walk")
+        else {
+            return;
+        };
+        let p = Project::open(&dir).unwrap();
+        let input = super::super::basis::read(&p, &id, None).unwrap().basis;
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        std::fs::write(dir.join("README.md"), "foreign record commit").unwrap();
+        git(&home, &dir, &["add", "README.md"]);
+        git(&home, &dir, &["commit", "-qm", "unrelated"]);
+        let key = OperationKey {
+            coordinator: id.to_string(),
+            operation_id: "d".repeat(32),
+        };
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let calls = super::super::proof::HISTORY_CALLS.with(|n| n.get());
+        validate_inputs(
+            &mut ctx,
+            &[Input {
+                task: id.to_string(),
+                basis: input,
+            }],
+        )
+        .unwrap();
+        assert_eq!(super::super::proof::HISTORY_CALLS.with(|n| n.get()), calls);
+    }
+
+    #[test]
+    fn retained_phase_freshness_cached_view() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_phase_freshness_cached_view")
+        else {
+            return;
+        };
+        let p = Project::open(&dir).unwrap();
+        let cached = super::super::read::start(&p).unwrap();
+        let pinned = super::super::basis::read(&cached, &id, Some("HEAD")).unwrap();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let path = p.task_path(&id);
+        let mut raw = std::fs::read(&path).unwrap();
+        raw.push(b'\n');
+        std::fs::write(&path, raw).unwrap();
+        git(&home, &dir, &["add", "tasks"]);
+        git(&home, &dir, &["commit", "-qm", "participant bytes"]);
+        assert!(
+            preimage(
+                &cached,
+                &id,
+                &pinned.basis,
+                &mut super::super::verify::Metrics::default()
+            )
+            .is_err(),
+            "cached HEAD must not hide participant bytes"
+        );
+    }
+
+    #[test]
+    fn retained_phase_freshness_configuration() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_phase_freshness_configuration")
+        else {
+            return;
+        };
+        let p = Project::open(&dir).unwrap();
+        let pinned = super::super::basis::read(&p, &id, None).unwrap();
+        let path = dir.join("tasks/.config.toml");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        for setting in ["commit", "cap"] {
+            let mut config: toml::Value = toml::from_str(&raw).unwrap();
+            if setting == "commit" {
+                config["git"]["commit"] = toml::Value::Boolean(false);
+            } else {
+                config.as_table_mut().unwrap().insert(
+                    "attachments".into(),
+                    toml::Value::try_from(serde_json::json!({"max_bytes":1})).unwrap(),
+                );
+            }
+            std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+            assert!(
+                preimage(
+                    &p,
+                    &id,
+                    &pinned.basis,
+                    &mut super::super::verify::Metrics::default()
+                )
+                .is_err(),
+                "changed {setting} must not reuse old publication configuration"
+            );
+        }
+    }
+
+    #[test]
+    fn retained_phase_freshness_readback() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_phase_freshness_readback")
+        else {
+            return;
+        };
+        let (key, a, n) = example(&id);
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let before = ctx.phase_bases[&id].clone();
+        std::fs::write(
+            dir.join(".git/hooks/pre-commit"),
+            format!(
+                "#!/bin/sh\nprintf tampered > 'tasks/files/{0}/{1}'\ngit add -- 'tasks/files/{0}/{1}'\n",
+                id, a.name
+            ),
+        )
+        .unwrap();
+        assert!(batch(&mut ctx, &id, &[a], &[n]).is_err());
+        assert_eq!(
+            ctx.phase_bases[&id], before,
+            "failed artifact readback cannot advance P"
+        );
+    }
+
+    #[test]
+    fn retained_phase_freshness_recover_committed_and_staged() {
+        let Some((dir, id)) = fixture(
+            "retained::publish::tests::retained_phase_freshness_recover_committed_and_staged",
+        ) else {
+            return;
+        };
+        let (key, a, n) = example(&id);
+        let operation =
+            decode_operation(n.text.strip_prefix("retention operation: ").unwrap()).unwrap();
+        let binding = Binding {
+            bytes: a.bytes.clone(),
+            request: operation.request.clone(),
+            name: a.name.clone(),
+            inputs: operation.input_bases.clone(),
+            host: operation.host.clone(),
+        };
+        let original = binding.inputs[0].basis.clone();
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let hook = dir.join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        assert!(
+            batch(
+                &mut ctx,
+                &id,
+                &[NewArtifact {
+                    name: a.name.clone(),
+                    bytes: a.bytes.clone()
+                }],
+                &[GeneratedNote {
+                    at: n.at.clone(),
+                    text: n.text.clone()
+                }]
+            )
+            .is_err()
+        );
+        drop(ctx);
+        let mut ctx = super::open(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        recover_phase_bases(&mut ctx, &binding).unwrap();
+        assert_eq!(ctx.phase_bases[&id], original);
+        assert!(!ctx.durable_phase, "staged intent is not durable");
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+        let p = batch(&mut ctx, &id, &[a], &[n]).unwrap().publication.basis;
+        assert_eq!(ctx.phase_bases[&id], p);
+        drop(ctx);
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        std::fs::write(dir.join("README.md"), "unrelated").unwrap();
+        git(&home, &dir, &["add", "README.md"]);
+        git(&home, &dir, &["commit", "-qm", "unrelated"]);
+        let mut ctx = super::open(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        assert_ne!(ctx.tasks[&id].basis.commit, p.commit);
+        recover_phase_bases(&mut ctx, &binding).unwrap();
+        assert_eq!(ctx.phase_bases[&id], p);
+        assert!(ctx.durable_phase);
+        ctx.revalidate().unwrap();
+    }
+
     fn example(id: &crate::model::TaskId) -> (OperationKey, NewArtifact, GeneratedNote) {
         let key = OperationKey {
             coordinator: id.to_string(),
@@ -1996,7 +2345,7 @@ mod tests {
         crate::attachments::ensure_task_dir(&p, &id).unwrap();
         let path = crate::attachments::task_dir(&p, &id).join(&a.name);
         std::fs::write(&path, &a.bytes).unwrap();
-        let mut ctx = open(
+        let mut ctx = open_test(
             Some(&dir),
             &[id.to_string()],
             &key,
@@ -2032,7 +2381,7 @@ mod tests {
             let home = PathBuf::from(std::env::var_os("HOME").unwrap());
             git(&home, &dir, &["add", "foreign"]);
             assert!(
-                open(
+                open_test(
                     Some(&dir),
                     &[id.to_string()],
                     &key,
@@ -2053,7 +2402,7 @@ mod tests {
             crate::attachments::ensure_task_dir(&p, &id).unwrap();
             let path = crate::attachments::task_dir(&p, &id).join(&a.name);
             std::fs::write(&path, "different").unwrap();
-            let mut ctx = open(
+            let mut ctx = open_test(
                 Some(&dir),
                 &[id.to_string()],
                 &key,
@@ -2075,7 +2424,7 @@ mod tests {
             let mut raw = std::fs::read_to_string(&path).unwrap();
             raw.push_str(&format!("- {} (fixture): {}\n", n.at, n.text));
             std::fs::write(path, raw).unwrap();
-            let mut ctx = open(
+            let mut ctx = open_test(
                 Some(&dir),
                 &[id.to_string()],
                 &key,
@@ -2097,7 +2446,7 @@ mod tests {
         if case == "warning" {
             std::fs::write(dir.join(".git/hooks/pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
         }
-        let mut ctx = open(
+        let mut ctx = open_test(
             Some(&dir),
             &[id.to_string()],
             &key,
@@ -2183,7 +2532,7 @@ mod tests {
         if std::env::var("TASKS_PUBLICATION_REVERSE").as_deref() == Ok("1") {
             ids.reverse();
         }
-        let mut ctx = open(
+        let mut ctx = open_test(
             Some(&dir),
             &ids,
             &key,

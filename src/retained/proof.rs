@@ -96,12 +96,17 @@ pub(crate) fn project_for(project: &Project, task: &str) -> Result<Project> {
     Resolver::new(project).task(project, task)
 }
 
+#[cfg(test)]
+thread_local! { pub(crate) static HISTORY_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 // Validate immutable metadata only; current payloads and working attachment files are irrelevant.
 pub fn validate_history(
     project: &Project,
     pinned: &basis::PinnedTask,
     host: Option<&str>,
 ) -> Result<()> {
+    #[cfg(test)]
+    HISTORY_CALLS.with(|calls| calls.set(calls.get() + 1));
     let resolver = Resolver::new(project);
     let mut pending = vec![(project.clone(), pinned.clone())];
     let mut seen = BTreeSet::new();

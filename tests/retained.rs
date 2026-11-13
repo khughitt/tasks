@@ -300,17 +300,17 @@ fn retained_checkpoint_unknown() {
 #[test]
 fn retained_checkpoint_changed() {
     let f = checkpoint_fixture();
-    let file = f.dir.join("payload");
+    let file = f.records.join("payload");
     std::fs::write(&file, "old").unwrap();
-    common::git(&f.dir, &["add", "payload"]);
-    common::git(&f.dir, &["commit", "-qm", "old payload"]);
+    common::git(&f.records, &["add", "payload"]);
+    common::git(&f.records, &["commit", "-qm", "old payload"]);
     checkpoint(
         &f,
         &checkpoint_request(&f, 1, json!([declaration(&file, "evidence")])),
     );
     let old = f.state();
     let identity = old["items"][0]["identity"].clone();
-    let prior = json!({"type":"git","basis":old["basis"],"path":"payload","sha256":old["items"][0]["record"]["sha256"]});
+    let prior = json!({"type":"git","basis":old["basis"],"path":format!("{}/payload",old["basis"]["records_subdir"].as_str().unwrap()),"sha256":old["items"][0]["record"]["sha256"]});
     std::fs::write(&file, "new").unwrap();
     let mut request = checkpoint_request(&f, 2, json!([]));
     request["preserved_previous"] = json!([{"identity":identity,"artifact":prior}]);
@@ -562,7 +562,7 @@ fn retained_checkpoint_formats_and_nongit() {
 #[test]
 fn retained_checkpoint_recursive_metadata() {
     let f = checkpoint_fixture();
-    let request = checkpoint_request(&f, 1, json!([declaration(&f.dir, "scratch")]));
+    let request = checkpoint_request(&f, 1, json!([declaration(&f.records, "scratch")]));
     let path = f.request("request.json", &request);
     let before = f.basis();
     let out = f
@@ -629,7 +629,7 @@ fn retained_checkpoint_scope_resolution() {
 }
 #[test]
 fn retained_checkpoint_layouts() {
-    for layout in ["in-tree", "detached", "linked"] {
+    for layout in ["detached", "linked"] {
         let f = RetainedEnv::new(layout);
         f.json(&["start", &f.id]);
         f.check_hook();
@@ -1701,4 +1701,262 @@ fn retained_state_working_input_scope() {
         ]),
         before
     );
+}
+
+#[test]
+fn retained_admission_ancestor() {
+    let f = checkpoint_fixture();
+    let request = checkpoint_request(&f, 91, json!([]));
+    std::fs::write(f.records.join("unrelated"), "unrelated").unwrap();
+    common::git(&f.records, &["add", "unrelated"]);
+    common::git(&f.records, &["commit", "-qm", "unrelated records"]);
+    let result = checkpoint(&f, &request);
+    assert_eq!(result["outcome"], "no_local_items");
+    let state = f.state();
+    assert_eq!(
+        state["operations"][0]["note"]["input_bases"],
+        request["inputs"]
+    );
+}
+
+#[test]
+fn retained_admission_changed_inputs() {
+    use std::os::unix::fs::PermissionsExt;
+    for case in [
+        "record",
+        "ABA",
+        "content",
+        "mode",
+        "extra",
+        "ignored",
+        "symlink",
+        "empty_directory",
+        "hidden_mode",
+    ] {
+        let f = checkpoint_fixture();
+        let file = f.dir.join("payload");
+        std::fs::write(&file, "original").unwrap();
+        f.json(&[
+            "attach",
+            &f.id,
+            file.to_str().unwrap(),
+            "--name",
+            "evidence",
+        ]);
+        let request = checkpoint_request(&f, 92, json!([]));
+        let files = f.records.join(format!("tasks/files/{}", f.id));
+        match case {
+            "record" | "ABA" => {
+                let path = f.records.join(format!("tasks/{}.md", f.id));
+                let old = std::fs::read(&path).unwrap();
+                let mut new = old.clone();
+                new.push(b'\n');
+                std::fs::write(&path, new).unwrap();
+                common::git(&f.records, &["add", "tasks"]);
+                common::git(&f.records, &["commit", "-qm", "participant edit"]);
+                if case == "ABA" {
+                    std::fs::write(&path, old).unwrap();
+                    common::git(&f.records, &["add", "tasks"]);
+                    common::git(&f.records, &["commit", "-qm", "participant revert"]);
+                }
+            }
+            "mode" => std::fs::set_permissions(
+                files.join("evidence"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap(),
+            "content" => std::fs::write(files.join("evidence"), "changed").unwrap(),
+            "extra" => std::fs::write(files.join("extra"), "extra").unwrap(),
+            "empty_directory" => std::fs::create_dir(files.join("empty")).unwrap(),
+            "hidden_mode" => {
+                common::git(
+                    &f.records,
+                    &[
+                        "update-index",
+                        "--assume-unchanged",
+                        files.join("evidence").to_str().unwrap(),
+                    ],
+                );
+                std::fs::set_permissions(
+                    files.join("evidence"),
+                    std::fs::Permissions::from_mode(0o755),
+                )
+                .unwrap();
+            }
+            "ignored" => {
+                let gitdir = common::git_fixture::command(f.env.home.path(), &f.records)
+                    .args(["rev-parse", "--absolute-git-dir"])
+                    .output()
+                    .unwrap();
+                let gitdir =
+                    std::path::PathBuf::from(String::from_utf8(gitdir.stdout).unwrap().trim());
+                std::fs::write(gitdir.join("info/exclude"), "ignored\n").unwrap();
+                std::fs::write(files.join("ignored"), "extra").unwrap();
+            }
+            "symlink" => {
+                std::fs::remove_file(files.join("evidence")).unwrap();
+                std::os::unix::fs::symlink(&file, files.join("evidence")).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let path = f.request("request.json", &request);
+        let out = f
+            .cmd()
+            .args([
+                "retained",
+                "checkpoint",
+                &f.id,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{case} admitted: {out:?}");
+        let shown = f.json(&["show", &f.id]);
+        assert!(
+            !shown["task"]["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|n| n["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("retention operation:")),
+            "{case}: intent written"
+        );
+        assert!(
+            !files
+                .join(format!(
+                    "retained-op-{}.request.json",
+                    request["operation_id"].as_str().unwrap()
+                ))
+                .exists()
+        );
+    }
+}
+
+#[test]
+fn retained_admission_in_tree() {
+    for worktree in [false, true] {
+        let mut f = RetainedEnv::new("in-tree");
+        if worktree {
+            let wt = f.dir.parent().unwrap().join("worktree");
+            common::git(
+                &f.dir,
+                &["worktree", "add", "-qb", "feature", wt.to_str().unwrap()],
+            );
+            common::git_fixture::assert_worktree(f.env.home.path(), &f.dir, &wt);
+            f.dir = wt;
+            f.records = f.dir.clone();
+        }
+        f.json(&["start", &f.id]);
+        let before = f.basis();
+        let request = checkpoint_request(&f, 93, json!([]));
+        let path = f.request("request.json", &request);
+        let out = f
+            .cmd()
+            .args([
+                "retained",
+                "checkpoint",
+                &f.id,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "in-tree admitted: {out:?}");
+        let error = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            error.contains("detached") && error.contains("manual") && error.contains("migration"),
+            "{error}"
+        );
+        assert_eq!(f.basis(), before, "no intent or artifact publication");
+    }
+}
+
+#[test]
+fn retained_admission_transfer_checks_both_participants() {
+    for sender_in_tree in [false, true] {
+        let f = RetainedEnv::new(if sender_in_tree {
+            "in-tree"
+        } else {
+            "detached"
+        });
+        f.json(&["start", &f.id]);
+        let payload = f.dir.join("payload");
+        std::fs::write(&payload, "payload").unwrap();
+        use sha2::{Digest, Sha256};
+        let mut record = f.record();
+        record["host"] = json!(host());
+        record["path"] = json!(payload);
+        record["sha256"] = json!(format!("{:x}", Sha256::digest(b"payload")));
+        f.note(record);
+        let (_root, to) = common::retained::cross_receiver_layout(&f, false, !sender_in_tree);
+        let request = transfer_request(&f, &to);
+        let path = f.request("transfer.json", &request);
+        let before = f.basis();
+        let out = f
+            .cmd()
+            .args([
+                "retained",
+                "transfer",
+                &f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            !out.status.success(),
+            "sender_in_tree={sender_in_tree}: {out:?}"
+        );
+        assert!(String::from_utf8(out.stderr).unwrap().contains("in-tree"));
+        assert_eq!(f.basis(), before);
+        for id in [&f.id, &to] {
+            let shown = f.json(&["show", id]);
+            assert!(
+                !shown["task"]["notes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|n| n["text"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("retention operation:")),
+                "{id}: intent written"
+            );
+        }
+    }
+}
+
+#[test]
+fn retained_admission_staged_in_tree_intent() {
+    let f = RetainedEnv::new("in-tree");
+    let seeded = common::retained::seed_historical_operation(
+        &f,
+        common::retained::HistoricalScenario::CheckpointPending,
+    );
+    let input = seeded.request["inputs"][0]["basis"]["commit"]
+        .as_str()
+        .unwrap();
+    common::git(&f.records, &["reset", "--mixed", input]);
+    let path = f.request("request.json", &seeded.request);
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8(out.stderr).unwrap().contains("in-tree"),
+        "staged phase cannot bypass location guard"
+    );
+    assert_eq!(f.basis(), input);
 }

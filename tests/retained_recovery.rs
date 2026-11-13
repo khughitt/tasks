@@ -208,7 +208,7 @@ fn retained_checkpoint_recovery() {
         "save:completed",
         "commit:completed",
     ] {
-        let f = RetainedEnv::new("in-tree");
+        let f = RetainedEnv::new("detached");
         f.json(&["start", &f.id]);
         f.check_hook();
         let tree = f.dir.join("tree");
@@ -255,7 +255,7 @@ fn retained_checkpoint_recovery() {
             .args([
                 "cat-file",
                 "-e",
-                &format!("HEAD:tasks/files/{}/{name}", f.id),
+                &format!("HEAD:sci/tasks/files/{}/{name}", f.id),
             ])
             .output()
             .unwrap();
@@ -268,7 +268,7 @@ fn retained_checkpoint_recovery() {
 
 #[test]
 fn retained_checkpoint_saved_completion_rechecks() {
-    let f = RetainedEnv::new("in-tree");
+    let f = RetainedEnv::new("detached");
     f.json(&["start", &f.id]);
     f.check_hook();
     let file = f.dir.join("payload");
@@ -742,7 +742,7 @@ fn retained_reconcile_checkpoint_manifest_recovery() {
         let path = std::path::Path::new(state["items"][0]["record"]["manifest"].as_str().unwrap());
         let name = path.file_name().unwrap().to_str().unwrap();
         let blob = common::git_fixture::command(f.env.home.path(), &f.records)
-            .args(["show", &format!("HEAD:tasks/files/{}/{name}", f.id)])
+            .args(["show", &format!("HEAD:sci/tasks/files/{}/{name}", f.id)])
             .output()
             .unwrap();
         assert!(blob.status.success());
@@ -897,5 +897,149 @@ fn retained_reconcile_consumer_fixture() {
             .output()
             .unwrap();
         assert!(out.status.success(), "{out:?}");
+    }
+}
+
+#[test]
+fn retained_phase_freshness_checkpoint_restart() {
+    for case in ["unrelated", "participant", "ABA"] {
+        let f = checkpoint_fixture();
+        let request = checkpoint_request(&f, 94, json!([]));
+        let path = f.request("request.json", &request);
+        let args = [
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            path.to_str().unwrap(),
+        ];
+        let stopped = f
+            .cmd()
+            .env("TASKS_RETAINED_STOP_AFTER", "intent")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
+        let target = if case == "unrelated" {
+            f.records.join("unrelated")
+        } else {
+            f.records.join(format!("tasks/{}.md", f.id))
+        };
+        let old = std::fs::read(&target).unwrap_or_default();
+        let mut new = old.clone();
+        new.push(b'\n');
+        std::fs::write(&target, new).unwrap();
+        common::git(&f.records, &["add", target.to_str().unwrap()]);
+        common::git(&f.records, &["commit", "-qm", "between invocations"]);
+        if case == "ABA" {
+            std::fs::write(&target, old).unwrap();
+            common::git(&f.records, &["add", target.to_str().unwrap()]);
+            common::git(&f.records, &["commit", "-qm", "revert"]);
+        }
+        let retry = f.cmd().args(args).output().unwrap();
+        assert_eq!(
+            retry.status.success(),
+            case == "unrelated",
+            "{case}: {retry:?}"
+        );
+        let state = f.state();
+        assert_eq!(
+            state["operations"][0]["note"]["input_bases"],
+            request["inputs"]
+        );
+    }
+}
+
+#[test]
+fn retained_historical_in_tree_operations() {
+    use common::retained::{HistoricalScenario as S, seed_historical_operation};
+    for scenario in [
+        S::CheckpointPending,
+        S::CheckpointCompleted,
+        S::TransferReceiverPublished,
+        S::TransferSenderReleased,
+        S::Reconciled,
+    ] {
+        let f = RetainedEnv::new("in-tree");
+        let seeded = seed_historical_operation(&f, scenario);
+        if let Some(directive) = seeded.reconciliation {
+            let path = f.request("reconcile.json", &directive);
+            let out = f.json(&[
+                "retained",
+                "reconcile",
+                &f.id,
+                "--request",
+                path.to_str().unwrap(),
+            ]);
+            assert_eq!(out["outcome"], "reconciled");
+        } else if let Some(to) = seeded.receiver {
+            let out = transfer(&f, &to, &seeded.request);
+            assert_eq!(out["outcome"], "transferred");
+        } else {
+            let out = checkpoint(&f, &seeded.request);
+            assert_eq!(out["outcome"], "verified");
+        }
+        assert_eq!(f.state()["complete"], true);
+    }
+}
+
+#[test]
+fn retained_phase_freshness_transfer_restart() {
+    for cross in [false, true] {
+        for edit in [false, true] {
+            let (f, mut to, _) = transfer_fixture();
+            let receiver_records = if cross {
+                let (root, id) = cross_receiver(&f, false);
+                to = id;
+                root
+            } else {
+                f.records.clone()
+            };
+            let request = transfer_request(&f, &to);
+            let path = f.request("transfer.json", &request);
+            let args = [
+                "retained",
+                "transfer",
+                &f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap(),
+            ];
+            let stopped = f
+                .cmd()
+                .env("TASKS_RETAINED_STOP_AFTER", "receiver_published")
+                .args(args)
+                .output()
+                .unwrap();
+            assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
+            let path = if edit {
+                receiver_records.join(format!("tasks/{to}.md"))
+            } else {
+                receiver_records.join("unrelated")
+            };
+            let old = std::fs::read(&path).unwrap_or_default();
+            let mut new = old.clone();
+            new.push(b'\n');
+            std::fs::write(&path, new).unwrap();
+            common::git(&receiver_records, &["add", path.to_str().unwrap()]);
+            common::git(
+                &receiver_records,
+                &["commit", "-qm", "between transfer invocations"],
+            );
+            if edit {
+                std::fs::write(&path, old).unwrap();
+                common::git(&receiver_records, &["add", path.to_str().unwrap()]);
+                common::git(&receiver_records, &["commit", "-qm", "revert participant"]);
+            }
+            let result = f.cmd().args(args).output().unwrap();
+            assert_eq!(
+                result.status.success(),
+                !edit,
+                "cross={cross}, ABA={edit}: {result:?}"
+            );
+            if edit {
+                assert_eq!(f.state()["items"][0]["record"]["state"], "kept");
+            }
+        }
     }
 }

@@ -851,6 +851,7 @@ pub fn run(
             "original operation already completed; reconciliation requires a pending operation",
         ));
     }
+    publish::recover_reconciliation_bases(&mut ctx, &binding, &request.inputs)?;
     publish::validate_since(&mut ctx, &request.inputs, &binding.inputs, true)?;
     // A staged terminal is adopted only after its complete ready proof has been verified.
     if let Some((_, n)) = ctx.phase(&from)?

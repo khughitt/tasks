@@ -590,6 +590,8 @@ pub fn run(
     if let Some(result) = replay(&mut ctx, &id, &request)? {
         return Ok(result);
     }
+    publish::recover_phase_bases(&mut ctx, &binding)?;
+    publish::new_admission(&ctx)?;
     publish::validate_inputs(&mut ctx, &request.inputs)?;
     publish::recover_saved(&mut ctx, &id, &binding)?;
     let inventory = inventory(&mut ctx, &id, &request)?;

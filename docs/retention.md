@@ -17,8 +17,15 @@ structural acceptance alone establishes no agreement or safe deletion verdict.
 
 Use one coordinated writer host for every participating task until completion/
 reconciliation commits and syncs. Start and hold the tasks first; mutations need
-Git records with git.commit=true, exact input bases and ordinary ownership. Local
-locks/heartbeats do not exclude remote writers or create atomic directory snapshots.
+Git records with git.commit=true, validated input bases and ordinary ownership.
+New native checkpoint/transfer admission supports detached and linked records;
+any in-tree participant refuses before intent or artifact publication. Existing
+published in-tree operations retain their retry/reconciliation routes and historical
+reads. A staged phase alone grants no admission exception. The manual route remains
+available where supported, and cannot bypass a pending operation or failed publication.
+Existing retained history needs separately supported recovery before records migration;
+changing layout or using an external manifest does not preserve its old locators.
+Local locks/heartbeats do not exclude remote writers or create atomic directory snapshots.
 No payload copying, relocation, deletion or automatic closure is implemented here.
 
 ## Record validation reads
@@ -109,12 +116,45 @@ self-referential commit hashes without weakening immutable retrieval. A basis
 must match actual task/project/layout and reachable retained branch, not merely
 pass field-shape checks. Keep named refs and required Git objects available.
 
+## Participant freshness
+
+A new request's basis B may precede locked HEAD H when its project, records pairing,
+layout/rename epoch, task path and publishing branch still match, B is an ancestor
+of H, and the participant remained byte-identical throughout. Protected committed
+paths include the task record, its entire attachment subtree and required note
+archives, including Git modes and additions/deletions. Every intervening commit
+is checked against every parent without path-limited history simplification.
+Change-then-revert (ABA) and merge-parent edits refuse, even with equal endpoints.
+Unavailable Git evidence fails explicitly.
+
+The submitted B stays in the immutable request and phase input_bases. At later
+publication boundaries, freshness starts at the last committed and successfully
+read-back phase basis P. A restart recovers P from exact durable request/phase
+publications, never from its initial HEAD snapshot or an uncommitted phase. Only
+successful task/artifact commit readback advances P. A fresh reconciliation starts
+from its directive's explicitly pinned inputs; subsequent reconciliation publications
+become P while original operation B stays unchanged. Existing retry/preimage checks
+still apply; a completed replay remains historical, and a committed sender release
+permits its missing receipts to finish despite later receiver work.
+
+New admission also compares live task/archive files and the complete attachment
+tree against committed bytes and modes, including index changes, ignored/untracked
+additions and unexpected directories or symlinks. These checks do not replace full
+payload verification or authorize recursive proof pruning. No new history-proof
+walk is added to admission.
+
 ## Query state
 
 `retained state <id> [--at <revision>] [--host <host>]` reads one immutable commit
 and returns version 1, contract retention-1, task, basis, host_filter, complete,
 items, checkpoints, operations, diagnostics and warnings. Default HEAD refuses
 dirty required task/archive inputs; explicit --at uses only its pinned blobs.
+Before a default query returns, it freshly checks branch/pairing, protected
+committed paths and live task/archive bytes and index state. Unrelated records
+commits can advance HEAD without invalidating the query: output keeps its original
+B and logical source ordinals. Ordinary attachment/payload bytes are not live query
+inputs; their historical proof uses pinned Git bytes. Explicit --at skips live
+checks. This is a pinned snapshot, with no guarantee HEAD stays still after return.
 No implicit fetch/push/provider occurs. Historical interpretation is not fresh
 filesystem verification.
 
@@ -283,7 +323,7 @@ through the current ID. Nested historical envelopes remain unchanged. Readers
 verify every intervening edge and original blob at its declared path/ref; missing
 proof is a recovery error. Publication lookup remains in the original epoch.
 
-New operations require current canonical task IDs and current input bases.
+New operations require current canonical task IDs and participant-fresh input bases.
 Custody matching accepts an old next_owner only through verified lineage. Rename
 alone does not rewrite item records or move payloads. A recorded generated manifest
 inside a renamed task attachment directory resolves to its moved attachment only

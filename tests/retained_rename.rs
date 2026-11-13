@@ -95,13 +95,22 @@ fn seed_rename(f: &mut RetainedEnv, target: &str) -> (String, String) {
 }
 fn observed(layout: &str) -> RetainedEnv {
     let f = RetainedEnv::new(layout);
-    f.json(&["start", &f.id]);
+    if layout != "in-tree" {
+        f.json(&["start", &f.id]);
+    }
     let payload = f.dir.join("payload");
     std::fs::write(&payload, "original").unwrap();
-    checkpoint(
-        &f,
-        &checkpoint_request(&f, 1, json!([declaration(&payload, "evidence")])),
-    );
+    if layout == "in-tree" {
+        common::retained::seed_historical_operation(
+            &f,
+            common::retained::HistoricalScenario::CheckpointCompleted,
+        );
+    } else {
+        checkpoint(
+            &f,
+            &checkpoint_request(&f, 1, json!([declaration(&payload, "evidence")])),
+        );
+    }
     f.json(&["park", &f.id, "rename fixture"]);
     f
 }
@@ -251,7 +260,7 @@ fn retention_rename_lineage_reconciled() {
 #[test]
 fn retention_rename_operations_custody() {
     use common::retained::{transfer, transfer_request};
-    let mut f = observed("in-tree");
+    let mut f = observed("detached");
     let old = f.id.clone();
     seed_rename(&mut f, "new");
     assert_eq!(
@@ -271,7 +280,7 @@ fn retention_rename_operations_custody() {
 }
 #[test]
 fn retention_rename_operations_manifest() {
-    for layout in ["in-tree", "detached", "linked"] {
+    for layout in ["detached", "linked"] {
         let mut f = RetainedEnv::new(layout);
         f.json(&["start", &f.id]);
         let a = f.dir.join("scratch");
@@ -370,7 +379,7 @@ fn retention_rename_operations_retry() {
 #[test]
 fn retention_rename_operations_cross_project_retry() {
     use common::retained::{cross_receiver, transfer, transfer_request};
-    let mut f = observed("in-tree");
+    let mut f = observed("detached");
     f.json(&["start", &f.id]);
     let (other, to) = cross_receiver(&f, false);
     f.json(&["-C", other.to_str().unwrap(), "start", &to]);
@@ -442,7 +451,7 @@ fn retention_rename_operations_missing_manifest_refuses() {
 #[test]
 fn retention_rename_operations_reconcile_carried_custody() {
     use common::retained::{host, transfer_request};
-    let mut f = observed("in-tree");
+    let mut f = observed("detached");
     seed_rename(&mut f, "new");
     f.json(&["start", &f.id]);
     let to = f.json(&["add", "Receiver"])["id"]
@@ -497,7 +506,7 @@ fn retention_rename_operations_reconcile_carried_custody() {
 
 #[test]
 fn retention_rename_operations_external_manifest_is_not_aliased() {
-    let mut f = RetainedEnv::new("in-tree");
+    let mut f = RetainedEnv::new("detached");
     f.json(&["start", &f.id]);
     let directory = f.dir.join("scratch");
     std::fs::create_dir(&directory).unwrap();
@@ -836,7 +845,7 @@ fn retention_rename_command_adopt() {
 #[test]
 fn retention_rename_command_pending_or_malformed_refuses() {
     for malformed in [false, true] {
-        let f = observed("in-tree");
+        let f = observed("detached");
         if malformed {
             f.seed_note("retention operation: {\"phase\":\"reconciled\"}");
         } else {
@@ -1188,7 +1197,7 @@ fn retention_rename_lineage_source_config_is_strict() {
 
 #[test]
 fn retention_rename_operations_current_branch_ref() {
-    let mut f = observed("in-tree");
+    let mut f = observed("detached");
     seed_rename(&mut f, "new");
     f.json(&["start", &f.id]);
     git(&f.records, &["branch", "a-preserved"]);
@@ -1283,7 +1292,7 @@ fn cross_reconciled(f: &RetainedEnv, to: &str) -> (serde_json::Value, serde_json
 #[test]
 fn retention_rename_review_receiver_reconcile_retry() {
     use common::retained::cross_receiver;
-    let mut f = observed("in-tree");
+    let mut f = observed("detached");
     f.json(&["start", &f.id]);
     let (other, to) = cross_receiver(&f, false);
     let (request, original) = cross_reconciled(&f, &to);
@@ -1322,7 +1331,7 @@ fn retention_rename_review_receiver_reconcile_retry() {
 fn retention_rename_review_cross_project_adopt() {
     use common::retained::{cross_receiver, transfer, transfer_request};
     for reconciled in [false, true] {
-        for layout in ["in-tree", "detached"] {
+        for layout in ["detached", "linked"] {
             let mut f = observed(layout);
             f.json(&["start", &f.id]);
             let (other, to) = cross_receiver(&f, false);
@@ -1345,7 +1354,12 @@ fn retention_rename_review_cross_project_adopt() {
             commit_rename(&f, "sci");
             let before = f.basis();
             let config = std::fs::read(f.records.join("tasks/.config.toml")).unwrap();
-            second.json(&f.dir, &["rename", "sci", "new", "--adopt"]);
+            let adoption_root = if layout == "linked" {
+                &f.records
+            } else {
+                &f.dir
+            };
+            second.json(adoption_root, &["rename", "sci", "new", "--adopt"]);
             assert_eq!(f.basis(), before);
             assert_eq!(
                 std::fs::read(f.records.join("tasks/.config.toml")).unwrap(),
@@ -1674,7 +1688,7 @@ fn retention_handoff_missing_or_malformed_lineage_refuses_before_mutation() {
 fn transfer_handoff_adoption(shared: bool, early_adoption: bool) {
     use common::retained::{cross_receiver, transfer, transfer_request};
     eprintln!("retained transfer handoff: shared={shared}, early_adoption={early_adoption}");
-    let mut f = observed(if shared { "detached" } else { "in-tree" });
+    let mut f = observed("detached");
     f.json(&["start", &f.id]);
     let source_records = f.records.clone();
     if shared {
@@ -1698,9 +1712,7 @@ fn transfer_handoff_adoption(shared: bool, early_adoption: bool) {
     let old = f.id.clone();
     f.json(&["rename", "sci", "sci1"]);
     f.id = format!("sci1-{}", old.split_once('-').unwrap().1);
-    if shared {
-        f.records = source_records.with_file_name("sci1");
-    }
+    f.records = source_records.with_file_name("sci1");
     f.json(&["commit", "--project", "sci1"]);
     if early_adoption {
         second.json(&f.dir, &["rename", "sci", "sci1", "--adopt"]);
@@ -1837,8 +1849,15 @@ fn assert_clean_check(out: &std::process::Output) {
 fn retention_rename_check_read_bound() {
     for layout in ["in-tree", "detached", "linked"] {
         let mut f = observed(layout);
-        f.json(&["start", &f.id]);
-        checkpoint(&f, &checkpoint_request(&f, 2, json!([])));
+        if layout == "in-tree" {
+            common::retained::seed_historical_operation(
+                &f,
+                common::retained::HistoricalScenario::CheckpointCompleted,
+            );
+        } else {
+            f.json(&["start", &f.id]);
+            checkpoint(&f, &checkpoint_request(&f, 2, json!([])));
+        }
         for _ in 0..5 {
             f.json(&["add", "Unrelated task"]);
         }
@@ -1887,7 +1906,7 @@ fn retention_rename_check_rejects_corrupt_history_after_cached_pass() {
 fn retention_rename_check_peer_context() {
     use common::retained::{cross_receiver, transfer, transfer_request};
     use std::collections::BTreeMap;
-    let mut f = observed("in-tree");
+    let mut f = observed("detached");
     f.json(&["start", &f.id]);
     let (other, to) = cross_receiver(&f, false);
     transfer(&f, &to, &transfer_request(&f, &to));

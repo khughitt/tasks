@@ -516,6 +516,7 @@ pub fn run(
     if let Some((index, _)) = phase(&ctx, &from, "sender_released")?
         && committed(&mut ctx, &from, index)?
     {
+        ctx.committed_release = true;
         for id in [&from, &to] {
             publish::recover_saved(&mut ctx, id, &binding)?;
         }
@@ -524,6 +525,8 @@ pub fn run(
         let counts = counts(&mut ctx, &request.host)?;
         return publish::result(&mut ctx, "transferred".into(), counts, Vec::new(), false);
     }
+    publish::recover_phase_bases(&mut ctx, &binding)?;
+    publish::new_admission(&ctx)?;
     publish::validate_inputs(&mut ctx, &request.inputs)?;
     for id in [&from, &to] {
         publish::recover_saved(&mut ctx, id, &binding)?;
