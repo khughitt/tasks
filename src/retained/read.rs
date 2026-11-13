@@ -495,6 +495,7 @@ fn cacheable(args: &[&str]) -> bool {
             "--",
             paths @ ..,
         ] => oid_is_full(a) && oid_is_full(b) && !paths.is_empty(),
+        ["rev-list", "--first-parent", revision] => oid_is_full(revision),
         ["rev-list", "--parents", revision] => full_range(revision) || oid_is_full(revision),
         ["rev-list", "--parents", head, "--not", base] => oid_is_full(head) && oid_is_full(base),
         ["ls-tree", "-z", oid, "--", _] => oid_is_full(oid),

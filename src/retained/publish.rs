@@ -269,6 +269,8 @@ pub struct OperationCtx {
     staged_recovery: Option<(crate::model::TaskId, StagedRecovery)>,
     pub tasks: BTreeMap<crate::model::TaskId, super::basis::PinnedTask>,
     phase_bases: BTreeMap<crate::model::TaskId, Basis>,
+    original_publications: BTreeMap<Vec<u8>, OriginalPublication>,
+    retry: bool,
     durable_phase: bool,
     pub(super) committed_release: bool,
     pub metrics: super::verify::Metrics,
@@ -276,6 +278,12 @@ pub struct OperationCtx {
     contexts: BTreeMap<String, crate::commands::Ctx>,
     locks: BTreeMap<std::path::PathBuf, crate::record_commit::CommitLock>,
 }
+struct OriginalPublication {
+    basis: Basis,
+    tip: Basis,
+    _permit: super::read::MemoPermit,
+}
+
 pub struct NewArtifact {
     pub name: String,
     pub bytes: Vec<u8>,
@@ -346,7 +354,16 @@ pub fn open(
         op_warnings.extend(warnings);
         locks.insert(common, lock);
     }
+    let mut reads = None;
+    for ctx in contexts.values_mut() {
+        ctx.project = match &reads {
+            Some(shared) => super::read::inherit(shared, ctx.project.clone())?,
+            None => super::read::start_live(&ctx.project)?,
+        };
+        reads = Some(ctx.project.clone());
+    }
     let mut tasks = BTreeMap::new();
+    let mut retry = false;
     for id in resolved {
         let ctx = contexts.get_mut(&id.prefix).expect("resolved prefix");
         crate::commands::retained_owner(ctx, &id)?;
@@ -392,6 +409,13 @@ pub fn open(
             }
             pinned.task = working;
         }
+        retry |= pinned.task.notes.iter().any(|entry| {
+            entry
+                .text
+                .strip_prefix("retention operation: ")
+                .and_then(|raw| decode_operation(raw).ok())
+                .is_some_and(|note| note.key == *key)
+        });
         tasks.insert(id, pinned);
     }
     let mut metrics = super::verify::Metrics::default();
@@ -414,6 +438,8 @@ pub fn open(
         started,
         staged_recovery: None,
         phase_bases: BTreeMap::new(),
+        original_publications: BTreeMap::new(),
+        retry,
         durable_phase: false,
         committed_release: false,
         tasks,
@@ -523,6 +549,22 @@ pub fn batch(
     artifacts: &[NewArtifact],
     notes: &[GeneratedNote],
 ) -> Result<Published> {
+    let result = batch_inner(ctx, id, artifacts, notes);
+    if result.is_err() {
+        ctx.retry = true;
+        if let Some(context) = ctx.contexts.get(&id.prefix) {
+            super::read::refresh(&context.project)?;
+        }
+    }
+    result
+}
+
+fn batch_inner(
+    ctx: &mut OperationCtx,
+    id: &crate::model::TaskId,
+    artifacts: &[NewArtifact],
+    notes: &[GeneratedNote],
+) -> Result<Published> {
     let expected = &ctx
         .tasks
         .get(id)
@@ -536,6 +578,7 @@ pub fn batch(
     crate::commands::retained_owner(context, id)?;
     crate::attachments::check_storage(&context.project, id)?;
     preimage(&context.project, id, &input, &ctx.key, &mut ctx.metrics)?;
+    let locked_tip = super::basis::resolve(&context.project, "HEAD")?;
     let mut task = context.project.read_task(id)?;
     if task != *expected {
         return Err(Error::RetainedStaleBasis(
@@ -549,9 +592,15 @@ pub fn batch(
         Some(_) => return Err(invalid("staged recovery targets another participant")),
         None => None,
     };
+    let mut may_seed = !ctx.retry && recovery.is_none();
     if let Some(recovery) = &recovery {
         task = recovery.base.clone();
     }
+    may_seed &= !notes.iter().any(|new| {
+        task.notes
+            .iter()
+            .any(|old| old.at == new.at && old.text == new.text)
+    });
     let mut sources = Vec::new();
     if notes.is_empty() {
         return Err(invalid("publication requires generated notes"));
@@ -568,6 +617,7 @@ pub fn batch(
                 .all(|(old, new)| old.at == new.at && old.text == new.text)
         })
         .map(|(i, _)| i);
+    ctx.retry |= reused.is_some() || recovery.is_some();
     let phase = notes
         .iter()
         .rev()
@@ -734,6 +784,7 @@ pub fn batch(
         )));
     }
     stop_phase("commit", &operation.phase);
+    super::read::refresh(&context.project)?;
     let pinned = super::basis::read(&context.project, id, None)?;
     ctx.metrics.history_bytes_read += pinned.history_bytes_read;
     if pinned.task != task {
@@ -768,12 +819,80 @@ pub fn batch(
         phase: operation.phase,
         basis: pinned.basis.clone(),
     };
+    if may_seed && reused.is_none() && pinned.basis.commit != locked_tip {
+        let parents = super::basis::git(
+            &context.project,
+            &["rev-list", "--parents", "-n", "1", &pinned.basis.commit],
+        )?;
+        let parents = std::str::from_utf8(&parents).map_err(invalid)?;
+        if parents.split_whitespace().nth(1) == Some(locked_tip.as_str()) {
+            let project = context.project.clone();
+            for i in start..start + notes.len() {
+                if let Some(raw) = pinned.task.notes[i]
+                    .text
+                    .strip_prefix("retention operation: ")
+                {
+                    let note = decode_operation(raw)?;
+                    let input = super::lineage::participant(&project, &note, id)?;
+                    // A historical locator after rename still needs the existing search.
+                    let mut original = input.basis.clone();
+                    original.commit = pinned.basis.commit.clone();
+                    if original == pinned.basis {
+                        let key = publication_key(
+                            &project,
+                            id,
+                            &ctx.key,
+                            &input.basis,
+                            &pinned.task.notes[..=i],
+                            &pinned.basis,
+                        )?;
+                        ctx.remember_publication(&project, key, original, pinned.basis.clone())?;
+                    }
+                }
+            }
+        }
+    }
     ctx.phase_bases.insert(id.clone(), pinned.basis.clone());
     ctx.tasks.insert(id.clone(), pinned);
     Ok(Published {
         publication,
         sources,
     })
+}
+
+fn publication_key(
+    project: &Project,
+    id: &crate::model::TaskId,
+    operation: &OperationKey,
+    context: &Basis,
+    prefix: &[crate::model::Note],
+    tip: &Basis,
+) -> Result<Vec<u8>> {
+    let repository = super::basis::git(
+        project,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--absolute-git-dir",
+            "--git-common-dir",
+        ],
+    )?;
+    let mut current = tip.clone();
+    current.commit.clear();
+    serde_json::to_vec(&(
+        repository,
+        &project.records,
+        &project.checkout,
+        &project.retention_lineage,
+        project.attachments_max_bytes,
+        id,
+        operation,
+        context,
+        prefix,
+        current,
+    ))
+    .map_err(invalid)
 }
 
 pub struct Binding {
@@ -818,6 +937,30 @@ impl OperationCtx {
         }
         Ok(())
     }
+    fn remember_publication(
+        &mut self,
+        project: &Project,
+        key: Vec<u8>,
+        basis: Basis,
+        tip: Basis,
+    ) -> Result<()> {
+        // Replacing an entry first returns its charge to the shared invocation budget.
+        self.original_publications.remove(&key);
+        let value = serde_json::to_vec(&(&basis, &tip)).map_err(invalid)?;
+        if let Some(bytes) = key.len().checked_add(value.len())
+            && let Some(permit) = super::read::reserve_memo(project, bytes)?
+        {
+            self.original_publications.insert(
+                key,
+                OriginalPublication {
+                    basis,
+                    tip,
+                    _permit: permit,
+                },
+            );
+        }
+        Ok(())
+    }
     pub fn phase_publications(&mut self, id: &crate::model::TaskId) -> Result<Vec<Publication>> {
         let task = self
             .tasks
@@ -825,7 +968,10 @@ impl OperationCtx {
             .ok_or_else(|| invalid("unknown participant"))?
             .task
             .clone();
-        let project = self.project(id).clone();
+        let project = super::freshness::context(self.project(id))?;
+        super::read::refresh(&project)?;
+        let tip = super::basis::read(&project, id, Some("HEAD"))?;
+        self.metrics.history_bytes_read += tip.history_bytes_read;
         let mut publications = Vec::new();
         for (i, n) in task.notes.iter().enumerate() {
             if let Some(raw) = n.text.strip_prefix("retention operation: ") {
@@ -834,13 +980,54 @@ impl OperationCtx {
                     let input = super::lineage::participant(&project, &note, id)?;
                     let historical_task = input.task.clone();
                     let context = input.basis.clone();
-                    let basis = super::basis::publication_basis(
+                    let key = publication_key(
                         &project,
                         id,
+                        &self.key,
                         &context,
                         &task.notes[..=i],
-                        &mut self.metrics.history_bytes_read,
+                        &tip.basis,
                     )?;
+                    super::basis::validate_locator(&project, id, &context)?;
+                    let cached = match self.original_publications.get(&key) {
+                        Some(entry) if entry.tip == tip.basis => Some(entry.basis.clone()),
+                        Some(entry) => {
+                            let chain = super::basis::git(
+                                &project,
+                                &["rev-list", "--first-parent", &tip.basis.commit],
+                            )?;
+                            let chain = std::str::from_utf8(&chain).map_err(invalid)?;
+                            if chain.lines().any(|commit| commit == entry.tip.commit) {
+                                let previous = super::basis::read_exact(&project, id, &entry.tip)?;
+                                self.metrics.history_bytes_read += previous.history_bytes_read;
+                                match super::freshness::unchanged(
+                                    &project,
+                                    id,
+                                    &entry.tip,
+                                    &tip.basis,
+                                    &previous.task,
+                                ) {
+                                    Ok(()) => Some(entry.basis.clone()),
+                                    Err(Error::RetainedStaleBasis(_)) => None,
+                                    Err(error) => return Err(error),
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        None => None,
+                    };
+                    let basis = match cached {
+                        Some(basis) => basis,
+                        None => super::basis::publication_basis(
+                            &project,
+                            id,
+                            &context,
+                            &task.notes[..=i],
+                            &mut self.metrics.history_bytes_read,
+                        )?,
+                    };
+                    self.remember_publication(&project, key, basis.clone(), tip.basis.clone())?;
                     publications.push(Publication {
                         task: historical_task,
                         phase: note.phase,
@@ -1578,6 +1765,12 @@ mod tests {
         let mut vars: Vec<(&'static str, std::ffi::OsString)> = vec![
             ("PATH", std::env::var_os("PATH").expect("PATH is set")),
             ("HOME", home.into()),
+            ("XDG_CONFIG_HOME", home.join("config").into_os_string()),
+            ("XDG_STATE_HOME", home.join("state").into_os_string()),
+            (
+                "GIT_TRACE2_EVENT",
+                home.join("publication-trace.jsonl").into_os_string(),
+            ),
             ("USER", "tester".into()),
             ("LC_ALL", "C".into()),
             ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
@@ -2289,6 +2482,408 @@ mod tests {
         ctx.revalidate().unwrap();
     }
 
+    fn publication_searches(home: &Path) -> usize {
+        std::fs::read_to_string(home.join("publication-trace.jsonl"))
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|event| {
+                event["event"] == "start"
+                    && event["argv"].as_array().is_some_and(|args| {
+                        args.iter().any(|arg| arg == "log")
+                            && args.iter().any(|arg| arg == "--first-parent")
+                    })
+            })
+            .count()
+    }
+
+    fn memo_fixture(
+        dir: &Path,
+        id: &crate::model::TaskId,
+    ) -> (OperationCtx, NewArtifact, GeneratedNote) {
+        let (key, artifact, note) = example(id);
+        let ctx = open_test(
+            Some(dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        (ctx, artifact, note)
+    }
+
+    #[test]
+    fn retained_publication_memo_original_commit() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_publication_memo_original_commit")
+        else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let original = batch(
+            &mut ctx,
+            &id,
+            &[artifact],
+            &[GeneratedNote {
+                at: note.at.clone(),
+                text: note.text.clone(),
+            }],
+        )
+        .unwrap()
+        .publication
+        .basis;
+        let before = publication_searches(&home);
+        let memo_basis = ctx.phase_publications(&id).unwrap()[0].basis.clone();
+        assert_eq!(
+            publication_searches(&home),
+            before,
+            "a verified new append must avoid a publication search"
+        );
+        let plain = Project::open(&dir).unwrap();
+        let receipt =
+            decode_operation(note.text.strip_prefix("retention operation: ").unwrap()).unwrap();
+        let uncached_publication_basis = super::super::basis::publication_basis(
+            &plain,
+            &id,
+            &receipt.input_bases[0].basis,
+            &ctx.tasks[&id].task.notes,
+            &mut 0,
+        )
+        .unwrap();
+        assert_eq!(memo_basis, uncached_publication_basis);
+        assert_eq!(memo_basis, original);
+        std::fs::write(dir.join("README.md"), "unrelated").unwrap();
+        git(&home, &dir, &["add", "README.md"]);
+        git(&home, &dir, &["commit", "-qm", "unrelated"]);
+        let before = publication_searches(&home);
+        assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        assert_eq!(
+            publication_searches(&home),
+            before,
+            "unchanged first-parent extension reuses original proof"
+        );
+        let no_op_retry_head = batch(&mut ctx, &id, &[], &[note])
+            .unwrap()
+            .publication
+            .basis
+            .commit;
+        assert_ne!(no_op_retry_head, original.commit);
+        assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        assert!(
+            ctx.retry,
+            "a no-op retry cannot later seed a missing receipt"
+        );
+        let mut progress = ctx.tasks[&id].task.clone();
+        crate::commands::append_note(&mut progress, "tester", "Ordinary progress").unwrap();
+        let context = &ctx.contexts[&id.prefix];
+        context
+            .project
+            .write_task(&context.registry, &progress)
+            .unwrap();
+        crate::written::take();
+        git(&home, &dir, &["add", "tasks"]);
+        git(&home, &dir, &["commit", "-qm", "ordinary progress"]);
+        let before = publication_searches(&home);
+        assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        assert!(
+            publication_searches(&home) > before,
+            "ordinary appended notes require a fresh exact publication search"
+        );
+    }
+
+    #[test]
+    fn retained_publication_memo_first_parent() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_publication_memo_first_parent")
+        else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let input = ctx.tasks[&id].basis.clone();
+        let original = batch(&mut ctx, &id, &[artifact], &[note])
+            .unwrap()
+            .publication
+            .basis;
+        let before = publication_searches(&home);
+        ctx.phase_publications(&id).unwrap();
+        assert_eq!(
+            publication_searches(&home),
+            before,
+            "new publication must seed original proof"
+        );
+        let tree = String::from_utf8(git(
+            &home,
+            &dir,
+            &["rev-parse", &format!("{}^{{tree}}", original.commit)],
+        ))
+        .unwrap();
+        let merge = String::from_utf8(git(
+            &home,
+            &dir,
+            &[
+                "commit-tree",
+                tree.trim(),
+                "-p",
+                &input.commit,
+                "-p",
+                &original.commit,
+                "-m",
+                "second-parent publication",
+            ],
+        ))
+        .unwrap();
+        git(
+            &home,
+            &dir,
+            &["update-ref", "refs/heads/main", merge.trim()],
+        );
+        let before = publication_searches(&home);
+        let actual = ctx.phase_publications(&id).unwrap()[0].basis.clone();
+        let second_parent_only_requires_search = publication_searches(&home) > before;
+        assert!(second_parent_only_requires_search);
+        assert_eq!(actual.commit, merge.trim());
+        assert_ne!(actual, original);
+    }
+
+    #[test]
+    fn retained_publication_memo_recovery() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_publication_memo_recovery")
+        else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let key = ctx.key.clone();
+        let copy_note = || GeneratedNote {
+            at: note.at.clone(),
+            text: note.text.clone(),
+        };
+        let original = batch(&mut ctx, &id, &[artifact], &[copy_note()])
+            .unwrap()
+            .publication
+            .basis;
+        drop(ctx);
+        std::fs::write(dir.join("README.md"), "unrelated retry").unwrap();
+        git(&home, &dir, &["add", "README.md"]);
+        git(&home, &dir, &["commit", "-qm", "unrelated retry"]);
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        let no_op_retry_head = batch(&mut ctx, &id, &[], &[copy_note()])
+            .unwrap()
+            .publication
+            .basis
+            .commit;
+        assert_ne!(no_op_retry_head, original.commit);
+        let before = publication_searches(&home);
+        assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        assert!(
+            publication_searches(&home) > before,
+            "retry must resolve original publication"
+        );
+        let before = publication_searches(&home);
+        assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        assert_eq!(
+            publication_searches(&home),
+            before,
+            "successful searched proof is reusable"
+        );
+    }
+
+    #[test]
+    fn retained_publication_memo_budget() {
+        let Some((dir, id)) = fixture("retained::publish::tests::retained_publication_memo_budget")
+        else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let mut permits = Vec::new();
+        while let Some(permit) = super::super::read::reserve_memo(ctx.project(&id), 0).unwrap() {
+            permits.push(permit);
+        }
+        let original = batch(&mut ctx, &id, &[artifact], &[note])
+            .unwrap()
+            .publication
+            .basis;
+        assert!(ctx.original_publications.is_empty());
+        let before = publication_searches(&home);
+        for _ in 0..2 {
+            assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        }
+        assert_eq!(
+            publication_searches(&home),
+            before + 2,
+            "saturated budget continues with exact uncached search"
+        );
+        assert!(ctx.original_publications.is_empty());
+        drop(permits);
+        ctx.phase_publications(&id).unwrap();
+        assert_eq!(ctx.original_publications.len(), 1);
+    }
+
+    #[test]
+    fn retained_publication_memo_staged_and_failed_readback() {
+        let Some((dir, id)) = fixture(
+            "retained::publish::tests::retained_publication_memo_staged_and_failed_readback",
+        ) else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let key = ctx.key.clone();
+        let copy_artifact = || NewArtifact {
+            name: artifact.name.clone(),
+            bytes: artifact.bytes.clone(),
+        };
+        let copy_note = || GeneratedNote {
+            at: note.at.clone(),
+            text: note.text.clone(),
+        };
+        let hook = dir.join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        assert!(batch(&mut ctx, &id, &[copy_artifact()], &[copy_note()]).is_err());
+        assert!(ctx.original_publications.is_empty());
+        drop(ctx);
+        let mut ctx = open_test(
+            Some(&dir),
+            &[id.to_string()],
+            &key,
+            Arc::new(HostConfig::default()),
+        )
+        .unwrap();
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+        let original = batch(&mut ctx, &id, &[copy_artifact()], &[copy_note()])
+            .unwrap()
+            .publication
+            .basis;
+        assert!(
+            ctx.original_publications.is_empty(),
+            "staged recovery must not seed readback as an original proof"
+        );
+        let before = publication_searches(&home);
+        assert_eq!(ctx.phase_publications(&id).unwrap()[0].basis, original);
+        assert!(publication_searches(&home) > before);
+        // A failed readback of a later phase must retain P and never seed that phase.
+        let old = ctx.phase_bases[&id].clone();
+        std::fs::write(&hook, format!("#!/bin/sh\nprintf tampered > 'tasks/files/{id}/{}'\ngit add -- 'tasks/files/{id}/{}'\n", artifact.name, artifact.name)).unwrap();
+        let operation =
+            decode_operation(note.text.strip_prefix("retention operation: ").unwrap()).unwrap();
+        let binding = Binding {
+            bytes: artifact.bytes.clone(),
+            name: artifact.name.clone(),
+            request: operation.request,
+            inputs: operation.input_bases,
+            host: operation.host,
+        };
+        let at = crate::time::after(&ctx.tasks[&id].task.updated).unwrap();
+        let incomplete = receipt(
+            &mut ctx,
+            &binding,
+            &id,
+            PhaseOutputs::Incomplete(IncompleteOutput {
+                attempt: 1,
+                previous_phase: "intent".into(),
+                checkpoint: None,
+                action: "retry".into(),
+            }),
+            &at,
+        )
+        .unwrap();
+        assert!(batch(&mut ctx, &id, &[copy_artifact()], &[incomplete]).is_err());
+        assert_eq!(
+            ctx.original_publications.len(),
+            1,
+            "failed readback must not seed a new phase"
+        );
+        assert_eq!(ctx.phase_bases[&id], old);
+        assert!(ctx.retry);
+    }
+
+    #[test]
+    fn retained_publication_memo_same_phase_attempts() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_publication_memo_same_phase_attempts")
+        else {
+            return;
+        };
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let operation =
+            decode_operation(note.text.strip_prefix("retention operation: ").unwrap()).unwrap();
+        let binding = Binding {
+            bytes: artifact.bytes.clone(),
+            name: artifact.name.clone(),
+            request: operation.request,
+            inputs: operation.input_bases,
+            host: operation.host,
+        };
+        let intent = batch(&mut ctx, &id, &[artifact], &[note])
+            .unwrap()
+            .publication
+            .basis;
+        let mut bases = vec![intent];
+        for attempt in 1..=2 {
+            let at = crate::time::after(&ctx.tasks[&id].task.updated).unwrap();
+            let note = receipt(
+                &mut ctx,
+                &binding,
+                &id,
+                PhaseOutputs::Incomplete(IncompleteOutput {
+                    attempt,
+                    previous_phase: if attempt == 1 { "intent" } else { "incomplete" }.into(),
+                    checkpoint: None,
+                    action: "retry exact request".into(),
+                }),
+                &at,
+            )
+            .unwrap();
+            bases.push(
+                batch(&mut ctx, &id, &[], &[note])
+                    .unwrap()
+                    .publication
+                    .basis,
+            );
+        }
+        let before = publication_searches(&home);
+        let publications = ctx.phase_publications(&id).unwrap();
+        assert!(
+            publication_searches(&home) >= before + 2,
+            "own later phase invalidates older exact range proofs"
+        );
+        assert_eq!(
+            publications
+                .iter()
+                .map(|p| p.basis.clone())
+                .collect::<Vec<_>>(),
+            bases
+        );
+        assert_ne!(publications[1].basis, publications[2].basis);
+        assert_eq!(ctx.original_publications.len(), 3);
+        let before = publication_searches(&home);
+        ctx.phase_publications(&id).unwrap();
+        assert_eq!(publication_searches(&home), before);
+    }
+
+    #[test]
+    fn retained_publication_memo_nonparticipant_refuses() {
+        let Some((dir, id)) =
+            fixture("retained::publish::tests::retained_publication_memo_nonparticipant_refuses")
+        else {
+            return;
+        };
+        let (mut ctx, artifact, note) = memo_fixture(&dir, &id);
+        let foreign = crate::model::TaskId::parse("fam-000000").unwrap();
+        assert!(batch(&mut ctx, &foreign, &[artifact], &[note]).is_err());
+    }
+
     fn example(id: &crate::model::TaskId) -> (OperationKey, NewArtifact, GeneratedNote) {
         let key = OperationKey {
             coordinator: id.to_string(),
@@ -2567,9 +3162,24 @@ mod tests {
             .unwrap();
         assert!(!out.status.success());
         assert_eq!(std::fs::read_to_string(path).unwrap(), "unrelated");
+        let second = crate::model::TaskId::parse(&second).unwrap();
+        assert!(ctx.tasks.contains_key(&second));
+        let mut permits = Vec::new();
+        while let Some(permit) = super::super::read::reserve_memo(ctx.project(&second), 0).unwrap()
+        {
+            permits.push(permit);
+        }
         assert!(
-            ctx.tasks
-                .contains_key(&crate::model::TaskId::parse(&second).unwrap())
+            super::super::read::reserve_memo(ctx.project(&id), 0)
+                .unwrap()
+                .is_none(),
+            "peer projects share the publication budget"
+        );
+        drop(permits);
+        assert!(
+            super::super::read::reserve_memo(ctx.project(&id), 0)
+                .unwrap()
+                .is_some()
         );
     }
     #[test]

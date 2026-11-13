@@ -642,6 +642,7 @@ fn validation_read_exact_queries_and_errors() {
         ],
         vec!["rev-list", "--parents", &range],
         vec!["rev-list", "--parents", &new],
+        vec!["rev-list", "--first-parent", &new],
     ];
     for args in queries {
         let before = starts(args[0]);
