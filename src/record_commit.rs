@@ -238,7 +238,7 @@ fn lock_for(common: &Path, state: &Path) -> Result<MutationLock, String> {
     let digest = crate::history::sha256(common.as_os_str().as_encoded_bytes());
     let hex = &digest[..16];
     let path = state.join(format!("tasks/claims/.commit-{hex}.lock"));
-    crate::retained::test_observer::observe("commit_wait", &common.to_string_lossy())
+    crate::retained::test_observer::event("commit_wait", &common.to_string_lossy())
         .map_err(|error| error.to_string())?;
     MutationLock::acquire_at(&path).map_err(|error| error.to_string())
 }

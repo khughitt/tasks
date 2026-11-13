@@ -301,6 +301,15 @@ fn validate_range(
 }
 
 fn working_file(project: &Project, commit: &str, path: &str, cap: Option<u64>) -> Result<()> {
+    working_file_expected(project, commit, path, cap, None)
+}
+fn working_file_expected(
+    project: &Project,
+    commit: &str,
+    path: &str,
+    cap: Option<u64>,
+    expected: Option<&[u8]>,
+) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let root = basis::root(project)?;
     let local = root.join(path);
@@ -318,7 +327,14 @@ fn working_file(project: &Project, commit: &str, path: &str, cap: Option<u64>) -
         return Err(stale());
     }
     let mut bytes_read = 0;
-    let expected = basis::blob(project, commit, path, cap, &mut bytes_read)?;
+    let committed;
+    let expected = match expected {
+        Some(bytes) => bytes,
+        None => {
+            committed = basis::blob(project, commit, path, cap, &mut bytes_read)?;
+            &committed
+        }
+    };
     let actual = super::verify::read_local(&local, cap.unwrap_or(u64::MAX))?;
     if actual != expected {
         return Err(stale());
@@ -327,6 +343,15 @@ fn working_file(project: &Project, commit: &str, path: &str, cap: Option<u64>) -
 }
 
 fn working_attachments(project: &Project, id: &TaskId, now: &Basis) -> Result<()> {
+    working_attachments_allowed(project, id, now, &std::collections::BTreeMap::new())
+}
+fn working_attachments_allowed(
+    project: &Project,
+    id: &TaskId,
+    now: &Basis,
+    allowed: &std::collections::BTreeMap<String, &[u8]>,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     let present = crate::attachments::check_storage(project, id)?;
     let root = basis::root(project)?;
     let directory = crate::attachments::task_dir(project, id);
@@ -358,6 +383,7 @@ fn working_attachments(project: &Project, id: &TaskId, now: &Basis) -> Result<()
         }
         expected.insert(path.to_string());
     }
+    let task_directory = directory.clone();
     let mut pending = if present { vec![directory] } else { Vec::new() };
     let mut found = std::collections::BTreeSet::new();
     while let Some(directory) = pending.pop() {
@@ -377,8 +403,25 @@ fn working_attachments(project: &Project, id: &TaskId, now: &Basis) -> Result<()
                 }
                 pending.push(path);
             } else {
-                if !meta.is_file() || !expected.contains(&relative) {
+                if !meta.is_file() {
                     return Err(stale());
+                }
+                if !expected.contains(&relative) {
+                    let name = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .ok_or_else(stale)?;
+                    let bytes = allowed
+                        .get(name)
+                        .filter(|_| path.parent() == Some(task_directory.as_path()))
+                        .ok_or_else(stale)?;
+                    if meta.permissions().mode() & 0o100 != 0
+                        || super::verify::read_local(&path, project.attachments_max_bytes)?
+                            != *bytes
+                    {
+                        return Err(stale());
+                    }
+                    continue;
                 }
                 working_file(
                     project,
@@ -394,6 +437,52 @@ fn working_attachments(project: &Project, id: &TaskId, now: &Basis) -> Result<()
         return Err(stale());
     }
     Ok(())
+}
+
+/// Exact physical/index preimage, with only the caller's preserved staged task and new artifacts allowed.
+pub(super) fn working_preimage(
+    project: &Project,
+    id: &TaskId,
+    pinned: &basis::PinnedTask,
+    staged_raw: Option<&str>,
+    allowed: &std::collections::BTreeMap<String, &[u8]>,
+) -> Result<()> {
+    let paths = paths(id, &pinned.basis, &pinned.task);
+    let mut args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "--cached",
+        "--name-only",
+        "HEAD",
+        "--",
+    ];
+    args.extend(paths.iter().map(String::as_str));
+    if !basis::git(project, &args)?.is_empty() {
+        return Err(stale());
+    }
+    working_file_expected(
+        project,
+        &pinned.basis.commit,
+        &pinned.basis.task_path,
+        None,
+        staged_raw.map(str::as_bytes),
+    )?;
+    for archive in &pinned.task.note_archives {
+        let path = format!(
+            "{}/tasks/files/{id}/{}",
+            pinned.basis.records_subdir,
+            archive.file_name()
+        );
+        working_file(
+            project,
+            &pinned.basis.commit,
+            path.trim_start_matches("./"),
+            None,
+        )?;
+    }
+    working_attachments_allowed(project, id, &pinned.basis, allowed)
 }
 
 pub(super) fn context(project: &Project) -> Result<Project> {

@@ -269,6 +269,7 @@ pub struct OperationCtx {
     staged_recovery: Option<(crate::model::TaskId, StagedRecovery)>,
     pub tasks: BTreeMap<crate::model::TaskId, super::basis::PinnedTask>,
     phase_bases: BTreeMap<crate::model::TaskId, Basis>,
+    physical_preimages: BTreeMap<crate::model::TaskId, String>,
     original_publications: BTreeMap<Vec<u8>, OriginalPublication>,
     retry: bool,
     durable_phase: bool,
@@ -343,7 +344,7 @@ pub fn open(
         .values()
         .map(|ctx| ctx.project.records.clone())
         .collect::<Vec<_>>();
-    let guard = PhaseGuard::acquire(&records)?;
+    let mut guard = PhaseGuard::acquire(&records)?;
     let mut op_warnings = Vec::new();
     for (prefix, ctx) in &contexts {
         if repository_identity(&ctx.project)? != repositories[prefix] {
@@ -363,6 +364,7 @@ pub fn open(
         reads = Some(ctx.project.clone());
     }
     let mut tasks = BTreeMap::new();
+    let mut physical_preimages = BTreeMap::new();
     let mut retry = false;
     for id in resolved {
         let ctx = contexts.get_mut(&id.prefix).expect("resolved prefix");
@@ -416,6 +418,7 @@ pub fn open(
                 .and_then(|raw| decode_operation(raw).ok())
                 .is_some_and(|note| note.key == *key)
         });
+        physical_preimages.insert(id.clone(), ctx.project.read_raw(&id)?);
         tasks.insert(id, pinned);
     }
     let mut metrics = super::verify::Metrics::default();
@@ -433,12 +436,13 @@ pub fn open(
         ));
     }
     metrics.track(owners);
-    drop(guard);
+    guard.release()?;
     Ok(OperationCtx {
         key: key.clone(),
         started,
         staged_recovery: None,
         phase_bases: BTreeMap::new(),
+        physical_preimages,
         original_publications: BTreeMap::new(),
         retry,
         durable_phase: false,
@@ -570,6 +574,8 @@ impl OperationCtx {
         super::freshness::current(&project, id, &current, true)?;
         self.metrics.history_bytes_read += current.history_bytes_read;
         // Post-release receipts use current work, without changing the last durable P.
+        self.physical_preimages
+            .insert(id.clone(), project.read_raw(id)?);
         self.tasks.insert(id.clone(), current);
         Ok(())
     }
@@ -684,13 +690,13 @@ impl PhaseGuard {
             locks: BTreeMap::new(),
         };
         for (common, records) in repositories {
-            super::test_observer::observe("lock_wait", &common.to_string_lossy())?;
+            super::test_observer::event("lock_wait", &common.to_string_lossy())?;
             let lock = crate::record_commit::lock(records)
                 .map_err(Error::RetainedPublicationUnsupported)?;
             guard.locks.insert(common.clone(), lock);
-            super::test_observer::observe("lock_acquired", &common.to_string_lossy())?;
+            super::test_observer::event("lock_acquired", &common.to_string_lossy())?;
         }
-        super::test_observer::observe("guard_acquired", "")?;
+        super::test_observer::event("guard_acquired", "")?;
         Ok(guard)
     }
     fn recover(&self, records: &[std::path::PathBuf], warnings: &mut Vec<String>) -> Result<bool> {
@@ -719,14 +725,28 @@ impl PhaseGuard {
         }
         Ok(changed)
     }
+    fn release(&mut self) -> Result<()> {
+        if self.locks.is_empty() {
+            return Ok(());
+        }
+        let mut error = None;
+        for (common, lock) in std::mem::take(&mut self.locks) {
+            drop(lock);
+            if let Err(failure) =
+                super::test_observer::event("lock_released", &common.to_string_lossy())
+            {
+                error.get_or_insert(failure);
+            }
+        }
+        if let Err(failure) = super::test_observer::event("guard_released", "") {
+            error.get_or_insert(failure);
+        }
+        error.map_or(Ok(()), Err)
+    }
 }
 impl Drop for PhaseGuard {
     fn drop(&mut self) {
-        for (common, lock) in std::mem::take(&mut self.locks) {
-            drop(lock);
-            let _ = super::test_observer::observe("lock_released", &common.to_string_lossy());
-        }
-        let _ = super::test_observer::observe("guard_released", "");
+        let _ = self.release();
     }
 }
 
@@ -788,12 +808,12 @@ fn batch_inner(
             warmed.insert(participant.clone(), warm);
         }
     }
-    super::test_observer::observe("prechecked", &id.to_string())?;
+    super::test_observer::event("prechecked", &id.to_string())?;
     let records = ids
         .iter()
         .map(|id| ctx.project(id).records.clone())
         .collect::<Vec<_>>();
-    let guard = PhaseGuard::acquire(&records)?;
+    let mut guard = PhaseGuard::acquire(&records)?;
     for participant in &ids {
         if repository_identity(ctx.project(participant))? != ctx.repositories[&participant.prefix] {
             return Err(invalid("publication repository identity changed"));
@@ -827,13 +847,41 @@ fn batch_inner(
             &mut ctx.metrics,
             warmed.get(participant),
         )?;
+        let current = super::basis::read(&project, participant, Some("HEAD"))?;
+        let staged_raw = if current.task != ctx.tasks[participant].task {
+            Some(
+                ctx.physical_preimages
+                    .get(participant)
+                    .ok_or_else(|| invalid("missing staged physical preimage"))?
+                    .as_str(),
+            )
+        } else {
+            None
+        };
+        let mut allowed = BTreeMap::new();
+        if participant == id {
+            for artifact in artifacts {
+                crate::attachments::validate_name(&artifact.name)?;
+                allowed.insert(artifact.name.clone(), artifact.bytes.as_slice());
+            }
+        }
+        super::freshness::working_preimage(&project, participant, &current, staged_raw, &allowed)?;
         if project.read_task(participant)? != ctx.tasks[participant].task {
             return Err(Error::RetainedStaleBasis(
                 "Participant changed between retained phases".into(),
             ));
         }
     }
-    batch_guarded(ctx, id, artifacts, notes, &guard)
+    super::test_observer::event("before_write", &id.to_string())?;
+    let published = batch_guarded(ctx, id, artifacts, notes, &guard);
+    let released = guard.release();
+    match published {
+        Err(error) => Err(error),
+        Ok(publication) => {
+            released?;
+            Ok(publication)
+        }
+    }
 }
 
 fn batch_guarded(
@@ -1030,6 +1078,7 @@ fn batch_guarded(
         }),
     )?;
     stop_phase("save", &operation.phase);
+    let expected_raw = context.project.read_raw(id)?;
     let written = crate::written::take();
     if written
         .roots
@@ -1070,7 +1119,14 @@ fn batch_guarded(
     super::read::refresh(&context.project)?;
     let pinned = super::basis::read(&context.project, id, None)?;
     ctx.metrics.history_bytes_read += pinned.history_bytes_read;
-    if pinned.task != task {
+    let committed_raw = super::basis::blob(
+        &context.project,
+        &pinned.basis.commit,
+        &pinned.basis.task_path,
+        None,
+        &mut ctx.metrics.history_bytes_read,
+    )?;
+    if pinned.task != task || committed_raw != expected_raw.as_bytes() {
         return Err(Error::RetainedHistoryBlocked("Committed retained record differs from intended publication; preserve exact evidence and recover".into()));
     }
     for artifact in artifacts {
@@ -1139,8 +1195,9 @@ fn batch_guarded(
         }
     }
     ctx.phase_bases.insert(id.clone(), pinned.basis.clone());
+    ctx.physical_preimages.insert(id.clone(), expected_raw);
     ctx.tasks.insert(id.clone(), pinned);
-    super::test_observer::observe("readback", &publication.phase)?;
+    super::test_observer::event("readback", &publication.phase)?;
     Ok(Published {
         publication,
         sources,
@@ -3693,6 +3750,8 @@ mod tests {
         // Retry the same saved phase: it becomes proven only after exact readback.
         let working = ctx.project(&id).read_task(&id).unwrap();
         ctx.tasks.get_mut(&id).unwrap().task = working;
+        ctx.physical_preimages
+            .insert(id.clone(), ctx.project(&id).read_raw(&id).unwrap());
         std::fs::write(&hook, original_hook).unwrap();
         batch(&mut ctx, &id, &[], &[release]).unwrap();
         assert!(

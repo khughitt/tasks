@@ -33,7 +33,9 @@ struct Observation {
 }
 impl Observation {
     fn resume(mut self) {
-        self.stream.write_all(b"+").unwrap();
+        if self.value["barrier"] == true {
+            self.stream.write_all(b"+").unwrap();
+        }
     }
 }
 fn read(mut stream: UnixStream) -> Observation {
@@ -56,7 +58,15 @@ fn read(mut stream: UnixStream) -> Observation {
     }
 }
 fn event(listener: &UnixListener, child: &mut Running, wanted: &str) -> Observation {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    event_until(listener, child, wanted, Duration::from_secs(30))
+}
+fn event_until(
+    listener: &UnixListener,
+    child: &mut Running,
+    wanted: &str,
+    timeout: Duration,
+) -> Observation {
+    let deadline = Instant::now() + timeout;
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -156,7 +166,7 @@ fn transfer_child(f: &RetainedEnv, to: &str, socket: &Path) -> Running {
         f.env
             .raw(&f.dir)
             .env("TASKS_SESSION", "retained-fixture")
-            .env("TASKS_RETAINED_OBSERVER", socket)
+            .env("TASKS_RETAINED_TEST_SOCKET", socket)
             .args([
                 "retained",
                 "transfer",
@@ -196,7 +206,7 @@ fn retained_locking_unrelated_writer_during_inspection() {
             f.env
                 .raw(&f.dir)
                 .env("TASKS_SESSION", "retained-fixture")
-                .env("TASKS_RETAINED_OBSERVER", &prefix_socket)
+                .env("TASKS_RETAINED_TEST_SOCKET", &prefix_socket)
                 .args(["note", &f.id, "Same prefix waits"])
                 .spawn()
                 .unwrap(),
@@ -223,20 +233,20 @@ fn retained_locking_phase_excludes_writer() {
         let mut child = transfer_child(&f, &to, &socket);
         // The initial guard has ended, and this publication's outside-lock precheck passed.
         event(&listener, &mut child, "prechecked").resume();
-        let guard = event(&listener, &mut child, "guard_acquired");
+        let guard = event(&listener, &mut child, "before_write");
         let writer_socket = f.dir.join("writer.sock");
         let writer_listener = self::listener(&writer_socket);
         let mut writer = Running(Some(
             f.env
                 .raw(&f.dir)
                 .env("TASKS_SESSION", "retained-fixture")
-                .env("TASKS_RETAINED_OBSERVER", &writer_socket)
+                .env("TASKS_RETAINED_TEST_SOCKET", &writer_socket)
                 .args(["note", &other, "Unrelated waits for publication"])
                 .spawn()
                 .unwrap(),
         ));
         let attempt = event(&writer_listener, &mut writer, "commit_wait");
-        let common = attempt.value["detail"].as_str().unwrap();
+        let common = attempt.value["phase"].as_str().unwrap();
         let digest = format!("{:x}", Sha256::digest(common.as_bytes()));
         let lock_path = f.env.home.path().join(format!(
             ".local/state/tasks/claims/.commit-{}.lock",
@@ -268,7 +278,7 @@ fn retained_phase_scope_completion_observes_later_receiver() {
     let mut child = transfer_child(&f, &to, &socket);
     loop {
         let readback = event(&listener, &mut child, "readback");
-        if readback.value["detail"] == "sender_released" {
+        if readback.value["phase"] == "sender_released" {
             let path = receiver_records.join(format!("tasks/{to}.md"));
             let raw = std::fs::read_to_string(&path).unwrap();
             std::fs::write(
@@ -364,4 +374,160 @@ fn retained_phase_freshness_guarded_delta() {
             );
         }
     }
+}
+
+#[test]
+fn retained_phase_freshness_dirty_working_preimage() {
+    use std::os::unix::fs::PermissionsExt;
+    for case in ["peer_mode", "sender_physical_bytes", "attachment_mode"] {
+        let (f, to, _) = transfer_fixture();
+        let socket = f.dir.join("observer.sock");
+        let listener = listener(&socket);
+        let mut child = transfer_child(&f, &to, &socket);
+        let precheck = event(&listener, &mut child, "prechecked");
+        let path = match case {
+            "peer_mode" => f.records.join(format!("tasks/{to}.md")),
+            "attachment_mode" => std::fs::read_dir(f.records.join(format!("tasks/files/{}", f.id)))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path(),
+            _ => f.records.join(format!("tasks/{}.md", f.id)),
+        };
+        if case == "sender_physical_bytes" {
+            let mut bytes = std::fs::read(&path).unwrap();
+            bytes.push(b'\n');
+            std::fs::write(&path, bytes).unwrap();
+        } else {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // Deliberately leave the edit unstaged and uncommitted: H is still H0.
+        precheck.resume();
+        let out = drain(&listener, child);
+        assert!(
+            !out.status.success(),
+            "dirty {case} must refuse before publication"
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("retained_stale_basis"),
+            "{out:?}"
+        );
+    }
+}
+#[test]
+fn retained_observer_timing_frames_need_no_ack() {
+    let (f, to, _) = transfer_fixture();
+    let socket = f.dir.join("observer.sock");
+    let listener = listener(&socket);
+    let mut child = transfer_child(&f, &to, &socket);
+    let observation = event(&listener, &mut child, "lock_wait");
+    // Keep this socket open without acknowledgement; timing frames cannot suspend work.
+    let barrier = event_until(&listener, &mut child, "prechecked", Duration::from_secs(2));
+    drop(observation);
+    barrier.resume();
+    finish(&listener, child);
+}
+
+#[test]
+fn retained_observer_disconnect_and_blocked_child_cleanup() {
+    for mode in ["disconnect", "unknown", "kill"] {
+        let (f, to, _) = transfer_fixture();
+        let socket = f.dir.join("observer.sock");
+        let listener = listener(&socket);
+        let mut child = transfer_child(&f, &to, &socket);
+        let mut barrier = event(&listener, &mut child, "before_write");
+        let pid = child.0.as_ref().unwrap().id() as libc::pid_t;
+        if mode != "kill" {
+            if mode == "unknown" {
+                barrier.stream.write_all(b"?").unwrap();
+            }
+            drop(barrier);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !child.finished() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(
+                !child.output().status.success(),
+                "disconnected parent must refuse continuation"
+            );
+        } else {
+            drop(child); // The scoped guard terminates and reaps a child still awaiting acknowledgement.
+            drop(barrier);
+        }
+        let mut status = 0;
+        assert_eq!(
+            unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) },
+            -1
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
+        );
+        f.json(&["note", &f.id, "Child released its prefix and commit locks"]);
+    }
+}
+
+#[test]
+fn retained_phase_freshness_post_release_dirty_target() {
+    use std::os::unix::fs::PermissionsExt;
+    let (f, to, _) = transfer_fixture();
+    let socket = f.dir.join("observer.sock");
+    let listener = listener(&socket);
+    let mut child = transfer_child(&f, &to, &socket);
+    loop {
+        let readback = event(&listener, &mut child, "readback");
+        let released = readback.value["phase"] == "sender_released";
+        readback.resume();
+        if released {
+            break;
+        }
+    }
+    let precheck = event(&listener, &mut child, "prechecked");
+    assert_eq!(precheck.value["phase"], to);
+    std::fs::set_permissions(
+        f.records.join(format!("tasks/{to}.md")),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    precheck.resume();
+    let out = drain(&listener, child);
+    assert!(
+        !out.status.success(),
+        "post-release target mode must remain exact under guard"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("retained_stale_basis"),
+        "{out:?}"
+    );
+}
+#[test]
+fn retained_observer_final_release_disconnect_refuses_success() {
+    let (f, to, _) = transfer_fixture();
+    let socket = f.dir.join("observer.sock");
+    let mut listener = Some(listener(&socket));
+    let mut child = transfer_child(&f, &to, &socket);
+    let mut completed = 0;
+    loop {
+        let readback = event(listener.as_ref().unwrap(), &mut child, "readback");
+        if readback.value["phase"] == "completed" {
+            completed += 1;
+        }
+        if completed == 2 {
+            drop(listener.take());
+            readback.resume();
+            break;
+        }
+        readback.resume();
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !child.finished() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        !child.output().status.success(),
+        "final release observation failure must fail the test invocation"
+    );
 }
