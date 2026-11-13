@@ -15,7 +15,16 @@ pub fn git(project: &Project, args: &[&str]) -> Result<Vec<u8>> {
     Ok(git_read(project, args)?.output.stdout)
 }
 fn git_read(project: &Project, args: &[&str]) -> Result<super::read::ReadOutput> {
-    let read = super::read::run(project, args)?;
+    git_context_read(&super::read::at(project, &project.records)?, args)
+}
+pub(crate) fn git_context(context: &super::read::ReadContext, args: &[&str]) -> Result<Vec<u8>> {
+    Ok(git_context_read(context, args)?.output.stdout)
+}
+fn git_context_read(
+    context: &super::read::ReadContext,
+    args: &[&str],
+) -> Result<super::read::ReadOutput> {
+    let read = context.run(args)?;
     let out = &read.output;
     if args.starts_with(&["cat-file", "blob"]) {
         crate::history::record_metadata_read(read.bytes_read as usize);
@@ -59,8 +68,8 @@ pub fn resolve(project: &Project, revision: &str) -> Result<String> {
     }
     Ok(value.into())
 }
-pub fn blob(
-    project: &Project,
+pub(crate) fn blob(
+    context: &super::read::ReadContext,
     commit: &str,
     path: &str,
     max: Option<u64>,
@@ -69,7 +78,7 @@ pub fn blob(
     if !member_path(path) {
         return Err(invalid("unsafe Git blob path"));
     }
-    let tree = git(project, &["ls-tree", "-z", commit, "--", path])?;
+    let tree = git_context(context, &["ls-tree", "-z", commit, "--", path])?;
     if !(tree.starts_with(b"100644 blob ") || tree.starts_with(b"100755 blob "))
         || tree.split(|b| *b == 0).filter(|v| !v.is_empty()).count() != 1
     {
@@ -79,7 +88,7 @@ pub fn blob(
     }
     let object = format!("{commit}:{path}");
     if let Some(cap) = max {
-        let size = string(git(project, &["cat-file", "-s", &object])?)?
+        let size = string(git_context(context, &["cat-file", "-s", &object])?)?
             .trim()
             .parse::<u64>()
             .map_err(invalid)?;
@@ -89,26 +98,42 @@ pub fn blob(
             )));
         }
     }
-    let read = git_read(project, &["cat-file", "blob", &object])?;
+    let read = git_context_read(context, &["cat-file", "blob", &object])?;
     *bytes_read = bytes_read
         .checked_add(read.bytes_read)
         .ok_or_else(|| invalid("history byte counter overflow"))?;
     Ok(read.output.stdout)
 }
+pub(crate) fn context(
+    project: &Project,
+    id: &TaskId,
+    basis: &Basis,
+) -> Result<super::read::ReadContext> {
+    match super::recovery::select(project, id, basis)? {
+        Some(selection) => Ok(selection.context),
+        None => super::read::at(project, &project.records),
+    }
+}
 pub(crate) fn task_at(
     project: &Project,
-    _id: &TaskId,
+    id: &TaskId,
+    basis: &Basis,
+    bytes_read: &mut u64,
+) -> Result<Task> {
+    load_task(&context(project, id, basis)?, basis, bytes_read)
+}
+pub(crate) fn load_task(
+    context: &super::read::ReadContext,
     basis: &Basis,
     bytes_read: &mut u64,
 ) -> Result<Task> {
     let original = super::lineage::historical_id(basis)?;
-    let context = super::read::at(project, &project.records)?;
-    if let Some(task) = super::read::task_cached(&context, basis)? {
+    if let Some(task) = super::read::task_cached(context, basis)? {
         return Ok(task);
     }
     let id = &original;
     let raw = string(blob(
-        project,
+        context,
         &basis.commit,
         &basis.task_path,
         None,
@@ -120,10 +145,10 @@ pub(crate) fn task_at(
             Path::new(&basis.records_subdir).join(format!("tasks/files/{id}/{}", a.file_name()));
         let relative = relative.strip_prefix(".").unwrap_or(&relative);
         blob(
-            project,
+            context,
             &basis.commit,
             &path_string(relative)?,
-            Some(project.attachments_max_bytes),
+            Some(context.attachments_max_bytes()),
             bytes_read,
         )
     })?;
@@ -132,11 +157,14 @@ pub(crate) fn task_at(
             "Pinned task has a different id; restore the declared pairing".into(),
         ));
     }
-    super::read::remember_task(&context, basis, &task)?;
+    super::read::remember_task(context, basis, &task)?;
     Ok(task)
 }
 pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result<()> {
     basis.validate()?;
+    if super::recovery::select(project, id, basis)?.is_some() {
+        return Ok(());
+    }
     if !project.retention_lineage.is_empty() {
         return super::lineage::validate_locator(project, id, basis);
     }
@@ -359,19 +387,30 @@ pub fn publication_basis(
         return Err(invalid("publication source requires a logical note"));
     }
     validate_locator(project, id, context)?;
-    let commits = string(git(
-        project,
-        &[
-            "log",
-            "--first-parent",
-            "--reverse",
-            "--format=%H",
+    let selected = super::recovery::select(project, id, context)?;
+    let reads = match &selected {
+        Some(s) => s.context.clone(),
+        None => super::read::at(project, &project.records)?,
+    };
+    let tip = selected
+        .as_ref()
+        .map(|s| s.publication_tip.as_str())
+        .unwrap_or_else(|| {
             project
                 .retention_lineage
                 .iter()
                 .find(|e| e.from_prefix == context.project)
                 .map(|e| e.commit.as_str())
-                .unwrap_or(&context.retained_ref),
+                .unwrap_or(&context.retained_ref)
+        });
+    let commits = string(git_context(
+        &reads,
+        &[
+            "log",
+            "--first-parent",
+            "--reverse",
+            "--format=%H",
+            tip,
             "--",
             &context.task_path,
         ],

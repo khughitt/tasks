@@ -50,6 +50,15 @@ pub fn run(
     explain: bool,
     host: &crate::config::HostConfig,
 ) -> Result<RenameOut> {
+    if invocation.records.join(CONFIG_REL).exists()
+        && Project::open(&invocation.records)?
+            .retention_recovery
+            .is_some()
+    {
+        return Err(Error::Config(
+            "rename cannot coexist with retention recovery".into(),
+        ));
+    }
     let snapshot = observe(registry, invocation, Inventory::load(&invocation.source)?)?;
     let source = registry.canonical_prefix(&invocation.source).to_string();
     let target = registry.canonical_prefix(&invocation.target).to_string();

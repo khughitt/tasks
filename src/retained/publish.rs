@@ -529,7 +529,7 @@ fn preimage_checked(
         if state == crate::attachments::Ledger::Attached {
             let path = format!("{}/tasks/files/{id}/{name}", input.records_subdir);
             let bytes = super::basis::blob(
-                project,
+                &super::basis::context(project, id, input)?,
                 &input.commit,
                 path.trim_start_matches("./"),
                 Some(project.attachments_max_bytes),
@@ -1123,7 +1123,7 @@ fn batch_guarded(
     let pinned = super::basis::read(&context.project, id, None)?;
     ctx.metrics.history_bytes_read += pinned.history_bytes_read;
     let committed_raw = super::basis::blob(
-        &context.project,
+        &super::read::at(&context.project, &context.project.records)?,
         &pinned.basis.commit,
         &pinned.basis.task_path,
         None,
@@ -1138,7 +1138,7 @@ fn batch_guarded(
             pinned.basis.records_subdir, artifact.name
         );
         let bytes = super::basis::blob(
-            &context.project,
+            &super::read::at(&context.project, &context.project.records)?,
             &pinned.basis.commit,
             path.trim_start_matches("./"),
             Some(context.project.attachments_max_bytes),
@@ -1232,6 +1232,7 @@ fn publication_key(
         &project.records,
         &project.checkout,
         &project.retention_lineage,
+        &project.retention_recovery,
         project.attachments_max_bytes,
         id,
         operation,
@@ -1599,6 +1600,7 @@ pub fn validate_since(
             .get(&id)
             .ok_or_else(|| invalid("request inputs differ from locked participants"))?;
         let project = ctx.project(&id).clone();
+        super::recovery::same_epoch(&project, &id, &input.basis, &pinned.basis)?;
         super::basis::validate_locator(&project, &id, &input.basis)?;
         if input.basis.retained_ref != pinned.basis.retained_ref {
             return Err(Error::RetainedStaleBasis(

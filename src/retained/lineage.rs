@@ -89,7 +89,13 @@ pub fn validate(project: &Project) -> Result<()> {
         let path = format!("{}/tasks/.config.toml", e.from_subdir)
             .trim_start_matches("./")
             .to_string();
-        let raw = basis::blob(project, &e.commit, &path, None, &mut bytes)?;
+        let raw = basis::blob(
+            &crate::retained::read::at(project, &project.records)?,
+            &e.commit,
+            &path,
+            None,
+            &mut bytes,
+        )?;
         let (prefix, kind, prior) =
             Project::retention_config(std::str::from_utf8(&raw).map_err(invalid)?)?;
         if prefix != e.from_prefix || prior != edges[..i] || kind != project.kind {
@@ -226,7 +232,13 @@ pub fn epoch_at(project: &Project, id: &TaskId, commit: &str) -> Result<Basis> {
         if tree.is_empty() {
             continue;
         }
-        let raw = basis::blob(project, commit, &path, None, &mut 0)?;
+        let raw = basis::blob(
+            &crate::retained::read::at(project, &project.records)?,
+            commit,
+            &path,
+            None,
+            &mut 0,
+        )?;
         let config: toml::Value =
             toml::from_str(std::str::from_utf8(&raw).map_err(invalid)?).map_err(invalid)?;
         if config.get("prefix").and_then(|v| v.as_str()) != Some(prefix.as_str()) {
@@ -483,7 +495,7 @@ fn protected_bytes(project: &Project, pinned: &basis::PinnedTask) -> Result<()> 
         .trim_start_matches("./")
         .to_string();
         let bytes = basis::blob(
-            project,
+            &crate::retained::read::at(project, &project.records)?,
             &pinned.basis.commit,
             &path,
             Some(project.attachments_max_bytes),
@@ -601,8 +613,13 @@ pub fn prepare(project: &Project, target: &str) -> Result<Option<RenameEdge>> {
     let config_path = format!("{sub}/tasks/.config.toml")
         .trim_start_matches("./")
         .to_string();
-    if basis::blob(project, &commit, &config_path, None, &mut 0)?
-        != std::fs::read(project.records.join(crate::repo::CONFIG_REL))?
+    if basis::blob(
+        &crate::retained::read::at(project, &project.records)?,
+        &commit,
+        &config_path,
+        None,
+        &mut 0,
+    )? != std::fs::read(project.records.join(crate::repo::CONFIG_REL))?
     {
         return Err(invalid("source config differs from its committed basis"));
     }
@@ -704,7 +721,7 @@ pub fn check_staged(project: &Project, edge: &RenameEdge, ids: &[TaskId]) -> Res
                 .trim_start_matches("./")
                 .to_string();
             let expected = basis::blob(
-                project,
+                &crate::retained::read::at(project, &project.records)?,
                 &edge.commit,
                 &path,
                 Some(project.attachments_max_bytes),

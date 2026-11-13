@@ -114,6 +114,9 @@ pub(crate) fn at(project: &Project, records: &Path) -> Result<ReadContext> {
     })
 }
 impl ReadContext {
+    pub(crate) fn attachments_max_bytes(&self) -> u64 {
+        self.attachments_max_bytes
+    }
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
@@ -490,9 +493,6 @@ pub(crate) fn inherit(from: &Project, mut peer: Project) -> Result<Project> {
 pub(crate) fn root(p: &Project) -> Result<PathBuf> {
     Ok(at(p, &p.records)?.root.clone())
 }
-pub(crate) fn command(p: &Project, args: &[&str]) -> Result<Command> {
-    at(p, &p.records)?.command(args)
-}
 pub(crate) fn ancestor(p: &Project, older: &str, newer: &str) -> Result<bool> {
     at(p, &p.records)?.ancestor(older, newer)
 }
@@ -500,22 +500,32 @@ pub(crate) fn run(p: &Project, args: &[&str]) -> Result<ReadOutput> {
     at(p, &p.records)?.run(args)
 }
 
-fn lineage_key(p: &Project) -> Result<String> {
-    serde_json::to_string(&(&p.records, &p.prefix, p.kind.as_str(), &p.retention_lineage))
-        .map_err(invalid)
+fn validation_key(p: &Project, name: &str) -> Result<String> {
+    serde_json::to_string(&(
+        name,
+        &p.records,
+        &p.checkout,
+        &p.prefix,
+        p.kind.as_str(),
+        &p.retention_lineage,
+        &p.retention_recovery,
+    ))
+    .map_err(invalid)
 }
-pub(crate) fn lineage_cached(p: &Project) -> Result<bool> {
+fn validation_cached(p: &Project, name: &str) -> Result<bool> {
     match &p.retention_reads {
-        Some(s) if s.1 == ReadView::Pinned => Ok(s.lock()?.lineages.contains_key(&lineage_key(p)?)),
+        Some(s) if s.1 == ReadView::Pinned => {
+            Ok(s.lock()?.lineages.contains_key(&validation_key(p, name)?))
+        }
         Some(_) => Ok(false),
         None => Ok(false),
     }
 }
-pub(crate) fn remember_lineage(p: &Project) -> Result<()> {
+fn remember_validation(p: &Project, name: &str) -> Result<()> {
     if let Some(s) = &p.retention_reads
         && s.1 == ReadView::Pinned
     {
-        let key = lineage_key(p)?;
+        let key = validation_key(p, name)?;
         let mut state = s.lock()?;
         let Some(charge) = key.len().checked_add(64) else {
             return Ok(());
@@ -525,6 +535,18 @@ pub(crate) fn remember_lineage(p: &Project) -> Result<()> {
         }
     }
     Ok(())
+}
+pub(crate) fn lineage_cached(p: &Project) -> Result<bool> {
+    validation_cached(p, "lineage")
+}
+pub(crate) fn remember_lineage(p: &Project) -> Result<()> {
+    remember_validation(p, "lineage")
+}
+pub(crate) fn recovery_cached(p: &Project) -> Result<bool> {
+    validation_cached(p, "recovery")
+}
+pub(crate) fn remember_recovery(p: &Project) -> Result<()> {
+    remember_validation(p, "recovery")
 }
 fn full_range(revision: &str) -> bool {
     revision
@@ -658,4 +680,4 @@ pub(crate) fn remember_task(
     Ok(())
 }
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

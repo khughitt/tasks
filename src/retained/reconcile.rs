@@ -309,6 +309,7 @@ fn ready_proofs_with(
                 .find(|i| i.task == publication.task)
                 .ok_or_else(|| invalid("original participant missing"))?,
         ] {
+            super::recovery::same_epoch(&p, &id, &input.basis, &pinned.basis)?;
             let original = basis::read_exact(&p, &id, &input.basis)?;
             metrics.history_bytes_read += original.history_bytes_read;
             if !pinned.task.notes.starts_with(&original.task.notes)
@@ -318,8 +319,8 @@ fn ready_proofs_with(
                     "ready publication does not preserve its exact input history",
                 ));
             }
-            basis::git(
-                &p,
+            basis::git_context(
+                &basis::context(&p, &id, &input.basis)?,
                 &[
                     "merge-base",
                     "--is-ancestor",
@@ -374,6 +375,7 @@ fn ready_proofs_with(
     Ok(ready)
 }
 pub fn validate_terminal_history(project: &Project, pinned: &basis::PinnedTask) -> Result<()> {
+    super::recovery::operation_epochs(project, &pinned.task)?;
     for note in &pinned.task.notes {
         if let Some(raw) = note.text.strip_prefix("retention operation: ")
             && let Ok(operation) = decode_operation(raw)
@@ -407,15 +409,19 @@ pub fn reservation_ended(project: &Project, task: &Task, note: &OperationNote) -
         )?
     };
     let p = super::read::inherit(project, p)?;
-    let reference = note
+    let input = note
         .input_bases
         .iter()
         .find(|i| i.task == from.to_string())
-        .ok_or_else(|| invalid("coordinator input ref missing"))?
-        .basis
-        .retained_ref
-        .clone();
-    let coordinator = basis::read(&p, &from, Some(&reference))?;
+        .ok_or_else(|| invalid("coordinator input ref missing"))?;
+    let coordinator = match super::recovery::select(&p, &from, &input.basis)? {
+        Some(selection) if selection.epoch == super::recovery::Epoch::Source => {
+            let mut endpoint = input.basis.clone();
+            endpoint.commit = selection.publication_tip;
+            basis::read_exact(&p, &from, &endpoint)?
+        }
+        _ => basis::read(&p, &from, Some(&input.basis.retained_ref))?,
+    };
     let terminal = phases(&coordinator.task, &note.key)?
         .into_iter()
         .find(|(_, n)| n.phase == "reconciled");
@@ -822,6 +828,7 @@ pub fn run(
     let binding = load_original(&mut ctx, &from)?;
     for input in &binding.inputs {
         let id = TaskId::parse(&input.task)?;
+        super::recovery::same_epoch(ctx.project(&id), &id, &input.basis, &ctx.tasks[&id].basis)?;
         if ctx.tasks[&id].basis.retained_ref != input.basis.retained_ref {
             return Err(Error::RetainedStaleBasis("Reconcile from the original input's named retained branch; recover that exact publication context first".into()));
         }

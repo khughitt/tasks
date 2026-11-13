@@ -493,7 +493,7 @@ impl Inventory {
                     .trim_start_matches("./")
                     .to_string();
                 let source = crate::retained::basis::blob(
-                    &project,
+                    &crate::retained::read::at(&project, &project.records)?,
                     &edge.commit,
                     &source_path,
                     None,

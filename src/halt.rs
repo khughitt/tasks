@@ -215,6 +215,7 @@ mod tests {
         let project = Project {
             retention_reads: None,
             retention_lineage: Vec::new(),
+            retention_recovery: None,
             root: PathBuf::new(),
             records: PathBuf::new(),
             kind: crate::repo::Kind::InTree,
@@ -257,6 +258,7 @@ mod tests {
         let project = Project {
             retention_reads: None,
             retention_lineage: Vec::new(),
+            retention_recovery: None,
             root: PathBuf::new(),
             records: PathBuf::new(),
             kind: crate::repo::Kind::InTree,

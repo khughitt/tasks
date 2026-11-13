@@ -120,6 +120,7 @@ pub fn validate_history(
         )) {
             continue;
         }
+        super::recovery::operation_epochs(&project, &pinned.task)?;
         let mut requests = BTreeMap::new();
         for (index, entry) in pinned.task.notes.iter().enumerate() {
             let Some(raw) = entry.text.strip_prefix("retention operation: ") else {
@@ -173,6 +174,9 @@ pub fn validate_history(
             for input in &note.input_bases {
                 let p = resolver.task(&project, &input.task)?;
                 let id = TaskId::parse(&input.task)?;
+                if super::lineage::same(&project, &input.task, &pinned.task.id.to_string())? {
+                    super::recovery::same_epoch(&p, &id, &input.basis, &publication)?;
+                }
                 let original = basis::read_exact(&p, &id, &input.basis)?;
                 if super::lineage::same(&project, &input.task, &pinned.task.id.to_string())? {
                     if !pinned.task.notes[..index].starts_with(&original.task.notes) {
@@ -180,8 +184,8 @@ pub fn validate_history(
                             "operation does not preserve its exact input history",
                         ));
                     }
-                    basis::git(
-                        &p,
+                    basis::git_context(
+                        &basis::context(&p, &id, &input.basis)?,
                         &[
                             "merge-base",
                             "--is-ancestor",

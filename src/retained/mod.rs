@@ -16,6 +16,7 @@ pub mod reconcile;
 pub mod proof;
 
 pub mod lineage;
+pub(crate) mod recovery;
 
 pub(crate) mod read;
 

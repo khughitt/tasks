@@ -137,6 +137,7 @@ fn range_key(
         &project.records,
         &project.checkout,
         &project.retention_lineage,
+        &project.retention_recovery,
         project.attachments_max_bytes,
     ))
     .map_err(super::model::invalid)
@@ -231,7 +232,7 @@ fn compare_edge(
             archive.file_name()
         );
         basis::blob(
-            project,
+            &crate::retained::read::at(project, &project.records)?,
             to,
             path.trim_start_matches("./"),
             Some(project.attachments_max_bytes),
@@ -239,7 +240,13 @@ fn compare_edge(
         )
     })?;
     // Parsed equality alone would hide byte-only edits; accept only writer output.
-    let raw = basis::blob(project, to, &context.task_path, None, &mut bytes)?;
+    let raw = basis::blob(
+        &crate::retained::read::at(project, &project.records)?,
+        to,
+        &context.task_path,
+        None,
+        &mut bytes,
+    )?;
     if raw != crate::format::serialize_physical(&physical).as_bytes() {
         return Err(stale());
     }
@@ -255,6 +262,8 @@ fn validate_range(
     policy: ProgressPolicy,
     warmed_head: Option<&str>,
 ) -> Result<()> {
+    super::recovery::require_current(project, id, from)?;
+    super::recovery::require_current(project, id, to)?;
     from.validate()?;
     to.validate()?;
     if from.project != to.project
@@ -331,7 +340,13 @@ fn working_file_expected(
     let expected = match expected {
         Some(bytes) => bytes,
         None => {
-            committed = basis::blob(project, commit, path, cap, &mut bytes_read)?;
+            committed = basis::blob(
+                &crate::retained::read::at(project, &project.records)?,
+                commit,
+                path,
+                cap,
+                &mut bytes_read,
+            )?;
             &committed
         }
     };
@@ -491,6 +506,7 @@ pub(super) fn context(project: &Project) -> Result<Project> {
         || fresh.prefix != project.prefix
         || fresh.kind != project.kind
         || fresh.checkout != project.checkout
+        || fresh.retention_recovery != project.retention_recovery
         || fresh.retention_lineage != project.retention_lineage
         || fresh.commit_records != project.commit_records
         || fresh.attachments_max_bytes != project.attachments_max_bytes
@@ -506,6 +522,7 @@ pub(crate) fn current(
     pinned: &basis::PinnedTask,
     attachments: bool,
 ) -> Result<Basis> {
+    super::recovery::require_current(project, id, &pinned.basis)?;
     let fresh = context(project)?;
     let branch = basis::git(&fresh, &["symbolic-ref", "-q", "HEAD"])?;
     if branch.strip_suffix(b"\n").unwrap_or(&branch) != pinned.basis.retained_ref.as_bytes() {

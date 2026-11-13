@@ -2,7 +2,7 @@ use super::*;
 use crate::retained::{basis, lineage};
 use std::{path::Path, process::Command};
 
-fn isolated(name: &str) -> bool {
+pub(crate) fn isolated(name: &str) -> bool {
     if std::env::var_os("TASKS_READ_FIXTURE_CHILD").is_some() {
         return false;
     }
@@ -30,12 +30,12 @@ fn isolated(name: &str) -> bool {
     assert!(out.status.success(), "{out:?}");
     true
 }
-fn git(dir: &Path, args: &[&str]) -> String {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
     let out = crate::git::at(dir).args(args).output().unwrap();
     assert!(out.status.success(), "{args:?}: {out:?}");
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
-fn fixture() -> (tempfile::TempDir, Project) {
+pub(crate) fn fixture() -> (tempfile::TempDir, Project) {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-qb", "main"]);
     assert_eq!(
@@ -340,14 +340,28 @@ fn validation_read_session_ends_after_failure() {
     let head = basis::resolve(&p, "HEAD").unwrap();
     let before = starts("cat-file");
     for _ in 0..2 {
-        basis::blob(&p, &head, "tasks/.config.toml", None, &mut 0).unwrap();
+        basis::blob(
+            &crate::retained::read::at(&p, &p.records).unwrap(),
+            &head,
+            "tasks/.config.toml",
+            None,
+            &mut 0,
+        )
+        .unwrap();
     }
     assert!(ancestor(&p, &"0".repeat(40), &head).is_err());
     let weak = Arc::downgrade(&p.retention_reads.as_ref().unwrap().0);
     drop(p);
     assert!(weak.upgrade().is_none());
     let next = start(&original).unwrap();
-    basis::blob(&next, &head, "tasks/.config.toml", None, &mut 0).unwrap();
+    basis::blob(
+        &at(&next, &next.records).unwrap(),
+        &head,
+        "tasks/.config.toml",
+        None,
+        &mut 0,
+    )
+    .unwrap();
     assert!(starts("cat-file") - before <= 2);
 }
 #[test]
@@ -367,7 +381,14 @@ fn validation_read_budget_falls_back_to_reads() {
         let before = starts("cat-file");
         for _ in 0..2 {
             assert_eq!(
-                basis::blob(&p, &head, "tasks/.config.toml", None, &mut 0).unwrap(),
+                basis::blob(
+                    &crate::retained::read::at(&p, &p.records).unwrap(),
+                    &head,
+                    "tasks/.config.toml",
+                    None,
+                    &mut 0
+                )
+                .unwrap(),
                 b"prefix = \"sci\"\n"
             );
         }
@@ -385,7 +406,14 @@ fn validation_read_separates_repositories() {
     assert_eq!(git(b.path(), &["rev-parse", "HEAD"]), head);
     let p = start(&p).unwrap();
     let q = inherit(&p, q).unwrap();
-    basis::blob(&p, &head, "tasks/.config.toml", None, &mut 0).unwrap();
+    basis::blob(
+        &crate::retained::read::at(&p, &p.records).unwrap(),
+        &head,
+        "tasks/.config.toml",
+        None,
+        &mut 0,
+    )
+    .unwrap();
     let oid = git(b.path(), &["rev-parse", "HEAD:tasks/.config.toml"]);
     std::fs::remove_file(
         b.path()
@@ -394,7 +422,16 @@ fn validation_read_separates_repositories() {
             .join(&oid[2..]),
     )
     .unwrap();
-    assert!(basis::blob(&q, &head, "tasks/.config.toml", None, &mut 0).is_err());
+    assert!(
+        basis::blob(
+            &at(&q, &q.records).unwrap(),
+            &head,
+            "tasks/.config.toml",
+            None,
+            &mut 0
+        )
+        .is_err()
+    );
 }
 #[test]
 fn validation_read_cache_preserves_caps_and_archive_integrity() {
@@ -476,7 +513,14 @@ fn validation_read_cache_preserves_caps_and_archive_integrity() {
     git(dir.path(), &["commit", "-qm", "regular payload"]);
     let regular = git(dir.path(), &["rev-parse", "HEAD"]);
     assert_eq!(
-        basis::blob(&p, &regular, "tasks/unsafe", None, &mut 0).unwrap(),
+        basis::blob(
+            &crate::retained::read::at(&p, &p.records).unwrap(),
+            &regular,
+            "tasks/unsafe",
+            None,
+            &mut 0
+        )
+        .unwrap(),
         b"regular"
     );
     std::fs::remove_file(&unsafe_path).unwrap();
@@ -484,7 +528,16 @@ fn validation_read_cache_preserves_caps_and_archive_integrity() {
     git(dir.path(), &["add", "."]);
     git(dir.path(), &["commit", "-qm", "unsafe payload"]);
     let unsafe_commit = git(dir.path(), &["rev-parse", "HEAD"]);
-    assert!(basis::blob(&p, &unsafe_commit, "tasks/unsafe", None, &mut 0).is_err());
+    assert!(
+        basis::blob(
+            &crate::retained::read::at(&p, &p.records).unwrap(),
+            &unsafe_commit,
+            "tasks/unsafe",
+            None,
+            &mut 0
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -558,7 +611,7 @@ fn validation_read_live_views_share_immutable_entries() {
     .unwrap();
     assert!(
         basis::blob(
-            &other,
+            &at(&other, &other.records).unwrap(),
             &pinned_head_before,
             "tasks/.config.toml",
             None,

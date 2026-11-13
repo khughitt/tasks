@@ -144,6 +144,7 @@ pub struct Project {
     pub kind: Kind,
     pub prefix: String,
     pub retention_lineage: Vec<crate::retained::lineage::RenameEdge>,
+    pub(crate) retention_recovery: Option<crate::retained::recovery::RecoveryDeclaration>,
     pub color: Option<crate::palette::Rgb>,
     pub profile: Option<String>,
     pub shorthand: Vec<String>,
@@ -207,6 +208,8 @@ struct Config {
     prefix: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     retention_lineage: Vec<crate::retained::lineage::RenameEdge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retention_recovery: Option<crate::retained::recovery::RecoveryDeclaration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -725,6 +728,7 @@ impl Project {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
                 retention_lineage: Vec::new(),
+                retention_recovery: None,
                 color: None,
                 profile: None,
                 shorthand: Vec::new(),
@@ -849,6 +853,7 @@ impl Project {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
                 retention_lineage: Vec::new(),
+                retention_recovery: None,
                 color: None,
                 profile: None,
                 shorthand: Vec::new(),
@@ -943,6 +948,14 @@ impl Project {
         };
         crate::retained::lineage::validate_shape(&config.prefix, kind, &config.retention_lineage)
             .map_err(|e| Error::Config(format!("{CONFIG_REL}: {e}")))?;
+        if let Some(d) = &config.retention_recovery {
+            crate::retained::recovery::validate_shape(&config.prefix, kind, d)?;
+            if !config.retention_lineage.is_empty() {
+                return Err(Error::Config(
+                    "recovery cannot coexist with rename lineage".into(),
+                ));
+            }
+        }
         Ok(Project {
             retention_reads: None,
             root,
@@ -953,6 +966,7 @@ impl Project {
             commit_records,
             prefix: config.prefix,
             retention_lineage: config.retention_lineage,
+            retention_recovery: config.retention_recovery,
             profile: config.profile,
             shorthand: config.shorthand,
             identity: config

@@ -388,7 +388,7 @@ pub(super) fn artifact_with(
 ) -> Result<Vec<u8>> {
     let (p, b, path, expected) = artifact_location(resolver, project, locator, metrics)?;
     let bytes = basis::blob(
-        &p,
+        &basis::context(&p, &super::lineage::historical_id(&b)?, &b)?,
         &b.commit,
         &path,
         Some(p.attachments_max_bytes),
@@ -410,12 +410,14 @@ fn payload_digest(
         locator,
         metrics,
     )?;
-    let mode = basis::git(&p, &["ls-tree", "-z", &b.commit, "--", &path])?;
+    let context = basis::context(&p, &super::lineage::historical_id(&b)?, &b)?;
+    let mode = basis::git_context(&context, &["ls-tree", "-z", &b.commit, "--", &path])?;
     if !(mode.starts_with(b"100644 blob ") || mode.starts_with(b"100755 blob ")) {
         return Err(invalid("preserved payload is not a regular Git blob"));
     }
     let object = format!("{}:{path}", b.commit);
-    let mut child = super::read::command(&p, &["cat-file", "blob", &object])?
+    let mut child = context
+        .command(&["cat-file", "blob", &object])?
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
