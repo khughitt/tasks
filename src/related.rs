@@ -295,6 +295,10 @@ pub fn link_citations(
                 let c = registry.canonical_id(r);
                 c == cited_canonical || c == dest_canonical
             })
+            || task.follows.iter().any(|r| {
+                let c = registry.canonical_id(r);
+                c == cited_canonical || c == dest_canonical
+            })
             || change.removed.iter().any(|r| {
                 let c = registry.canonical_id(r);
                 c == cited_canonical || c == dest_canonical
@@ -371,6 +375,7 @@ mod tests {
             last_done: None,
             depends: vec![],
             related: vec![],
+            follows: vec![],
             parent: None,
             tags: vec![],
             source: None,

@@ -115,6 +115,7 @@ mod tests {
             last_done: None,
             depends: vec![],
             related: vec![],
+            follows: vec![],
             parent: None,
             tags: vec!["feedback".into()],
             source: None,

@@ -140,6 +140,7 @@ pub(crate) fn build_pair(
     )?;
     let mut tombstone = source.clone();
     tombstone.related.clear();
+    tombstone.follows.clear();
     if source.status == Status::Shelved {
         tombstone.wake_on.clear();
         tombstone.defer = None;

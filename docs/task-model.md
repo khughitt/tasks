@@ -52,6 +52,7 @@ optional booleans false, and other optional values absent.
 | `depends`, `parent` | Execution dependency ids (foreign allowed); optional same-project containment parent. |
 | `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. Written by add/edit --related, edit --rm-related and edit --no-related. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
+| `follows` | Optional ordered task-id list for additional work continuing earlier work; foreign ids allowed. Reader release preserves and displays stored lists, including duplicates; no writer flags, inference or historical conversion. Editor changes (including removal/reorder) refuse until writer activation. Never gates execution or review. |
 | `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status and `updated` timestamp; that display reads the record and changes nothing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |
 | `origin` | Current judgment `user`, `agent`, `mixed`; absent means unknown. |
@@ -131,7 +132,7 @@ counts, and only ids absent from the old body count. Each new citation resolves 
 destination across move chains (`tombstone::follow`). Unresolvable citations warn
 `<task> cites <id>, which resolves to no task here; not linked`. Citations are skipped without
 warning if the cited id or its destination matches the record itself, a child, an id already
-in `related`, or an id held in `depends`, `parent`, `wake_on`, `moved_to`, `moved_from`, a
+in `related`, or an id held in `depends`, `parent`, `wake_on`, `follows`, `moved_to`, `moved_from`, a
 task-id `source`, or removed in the same write. Explicit related changes (`--rm-related`,
 `--no-related`, editor changes to `related`) take precedence over automatic linking. While a
 retained operation is pending on the record, automatic linking is deferred with a warning
@@ -178,8 +179,8 @@ false booleans, zero numbers and empty body remain. Response containers such as
 `tasks` and `warnings` remain arrays, and an empty `next` result is explicit null.
 Summary/park/goal rows are projections, not interchangeable full Task objects.
 Resolved relationship entries on `show` and `next` (`parent`, `children`,
-`depends_on`, `related_to`, `wake_targets` and `source_task`) carry `id`,
-`title`, `status` and `updated` (plus `resolved` on `depends_on`, `related_to`,
+`depends_on`, `related_to`, `follows_tasks`, `wake_targets` and `source_task`) carry `id`,
+`title`, `status` and `updated` (plus `resolved` on `depends_on`, `related_to`, `follows_tasks`,
 `wake_targets` and `source_task`, where unresolved entries omit `title`,
 `status` and `updated`).
 Additive output fields are allowed; clients should ignore unknown output fields.
@@ -197,3 +198,26 @@ current references, migration/read compatibility and the relevant tests together
 Install the updated binary on every host that reads synced records before records
 carrying new keys sync; verify one host end to end, and the other hosts updated
 by the same install path are covered.
+
+## Follows reader release
+
+`follows` means this task contains additional work arising from named earlier tasks,
+without asserting closure, prerequisites or replacement. Existing `source` (filing
+origin) and `related` (informational citation) values remain unchanged. No command
+infers or backfills follows. Empty lists are omitted from frontmatter and full Task
+JSON; summary rows do not gain the field. Parsing checks id syntax only.
+
+Show and next preserve stored outgoing order and duplicates in `follows_tasks`.
+Missing targets remain unresolved with warnings; moved targets display the stored
+tombstone. Inverse follow-up discovery is not available in this release.
+
+Check warns `self_follows`, `duplicate_follows` (canonical aliases included), and
+`dangling_follows` for missing local targets. Foreign targets are resolved on show,
+not globally scanned by check. Tombstone follows produces the `follows_status`
+error. Unchanged lists, including semantic errors, survive unrelated editor saves
+and non-editor writes. Reader-stage editor changes refuse atomically.
+
+Prefix rename rewrites local follows ids. Move preserves the list on the successor
+and clears the tombstone; inbound stored links remain unchanged. Migration remaps
+carried targets and records `follows OLD carried as NEW`; uncarried targets retain
+their references. Follows never acts as a migration prerequisite.

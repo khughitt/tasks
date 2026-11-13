@@ -244,6 +244,7 @@ impl Journal {
         expected_target.updated.clone_from(&target.updated);
         let mut expected_tombstone = source.clone();
         expected_tombstone.related.clear();
+        expected_tombstone.follows.clear();
         if source.status == Status::Shelved {
             expected_tombstone.wake_on.clear();
             expected_tombstone.defer = None;

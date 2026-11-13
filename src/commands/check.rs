@@ -553,6 +553,42 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 }
             }
         }
+        let mut follows_seen = BTreeSet::new();
+        for target in &task.follows {
+            let id = ctx.registry.canonical_id(target);
+            if id == ctx.registry.canonical_id(&task.id) {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "self_follows",
+                    "a task cannot follow itself".into(),
+                ));
+            }
+            if !follows_seen.insert(id.clone()) {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "duplicate_follows",
+                    format!("duplicate follows target {target}"),
+                ));
+            }
+            if id.prefix == ctx.project.prefix && !ctx.project.task_path(&id).try_exists()? {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "dangling_follows",
+                    format!("follows missing {target}"),
+                ));
+            }
+        }
+        if !task.follows.is_empty() && task.status == Status::Moved {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "follows_status",
+                "a tombstone cannot carry follows".into(),
+            ));
+        }
         for related in &task.related {
             let related_id = ctx.registry.canonical_id(related);
             if related_id.prefix == ctx.project.prefix

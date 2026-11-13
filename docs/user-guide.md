@@ -124,11 +124,23 @@ full titles. Project colors and `--color always` do not change width budgets.
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
 `show` collects every task link in the `── related ──` section: rows run in the
-order `parent`, `depends on`, `wake on`, `related`, `source`, and `child`,
+order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, and `child`,
 formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
 Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
 recency scale); an unresolved target leaves the date blank and prints
 `(unresolved)` with `?` for status, while a moved target reads `moved`.
+
+The reader release recognizes `follows`: this task continues work arising from
+one or more earlier tasks. `source` remains its filing origin, and `related` an
+informational citation. Follows does not require an earlier task to close or change
+readiness, review or completion. Existing source/related links are not converted.
+Show and next display stored outgoing follows rows, including foreign, moved and
+unresolved targets. They do not yet discover incoming follow-ups.
+
+Writers remain disabled until every participating reader is upgraded: no follows
+flags are exposed, and editor additions, removals and reordering refuse. Unrelated
+saves preserve existing lists. Do not manually introduce follows into shared
+records before the reader rollout is confirmed.
 
 A lane is a goal marked `--lane`: its descendant tree is one stream of work.
 Lanes cannot nest. A live claim in a lane makes sibling work in that lane busy.

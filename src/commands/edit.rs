@@ -480,6 +480,11 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ctx.project.read_archive(&original.id, archive)
     })
     .map_err(keep)?;
+    if edited.follows != original.follows {
+        return Err(keep(Error::Validation(
+            "follows changes are disabled until reader rollout is complete".into(),
+        )));
+    }
     check_invariants(&original, &edited).map_err(keep)?;
     crate::review::stamp_edited(&original, &mut edited);
     // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it

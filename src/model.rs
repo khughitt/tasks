@@ -163,6 +163,7 @@ mod tests {
             last_done: None,
             depends: vec![],
             related: vec![],
+            follows: vec![],
             parent: None,
             tags: vec![],
             source: None,
@@ -667,6 +668,8 @@ pub struct Task {
     pub depends: Vec<TaskId>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<TaskId>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub follows: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<TaskId>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

@@ -91,6 +91,7 @@ mod tests {
             last_done: last_done.map(Into::into),
             depends: vec![],
             related: vec![],
+            follows: vec![],
             parent: None,
             tags: vec![],
             source: None,

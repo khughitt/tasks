@@ -7,7 +7,7 @@ use crate::model::{
 
 pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 37] = [
+const KEYS: [&str; 38] = [
     "id",
     "title",
     "status",
@@ -34,6 +34,7 @@ const KEYS: [&str; 37] = [
     "last_done",
     "depends",
     "related",
+    "follows",
     "parent",
     "tags",
     "source",
@@ -191,6 +192,11 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
             .collect::<Result<Vec<_>>>()
             .map_err(|error| perr(file, error.to_string()))?,
         related: optional_list("related")?
+            .iter()
+            .map(|value| TaskId::parse(value))
+            .collect::<Result<Vec<_>>>()
+            .map_err(|error| perr(file, error.to_string()))?,
+        follows: optional_list("follows")?
             .iter()
             .map(|value| TaskId::parse(value))
             .collect::<Result<Vec<_>>>()
@@ -613,7 +619,13 @@ pub fn roots_hint(kind: &str) -> String {
 
 pub fn validate_task(t: &Task) -> Result<()> {
     TaskId::parse(&t.id.to_string())?;
-    for dependency in t.depends.iter().chain(&t.wake_on).chain(&t.related) {
+    for dependency in t
+        .depends
+        .iter()
+        .chain(&t.wake_on)
+        .chain(&t.related)
+        .chain(&t.follows)
+    {
         TaskId::parse(&dependency.to_string())?;
     }
     validate_line("title", &t.title)?;
@@ -780,6 +792,12 @@ pub fn serialize_physical(record: &PhysicalTask) -> String {
         pairs.push((
             "related".into(),
             Value::List(t.related.iter().map(ToString::to_string).collect()),
+        ));
+    }
+    if !t.follows.is_empty() {
+        pairs.push((
+            "follows".into(),
+            Value::List(t.follows.iter().map(ToString::to_string).collect()),
         ));
     }
     if let Some(parent) = &t.parent {
@@ -1356,6 +1374,21 @@ mod tests {
         assert!(
             crate::history::fixture(
                 &MINIMAL.replace("depends: []", "depends: []\nrelated: [bad-id]"),
+                "x"
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn follows_reader_roundtrips() {
+        let with_follows = MINIMAL.replace("depends: []", "depends: []\nfollows: [sci-000002]");
+        let t = crate::history::fixture(&with_follows, "x").unwrap();
+        assert_eq!(t.follows.len(), 1);
+        assert_eq!(t.follows[0].to_string(), "sci-000002");
+        assert_eq!(crate::history::fixture_text(&t), with_follows);
+        assert!(
+            crate::history::fixture(
+                &MINIMAL.replace("depends: []", "depends: []\nfollows: [bad-id]"),
                 "x"
             )
             .is_err()

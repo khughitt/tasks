@@ -308,6 +308,7 @@ mod tests {
             last_done: None,
             depends: deps.iter().map(|d| TaskId::parse(d).unwrap()).collect(),
             related: vec![],
+            follows: vec![],
             parent: None,
             tags: vec![],
             source: None,

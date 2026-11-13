@@ -447,6 +447,26 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         }
         work.carried.pair.target.related = related;
 
+        // follows.
+        let mut follows = Vec::new();
+        for target in std::mem::take(&mut work.carried.pair.target.follows) {
+            let c = canonical(&target);
+            match map.get(&c) {
+                Some(new) => {
+                    follows.push(new.clone());
+                    rewrite(
+                        &mut ctx.source,
+                        &owner,
+                        &suffix,
+                        &mut work.carried,
+                        format!("follows {c} carried as {new}"),
+                    )?;
+                }
+                None => follows.push(target),
+            }
+        }
+        work.carried.pair.target.follows = follows;
+
         // Links.
         let drop_links = match entry.links.as_deref() {
             None => false,

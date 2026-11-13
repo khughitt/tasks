@@ -222,7 +222,7 @@ fn color(o: &ShowFields, id: &str) -> Option<Rgb> {
 }
 
 /// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): one row per field with a value, in this
-/// order. Links (`parent`, `depends on`, `wake on`, `related`, and a task `source`) are listed under `── related ──`
+/// order. Links (`parent`, `depends on`, `follows`, `wake on`, `related`, and a task `source`) are listed under `── related ──`
 /// instead.
 fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     let t = &o.task;
@@ -448,7 +448,7 @@ fn hang(line: &str) -> usize {
 }
 
 /// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <date>  <title>`,
-/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `wake on`, `related`, `source`, `child`.
+/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `child`.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
     let date_of = |updated: Option<&str>| match updated {
         Some(ts) => present::date(ts),
@@ -474,6 +474,16 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             date_of(dependency.updated.as_deref()),
             dependency.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &dependency.id).filter(|_| dependency.resolved),
+        ));
+    }
+    for rel in &o.follows_tasks {
+        rows.push((
+            "follows",
+            rel.id.as_str(),
+            present::status_of(rel.status),
+            date_of(rel.updated.as_deref()),
+            rel.title.as_deref().unwrap_or("(unresolved)"),
+            color(o, &rel.id).filter(|_| rel.resolved),
         ));
     }
     for wake in &o.wake_targets {
@@ -815,6 +825,7 @@ mod tests {
             step_found: None,
             depends_on: vec![],
             related_to: vec![],
+            follows_tasks: vec![],
             wake_targets: vec![],
             source_task: None,
             parent: None,
@@ -989,7 +1000,7 @@ mod tests {
     }
 
     #[test]
-    fn related_rows_render_in_exact_order_and_overview_omits_wake_and_task_source() {
+    fn follows_reader_related_rows_render_in_exact_order_and_overview_omits_wake_and_task_source() {
         let mut o = fields();
         o.task.wake_on = vec![crate::model::TaskId::parse("sci-000003").unwrap()];
         o.task.source = Some("sci-000005".into());
@@ -1000,6 +1011,13 @@ mod tests {
             updated: "2026-01-01T00:00:00Z".into(),
         });
         o.depends_on = vec![DepInfo {
+            id: "sci-000002".into(),
+            title: Some("Dep".into()),
+            status: Some(Status::Todo),
+            updated: Some("2026-01-02T00:00:00Z".into()),
+            resolved: true,
+        }];
+        o.follows_tasks = vec![DepInfo {
             id: "sci-000002".into(),
             title: Some("Dep".into()),
             status: Some(Status::Todo),
@@ -1044,13 +1062,14 @@ mod tests {
             .skip(1)
             .take_while(|l| !l.is_empty())
             .collect();
-        assert_eq!(lines.len(), 6, "{lines:?}");
+        assert_eq!(lines.len(), 7, "{lines:?}");
         assert!(lines[0].starts_with("parent      sci-000001  todo     2026-01-01  Parent"));
         assert!(lines[1].starts_with("depends on  sci-000002  todo     2026-01-02  Dep"));
-        assert!(lines[2].starts_with("wake on     sci-000003  todo     2026-01-03  Wake"));
-        assert!(lines[3].starts_with("related     sci-000004  done     2026-01-04  Rel"));
-        assert!(lines[4].starts_with("source      sci-000005  todo     2026-01-05  Source"));
-        assert!(lines[5].starts_with("child       sci-000006  todo     2026-01-06  Child"));
+        assert!(lines[2].starts_with("follows     sci-000002  todo     2026-01-02  Dep"));
+        assert!(lines[3].starts_with("wake on     sci-000003  todo     2026-01-03  Wake"));
+        assert!(lines[4].starts_with("related     sci-000004  done     2026-01-04  Rel"));
+        assert!(lines[5].starts_with("source      sci-000005  todo     2026-01-05  Source"));
+        assert!(lines[6].starts_with("child       sci-000006  todo     2026-01-06  Child"));
 
         // When source is opaque (source_task is None), it stays in overview.
         o.source_task = None;
@@ -1063,86 +1082,92 @@ mod tests {
     }
 
     #[test]
-    fn related_rows_align_hanging_wrapped_titles_and_paint_dates_by_recency() {
-        let mut o = fields();
-        o.parent = Some(Related {
-            id: "sci-000001".into(),
-            title: "Alpha beta gamma delta".into(),
-            status: Status::Todo,
-            updated: "2026-09-25T12:00:00Z".into(),
-        });
-        o.related_to = vec![
-            DepInfo {
-                id: "fam-000002".into(),
-                title: Some("Old target".into()),
-                status: Some(Status::Done),
-                updated: Some("2020-01-01T00:00:00Z".into()),
-                resolved: true,
-            },
-            DepInfo {
-                id: "fam-000003".into(),
-                title: None,
-                status: None,
-                updated: None,
-                resolved: false,
-            },
-        ];
+    fn follows_reader_and_related_rows_wrap_and_paint_dates() {
+        for follows in [false, true] {
+            let mut o = fields();
+            o.parent = Some(Related {
+                id: "sci-000001".into(),
+                title: "Alpha beta gamma delta".into(),
+                status: Status::Todo,
+                updated: "2026-09-25T12:00:00Z".into(),
+            });
+            o.related_to = vec![
+                DepInfo {
+                    id: "fam-000002".into(),
+                    title: Some("Old target".into()),
+                    status: Some(Status::Done),
+                    updated: Some("2020-01-01T00:00:00Z".into()),
+                    resolved: true,
+                },
+                DepInfo {
+                    id: "fam-000003".into(),
+                    title: None,
+                    status: None,
+                    updated: None,
+                    resolved: false,
+                },
+            ];
 
-        // label_width = 7 ("related"), id_width = 10, status_width = 7, date_width = 10 -> lead_width = 42.
-        let text = render(&o, &plain(), Some(56));
-        let related_block = text.split_once("── related ").unwrap().1;
-        let lines: Vec<&str> = related_block
-            .lines()
-            .skip(1)
-            .take_while(|l| !l.is_empty())
-            .collect();
-        assert_eq!(
-            lines,
-            vec![
-                "parent   sci-000001  todo     2026-09-25  Alpha beta",
-                "                                          gamma delta",
-                "related  fam-000002  done     2020-01-01  Old target",
-                "related  fam-000003  ?                    (unresolved)",
-            ],
-            "{related_block}"
-        );
+            if follows {
+                o.follows_tasks = std::mem::take(&mut o.related_to);
+            }
+            let label = if follows { "follows" } else { "related" };
+            // label_width = 7 ("related"), id_width = 10, status_width = 7, date_width = 10 -> lead_width = 42.
+            let text = render(&o, &plain(), Some(56));
+            let related_block = text.split_once("── related ").unwrap().1;
+            let lines: Vec<&str> = related_block
+                .lines()
+                .skip(1)
+                .take_while(|l| !l.is_empty())
+                .collect();
+            assert_eq!(
+                lines,
+                vec![
+                    "parent   sci-000001  todo     2026-09-25  Alpha beta".to_string(),
+                    "                                          gamma delta".to_string(),
+                    format!("{label}  fam-000002  done     2020-01-01  Old target"),
+                    format!("{label}  fam-000003  ?                    (unresolved)"),
+                ],
+                "{related_block}"
+            );
 
-        let palette = crate::palette::Palette {
-            fg: Rgb {
-                r: 229,
-                g: 227,
-                b: 215,
-            },
-            bg: Rgb {
-                r: 19,
-                g: 20,
-                b: 13,
-            },
-            cyan: Rgb {
-                r: 0,
-                g: 215,
-                b: 255,
-            },
-            magenta: None,
-        };
-        let today = time::Date::from_calendar_date(2026, time::Month::September, 25).unwrap();
-        let painter = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false)
-            .with_recency(crate::style::Recency::new(today, &palette));
-        let painted = render(&o, &painter, Some(120));
-        assert!(
-            painted.contains("\x1b[38;2;0;215;255m2026-09-25\x1b[0m  Alpha beta gamma delta"),
-            "{painted:?}"
-        );
-        assert!(
-            painted.contains("\x1b[38;2;125;125;115m2020-01-01\x1b[0m  Old target"),
-            "{painted:?}"
-        );
-        assert!(
-            painted.contains(
-                "\x1b[2mfam-000003\x1b[0m  \x1b[2m?      \x1b[0m              (unresolved)"
-            ),
-            "{painted:?}"
-        );
+            let palette = crate::palette::Palette {
+                fg: Rgb {
+                    r: 229,
+                    g: 227,
+                    b: 215,
+                },
+                bg: Rgb {
+                    r: 19,
+                    g: 20,
+                    b: 13,
+                },
+                cyan: Rgb {
+                    r: 0,
+                    g: 215,
+                    b: 255,
+                },
+                magenta: None,
+            };
+            let today = time::Date::from_calendar_date(2026, time::Month::September, 25).unwrap();
+            let painter = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false)
+                .with_recency(crate::style::Recency::new(today, &palette));
+            let painted = render(&o, &painter, Some(120));
+            assert!(
+                painted.contains("\x1b[38;2;0;215;255m2026-09-25\x1b[0m  Alpha beta gamma delta"),
+                "{painted:?}"
+            );
+            assert!(
+                painted.contains("\x1b[38;2;125;125;115m2020-01-01\x1b[0m  Old target"),
+                "{painted:?}"
+            );
+            assert!(
+                painted.contains(
+                    "\x1b[2mfam-000003\x1b[0m  \x1b[2m?      \x1b[0m              (unresolved)"
+                ),
+                "{painted:?}"
+            );
+        }
     }
 
     #[test]

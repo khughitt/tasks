@@ -147,6 +147,14 @@ pub fn describe(
         }
         related_to.push(row);
     }
+    let mut follows_tasks = Vec::new();
+    for related in &task.follows {
+        let row = resolve_row(registry, all, &resolver, related)?;
+        if !row.resolved {
+            warnings.push(format!("follows task {related} is unreachable"));
+        }
+        follows_tasks.push(row);
+    }
     let mut wake_targets = Vec::new();
     for target in &task.wake_on {
         let row = resolve_row(registry, all, &resolver, target)?;
@@ -307,6 +315,7 @@ pub fn describe(
         .depends
         .iter()
         .chain(&task.related)
+        .chain(&task.follows)
         .chain(&task.wake_on)
         .chain(&task.moved_to)
         .chain(&task.moved_from)
@@ -335,6 +344,7 @@ pub fn describe(
         step_found,
         depends_on,
         related_to,
+        follows_tasks,
         wake_targets,
         source_task,
         parent,
