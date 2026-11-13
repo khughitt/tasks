@@ -258,6 +258,11 @@ impl Running {
                 Ok(())
             });
         }
+        #[cfg(target_os = "linux")]
+        require(
+            unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } == 0,
+            "cannot own/reap measurement descendants",
+        )?;
         let start = Instant::now();
         Ok(Self {
             child: Some(command.spawn().map_err(failure)?),
@@ -266,28 +271,49 @@ impl Running {
             start,
         })
     }
-    fn finish(mut self, timeout: Duration) -> Result<(Value, u128)> {
+    fn poll(&mut self, deadline: Instant) -> Result<bool> {
+        remaining(deadline)?;
+        let status = self.child.as_mut().unwrap().try_wait().map_err(failure)?;
+        remaining(deadline)?;
+        if let Some(status) = status {
+            require(
+                status.success(),
+                &format!(
+                    "CLI failed; sample incomplete: {}",
+                    fs::read_to_string(&self.stderr).unwrap_or_default()
+                ),
+            )?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+    fn active(&mut self, deadline: Instant) -> Result<()> {
+        require(
+            !self.poll(deadline)?,
+            "measured CLI exited during observer work; sample incomplete",
+        )
+    }
+    fn finish(self, timeout: Duration) -> Result<(Value, u128)> {
+        let deadline = self.start + timeout;
+        self.finish_until(deadline, || Ok(()))
+    }
+    fn finish_until(
+        mut self,
+        deadline: Instant,
+        mut watch: impl FnMut() -> Result<()>,
+    ) -> Result<(Value, u128)> {
         loop {
-            if let Some(status) = self.child.as_mut().unwrap().try_wait().map_err(failure)? {
+            watch()?;
+            if self.poll(deadline)? {
                 let elapsed = self.start.elapsed().as_nanos();
-                require(
-                    status.success(),
-                    &format!(
-                        "CLI failed: {}",
-                        fs::read_to_string(&self.stderr).unwrap_or_default()
-                    ),
-                )?;
-                // Reap and terminate any descendant left by a hook before releasing ownership.
                 self.stop();
                 let value = serde_json::from_slice(&fs::read(&self.stdout).map_err(failure)?)
                     .map_err(failure)?;
+                watch()?;
+                remaining(deadline)?;
                 return Ok((value, elapsed));
             }
-            require(
-                self.start.elapsed() < timeout,
-                "CLI timed out; sample incomplete",
-            )?;
-            std::thread::sleep(Duration::from_millis(2));
+            std::thread::sleep(remaining(deadline)?.min(Duration::from_millis(2)));
         }
     }
     fn stop(&mut self) {
@@ -296,8 +322,26 @@ impl Running {
                 libc::kill(-(child.id() as i32), libc::SIGKILL);
             }
             let _ = child.wait();
+            loop {
+                let result =
+                    unsafe { libc::waitpid(-(child.id() as i32), std::ptr::null_mut(), 0) };
+                if result > 0 {
+                    continue;
+                }
+                if result < 0
+                    && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+                {
+                    continue;
+                }
+                break;
+            }
         }
     }
+}
+fn remaining(deadline: Instant) -> Result<Duration> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    require(!left.is_zero(), "CLI timed out; sample incomplete")?;
+    Ok(left)
 }
 impl Drop for Running {
     fn drop(&mut self) {
@@ -564,6 +608,19 @@ impl Fixture {
         trace: bool,
         observer: Option<(&Path, usize, usize)>,
     ) -> Result<Sample> {
+        self.run_with_timeout(args, trace, observer, Duration::from_secs(60))
+    }
+    fn run_with_timeout(
+        &mut self,
+        args: &[&str],
+        trace: bool,
+        observer: Option<(&Path, usize, usize)>,
+        timeout: Duration,
+    ) -> Result<Sample> {
+        require(
+            timeout <= Duration::from_secs(60),
+            "measured CLI allowance exceeds 60 seconds",
+        )?;
         let listener = if let Some((socket, _, _)) = observer {
             let listener = UnixListener::bind(socket).map_err(failure)?;
             listener.set_nonblocking(true).map_err(failure)?;
@@ -572,63 +629,78 @@ impl Fixture {
             None
         };
         let (mut child, trace_path) = self.begin(args, observer.map(|x| x.0), trace)?;
+        let deadline = child.start + timeout;
         let mut frames = Vec::new();
         let mut inspections = false;
         let mut prechecks = false;
         if let Some(listener) = listener {
             loop {
-                let exited = child
-                    .child
-                    .as_mut()
-                    .unwrap()
-                    .try_wait()
-                    .map_err(failure)?
-                    .is_some();
+                let exited = child.poll(deadline)?;
                 loop {
+                    child.poll(deadline)?;
                     let (mut stream, _) = match listener.accept() {
                         Ok(pair) => pair,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                         Err(e) => return Err(failure(e)),
                     };
-                    stream
-                        .set_read_timeout(Some(Duration::from_secs(2)))
-                        .map_err(failure)?;
+                    let frame_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
                     let mut bytes = Vec::new();
                     loop {
+                        child.poll(deadline)?;
+                        stream
+                            .set_read_timeout(Some(
+                                remaining(frame_deadline)?.min(Duration::from_millis(10)),
+                            ))
+                            .map_err(failure)?;
                         let mut b = [0];
-                        stream.read_exact(&mut b).map_err(failure)?;
+                        match stream.read_exact(&mut b) {
+                            Ok(()) => {}
+                            Err(e)
+                                if matches!(
+                                    e.kind(),
+                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                                ) =>
+                            {
+                                continue;
+                            }
+                            Err(e) => return Err(failure(e)),
+                        }
                         if b[0] == b'\n' {
                             break;
                         }
                         bytes.push(b[0]);
                         require(bytes.len() < 4096, "observer frame bound")?;
                     }
+                    child.poll(deadline)?;
                     let value: Value = serde_json::from_slice(&bytes).map_err(failure)?;
                     if value["event"] == "inspection" && !inspections {
                         inspections = true;
-                        self.unrelated(observer.unwrap().1)?;
+                        self.unrelated(observer.unwrap().1, &mut child, deadline)?;
                     }
                     if value["event"] == "prechecked" && !prechecks {
                         prechecks = true;
-                        self.unrelated(observer.unwrap().2)?;
+                        self.unrelated(observer.unwrap().2, &mut child, deadline)?;
                     }
                     if value["barrier"] == true {
+                        child.active(deadline)?;
+                        stream
+                            .set_write_timeout(Some(
+                                remaining(deadline)?.min(Duration::from_secs(2)),
+                            ))
+                            .map_err(failure)?;
                         stream.write_all(b"+").map_err(failure)?;
                     }
+                    child.poll(deadline)?;
                     frames.push(value);
                 }
                 if exited {
                     break;
                 }
-                require(
-                    child.start.elapsed() < Duration::from_secs(60),
-                    "observer CLI timed out; sample incomplete",
-                )?;
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::sleep(remaining(deadline)?.min(Duration::from_millis(1)));
             }
             fs::remove_file(observer.unwrap().0).map_err(failure)?;
         }
-        let (result, wall_ns) = child.finish(Duration::from_secs(60))?;
+        let (result, wall_ns) = child.finish_until(deadline, || Ok(()))?;
         let (git_starts, repeated_immutable) = if trace {
             trace_counts(&trace_path)?
         } else {
@@ -644,14 +716,23 @@ impl Fixture {
             timing,
         })
     }
-    fn unrelated(&mut self, count: usize) -> Result<()> {
+    fn unrelated(&mut self, count: usize, measured: &mut Running, deadline: Instant) -> Result<()> {
         let id = self.ids[2].clone();
         for n in 0..count {
-            self.cli(&[
-                "note",
-                &id,
-                &format!("Unrelated observation {}-{n}", self.sequence),
-            ])?;
+            measured.active(deadline)?;
+            let writer = self
+                .begin(
+                    &[
+                        "note",
+                        &id,
+                        &format!("Unrelated observation {}-{n}", self.sequence),
+                    ],
+                    None,
+                    false,
+                )?
+                .0;
+            writer.finish_until(deadline, || measured.active(deadline))?;
+            measured.active(deadline)?;
         }
         Ok(())
     }
@@ -1745,5 +1826,173 @@ fn retained_latency_admission_gate() {
     assert!(
         timing(&too_many).is_err(),
         "admission evidence remains bounded by the shared cache cap"
+    );
+}
+
+#[test]
+fn retained_latency_deadline_late_exit() {
+    let root = tempfile::tempdir().unwrap();
+    let mut command = Command::new("sh");
+    command
+        .env_clear()
+        .envs(common::isolated_env(root.path()))
+        .args(["-c", "printf '{}'"]);
+    let mut running = Running::start(
+        command,
+        root.path().join("stdout"),
+        root.path().join("stderr"),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    let wait_limit = Instant::now() + Duration::from_secs(1);
+    while running
+        .child
+        .as_mut()
+        .unwrap()
+        .try_wait()
+        .unwrap()
+        .is_none()
+    {
+        assert!(Instant::now() < wait_limit);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        running.finish(Duration::from_millis(5)).is_err(),
+        "a late observed exit has no in-bound completion timestamp"
+    );
+}
+
+// Cleanup also covers the RED implementation, whose process-group kill did not reap descendants.
+struct DeadlineFixtureCleanup(PathBuf);
+impl Drop for DeadlineFixtureCleanup {
+    fn drop(&mut self) {
+        for pid in deadline_fixture_pids(&self.0) {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+                libc::waitpid(pid, std::ptr::null_mut(), 0);
+            }
+        }
+    }
+}
+fn deadline_fixture_pids(path: &Path) -> Vec<i32> {
+    fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .flat_map(|line| {
+            let value: Value = serde_json::from_str(line).unwrap();
+            vec![
+                value["pid"].as_i64().unwrap() as i32,
+                value["child"].as_i64().unwrap() as i32,
+            ]
+        })
+        .collect()
+}
+#[test]
+fn retained_latency_deadline_nested_injection() {
+    // Confine orphan adoption/reaping to this test executable, never a host service.
+    assert_eq!(
+        unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) },
+        0
+    );
+    let root = tempfile::tempdir().unwrap();
+    let pids = root.path().join("pids.jsonl");
+    let _cleanup = DeadlineFixtureCleanup(pids.clone());
+    let script = root.path().join("fixture-cli");
+    let pid_literal = serde_json::to_string(pids.to_str().unwrap()).unwrap();
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env python3
+import json,os,socket,sys,time
+role=sys.argv[1]
+child=os.fork()
+if child==0:
+    time.sleep(60)
+    os._exit(0)
+with open({pid_literal},'a') as f:
+    f.write(json.dumps({{'role':role,'pid':os.getpid(),'child':child}})+'\n')
+if role=='measure':
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+    s.connect(os.environ['TASKS_RETAINED_TEST_SOCKET'])
+    s.sendall(b'{{"event":"inspection","phase":"fixture","elapsed_ns":0,"barrier":true}}\n')
+    s.recv(1)
+else:
+    time.sleep(0.2)
+print('{{}}',flush=True)
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let logs = root.path().join("logs");
+    fs::create_dir(&logs).unwrap();
+    let mut fixture = Fixture {
+        root: root.path().into(),
+        home: root.path().into(),
+        code: root.path().into(),
+        records: BTreeMap::new(),
+        ids: vec![
+            "sci-000001".into(),
+            "fam-000002".into(),
+            "aux-000003".into(),
+        ],
+        binary: script,
+        logs,
+        sequence: 0,
+    };
+    let socket = root.path().join("deadline.sock");
+    let began = Instant::now();
+    let result = fixture.run_with_timeout(
+        &["measure"],
+        false,
+        Some((&socket, 10, 0)),
+        Duration::from_millis(750),
+    );
+    assert!(
+        result.is_err(),
+        "aggregate callback work must leave the sample incomplete"
+    );
+    assert!(
+        began.elapsed() < Duration::from_millis(1500),
+        "outer deadline did not bound injected work: {:?}",
+        began.elapsed()
+    );
+    let raw = fs::read_to_string(&pids).unwrap_or_else(|e| {
+        panic!(
+            "fixture PID evidence missing: {e}; invocation error: {:?}",
+            result.as_ref().err()
+        )
+    });
+    let writers = raw
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|v| v["role"] == "note")
+        .count();
+    assert!(
+        writers > 0 && writers < 10,
+        "later injections continued beyond the measured deadline: {writers}"
+    );
+    assert!(result.err().unwrap().contains("incomplete"));
+    for pid in deadline_fixture_pids(&pids) {
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "owned process {pid} survived cleanup"
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+        assert_eq!(
+            unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) },
+            -1,
+            "owned process {pid} was not reaped"
+        );
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(
+        fs::read_to_string(pids).unwrap(),
+        raw,
+        "injection continued after incomplete return"
     );
 }
