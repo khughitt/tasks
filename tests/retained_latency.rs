@@ -9,6 +9,8 @@ use std::{
 #[test]
 fn retained_latency_harness_smallest() {
     assert!(configuration(None, None, None, None).unwrap().is_none());
+    assert_eq!(git_count_verdict(Mode::Matrix, true), None);
+    assert_eq!(git_count_verdict(Mode::Repeat, false), Some(false));
     for invalid in ["", "0", "true"] {
         assert!(configuration(Some(invalid), None, None, None).is_err());
     }
@@ -1514,6 +1516,9 @@ fn prepare_seed(
 
     Ok((f, seed, metadata))
 }
+fn git_count_verdict(mode: Mode, lower: bool) -> Option<bool> {
+    (mode != Mode::Matrix).then_some(lower)
+}
 fn measure_inner(settings: &Settings, artifact: &Path) -> Result<()> {
     fs::create_dir_all(&settings.out).map_err(failure)?;
 
@@ -1632,7 +1637,7 @@ fn measure_inner(settings: &Settings, artifact: &Path) -> Result<()> {
             summaries.push(json!({"layout":layout,"operation":if operation==2 {"transfer"} else {"checkpoint"},"participant":operation,"baseline":baseline,"candidate":candidate,"git_counts_lower":lower}));
         }
     }
-    let value = json!({"requested":true,"complete":true,"mode":settings.mode,"build":"debug opt-level=0; no release latency inference","candidate_binary":candidate,"candidate_sha256":digest(&fs::read(&candidate).map_err(failure)?),"baseline_binary":settings.baseline,"baseline_sha256":digest(&fs::read(&settings.baseline).map_err(failure)?),"seeds":seeds,"pairs":pairs,"matrix":cells,"matrix_summaries":matrix_summaries(&cells),"summaries":summaries,"logical_verdict":"equal","git_count_verdict":performance_equal_or_better,"instrumented_matrix":settings.mode==Mode::Matrix});
+    let value = json!({"requested":true,"complete":true,"mode":settings.mode,"build":"debug opt-level=0; no release latency inference","candidate_binary":candidate,"candidate_sha256":digest(&fs::read(&candidate).map_err(failure)?),"baseline_binary":settings.baseline,"baseline_sha256":digest(&fs::read(&settings.baseline).map_err(failure)?),"seeds":seeds,"pairs":pairs,"matrix":cells,"matrix_summaries":matrix_summaries(&cells),"summaries":summaries,"logical_verdict":"equal","git_count_verdict":git_count_verdict(settings.mode,performance_equal_or_better),"instrumented_matrix":settings.mode==Mode::Matrix});
     fs::write(
         artifact,
         serde_json::to_vec_pretty(&value).map_err(failure)?,
