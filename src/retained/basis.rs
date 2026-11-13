@@ -383,6 +383,7 @@ pub fn publication_basis(
     prefix: &[crate::model::Note],
     bytes_read: &mut u64,
 ) -> Result<Basis> {
+    super::test_observer::event("publication_discovery", &id.to_string())?;
     if prefix.is_empty() {
         return Err(invalid("publication source requires a logical note"));
     }
@@ -444,5 +445,13 @@ pub fn publication_basis(
     {
         return Err(invalid("original publication prefix does not match"));
     }
+    #[cfg(debug_assertions)]
+    super::test_observer::event(
+        "publication_found",
+        &serde_json::to_string(
+            &serde_json::json!({"task":id,"ordinal":prefix.len(),"basis":result}),
+        )
+        .map_err(invalid)?,
+    )?;
     Ok(result)
 }

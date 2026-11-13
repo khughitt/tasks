@@ -369,3 +369,64 @@ current history as well. Adoption verifies synced lineage before host state chan
 Upgrade all participating readers before a writer creates lineage config; keep
 one coordinated writer through rename, commit and secondary-host adoption. Preserve
 all named refs and cutover commits while their retention evidence is needed.
+
+## Migrated in-tree history
+
+An explicit [recovery declaration](configuration.md#project-settings) can make an
+already imported in-tree history readable through its current detached project.
+The owning project stays paired to destination records. Exact historical Bases
+select an independent source read context by declared project/task/layout/ref;
+equal files or object IDs in another repository do not select it. Task/archive,
+request/artifact and publication reads use that context without rewriting nested
+Bases or output schemas.
+
+Source publication lookup runs on the original first-parent history through the
+mapped frozen endpoint, preserving the original publication commit. Disposable
+original branch names may be absent; `source_ref` must still retain the cutover and
+its endpoints. Keep all required source history after activation. A declaration
+or matching import trees does not replace complete immutable phase proofs.
+
+Within one OperationKey, each participant's input, publication and reconciliation
+operands stay in one repository epoch. A mixed operation refuses before its Git
+comparison. No ancestry bridge across migration is inferred. Source-era
+nonterminal operations cannot resume at the destination. New checkpoints and
+transfers use current detached inputs/publications and verify recovered
+predecessors as separate source operations. Freshness and cache identity include
+the complete declaration; changing it invalidates an in-flight operation.
+
+`state --at` resolves its revision only in destination records. Rewritten revisions
+before the declared import refuse. To inspect an original source cutover directly,
+use the isolated source-snapshot recovery procedure; do not repoint live records.
+Historical readability grants no custody, payload verification or disposal.
+
+A manifest binding names one exact source-cutover retained note ordinal. It proves
+the old attachment string, ledger before observation, original blob/digest and
+import equality; generated manifests additionally require their original
+observation binding. A manually named attached manifest needs its prior attachment
+provenance, not an invented generation phase. Before returning a current path,
+tasks checks current ledger, regular-file storage and exact bytes. Missing or
+changed files refuse. External manual manifests retain literal paths, even with
+equal digests. No suffix-only search, equal-content fallback or historical-note
+rewrite is performed. A new source-style manifest reference after cutover is
+uncovered and refuses; a legitimate successor observation can publish a current
+manifest path. Payloads stay in place and prior-version preservation still applies.
+
+Routine `tasks check` validates the static import/config/tree boundary and exact
+source prefixes once per project invocation, loading each source prefix at most
+once and reusing check's live logical tasks. Attachment equality compares tree
+objects. This path adds zero full history, terminal-proof or publication-discovery
+walks; ordinary attachment/storage checks remain. Errors use the existing finding
+shape with kind `retention_recovery`. State and lifecycle commands retain full
+proof verification. Check success is partial metadata validation, not a proof
+replay or current payload audit.
+
+Before live activation, freeze complete proposed config files and preimages,
+rehearse those exact bytes in a throwaway records clone with actual sources
+read-only, and compare original publications/ordinals/diagnostics. Measure check
+cost on paired identical isolated inputs with baseline and candidate binaries;
+that acceptance evidence belongs to the rollout, not to routine check output.
+Activation and installation need separate explicit authority. If the live config
+preimage changes, preserve/reconcile it and rehearse replacement bytes. Authorized
+rollback restores preserved config bytes and never deletes source history.
+Older readers ignore the table and stay blocked at the existing layout boundary;
+use the updated writer and preserve anchors throughout rollout.

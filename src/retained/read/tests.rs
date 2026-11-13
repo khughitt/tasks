@@ -1355,3 +1355,49 @@ fn validation_read_query_admission_observer() {
         "cache hit adds no Git start, failed/unadmitted queries do"
     );
 }
+#[test]
+fn validation_read_refresh_discards_recovery_source_view() {
+    if isolated("retained::read::tests::validation_read_refresh_discards_recovery_source_view") {
+        return;
+    }
+    let (_owner, mut p) = fixture();
+    let (source, _) = fixture();
+    p.checkout = source.path().into();
+    p.retention_recovery=Some(serde_json::from_value(serde_json::json!({"version":1,"source_cutover":"a".repeat(40),"destination_import":"b".repeat(40),"source_ref":"refs/heads/main","tasks":["sci-123456"],"refs":[{"original_ref":"refs/heads/main","endpoint":"a".repeat(40)}],"manifest_bindings":[]})).unwrap());
+    let p = start(&p).unwrap();
+    let args = [
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/heads/new-source-ref",
+    ];
+    assert!(
+        !at(&p, &p.checkout)
+            .unwrap()
+            .run(&args)
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    git(source.path(), &["branch", "new-source-ref"]);
+    assert!(
+        !at(&p, &p.checkout)
+            .unwrap()
+            .run(&args)
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+    refresh(&p).unwrap();
+    assert!(
+        at(&p, &p.checkout)
+            .unwrap()
+            .run(&args)
+            .unwrap()
+            .output
+            .status
+            .success()
+    );
+}

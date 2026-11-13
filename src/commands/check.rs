@@ -1022,6 +1022,14 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             error.to_string(),
         ));
     }
+    if let Err(error) = crate::retained::recovery::check_live(&ctx.project, &tasks) {
+        errors.push(finding(
+            None,
+            crate::repo::CONFIG_REL.into(),
+            "retention_recovery",
+            error.to_string(),
+        ));
+    }
     for problem in crate::attachments::audit(&ctx.project, &tasks)? {
         let finding = Finding {
             id: problem.id.map(|id| id.to_string()),

@@ -375,6 +375,7 @@ fn ready_proofs_with(
     Ok(ready)
 }
 pub fn validate_terminal_history(project: &Project, pinned: &basis::PinnedTask) -> Result<()> {
+    super::test_observer::event("proof_terminal", &pinned.task.id.to_string())?;
     super::recovery::operation_epochs(project, &pinned.task)?;
     for note in &pinned.task.notes {
         if let Some(raw) = note.text.strip_prefix("retention operation: ")

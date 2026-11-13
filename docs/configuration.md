@@ -5,17 +5,19 @@ Project and host TOML formats are currently unversioned. Related references are
 the [task model](task-model.md) and [document protocol](documents.md).
 
 Project settings are committed with records. Host settings and the registry are
-local to a machine. Unknown project/host keys and malformed present files are
-errors; an absent optional host file uses defaults. Never repair an invalid local
+local to a machine. Unknown host keys and malformed present files are
+errors; unknown top-level project keys are currently ignored. Nested tables enforce
+their own schemas; an absent optional host file uses defaults. Never repair an invalid local
 project by silently selecting another checkout.
 
 ## Project settings
 
 `tasks/.config.toml` belongs to the records directory for all storage kinds.
-The accepted top-level keys/tables are exactly those below.
+The supported top-level keys/tables are listed below.
 
 | Key/table | Contract and default |
 | --- | --- |
+| `[retention_recovery]` | Optional explicit migration boundary for detached retained history; exact fields below. |
 | `[[retention_lineage]]` | Rename-managed, ordered Git-anchored edges; omitted when empty. Fields and validation below. |
 | `prefix` | Required `[a-z][a-z0-9]{1,7}` project id; agrees with registration and records. |
 | `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON. `check` warns with `color_missing` when unset; it never assigns a color. |
@@ -50,6 +52,58 @@ cycles or conflicting endpoints, and end at the live pairing. Each source config
 at its cutover commit must contain exactly its preceding edges. Retention reads,
 rename and check reject missing or inconsistent proof; an alias alone is not proof.
 Rename writes these fields; do not hand-edit them to repair missing history.
+
+A `[retention_recovery]` table declares one migration from the paired code Git
+repository into detached records. It cannot coexist with rename lineage or another
+recovery epoch. Every field below is required, including empty `manifest_bindings`
+when no manifest needs relocation. Unknown fields, wrong types/versions, duplicate
+tasks/refs/bindings and conflicting declarations refuse.
+
+| Field | Contract |
+| --- | --- |
+| `version` | Integer 1. |
+| `source_cutover` | Full lowercase 40-hex source commit named by the import trailer. |
+| `destination_import` | Full lowercase 40-hex records import merge. |
+| `source_ref` | Explicit local `refs/heads/...` branch retaining the cutover in the paired code repository. |
+| `tasks` | Nonempty unique canonical task IDs, each with the enclosing prefix. Counts are declaration data. |
+| `refs` | Nonempty unique entries containing exactly `original_ref` (original local branch name) and `endpoint` (full frozen source commit). |
+| `manifest_bindings` | Unique entries containing exactly `task`, positive logical `ordinal` at the source cutover, and valid attachment name `attachment`. |
+
+The source is the actual Git root at the configured paired checkout; tasks does
+not search for objects, fetch them, or change the destination `Project.records`.
+The import's final Git trailer block must contain exactly one each of
+`Records-Migrate-Prefix` (the enclosing prefix), `Records-Migrate-Source`
+(`source_cutover`), `Records-Migrate-Paths` (the sequence
+`tasks docs/specs docs/plans docs/notes docs/superpowers docs/designs docs/reports`)
+and `Records-Migrate-Citations` (`2`). This contract is pinned to ops
+`bin/records-migrate` at `dd45550d3b3eec301bcea4cc97370714076c179e`;
+body lookalikes, missing/duplicate trailers and older migration defaults refuse.
+
+Both repositories must use SHA-1. Source configuration at the cutover must be
+in-tree with the same prefix and no lineage/recovery; its prefixed imported
+configuration must have the **same blob ID**. Listed task modes/blobs and entire
+attachment-directory modes/tree IDs must match the import, including absence.
+Current logical notes must preserve the exact source prefix, including provenance
+and ordinals. Frozen endpoints precede the cutover, which remains reachable from
+`source_ref`. Advancing that branch preserves recovery when it retains those
+commits; deleting or rewriting away the required history blocks it.
+
+An in-tree Basis with `records_subdir = "."`, the declared task path and a mapped
+original ref selects the source and must precede its mapped endpoint. A current
+detached Basis selects records and must descend from `destination_import`; this
+also supports new tasks outside the list. Every other tuple refuses. Each
+participant of an operation stays in one repository epoch; source operations are
+read-only, while new operations use current detached inputs. See
+[retained lifecycle](retention.md#migrated-in-tree-history) for proof, manifest and
+check scope.
+
+Older readers ignore this table and retain their pairing/layout refusal: they fail
+closed. Use the updated writer for config edits; an older writer can discard an
+unknown table. Rename refuses while recovery is present, containing the existing
+rename-writer risk. Prepare and rehearse the exact complete configuration bytes in
+a throwaway records clone with real sources read-only before activation; preserve
+preimages and reject a changed live config. Reuse those tested bytes only under
+separate explicit live-write/installation authority, including any rollback scope.
 
 `spec_dirs`/`plan_dirs` define allowed working-document roots, not a public
 reference index. Root lists must be nonempty and contain normalized relative

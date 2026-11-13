@@ -105,6 +105,7 @@ pub fn validate_history(
     pinned: &basis::PinnedTask,
     host: Option<&str>,
 ) -> Result<()> {
+    super::test_observer::event("proof_history", &pinned.task.id.to_string())?;
     #[cfg(test)]
     HISTORY_CALLS.with(|calls| calls.set(calls.get() + 1));
     let resolver = Resolver::new(project);

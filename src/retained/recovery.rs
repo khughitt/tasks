@@ -277,6 +277,26 @@ pub(crate) fn validate_boundary(
         if !current.notes.starts_with(&old.notes) {
             return Err(invalid(format!("recovery logical prefix differs: {task}")));
         }
+        for note in &current.notes[old.notes.len()..] {
+            let Some(raw) = note.text.strip_prefix("retained: ") else {
+                continue;
+            };
+            let record = decode_record(raw)?;
+            let Some(path) = record.manifest.value() else {
+                continue;
+            };
+            let original = super::verify::current_path(project, path)?;
+            let name = original
+                .file_name()
+                .ok_or_else(|| invalid("suffix manifest filename"))?;
+            if original.ends_with(std::path::Path::new("tasks/files").join(task).join(name))
+                && original != crate::attachments::task_dir(project, &id).join(name)
+            {
+                return Err(invalid(
+                    "post-cutover source-style manifest has no supported recovery binding",
+                ));
+            }
+        }
     }
     read::remember_recovery(project)?;
     Ok(boundary)
@@ -556,4 +576,13 @@ pub(crate) fn manifest_path(
         ));
     }
     Ok(Some(local))
+}
+
+pub(crate) fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
+    if project.retention_recovery.is_none() {
+        return Ok(());
+    }
+    let scoped = read::start(project)?;
+    validate_boundary(&scoped, Some(tasks))?;
+    Ok(())
 }

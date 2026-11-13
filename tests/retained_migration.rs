@@ -319,9 +319,142 @@ fn migration_suffix_and_config_change() {
     f.bind_manifests();
     let mut record = f.original["items"][0]["record"].clone();
     record["purpose"] = serde_json::json!("Later source-style reference");
+    let mut basis = f.f.state()["basis"].clone();
     f.f.note(record);
-    let before = f.f.state();
-    let out = f.checkpoint();
+    let head = f.git(&f.destination, &["rev-parse", "HEAD"]);
+    basis["commit"] = serde_json::json!(head);
+    let out =
+        f.f.cmd()
+            .args(["retained", "state", &f.f.id])
+            .output()
+            .unwrap();
+    assert!(!out.status.success());
+    let request = serde_json::json!({"version":1,"operation_id":"d".repeat(32),"host":common::retained::host(),"inputs":[{"task":f.f.id,"basis":basis}]});
+    let request = f.f.request("suffix.json", &request);
+    let out =
+        f.f.cmd()
+            .args([
+                "retained",
+                "checkpoint",
+                &f.f.id,
+                "--request",
+                request.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
     assert!(!out.status.success(), "{out:?}");
-    assert_eq!(f.f.state()["operations"], before["operations"]);
+    assert_eq!(f.git(&f.destination, &["rev-parse", "HEAD"]), head);
+}
+#[test]
+fn migration_check_tree_identity() {
+    for case in ["mode", "tree", "config"] {
+        let mut f = migration_fixture(HistoricalScenario::CheckpointCompleted);
+        let out = f.f.cmd().args(["check"]).output().unwrap();
+        assert!(out.status.success(), "initial {out:?}");
+        f.replace_import(case);
+        let out = f.f.cmd().args(["check"]).output().unwrap();
+        assert!(!out.status.success(), "accepted changed {case}: {out:?}");
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            result["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == "retention_recovery"),
+            "{result}"
+        );
+    }
+}
+#[test]
+fn migration_check_live_prefix() {
+    for case in ["provenance", "source_style_suffix"] {
+        let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+        f.bind_manifests();
+        let out = f.f.cmd().args(["check"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        if case == "provenance" {
+            let path = f.f.records.join(format!("tasks/{}.md", f.f.id));
+            let raw = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(path, raw.replacen("(fixture):", "(forged):", 1)).unwrap();
+        } else {
+            let mut record = f.original["items"][0]["record"].clone();
+            record["purpose"] = serde_json::json!("new source-style suffix");
+            f.f.note(record);
+        }
+        let out = f.f.cmd().args(["check"]).output().unwrap();
+        assert!(!out.status.success(), "accepted {case}: {out:?}");
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            result["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == "retention_recovery"),
+            "{result}"
+        );
+    }
+}
+#[test]
+fn migration_config_roundtrip_and_rename_guard() {
+    let f = migration_fixture(HistoricalScenario::CheckpointCompleted);
+    let config = f.f.records.join("tasks/.config.toml");
+    let before = std::fs::read(&config).unwrap();
+    f.f.json(&[
+        "init",
+        "--prefix",
+        "sci",
+        "--records",
+        f.destination.to_str().unwrap(),
+        "--force",
+    ]);
+    assert_eq!(std::fs::read(&config).unwrap(), before);
+    let head = f.git(&f.destination, &["rev-parse", "HEAD"]);
+    let out = f.f.cmd().args(["rename", "sci", "abc"]).output().unwrap();
+    assert!(!out.status.success());
+    assert_eq!(f.git(&f.destination, &["rev-parse", "HEAD"]), head);
+    assert_eq!(std::fs::read(config).unwrap(), before);
+}
+#[test]
+fn migration_check_recovers_peer_context() {
+    let f = migration_fixture(HistoricalScenario::CheckpointCompleted);
+    let (records, to) = common::retained::cross_receiver(&f.f, false);
+    let request = serde_json::json!({"version":1,"operation_id":"f".repeat(32),"host":common::retained::host(),"inputs":[{"task":f.f.id,"basis":f.f.state()["basis"]},{"task":to,"basis":f.f.json(&["retained","state",&to])["basis"]}],"items":[f.original["items"][0]["identity"]],"purpose":"Peer review","cleanup_trigger":"Review complete"});
+    let path = f.f.request("peer-transfer.json", &request);
+    let out =
+        f.f.cmd()
+            .args([
+                "retained",
+                "transfer",
+                &f.f.id,
+                &to,
+                "--request",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(f.f.json(&["retained", "state", &to])["complete"], true);
+    let out = f.f.env.cmd(&records).args(["check"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+#[test]
+fn migration_check_source_archive() {
+    let mut f = migration_fixture_with(HistoricalScenario::CheckpointCompleted, |f| {
+        let preview = f.json(&["archive-notes", &f.id]);
+        assert_eq!(preview["eligible"], true);
+        f.json(&[
+            "archive-notes",
+            &f.id,
+            "--expect",
+            preview["source_sha256"].as_str().unwrap(),
+        ]);
+    });
+    f.declaration["refs"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"original_ref":"refs/heads/disposable","endpoint":f.cutover}));
+    f.write_declaration(&f.declaration);
+    let out = f.f.cmd().args(["check"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(f.f.state()["complete"], true);
 }

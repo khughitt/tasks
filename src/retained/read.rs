@@ -442,9 +442,15 @@ pub(crate) fn live(project: &Project) -> Project {
 pub(crate) fn refresh(project: &Project) -> Result<()> {
     if let Some(session) = &project.retention_reads {
         let mut views = session.views()?;
-        if let Some(key) = views.aliases.remove(&project.records) {
-            views.aliases.retain(|_, value| value != &key);
-            views.repositories.remove(&key);
+        let mut roots = vec![&project.records];
+        if project.retention_recovery.is_some() {
+            roots.push(&project.checkout);
+        }
+        for root in roots {
+            if let Some(key) = views.aliases.remove(root) {
+                views.aliases.retain(|_, value| value != &key);
+                views.repositories.remove(&key);
+            }
         }
         let mut state = session.lock()?;
         let charge: usize = state.lineages.values().sum();

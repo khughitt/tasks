@@ -684,3 +684,85 @@ fn migration_recovery_config_changes_at_phase_boundary() {
                 && o["note"]["phase"] == "completed")
     );
 }
+
+fn migration_observed(
+    f: &common::retained_migration::MigrationFixture,
+    args: &[&str],
+) -> (Output, Vec<Value>) {
+    let socket = f.f.dir.join("check-observer.sock");
+    if socket.exists() {
+        std::fs::remove_file(&socket).unwrap();
+    }
+    let listener = listener(&socket);
+    let mut child = Running(Some(
+        f.f.env
+            .raw(&f.f.dir)
+            .env("TASKS_SESSION", "retained-fixture")
+            .env("TASKS_RETAINED_TEST_SOCKET", &socket)
+            .args(args)
+            .spawn()
+            .unwrap(),
+    ));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut observations = Vec::new();
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let event = read(stream);
+                observations.push(event.value.clone());
+                event.resume();
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if child.finished() {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) => panic!("{e}"),
+        }
+    }
+    (child.output(), observations)
+}
+#[test]
+fn migration_check_zero_walks() {
+    let f =
+        common::retained_migration::migration_fixture(HistoricalScenario::TransferSenderReleased);
+    let (out, observed) = migration_observed(&f, &["check"]);
+    assert!(out.status.success(), "{out:?}");
+    for task in f.declaration["tasks"].as_array().unwrap() {
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|e| e["event"] == "recovery_prefix" && e["phase"] == *task)
+                .count(),
+            1,
+            "{task}"
+        );
+    }
+    for name in ["proof_history", "proof_terminal", "publication_discovery"] {
+        assert_eq!(
+            observed.iter().filter(|e| e["event"] == name).count(),
+            0,
+            "{name}"
+        );
+    }
+    let (out, observed) = migration_observed(&f, &["retained", "state", &f.f.id]);
+    assert!(out.status.success(), "{out:?}");
+    for name in ["proof_history", "proof_terminal", "publication_discovery"] {
+        assert!(
+            observed.iter().any(|e| e["event"] == name),
+            "observer did not expose {name} on actual state proof"
+        );
+    }
+    assert!(
+        observed
+            .iter()
+            .filter(|e| e["event"] == "publication_found")
+            .any(|e| {
+                let found: Value = serde_json::from_str(e["phase"].as_str().unwrap()).unwrap();
+                found["basis"]["commit"] == f.cutover && found["basis"]["layout"] == "in-tree"
+            }),
+        "actual source publication was not observable"
+    );
+}

@@ -622,6 +622,23 @@ preserving the original basis and ordinals; intervening participant-tree edits,
 including a revert, refuse. Ordinary attachment/payload bytes stay historical query
 inputs. Explicit historical reads use only pinned task/archive blobs. Missing or
 conflicting evidence fails explicitly. This query does not verify current retained payload bytes.
+For an existing `[retention_recovery]` declaration, preserve its source repository,
+retaining branch, frozen endpoints and exact historical notes. The declaration
+selects independent source read contexts for old in-tree Bases; new operations
+still use current detached inputs. `state` retains full immutable proofs, while
+routine `check` validates boundary/tree identities and exact logical prefixes
+without phase-proof walks. A successful read never verifies current payloads.
+Explicit manifest bindings authorize only their exact source note/attachment;
+external manual paths stay literal. Missing evidence and mixed-epoch operations
+refuse. `--at` resolves in destination records, not the source. See
+[configuration](../../docs/configuration.md#project-settings) and
+[migrated history](../../docs/retention.md#migrated-in-tree-history).
+Prepare complete config bytes and preimages, rehearse those same bytes in a
+throwaway records clone with real sources read-only, then obtain separate explicit
+authority before live activation or installation. A changed preimage requires
+reconciliation and another rehearsal. Older readers ignore the table and remain
+blocked; use the updated writer for config edits. Rename refuses with recovery.
+
 New native checkpoint/transfer admission requires detached or linked records for
 every participant; any in-tree participant refuses before intent/artifact publication.
 Existing durable in-tree operations retain retry/reconcile routes; a staged phase
