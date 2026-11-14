@@ -596,11 +596,12 @@ fn external_doc_check_production_deadline() {
             .any(|item| item["kind"] == "doc_missing")
     );
     let warnings = report["warnings"].as_array().unwrap();
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0]["kind"], "doc_unchecked");
+    assert_eq!(warnings.len(), 2, "{report}");
+    assert_eq!(warnings[0]["kind"], "color_missing");
+    assert_eq!(warnings[1]["kind"], "doc_unchecked");
     for name in ["a", "b", "c", "d", "e", "f"] {
         assert!(
-            warnings[0]["detail"]
+            warnings[1]["detail"]
                 .as_str()
                 .unwrap()
                 .contains(&format!("stub:{name}"))

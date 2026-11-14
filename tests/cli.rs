@@ -2996,9 +2996,10 @@ fn pretty_non_table_warnings_use_columns_and_invalid_width_prevents_init() {
     assert!(out.status.success(), "{out:?}");
     let warnings = String::from_utf8(out.stderr).unwrap();
     let rule = warnings.lines().next().expect("missing skill warning");
-    assert!(rule.starts_with("── warnings (1) "), "{warnings}");
+    assert!(rule.starts_with("── warnings (2) "), "{warnings}");
     assert_eq!(rule.chars().count(), 80, "{warnings}");
     assert!(warnings.contains("no tasks skill found"), "{warnings}");
+    assert!(warnings.contains("root_detached:"), "{warnings}");
 
     let fresh = tempfile::tempdir().unwrap();
     let registry = env.home.path().join(".config/tasks/projects.toml");
@@ -7715,7 +7716,7 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
         "project-relative, unquoted: not \"sub space/tasks/…\""
     );
 
-    // a staged rename record carries two paths; only the new one is reported. The file
+    // A staged rename reports both paths. The file
     // renamed is a dotfile, which the task scanner skips, because renaming a task file
     // would break id == filename and fail prime's scan before the warning is built
     std::fs::write(nested.join("tasks/.keep"), "").unwrap();
@@ -7726,7 +7727,10 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
         .as_str()
         .unwrap()
         .to_string();
-    assert_eq!(text, "uncommitted task files: tasks/.kept", "{text}");
+    assert_eq!(
+        text, "uncommitted task files: tasks/.keep, tasks/.kept",
+        "{text}"
+    );
 
     // a broken repository is an error, not a silent skip: a corrupt index makes
     // `git status` fail after discovery succeeded
@@ -7774,7 +7778,10 @@ fn feedback_outside_every_project_reports_as_unregistered() {
 
     // The tag is one feedback writes, so a project with a tag dictionary holds it defined.
     let config = target.join("tasks/.config.toml");
-    let mut text = std::fs::read_to_string(&config).unwrap();
+    let mut text = format!(
+        "color = \"#123456\"\n{}",
+        std::fs::read_to_string(&config).unwrap()
+    );
     text.push_str("\n[tags]\nunrelated = \"a tag the dictionary defines\"\n");
     std::fs::write(&config, text).unwrap();
     let out = env.cmd(&target).arg("check").output().unwrap();
@@ -8730,7 +8737,13 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
         .output()
         .unwrap();
     assert!(warned.status.success());
-    assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[1m── warnings (1) \x1b[0m"));
+    let warnings = String::from_utf8_lossy(&warned.stderr);
+    assert!(
+        warnings.starts_with("\x1b[1m── warnings (2) \x1b[0m"),
+        "{warnings}"
+    );
+    assert!(warnings.contains("root_detached:"), "{warnings}");
+    assert!(warnings.contains("no tasks skill found"), "{warnings}");
 }
 
 /// A pretty show overview row's value, independent of key column width.
@@ -9216,12 +9229,30 @@ fn resolve_omits_the_color_it_cannot_read_and_still_resolves() {
         assert!(row.get("color").is_none(), "{row}");
     }
     let warnings = out["warnings"].as_array().unwrap();
-    assert_eq!(warnings.len(), 1, "{out}");
+    assert_eq!(warnings.len(), 3, "{out}");
     let warning = warnings[0].as_str().unwrap();
     assert!(
         warning.starts_with("bad: ") && warning.contains("its color is not reported"),
         "{warning}"
     );
+    for (index, prefix) in [(1, "bad"), (2, "gone")] {
+        let row = out["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["prefix"] == prefix)
+            .unwrap();
+        let error = row["entry_error"].as_str().unwrap();
+        assert!(
+            error.contains(if prefix == "bad" {
+                "must be #RRGGBB"
+            } else {
+                "paired with no records directory"
+            }),
+            "{error}"
+        );
+        assert_eq!(warnings[index], format!("{prefix}: {error}"));
+    }
 }
 
 #[test]
@@ -18543,6 +18574,10 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
     type Baseline<'a> = ((Vec<&'a str>, &'a str), Vec<&'a str>);
     let baselines: Vec<Baseline> = vec![
         (
+            (vec!["goals"], "--sort"),
+            vec!["goals", "--sort", "activity"],
+        ),
+        (
             (vec!["add"], "--status"),
             vec!["add", "B1", "--status", "idea"],
         ),
@@ -18899,6 +18934,7 @@ fn cli_vocabulary_routing_output() {
             .success()
     );
     // check: clean prints nothing; findings containing an error print a JSON object and exit 1
+    write_project_color(&dir, "sci", "#123456");
     let out = env.cmd(&dir).args(["check"]).output().unwrap();
     assert!(out.status.success() && out.stdout.is_empty());
     std::fs::write(
