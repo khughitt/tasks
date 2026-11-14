@@ -954,7 +954,9 @@ fn retained_range_warm_merge_edges() {
     let proof = warm(&p, &id, &pinned.basis, &h0, &pinned.task, Exact)
         .unwrap()
         .unwrap();
-    // Every parent edge counts, even when that parent is excluded as an old H0 ancestor.
+    // A pre-basis parent that the merge did not keep is history outside the pinned
+    // window: as a later parent it is skipped, while a first parent is always compared.
+    // Warm and full proofs must agree either way.
     let old_parent = git(
         dir.path(),
         &["rev-parse", &format!("{}^", pinned.basis.commit)],
@@ -963,38 +965,46 @@ fn retained_range_warm_merge_edges() {
         dir.path(),
         &["rev-parse", &format!("{}^{{tree}}", h0.commit)],
     );
-    let merge = git(
-        dir.path(),
-        &[
-            "commit-tree",
-            &tree,
-            "-p",
-            &h0.commit,
-            "-p",
-            &old_parent,
-            "-m",
-            "boundary parent",
-        ],
-    );
-    git(dir.path(), &["reset", "--hard", &merge]);
-    let boundary = range_tip(&p, &h0);
-    let warm_verdict = check(
-        &p,
-        &id,
-        &pinned.basis,
-        &boundary,
-        &pinned.task,
-        Exact,
-        Some(&proof),
-    )
-    .map_err(|e| e.to_string());
-    let full_verdict = check(&p, &id, &pinned.basis, &boundary, &pinned.task, Exact, None)
+    for old_first in [false, true] {
+        let parents = if old_first {
+            [old_parent.as_str(), h0.commit.as_str()]
+        } else {
+            [h0.commit.as_str(), old_parent.as_str()]
+        };
+        let merge = git(
+            dir.path(),
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                parents[0],
+                "-p",
+                parents[1],
+                "-m",
+                "boundary parent",
+            ],
+        );
+        git(dir.path(), &["reset", "--hard", &merge]);
+        let boundary = range_tip(&p, &h0);
+        let warm_verdict = check(
+            &p,
+            &id,
+            &pinned.basis,
+            &boundary,
+            &pinned.task,
+            Exact,
+            Some(&proof),
+        )
         .map_err(|e| e.to_string());
-    assert_eq!(warm_verdict, full_verdict);
-    assert!(
-        warm_verdict.is_err(),
-        "old parent at the boundary must still be compared"
-    );
+        let full_verdict = check(&p, &id, &pinned.basis, &boundary, &pinned.task, Exact, None)
+            .map_err(|e| e.to_string());
+        assert_eq!(warm_verdict, full_verdict);
+        assert_eq!(
+            warm_verdict.is_err(),
+            old_first,
+            "only a first-parent pre-basis edge is compared: {warm_verdict:?}"
+        );
+    }
     for revert in [false, true] {
         git(dir.path(), &["reset", "--hard", &h0.commit]);
         git(

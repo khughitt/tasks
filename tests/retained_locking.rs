@@ -315,7 +315,16 @@ fn retained_phase_scope_completion_observes_later_receiver() {
 #[test]
 fn retained_phase_freshness_guarded_delta() {
     use std::os::unix::fs::PermissionsExt;
-    for case in ["unrelated", "ABA", "mode", "merge"] {
+    for case in [
+        "unrelated",
+        "unrelated_history",
+        "unrelated_history_branch",
+        "unrelated_history_resolution",
+        "ABA",
+        "mode",
+        "merge",
+        "pre_basis_side",
+    ] {
         let (f, to, _) = transfer_fixture();
         let socket = f.dir.join("observer.sock");
         let listener = listener(&socket);
@@ -327,14 +336,98 @@ fn retained_phase_freshness_guarded_delta() {
             common::git(&f.records, &["add", "."]);
             common::git(&f.records, &["commit", "-qm", message]);
         };
+        let git_out = |args: &[&str]| {
+            let out = common::git_fixture::command(f.env.home.path(), &f.records)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        // An imported archive history that never held the participant.
+        let import = || {
+            let empty = git_out(&["hash-object", "-t", "tree", "-w", "/dev/null"]);
+            let root = git_out(&["commit-tree", &empty, "-m", "imported root"]);
+            git_out(&["commit-tree", &empty, "-p", &root, "-m", "imported tip"])
+        };
+        let merge_import = |tip: &str, extra: &[&str]| {
+            let mut args = vec![
+                "merge",
+                "--no-ff",
+                "-s",
+                "ours",
+                "--allow-unrelated-histories",
+                "-m",
+                "import unrelated history after precheck",
+            ];
+            args.extend_from_slice(extra);
+            args.push(tip);
+            common::git(&f.records, &args);
+        };
+        // The refusal must name an edge touching this commit.
+        let mut named = None;
         match case {
             "unrelated" => {
                 std::fs::write(f.records.join("unrelated.txt"), "new unrelated edge").unwrap();
                 commit("unrelated after precheck");
             }
+            "unrelated_history" => merge_import(&import(), &[]),
+            "unrelated_history_branch" => {
+                // The import lands on a branch forked from the proven head, which then
+                // merges into main beside other work.
+                common::git(&f.records, &["checkout", "-qb", "archive"]);
+                merge_import(&import(), &[]);
+                common::git(&f.records, &["checkout", "-q", "main"]);
+                std::fs::write(f.records.join("unrelated.txt"), "main edge").unwrap();
+                commit("main edge");
+                common::git(
+                    &f.records,
+                    &[
+                        "merge",
+                        "--no-ff",
+                        "-qm",
+                        "integrate archive branch",
+                        "archive",
+                    ],
+                );
+            }
+            "unrelated_history_resolution" => {
+                // The import merge's resolution changes the participant relative to its
+                // lineage parent; a later commit restores the endpoint bytes.
+                merge_import(&import(), &["--no-commit"]);
+                std::fs::write(&path, [old.as_slice(), b"\n"].concat()).unwrap();
+                commit("import resolution edits participant");
+                named = Some(git_out(&["rev-parse", "HEAD"]));
+                std::fs::write(&path, &old).unwrap();
+                commit("participant reverted bytes");
+            }
             "mode" => {
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
                 commit("participant mode after precheck");
+            }
+            "pre_basis_side" => {
+                // A side branch forked before the proven head edits then reverts the
+                // participant; the merge keeps the lineage bytes, and the side's own
+                // edges still refuse.
+                common::git(&f.records, &["checkout", "-qb", "side", "HEAD~1"]);
+                std::fs::write(&path, [old.as_slice(), b"\n"].concat()).unwrap();
+                commit("participant edit on a pre-basis side branch");
+                named = Some(git_out(&["rev-parse", "HEAD"]));
+                std::fs::write(&path, &old).unwrap();
+                commit("participant reverted on the side branch");
+                common::git(&f.records, &["checkout", "-q", "main"]);
+                common::git(
+                    &f.records,
+                    &[
+                        "merge",
+                        "--no-ff",
+                        "-s",
+                        "ours",
+                        "side",
+                        "-m",
+                        "pre-basis side history after precheck",
+                    ],
+                );
             }
             _ => {
                 if case == "merge" {
@@ -342,6 +435,7 @@ fn retained_phase_freshness_guarded_delta() {
                 }
                 std::fs::write(&path, [old.as_slice(), b"\n"].concat()).unwrap();
                 commit("participant intervening edit");
+                named = Some(git_out(&["rev-parse", "HEAD"]));
                 std::fs::write(&path, &old).unwrap();
                 commit("participant reverted bytes");
                 if case == "merge" {
@@ -365,21 +459,26 @@ fn retained_phase_freshness_guarded_delta() {
         }
         precheck.resume();
         let out = drain(&listener, child);
-        if case == "unrelated" {
-            assert!(
-                out.status.success(),
-                "{}",
-                String::from_utf8_lossy(&out.stderr)
-            );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if case.starts_with("unrelated") && case != "unrelated_history_resolution" {
+            assert!(out.status.success(), "{case}: {stderr}");
         } else {
             assert!(
                 !out.status.success(),
                 "{case} must refuse even when endpoint bytes match"
             );
-            assert!(
-                String::from_utf8_lossy(&out.stderr).contains("retained_stale_basis"),
-                "{out:?}"
-            );
+            assert!(stderr.contains("retained_stale_basis"), "{out:?}");
+            if let Some(commit) = named {
+                let edge = stderr
+                    .split("history edge ")
+                    .nth(1)
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .unwrap_or_else(|| panic!("{case} refusal must name its edge: {stderr}"));
+                assert!(
+                    edge.split("..").any(|oid| oid == commit),
+                    "{case} refusal names {edge}, not an edge of {commit}"
+                );
+            }
         }
     }
 }

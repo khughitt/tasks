@@ -122,9 +122,20 @@ A new request's basis B may precede locked HEAD H when its project, records pair
 layout/rename epoch, task path and publishing branch still match, B is an ancestor
 of H, and the participant remained byte-identical throughout. Protected committed
 paths include the task record, its entire attachment subtree and required note
-archives, including Git modes and additions/deletions. Every intervening commit
-is checked against every parent without path-limited history simplification.
-Change-then-revert (ABA) and merge-parent edits refuse, even with equal endpoints.
+archives, including Git modes and additions/deletions. Intervening history is
+walked without path-limited simplification. A commit that descends from B is a
+lineage commit (also when a reused proof starts the walk at a later proven head):
+each of its edges to B or another lineage commit must leave the participant
+unchanged, so byte-identity holds throughout the lineage. Every edge of a commit
+that does not descend from B (side history) is checked the same way, and so is
+every first-parent edge. A lineage merge's later-parent edge to a commit outside
+the lineage (pre-basis or unrelated imported history, such as an archive-import
+merge whose second parent never held the participant) is not compared: the lineage
+edge proves the merge kept the participant, and the side's own edges catch any
+edit made there. Change-then-revert (ABA), side-branch edits and merge resolutions
+that change the participant relative to a lineage parent refuse, even with equal
+endpoints. A refusal names the offending `<parent>..<commit>` edge, or the pinned
+basis and current commit when the endpoints differ.
 Unavailable Git evidence fails explicitly.
 
 The submitted B stays in the immutable request and phase input_bases. At later

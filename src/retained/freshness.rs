@@ -286,7 +286,12 @@ fn validate_range(
     basis::validate_locator(&fresh, id, from)?;
     basis::validate_locator(&fresh, id, to)?;
     let paths = paths(id, from, task);
-    compare_edge(&fresh, id, from, &from.commit, &to.commit, &paths, policy)?;
+    compare_edge(&fresh, id, from, &from.commit, &to.commit, &paths, policy).map_err(|error| {
+        stale_at(
+            error,
+            &format!("between pinned basis {} and {}", from.commit, to.commit),
+        )
+    })?;
     // No path-limited traversal: it can hide reverted side-branch and merge-parent edits.
     let range = format!("{}..{}", from.commit, to.commit);
     let commits = match warmed_head {
@@ -297,16 +302,104 @@ fn validate_range(
         None => basis::git(&fresh, &["rev-list", "--parents", &range])?,
     };
     let commits = std::str::from_utf8(&commits).map_err(super::model::invalid)?;
-    for line in commits.lines() {
-        let mut oids = line.split_whitespace();
-        let commit = oids
-            .next()
-            .ok_or_else(|| super::model::invalid("empty commit range entry"))?;
-        for parent in oids {
-            compare_edge(&fresh, id, from, parent, commit, &paths, policy)?;
+    let edges = commits
+        .lines()
+        .map(|line| {
+            let mut oids = line.split_whitespace();
+            let commit = oids
+                .next()
+                .ok_or_else(|| super::model::invalid("empty commit range entry"))?;
+            Ok((commit, oids.collect::<Vec<_>>()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let graph: std::collections::BTreeMap<_, _> =
+        edges.iter().map(|(c, p)| (*c, p.as_slice())).collect();
+    // Lineage is always relative to `from`. A full range's outside parents are `from`
+    // or its ancestors; a warmed range's are the proven head's ancestors, some of
+    // which descend from `from` (a branch forked inside the proven range).
+    let mut seeds = std::collections::BTreeSet::from([from.commit.as_str()]);
+    if warmed_head.is_some() {
+        let mut outside = std::collections::BTreeSet::new();
+        for parent in edges
+            .iter()
+            .flat_map(|(_, parents)| parents.iter().copied())
+        {
+            if !graph.contains_key(parent)
+                && outside.insert(parent)
+                && super::read::ancestor(&fresh, &from.commit, parent)?
+            {
+                seeds.insert(parent);
+            }
+        }
+    }
+    let lineage = lineage(&graph, &seeds);
+    for (commit, parents) in &edges {
+        for (index, parent) in parents.iter().enumerate() {
+            // A lineage merge's later parent outside the lineage brings in pre-basis or
+            // unrelated history (such as an archive import): that side's own edges are
+            // checked in this loop, and the lineage edge proves the merge kept the
+            // participant. The first parent is always compared, so the first-parent
+            // chain readers walk stays inside the lineage. A shallow or replaced
+            // boundary reads as a parentless side root and is not compared here.
+            if index > 0
+                && lineage.contains(commit)
+                && !seeds.contains(parent)
+                && !lineage.contains(parent)
+            {
+                continue;
+            }
+            compare_edge(&fresh, id, from, parent, commit, &paths, policy)
+                .map_err(|error| stale_at(error, &format!("on history edge {parent}..{commit}")))?;
         }
     }
     Ok(())
+}
+
+/// Commits in the range that descend from a seed: parents outside the range count
+/// only when they are seeds. Iterative, since range order is not topological
+/// (imported histories carry arbitrary dates).
+fn lineage<'a>(
+    graph: &std::collections::BTreeMap<&'a str, &[&'a str]>,
+    seeds: &std::collections::BTreeSet<&str>,
+) -> std::collections::BTreeSet<&'a str> {
+    let mut known = std::collections::BTreeMap::<&str, bool>::new();
+    for &start in graph.keys() {
+        let mut stack = vec![start];
+        while let Some(&commit) = stack.last() {
+            if known.contains_key(commit) {
+                stack.pop();
+                continue;
+            }
+            let parents = graph[commit];
+            let pending: Vec<_> = parents
+                .iter()
+                .copied()
+                .filter(|p| graph.contains_key(p) && !known.contains_key(p))
+                .collect();
+            if pending.is_empty() {
+                let descends = parents
+                    .iter()
+                    .any(|p| seeds.contains(p) || known.get(p).copied().unwrap_or(false));
+                known.insert(commit, descends);
+                stack.pop();
+            } else {
+                stack.extend(pending);
+            }
+        }
+    }
+    known
+        .into_iter()
+        .filter_map(|(commit, descends)| descends.then_some(commit))
+        .collect()
+}
+
+fn stale_at(error: Error, place: &str) -> Error {
+    match error {
+        Error::RetainedStaleBasis(_) => Error::RetainedStaleBasis(format!(
+            "Retained participant changed {place} since its pinned basis; recover or refresh its exact inputs"
+        )),
+        other => other,
+    }
 }
 
 fn working_file(project: &Project, commit: &str, path: &str, cap: Option<u64>) -> Result<()> {
@@ -557,4 +650,58 @@ pub(crate) fn current(
         working_attachments(&fresh, id, &now)?;
     }
     Ok(now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lineage;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// `edges` lists (commit, parents) in range order; `f` is the basis outside it.
+    fn classify(edges: &[(&'static str, &[&'static str])], seeds: &[&str]) -> Vec<&'static str> {
+        let graph: BTreeMap<_, _> = edges.iter().copied().collect();
+        let seeds: BTreeSet<&str> = seeds.iter().copied().collect();
+        lineage(&graph, &seeds).into_iter().collect()
+    }
+
+    #[test]
+    fn unrelated_import_merge_keeps_its_side_out_of_the_lineage() {
+        // u1 <- u2 is an orphan history; m merges it onto a; non-topological order.
+        let edges: &[(&str, &[&str])] = &[
+            ("m", &["a", "u2"]),
+            ("u1", &[]),
+            ("a", &["f"]),
+            ("u2", &["u1"]),
+        ];
+        assert_eq!(classify(edges, &["f"]), ["a", "m"]);
+    }
+
+    #[test]
+    fn diamond_criss_cross_and_octopus_stay_lineage() {
+        let edges: &[(&str, &[&str])] = &[
+            ("o", &["x2", "p", "y2"]),
+            ("x2", &["x", "y"]),
+            ("y2", &["y", "x"]),
+            ("x", &["f"]),
+            ("y", &["f"]),
+            ("p", &["old"]),
+        ];
+        assert_eq!(classify(edges, &["f"]), ["o", "x", "x2", "y", "y2"]);
+    }
+
+    #[test]
+    fn a_side_that_merges_the_lineage_in_joins_it() {
+        // s1 forks before the basis; s2 merges lineage commit l into it.
+        let edges: &[(&str, &[&str])] = &[("s2", &["s1", "l"]), ("s1", &["old"]), ("l", &["f"])];
+        assert_eq!(classify(edges, &["f"]), ["l", "s2"]);
+    }
+
+    #[test]
+    fn warmed_ranges_seed_proven_parents_that_descend_from_the_basis() {
+        // c sits on a branch forked at proven commit k (descends from f) and merges
+        // an unrelated import u; only seeding k makes c lineage.
+        let edges: &[(&str, &[&str])] = &[("t", &["h", "c"]), ("c", &["k", "u"]), ("u", &[])];
+        assert_eq!(classify(edges, &["f", "h"]), ["t"]);
+        assert_eq!(classify(edges, &["f", "h", "k"]), ["c", "t"]);
+    }
 }
