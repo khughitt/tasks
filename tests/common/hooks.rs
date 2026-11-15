@@ -94,3 +94,58 @@ pub fn claim_root(env: &TestEnv, prefix: &str, id: &str, root: &str) {
         .insert("root_session".into(), root.into());
     std::fs::write(path, toml::to_string(&store).unwrap()).unwrap();
 }
+
+pub fn notice(env: &TestEnv, process_cwd: &Path, event_cwd: &Path) -> Value {
+    let event = envelope("codex", "SessionStart", "controller", event_cwd);
+    let out = env
+        .cmd(process_cwd)
+        .args(["hook", "halt-notice"])
+        .write_stdin(event.to_string())
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+pub fn repository(env: &TestEnv, dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    let run = |args: &[&str]| {
+        let out = super::git_fixture::command(env.home.path(), dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {out:?}");
+    };
+    run(&["init", "-q", "-b", "main"]);
+    super::git_fixture::assert_repo(env.home.path(), dir);
+    std::fs::write(dir.join("README"), "fixture\n").unwrap();
+    run(&["add", "-A"]);
+    run(&["commit", "-qm", "fixture"]);
+}
+
+pub fn fingerprint(paths: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    use sha2::{Digest, Sha256};
+    fn walk(path: &Path, found: &mut Vec<(PathBuf, String)>) {
+        if path.is_dir() {
+            for item in std::fs::read_dir(path).unwrap() {
+                walk(&item.unwrap().path(), found);
+            }
+        } else if path.is_file() {
+            found.push((
+                path.to_path_buf(),
+                format!("{:x}", Sha256::digest(std::fs::read(path).unwrap())),
+            ));
+        }
+    }
+    let mut found = Vec::new();
+    for path in paths {
+        walk(path, &mut found);
+    }
+    found.sort();
+    found
+}

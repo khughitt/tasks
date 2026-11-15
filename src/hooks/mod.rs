@@ -1,6 +1,7 @@
 //! Read-only session policy on relay's projected subscriber envelope.
 mod claim_guard;
 mod facts;
+mod halt_notice;
 mod input;
 
 use serde_json::json;
@@ -52,12 +53,29 @@ pub(crate) fn claim_guard(
 }
 
 pub(crate) fn halt_notice(
-    _input: &mut dyn Read,
-    _output: &mut dyn Write,
+    input: &mut dyn Read,
+    output: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> i32 {
-    let _ = writeln!(diagnostics, "halt-notice: not implemented yet");
-    1
+    let result = read(input)
+        .and_then(|event| halt_notice::notice(&event))
+        .and_then(|context| {
+            if context.as_deref().is_some_and(|text| !bounded(text)) {
+                return Err("context exceeds the reply limit".into());
+            }
+            let reply = match context {
+                Some(text) => json!({"context":text}),
+                None => json!({}),
+            };
+            serde_json::to_writer(output, &reply).map_err(|_| "reply could not be written".into())
+        });
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            let _ = writeln!(diagnostics, "halt-notice: {error}");
+            1
+        }
+    }
 }
 
 #[cfg(test)]

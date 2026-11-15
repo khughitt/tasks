@@ -257,3 +257,376 @@ fn hooks_agy_exemption_matrix() {
         assert_eq!(guard(&env, &root, &event)["decision"], "allow");
     }
 }
+
+#[test]
+fn hooks_halt_authority_matrix() {
+    use common::hooks::{fingerprint, notice, repository};
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let halt = common::id_of(env.json(&root, &["add", "Stop work", "--tag", "halt"]));
+    let paths = vec![
+        root.join("tasks"),
+        env.home.path().join(".config/tasks/projects.toml"),
+        env.home.path().join(".local/state/tasks"),
+    ];
+    write_claim(&env, "sci", "sci-000001", "codex:controller", true);
+    let before = fingerprint(&paths);
+    assert!(
+        notice(&env, &root, &root)["context"]
+            .as_str()
+            .unwrap()
+            .contains(&halt)
+    );
+    assert_eq!(before, fingerprint(&paths));
+    let other = tempfile::tempdir().unwrap();
+    assert_eq!(notice(&env, &root, other.path()), json!({}));
+    for cwd in [root.join("missing"), root.join("tasks/.config.toml")] {
+        assert!(
+            notice(&env, &root, &cwd)["context"]
+                .as_str()
+                .unwrap()
+                .contains("cannot tell which project")
+        );
+    }
+    let config = root.join("tasks/.config.toml");
+    let original = std::fs::read(&config).unwrap();
+    for broken in ["broken [toml", "[git]\ncommit=false\n"] {
+        std::fs::write(&config, broken).unwrap();
+        assert!(
+            notice(&env, &root, &root)["context"]
+                .as_str()
+                .unwrap()
+                .contains("cannot tell which project")
+        );
+    }
+    std::fs::write(&config, original).unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let saved = std::fs::read(&registry).unwrap();
+    std::fs::write(&registry, "[projects]\n").unwrap();
+    for in_git in [false, true] {
+        if in_git {
+            repository(&env, &root);
+        }
+        let text = notice(&env, &root, &root)["context"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            text.contains("unregistered") && text.contains("sci") && text.contains("tasks where"),
+            "{text}"
+        );
+    }
+    std::fs::write(&registry, &saved).unwrap();
+    std::fs::write(root.join(format!("tasks/{halt}.md")), "corrupt task").unwrap();
+    let out = env
+        .cmd(&root)
+        .args(["hook", "halt-notice"])
+        .write_stdin(envelope("codex", "SessionStart", "c", &root).to_string())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert!(!out.stderr.is_empty());
+}
+
+#[test]
+fn hooks_halt_registered_git_authorities_and_historical_tree() {
+    use common::hooks::{notice, repository};
+    let env = TestEnv::new();
+    let base = tempfile::tempdir().unwrap();
+    let code = base.path().join("code");
+    let records = base.path().join("records");
+    repository(&env, &code);
+    repository(&env, &records);
+    env.json(
+        &code,
+        &[
+            "init",
+            "--prefix",
+            "det",
+            "--records",
+            records.to_str().unwrap(),
+        ],
+    );
+    let authority = records.join("det");
+    let halt = common::id_of(env.json(&authority, &["add", "Detached halt", "--tag", "halt"]));
+    let worktree = base.path().join("worktree");
+    common::git(
+        &code,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &code, &worktree);
+    for dir in [&code, &worktree, &authority] {
+        assert!(
+            notice(&env, &code, dir)["context"]
+                .as_str()
+                .unwrap()
+                .contains(&halt)
+        );
+    }
+    std::fs::create_dir_all(worktree.join("tasks")).unwrap();
+    std::fs::write(worktree.join("tasks/.config.toml"), "prefix='det'\n").unwrap();
+    assert!(
+        notice(&env, &code, &worktree)["context"]
+            .as_str()
+            .unwrap()
+            .contains(&halt)
+    );
+    // Ordinary commands retain records_moved; the subscriber follows verified authority.
+    assert_eq!(env.fail(&worktree, &["list"]), "records_moved");
+    let foreign = base.path().join("foreign");
+    repository(&env, &foreign);
+    std::fs::create_dir_all(foreign.join("tasks")).unwrap();
+    std::fs::write(foreign.join("tasks/.config.toml"), "prefix='det'\n").unwrap();
+    assert!(
+        notice(&env, &code, &foreign)["context"]
+            .as_str()
+            .unwrap()
+            .contains("cannot tell which project")
+    );
+    std::fs::write(
+        authority.join("tasks/.config.toml"),
+        "prefix='det'\n[checkout]\nkind='detached'\npath='../../foreign'\n",
+    )
+    .unwrap();
+    assert!(
+        notice(&env, &code, &code)["context"]
+            .as_str()
+            .unwrap()
+            .contains("cannot tell which project")
+    );
+}
+
+#[test]
+fn hooks_halt_linked_and_in_tree_worktrees_use_registered_records() {
+    use common::hooks::{notice, repository};
+    let mut env = TestEnv::new();
+    let authority = env.init("lnk");
+    let base = tempfile::tempdir().unwrap();
+    let code = base.path().join("code");
+    repository(&env, &code);
+    let config = authority.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str(&format!(
+        "\n[checkout]\npath={:?}\n",
+        code.to_str().unwrap()
+    ));
+    std::fs::write(&config, text).unwrap();
+    let halt = common::id_of(env.json(&authority, &["add", "Linked halt", "--tag", "halt"]));
+    let wt = base.path().join("linked-wt");
+    common::git(
+        &code,
+        &["worktree", "add", "-q", "-b", "side", wt.to_str().unwrap()],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &code, &wt);
+    for dir in [&code, &wt] {
+        assert!(
+            notice(&env, &authority, dir)["context"]
+                .as_str()
+                .unwrap()
+                .contains(&halt)
+        );
+    }
+    let root = env.init("itr");
+    repository(&env, &root);
+    let halt = common::id_of(env.json(&root, &["add", "In tree halt", "--tag", "halt"]));
+    common::git(&root, &["add", "-A"]);
+    common::git(&root, &["commit", "-qm", "records"]);
+    let side = base.path().join("in-tree-wt");
+    common::git(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &root, &side);
+    std::fs::remove_file(side.join(format!("tasks/{halt}.md"))).unwrap();
+    assert!(
+        notice(&env, &root, &side)["context"]
+            .as_str()
+            .unwrap()
+            .contains(&halt)
+    );
+}
+
+#[test]
+fn hooks_halt_selects_oldest_open_task() {
+    use common::hooks::notice;
+    for status in [
+        "idea", "todo", "doing", "blocked", "shelved", "done", "dropped",
+    ] {
+        let mut env = TestEnv::new();
+        let root = env.init("sci");
+        let first = common::id_of(env.json(&root, &["add", "First", "--tag", "halt"]));
+        let second = common::id_of(env.json(&root, &["add", "Second", "--tag", "halt"]));
+        let mut ids = [first.clone(), second.clone()];
+        ids.sort();
+        for id in &ids {
+            let path = root.join(format!("tasks/{id}.md"));
+            let text = std::fs::read_to_string(&path)
+                .unwrap()
+                .lines()
+                .map(|line| {
+                    if line.starts_with("created:") {
+                        "created: 2026-01-01T00:00:00Z".into()
+                    } else if line.starts_with("status:") {
+                        format!("status: {}", if *id == ids[0] { status } else { "todo" })
+                    } else {
+                        line.into()
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join("\n");
+            std::fs::write(path, text).unwrap();
+        }
+        let expected = if matches!(status, "done" | "dropped") {
+            &ids[1]
+        } else {
+            &ids[0]
+        };
+        assert!(
+            notice(&env, &root, &root)["context"]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{status}"
+        );
+    }
+}
+
+#[test]
+fn hooks_notice_ignores_display_and_global_dir() {
+    use common::hooks::notice;
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let other = env.init("other");
+    let halt = common::id_of(env.json(&root, &["add", "Stop work", "--tag", "halt"]));
+    std::fs::write(
+        env.home.path().join(".config/tasks/config.toml"),
+        "broken [toml",
+    )
+    .unwrap();
+    for h in ["codex", "claude-code", "agy"] {
+        let out = env
+            .cmd(&other)
+            .args([
+                "--json",
+                "hook",
+                "halt-notice",
+                "--pretty",
+                "--headers",
+                "--no-headers",
+                "-Cmissing",
+                "--color=bad",
+            ])
+            .env("TASKS_FORMAT", "bad")
+            .env("TASKS_COLOR", "bad")
+            .env("TASKS_HEADERS", "bad")
+            .env("TASKS_THEME", "bad")
+            .env("TASKS_PALETTE", "bad")
+            .env("COLUMNS", "bad")
+            .write_stdin(envelope(h, "SessionStart", "controller", &root).to_string())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["context"]
+                .as_str()
+                .unwrap()
+                .contains(&halt)
+        );
+    }
+    // Enter an owned cwd that the child removes before exec: current_dir() must never be needed.
+    let gone = root.join("gone");
+    std::fs::create_dir(&gone).unwrap();
+    let mut cmd = env.raw(&gone);
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::process::CommandExt;
+    let gone_path = std::ffi::CString::new(gone.as_os_str().as_bytes()).unwrap();
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::rmdir(gone_path.as_ptr()) == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    cmd.args(["hook", "halt-notice"])
+        .stdin(std::process::Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            envelope("codex", "SessionStart", "c", &root)
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["context"]
+            .as_str()
+            .unwrap()
+            .contains(&halt)
+    );
+    // Separate valid event cwd also works from every unrelated existing process directory.
+    assert!(
+        notice(&env, &other, &root)["context"]
+            .as_str()
+            .unwrap()
+            .contains(&halt)
+    );
+}
+
+#[test]
+fn hooks_notice_discovery_avoids_records_admission_commands() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    common::hooks::repository(&env, &root);
+    let halt = common::id_of(env.json(&root, &["add", "Halt", "--tag", "halt"]));
+    let bin = env.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let git = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|p| p.join("git"))
+        .find(|p| p.is_file())
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+    let wrapper = bin.join("git");
+    let calls = env.home.path().join("git-calls");
+    std::fs::write(&wrapper,format!("#!/usr/bin/env python3\nimport os,sys\nwith open({:?},'a') as f: f.write(' '.join(sys.argv[1:])+'\\n')\nif 'ls-tree' in sys.argv or ('worktree' in sys.argv and 'list' in sys.argv): sys.exit(88)\nos.execv({:?}, ['git',*sys.argv[1:]])\n",calls.to_str().unwrap(),git.to_str().unwrap())).unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = env
+        .cmd(&root)
+        .env(
+            "PATH",
+            format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+        )
+        .args(["hook", "halt-notice"])
+        .write_stdin(envelope("codex", "SessionStart", "c", &root).to_string())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(String::from_utf8(out.stdout).unwrap().contains(&halt));
+    let calls = std::fs::read_to_string(calls).unwrap();
+    assert!(!calls.contains("ls-tree"));
+    assert!(!calls.contains("worktree list"));
+}
