@@ -53,6 +53,9 @@ redirect to its successor, not editable work.
 `drop` refuses open descendants and has no force override. A `halt` tag on open
 work prevents lower-priority starts in that project without an explicit override;
 `prime` reports halts. See the [task model](task-model.md#lifecycle).
+Session integrations can use the [hook subscribers](hooks.md) to report held claims
+and registered halts. They are read-only protocol commands; configuring a route
+requires its own qualification and activation.
 
 ## Select work without losing context
 

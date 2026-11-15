@@ -1,0 +1,1461 @@
+{
+  "sources": [
+    {
+      "repository": "ops",
+      "commit": "f1c08d8008a0f1117d01d9913f8d20951d9be7df",
+      "path": "tests/test_claim_guard.py",
+      "sha256": "afe3cb9be42050d8c02e95c4f9dbe75b936a9ffa7ddca4a7df1d36d70b97d6e0"
+    },
+    {
+      "repository": "ops",
+      "commit": "f1c08d8008a0f1117d01d9913f8d20951d9be7df",
+      "path": "tests/test_sessionstart.py",
+      "sha256": "52197ece9ba47e3fdaeb2f780bbb8a33ce31981aa6154e85330964cfa682234d"
+    }
+  ],
+  "mapping": [
+    {
+      "test": "DecideTests.test_own_live_claim_blocks",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_another_sessions_claim_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "foreign-claim"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_no_claim_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "no-claim",
+        "agy-no-claim"
+      ],
+      "boundary": [
+        "complete_read_precedes_child_and_no_claim_skips_facts"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_stale_claim_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "stale-claim"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_retry_allows_even_with_a_held_claim",
+      "kind": "policy-replay",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "agy-positive-invalid-reason"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_retry_allows_even_when_the_read_fails",
+      "kind": "policy-replay",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "agy-positive-invalid-reason"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_retry_never_reads",
+      "kind": "policy-replay",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "agy-positive-invalid-reason"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_codex_tagged_claim_is_held",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_a_tagged_claude_session_is_held",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_unparseable_input_blocks",
+      "kind": "command-boundary",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "strict_input_rejects_nested_duplicate_keys",
+        "hooks_protocol_failures_are_explicit",
+        "malformed_guard_input_is_a_deny"
+      ],
+      "disposition": "Strict bytes/envelope boundary is tested separately from producer rejection; no successful subscriber invocation is claimed."
+    },
+    {
+      "test": "DecideTests.test_input_without_a_session_blocks",
+      "kind": "policy-replay",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "hooks_protocol_failures_are_explicit"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_failed_read_blocks_with_the_error",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_unexpected_exception_in_read_blocks",
+      "kind": "command-boundary",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation",
+        "hooks_agy_exemption_matrix",
+        "malformed_guard_input_is_a_deny",
+        "write_failure_is_explicit"
+      ],
+      "disposition": "Python monkey-patch exceptions have no Rust Result equivalent; exemptions precede injected store/facts reads, explicit read errors deny. Panic/OOM containment is not claimed."
+    },
+    {
+      "test": "DecideTests.test_malformed_claim_from_read_blocks",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "DecideTests.test_failed_read_reason_offers_every_option",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_bytes_input_that_is_not_utf8_blocks",
+      "kind": "command-boundary",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "strict_input_rejects_nested_duplicate_keys",
+        "hooks_protocol_failures_are_explicit",
+        "malformed_guard_input_is_a_deny"
+      ],
+      "disposition": "Strict bytes/envelope boundary is tested separately from producer rejection; no successful subscriber invocation is claimed."
+    },
+    {
+      "test": "DecideTests.test_running_child_allows_with_a_held_claim",
+      "kind": "policy-replay",
+      "cases": [
+        "shell-running",
+        "child-pending",
+        "child-with-monitor",
+        "wake-false"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_running_background_command_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "shell-running",
+        "child-pending",
+        "child-with-monitor",
+        "wake-false"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_pending_child_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "child-pending"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_running_child_requires_the_claims_read",
+      "kind": "policy-replay",
+      "cases": [
+        "shell-running",
+        "child-pending",
+        "child-with-monitor",
+        "wake-false"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_unknown_status_blocks_and_says_children_are_unseen",
+      "kind": "policy-replay",
+      "cases": [
+        "unknown-status-completed",
+        "unknown-status-Running",
+        "unknown-status-queued"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_work_that_is_not_known_to_wake_blocks_and_is_named",
+      "kind": "policy-replay",
+      "cases": [
+        "background-nonwaking",
+        "nonwaking-workflow",
+        "nonwaking-remote_agent"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_running_child_beside_a_monitor_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "child-with-monitor"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_running_child_beside_a_malformed_item_blocks",
+      "kind": "policy-replay",
+      "cases": [
+        "background-malformed-tail"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_scheduled_wake_up_blocks_without_saying_nothing_will_wake",
+      "kind": "policy-replay",
+      "cases": [
+        "cron-original-source-schedule",
+        "cron-only"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_deeply_nested_input_blocks",
+      "kind": "command-boundary",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "strict_input_rejects_nested_duplicate_keys",
+        "hooks_protocol_failures_are_explicit",
+        "malformed_guard_input_is_a_deny"
+      ],
+      "disposition": "Strict bytes/envelope boundary is tested separately from producer rejection; no successful subscriber invocation is claimed."
+    },
+    {
+      "test": "DecideTests.test_failed_claims_read_keeps_wake_unavailable",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_failed_read_reason_reads_as_one_sentence_each",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_empty_list_blocks_but_accounts_for_queued_completion",
+      "kind": "policy-replay",
+      "cases": [
+        "background-empty"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_input_without_the_list_blocks_and_says_children_are_unseen",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_malformed_list_blocks_and_names_the_field",
+      "kind": "policy-replay",
+      "cases": [
+        "malformed-background-0",
+        "malformed-background-1",
+        "malformed-background-2",
+        "malformed-background-3",
+        "malformed-background-4",
+        "malformed-background-5",
+        "malformed-background-6",
+        "background-malformed-no-claim"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_malformed_list_allows_without_a_claim",
+      "kind": "policy-replay",
+      "cases": [
+        "malformed-background-0",
+        "malformed-background-1",
+        "malformed-background-2",
+        "malformed-background-3",
+        "malformed-background-4",
+        "malformed-background-5",
+        "malformed-background-6",
+        "background-malformed-no-claim"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_running_child_does_not_excuse_a_harness_that_never_wakes",
+      "kind": "policy-replay",
+      "cases": [
+        "shell-running",
+        "child-pending",
+        "child-with-monitor",
+        "wake-false"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_running_child_does_not_excuse_a_missing_session",
+      "kind": "policy-replay",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "hooks_protocol_failures_are_explicit"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "DecideTests.test_failed_claims_read_does_not_claim_a_wake",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_held_claim_blocks",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_prefixed_claim_is_held",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_no_claim_allows",
+      "kind": "policy-replay",
+      "cases": [
+        "no-claim",
+        "agy-no-claim"
+      ],
+      "boundary": [
+        "complete_read_precedes_child_and_no_claim_skips_facts"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_refire_allows_without_reading",
+      "kind": "policy-replay",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "agy-positive-invalid-reason"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_own_termination_allows_even_without_an_execution_count",
+      "kind": "policy-replay",
+      "cases": [
+        "agy-own-end-error",
+        "agy-own-end-user_canceled",
+        "agy-own-end-max_invocations",
+        "agy-own-end-max_forced_invocations",
+        "agy-own-end-max_token_budget_exceeded",
+        "agy-own-end-terminal_custom_hook",
+        "agy-own-end-error-count-0",
+        "agy-own-end-error-count-1",
+        "agy-own-end-error-count-2",
+        "agy-own-end-error-count-3",
+        "agy-own-end-error-count-4",
+        "agy-own-end-error-count-5",
+        "agy-own-end-error-valid-id",
+        "agy-own-end-user_canceled-count-0",
+        "agy-own-end-user_canceled-count-1",
+        "agy-own-end-user_canceled-count-2",
+        "agy-own-end-user_canceled-count-3",
+        "agy-own-end-user_canceled-count-4",
+        "agy-own-end-user_canceled-count-5",
+        "agy-own-end-user_canceled-valid-id",
+        "agy-own-end-max_invocations-count-0",
+        "agy-own-end-max_invocations-count-1",
+        "agy-own-end-max_invocations-count-2",
+        "agy-own-end-max_invocations-count-3",
+        "agy-own-end-max_invocations-count-4",
+        "agy-own-end-max_invocations-count-5",
+        "agy-own-end-max_invocations-valid-id",
+        "agy-own-end-max_forced_invocations-count-0",
+        "agy-own-end-max_forced_invocations-count-1",
+        "agy-own-end-max_forced_invocations-count-2",
+        "agy-own-end-max_forced_invocations-count-3",
+        "agy-own-end-max_forced_invocations-count-4",
+        "agy-own-end-max_forced_invocations-count-5",
+        "agy-own-end-max_forced_invocations-valid-id",
+        "agy-own-end-max_token_budget_exceeded-count-0",
+        "agy-own-end-max_token_budget_exceeded-count-1",
+        "agy-own-end-max_token_budget_exceeded-count-2",
+        "agy-own-end-max_token_budget_exceeded-count-3",
+        "agy-own-end-max_token_budget_exceeded-count-4",
+        "agy-own-end-max_token_budget_exceeded-count-5",
+        "agy-own-end-max_token_budget_exceeded-valid-id",
+        "agy-own-end-terminal_custom_hook-count-0",
+        "agy-own-end-terminal_custom_hook-count-1",
+        "agy-own-end-terminal_custom_hook-count-2",
+        "agy-own-end-terminal_custom_hook-count-3",
+        "agy-own-end-terminal_custom_hook-count-4",
+        "agy-own-end-terminal_custom_hook-count-5",
+        "agy-own-end-terminal_custom_hook-valid-id"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_double_fire_while_a_subagent_runs",
+      "kind": "policy-replay",
+      "cases": [
+        "agy-busy",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_kinds_missing_shell_make_idle_false_unseen",
+      "kind": "policy-replay",
+      "cases": [
+        "agy-blind-shell"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_unreadable_inputs_block",
+      "kind": "policy-replay",
+      "cases": [
+        "agy-count-negative",
+        "agy-count-boolean",
+        "agy-count-missing",
+        "agy-idle-missing",
+        "agy-idle-invalid",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "hooks_protocol_failures_are_explicit"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_claims_or_facts_unreadable_block",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "AgyTests.test_agy_reason_names_daemons_once",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ParseTests.test_well_formed",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ParseTests.test_not_json",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ParseTests.test_no_claims_list",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ParseTests.test_claim_missing_a_field",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ParseTests.test_live_must_be_a_bool",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ReasonTests.test_reason_names_every_held_claim",
+      "kind": "policy-replay",
+      "cases": [
+        "multiple-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_reason_names_every_way_to_end",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_park_step_must_be_an_action",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_claude_code_reason_is_a_few_lines",
+      "kind": "command-boundary",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [
+        "reply_counts_utf16_units",
+        "hooks_protocol_failures_are_explicit"
+      ],
+      "disposition": "Spec \u00a73 replaces incidental old byte/line budgets with the 10,000 UTF-16-unit wire bound. Ordinary actionable text still compares exactly."
+    },
+    {
+      "test": "ReasonTests.test_codex_reason_stays_under_1200_characters",
+      "kind": "command-boundary",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [
+        "reply_counts_utf16_units",
+        "hooks_protocol_failures_are_explicit"
+      ],
+      "disposition": "Spec \u00a73 replaces incidental old byte/line budgets with the 10,000 UTF-16-unit wire bound. Ordinary actionable text still compares exactly."
+    },
+    {
+      "test": "ReasonTests.test_claude_code_reason_has_no_subagent_branch",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_worker_exit_is_conditional",
+      "kind": "policy-replay",
+      "cases": [
+        "codex-subagent-own",
+        "codex-subagent-root-only",
+        "codex-root-related",
+        "codex-root-own-related",
+        "codex-worker-stop-mixed",
+        "codex-cross-prefix"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "liveness_session_spelling_and_related_recovery"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_child_sentence_follows_child_wakes",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_unseen_children_say_why_and_that_the_repeat_stop_is_allowed",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_detached_work_is_named_once",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_codex_wait_names_wait_agent",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReasonTests.test_user_instruction_stands_over_continue",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "InFlightTests.test_lists_the_kinds_probed_to_wake",
+      "kind": "policy-replay",
+      "cases": [
+        "shell-running",
+        "child-pending",
+        "child-with-monitor",
+        "wake-false"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "InFlightTests.test_an_empty_list_is_seen_and_empty",
+      "kind": "policy-replay",
+      "cases": [
+        "background-empty"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "InFlightTests.test_a_missing_list_is_unseen",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "InFlightTests.test_a_malformed_list_is_unseen",
+      "kind": "policy-replay",
+      "cases": [
+        "malformed-background-0",
+        "malformed-background-1",
+        "malformed-background-2",
+        "malformed-background-3",
+        "malformed-background-4",
+        "malformed-background-5",
+        "malformed-background-6",
+        "background-malformed-no-claim"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "ReadTests.test_timeout_is_a_read_failure",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ReadTests.test_nonzero_exit_is_a_read_failure_naming_stderr",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "ReadTests.test_reads_all_projects",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "EntryTests.test_held_claim_prints_a_block",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_held_claim_with_a_running_child_prints_nothing",
+      "kind": "policy-replay",
+      "cases": [
+        "shell-running",
+        "child-pending",
+        "child-with-monitor",
+        "wake-false"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_no_claim_prints_nothing",
+      "kind": "policy-replay",
+      "cases": [
+        "no-claim",
+        "agy-no-claim"
+      ],
+      "boundary": [
+        "complete_read_precedes_child_and_no_claim_skips_facts"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_failing_tasks_blocks",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_no_tasks_on_path_blocks_and_says_so",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "EntryTests.test_agy_block_is_continue",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_agy_allow_prints_nothing",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_agy_crash_on_refire_allows",
+      "kind": "command-boundary",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation",
+        "hooks_agy_exemption_matrix",
+        "malformed_guard_input_is_a_deny",
+        "write_failure_is_explicit"
+      ],
+      "disposition": "Python monkey-patch exceptions have no Rust Result equivalent; exemptions precede injected store/facts reads, explicit read errors deny. Panic/OOM containment is not claimed."
+    },
+    {
+      "test": "EntryTests.test_a_crash_on_the_retry_allows",
+      "kind": "command-boundary",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation",
+        "hooks_agy_exemption_matrix",
+        "malformed_guard_input_is_a_deny",
+        "write_failure_is_explicit"
+      ],
+      "disposition": "Python monkey-patch exceptions have no Rust Result equivalent; exemptions precede injected store/facts reads, explicit read errors deny. Panic/OOM containment is not claimed."
+    },
+    {
+      "test": "EntryTests.test_a_crash_otherwise_blocks",
+      "kind": "command-boundary",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation",
+        "hooks_agy_exemption_matrix",
+        "malformed_guard_input_is_a_deny",
+        "write_failure_is_explicit"
+      ],
+      "disposition": "Python monkey-patch exceptions have no Rust Result equivalent; exemptions precede injected store/facts reads, explicit read errors deny. Panic/OOM containment is not claimed."
+    },
+    {
+      "test": "EntryTests.test_a_block_names_its_owner_and_decide_stays_bare",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_bad_harness_is_exit_1_and_no_reply",
+      "kind": "policy-replay",
+      "cases": [
+        "own-live",
+        "codex-root",
+        "agy-own"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "EntryTests.test_unreadable_stdin_blocks",
+      "kind": "command-boundary",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "strict_input_rejects_nested_duplicate_keys",
+        "hooks_protocol_failures_are_explicit",
+        "malformed_guard_input_is_a_deny"
+      ],
+      "disposition": "Strict bytes/envelope boundary is tested separately from producer rejection; no successful subscriber invocation is claimed."
+    },
+    {
+      "test": "PolicyTests.test_worker_selects_itself_without_reading_facts",
+      "kind": "policy-replay",
+      "cases": [
+        "codex-subagent-own",
+        "codex-subagent-root-only",
+        "codex-root-related",
+        "codex-root-own-related",
+        "codex-worker-stop-mixed",
+        "codex-cross-prefix"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "liveness_session_spelling_and_related_recovery"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_no_claim_and_retry_skip_facts",
+      "kind": "policy-replay",
+      "cases": [
+        "retry",
+        "agy-double-stop",
+        "agy-positive-invalid-reason"
+      ],
+      "boundary": [
+        "retry_header_precedes_unrelated_validation"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_root_has_recovery_for_related_claims_without_foreign_done",
+      "kind": "policy-replay",
+      "cases": [
+        "codex-subagent-own",
+        "codex-subagent-root-only",
+        "codex-root-related",
+        "codex-root-own-related",
+        "codex-worker-stop-mixed",
+        "codex-cross-prefix"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "liveness_session_spelling_and_related_recovery"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_root_own_claim_with_root_metadata_keeps_done_guidance",
+      "kind": "policy-replay",
+      "cases": [
+        "codex-own-root-metadata"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_unknown_capability_never_allows_a_running_child",
+      "kind": "policy-replay",
+      "cases": [
+        "wake-unknown",
+        "kinds-unknown",
+        "statuses-unknown"
+      ],
+      "boundary": [
+        "wake_matrix_requires_probed_sets_and_agy_blind_kinds"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_failed_facts_read_names_the_failure",
+      "kind": "policy-replay",
+      "cases": [
+        "claims-unreadable",
+        "facts-missing"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_changed_sets_change_the_wake_decision",
+      "kind": "policy-replay",
+      "cases": [
+        "changed-wake-kinds",
+        "changed-wake-statuses",
+        "changed-wake-both"
+      ],
+      "boundary": [],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_malformed_event_fields_block",
+      "kind": "policy-replay",
+      "cases": [
+        "decoder-reject-141",
+        "decoder-reject-142",
+        "decoder-reject-143",
+        "decoder-reject-144",
+        "agy-decoder-152",
+        "agy-decoder-153"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "hooks_protocol_failures_are_explicit"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "PolicyTests.test_malformed_optional_root_refuses_the_inventory",
+      "kind": "retired-transport-dependency",
+      "cases": [
+        "claims-unreadable"
+      ],
+      "boundary": [
+        "hooks_claim_inventory_is_complete"
+      ],
+      "disposition": "The nested tasks-claims JSON subprocess/exception injection is retired. Registry/ClaimSnapshot are read directly with existing typed store validation; complete read failure still denies. No second tasks process exists.",
+      "owner": "tasks-e67608"
+    },
+    {
+      "test": "FactsReadTests.test_injected_command_and_original_entries",
+      "kind": "policy-replay",
+      "cases": [
+        "wake-unknown",
+        "facts-missing",
+        "facts-invalid",
+        "facts-nonzero",
+        "changed-wake-both"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown",
+        "installed_reader_failures_are_bounded_and_cleaned"
+      ],
+      "disposition": "Schema values and real disposable subprocess failures; fixed installed command replaces the old injected command parameter."
+    },
+    {
+      "test": "FactsReadTests.test_unknown_is_not_a_negative_probe",
+      "kind": "policy-replay",
+      "cases": [
+        "wake-unknown",
+        "facts-missing",
+        "facts-invalid",
+        "facts-nonzero",
+        "changed-wake-both"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown",
+        "installed_reader_failures_are_bounded_and_cleaned"
+      ],
+      "disposition": "Schema values and real disposable subprocess failures; fixed installed command replaces the old injected command parameter."
+    },
+    {
+      "test": "FactsReadTests.test_invalid_facts_json_refuses",
+      "kind": "policy-replay",
+      "cases": [
+        "wake-unknown",
+        "facts-missing",
+        "facts-invalid",
+        "facts-nonzero",
+        "changed-wake-both"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown",
+        "installed_reader_failures_are_bounded_and_cleaned"
+      ],
+      "disposition": "Schema values and real disposable subprocess failures; fixed installed command replaces the old injected command parameter."
+    },
+    {
+      "test": "FactsReadTests.test_subprocess_failure_refuses",
+      "kind": "policy-replay",
+      "cases": [
+        "wake-unknown",
+        "facts-missing",
+        "facts-invalid",
+        "facts-nonzero",
+        "changed-wake-both"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown",
+        "installed_reader_failures_are_bounded_and_cleaned"
+      ],
+      "disposition": "Schema values and real disposable subprocess failures; fixed installed command replaces the old injected command parameter."
+    },
+    {
+      "test": "NativeClaimTests.test_emitted_native_rows_select_worker_and_own_root",
+      "kind": "policy-replay",
+      "cases": [
+        "codex-subagent-own",
+        "codex-subagent-root-only",
+        "codex-root-related",
+        "codex-root-own-related",
+        "codex-worker-stop-mixed",
+        "codex-cross-prefix"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "liveness_session_spelling_and_related_recovery"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "NativeClaimTests.test_selection_controls",
+      "kind": "policy-replay",
+      "cases": [
+        "codex-subagent-own",
+        "codex-subagent-root-only",
+        "codex-root-related",
+        "codex-root-own-related",
+        "codex-worker-stop-mixed",
+        "codex-cross-prefix"
+      ],
+      "boundary": [
+        "hooks_codex_worker_matrix",
+        "liveness_session_spelling_and_related_recovery"
+      ],
+      "disposition": "Exact paired reason text and decision cover this action/branch."
+    },
+    {
+      "test": "RealFactsTests.test_actual_reader_preserves_false_and_unknown",
+      "kind": "command-boundary",
+      "cases": [
+        "wake-false",
+        "wake-unknown",
+        "changed-wake-kinds",
+        "changed-wake-statuses",
+        "changed-wake-both",
+        "facts-invalid"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown"
+      ],
+      "disposition": "Actual hq checkout resolution, provider source reprobe and raw TOML edits belong to the installed reader owner. Tasks consumes its schema-1 view. These rows test the projected values; no real-provider or adapted-bridge qualification is claimed.",
+      "owner": "hq-a83688"
+    },
+    {
+      "test": "RealFactsTests.test_disposable_wake_false_and_unknown_block",
+      "kind": "command-boundary",
+      "cases": [
+        "wake-false",
+        "wake-unknown",
+        "changed-wake-kinds",
+        "changed-wake-statuses",
+        "changed-wake-both",
+        "facts-invalid"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown"
+      ],
+      "disposition": "Actual hq checkout resolution, provider source reprobe and raw TOML edits belong to the installed reader owner. Tasks consumes its schema-1 view. These rows test the projected values; no real-provider or adapted-bridge qualification is claimed.",
+      "owner": "hq-a83688"
+    },
+    {
+      "test": "RealFactsTests.test_actual_changed_sets_control_the_decision",
+      "kind": "command-boundary",
+      "cases": [
+        "wake-false",
+        "wake-unknown",
+        "changed-wake-kinds",
+        "changed-wake-statuses",
+        "changed-wake-both",
+        "facts-invalid"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown"
+      ],
+      "disposition": "Actual hq checkout resolution, provider source reprobe and raw TOML edits belong to the installed reader owner. Tasks consumes its schema-1 view. These rows test the projected values; no real-provider or adapted-bridge qualification is claimed.",
+      "owner": "hq-a83688"
+    },
+    {
+      "test": "RealFactsTests.test_scenarios_survive_a_valid_source_reprobe",
+      "kind": "command-boundary",
+      "cases": [
+        "wake-false",
+        "wake-unknown",
+        "changed-wake-kinds",
+        "changed-wake-statuses",
+        "changed-wake-both",
+        "facts-invalid"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown"
+      ],
+      "disposition": "Actual hq checkout resolution, provider source reprobe and raw TOML edits belong to the installed reader owner. Tasks consumes its schema-1 view. These rows test the projected values; no real-provider or adapted-bridge qualification is claimed.",
+      "owner": "hq-a83688"
+    },
+    {
+      "test": "RealFactsTests.test_actual_invalid_and_truncated_files_refuse",
+      "kind": "command-boundary",
+      "cases": [
+        "wake-false",
+        "wake-unknown",
+        "changed-wake-kinds",
+        "changed-wake-statuses",
+        "changed-wake-both",
+        "facts-invalid"
+      ],
+      "boundary": [
+        "facts_validation_preserves_false_and_unknown"
+      ],
+      "disposition": "Actual hq checkout resolution, provider source reprobe and raw TOML edits belong to the installed reader owner. Tasks consumes its schema-1 view. These rows test the projected values; no real-provider or adapted-bridge qualification is claimed.",
+      "owner": "hq-a83688"
+    },
+    {
+      "test": "HaltNoticeTests.test_a_halted_project_prints_one_line_from_the_main_checkout_and_a_worktree",
+      "kind": "policy-replay",
+      "cases": [
+        "halt-codex",
+        "no-halt-codex",
+        "no-project-codex",
+        "corrupt-config-codex",
+        "bad-scan-codex"
+      ],
+      "boundary": [
+        "hooks_halt_authority_matrix",
+        "hooks_halt_registered_git_authorities_and_historical_tree",
+        "hooks_halt_linked_and_in_tree_worktrees_use_registered_records",
+        "hooks_notice_discovery_avoids_records_admission_commands"
+      ],
+      "disposition": "Registered authority replaces native resolver/list subprocess coupling under spec \u00a75. Known-authority scan failures are explicit; resolver failures get context. Subprocess PATH absence is retired, no replacement native dependency."
+    },
+    {
+      "test": "HaltNoticeTests.test_silent_outside_a_project_when_unhalted_and_when_tasks_fails",
+      "kind": "policy-replay",
+      "cases": [
+        "halt-codex",
+        "no-halt-codex",
+        "no-project-codex",
+        "corrupt-config-codex",
+        "bad-scan-codex"
+      ],
+      "boundary": [
+        "hooks_halt_authority_matrix",
+        "hooks_halt_registered_git_authorities_and_historical_tree",
+        "hooks_halt_linked_and_in_tree_worktrees_use_registered_records",
+        "hooks_notice_discovery_avoids_records_admission_commands"
+      ],
+      "disposition": "Registered authority replaces native resolver/list subprocess coupling under spec \u00a75. Known-authority scan failures are explicit; resolver failures get context. Subprocess PATH absence is retired, no replacement native dependency."
+    },
+    {
+      "test": "HaltNoticeTests.test_a_linked_checkout_shows_its_projects_halt",
+      "kind": "policy-replay",
+      "cases": [
+        "halt-codex",
+        "no-halt-codex",
+        "no-project-codex",
+        "corrupt-config-codex",
+        "bad-scan-codex"
+      ],
+      "boundary": [
+        "hooks_halt_authority_matrix",
+        "hooks_halt_registered_git_authorities_and_historical_tree",
+        "hooks_halt_linked_and_in_tree_worktrees_use_registered_records",
+        "hooks_notice_discovery_avoids_records_admission_commands"
+      ],
+      "disposition": "Registered authority replaces native resolver/list subprocess coupling under spec \u00a75. Known-authority scan failures are explicit; resolver failures get context. Subprocess PATH absence is retired, no replacement native dependency."
+    },
+    {
+      "test": "HaltNoticeTests.test_an_unanswerable_resolver_is_one_line_not_silence",
+      "kind": "policy-replay",
+      "cases": [
+        "halt-codex",
+        "no-halt-codex",
+        "no-project-codex",
+        "corrupt-config-codex",
+        "bad-scan-codex"
+      ],
+      "boundary": [
+        "hooks_halt_authority_matrix",
+        "hooks_halt_registered_git_authorities_and_historical_tree",
+        "hooks_halt_linked_and_in_tree_worktrees_use_registered_records",
+        "hooks_notice_discovery_avoids_records_admission_commands"
+      ],
+      "disposition": "Registered authority replaces native resolver/list subprocess coupling under spec \u00a75. Known-authority scan failures are explicit; resolver failures get context. Subprocess PATH absence is retired, no replacement native dependency."
+    },
+    {
+      "test": "HaltNoticeTests.test_an_in_tree_project_never_asks_the_resolver",
+      "kind": "policy-replay",
+      "cases": [
+        "halt-codex",
+        "no-halt-codex",
+        "no-project-codex",
+        "corrupt-config-codex",
+        "bad-scan-codex"
+      ],
+      "boundary": [
+        "hooks_halt_authority_matrix",
+        "hooks_halt_registered_git_authorities_and_historical_tree",
+        "hooks_halt_linked_and_in_tree_worktrees_use_registered_records",
+        "hooks_notice_discovery_avoids_records_admission_commands"
+      ],
+      "disposition": "Registered authority replaces native resolver/list subprocess coupling under spec \u00a75. Known-authority scan failures are explicit; resolver failures get context. Subprocess PATH absence is retired, no replacement native dependency."
+    }
+  ]
+}

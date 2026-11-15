@@ -1,0 +1,50 @@
+{
+  "name": "relay",
+  "version": "0.4.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./opencode": "./integrations/opencode/plugin.js",
+    "./fixtures/handles.json": "./test/fixtures/handles.json",
+    "./fixtures/ancestry.json": "./test/fixtures/ancestry.json",
+    "./fixtures/whoami.json": "./test/fixtures/whoami.json",
+    "./qualification": "./src/install/qualification.js",
+    "./fixtures/hook-qualification.json": "./test/fixtures/hook-qualification.json"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js integrations/opencode/*.test.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "integrations/opencode/*.js",
+    "test/fixtures/handles.json",
+    "test/fixtures/ancestry.json",
+    "test/fixtures/whoami.json",
+    "test/fixtures/hook-qualification.json",
+    "docs/api.md",
+    "docs/registry.md",
+    "docs/adapters.md",
+    "docs/questions.md",
+    "docs/runbooks/registry-lock-repair.md",
+    "schemas/",
+    "docs/runbooks/inbox-service.md",
+    "LICENSE",
+    "docs/evidence/codex-question-0.166.0.json"
+  ],
+  "bin": {
+    "relay": "bin/relay.js"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}

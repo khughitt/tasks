@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""Stop guard: refuse a turn end, once, while this session holds a live tasks claim
+and no child the harness tracks is running.
+
+A guard in the functional-core sense (ai docs/specs/2026-09-21-functional-core-design.md
+§3.4): `decide` maps the hook input and a claim read to allow (None) or a block reason,
+and is total: its own failure is a block with that reason, never a pass. The harness
+retries a refused stop with `stop_hook_active: true` (or for agy, `executionNum > 0`
+or one of agy's own listed terminations), and that retry is always allowed,
+so a block is a one-shot interruption, not a lock; the reason text is what the model acts
+on (ai docs/specs/2026-09-24-turn-boundary-gate-design.md §3.2-3.3).
+
+It never writes, logs, or indexes. The claim read is `tasks claims`, which reads every
+registered prefix's claim store without opening a checkout and fails rather than answer
+partially. Where the harness wakes a controller when its child finishes, a Stop input
+that lists a qualifying child is allowed only after that complete read and a validated wake-facts read. Workers are selected by SubagentStop agent_id, not the shared root.
+"""
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+
+# Appended by `main` to every block, never by `decide`, whose reasons tests compare whole.
+# docs/operations.md
+OWNER_LINE = "(owner: ops; a wrong or unclear block is feedback, see Feedback in your instructions)"
+
+HARNESSES = ("claude-code", "codex", "agy")
+CLAIM_FIELDS = ("id", "prefix", "session", "live", "host", "worktree")
+TIMEOUT_S = 10
+BOUNDED_WAIT = {
+    "claude-code": "the harness's bounded wait (a foreground check with a timeout that covers it)",
+    "codex": "the harness's bounded wait (`wait_agent` with a long timeout)",
+    "agy": "the harness's bounded wait (a foreground `run_command` with a timeout that covers it)",
+}
+# agy 1.4.12 Stop terminations that are never a turn the model chose to end (hq-e72097).
+AGY_NON_BLOCKING = frozenset({
+    "ERROR", "USER_CANCELED", "MAX_INVOCATIONS", "MAX_FORCED_INVOCATIONS",
+    "MAX_TOKEN_BUDGET_EXCEEDED", "TERMINAL_CUSTOM_HOOK",
+})
+
+
+class ReadFailed(Exception):
+    """The claims could not be read completely; the message is for the model."""
+
+
+class Unreadable(Exception):
+    """The harness's Stop input lacks a field the guard needs; the message is for the model."""
+
+
+class Unseen(Exception):
+    """The Stop input does not say what is running; the message is for the model."""
+
+
+def in_flight(event, kinds, statuses):
+    """The listed background work whose completion starts the controller's next turn."""
+    if "background_tasks" not in event:
+        raise Unseen("the Stop input lists no background work")
+    tasks = event["background_tasks"]
+    if not isinstance(tasks, list) or any(
+            not isinstance(task, dict) or not isinstance(task.get("status"), str)
+            or not isinstance(task.get("type"), str) for task in tasks):
+        raise Unseen("the Stop input's background_tasks is not a list of tasks with a type "
+                     "and a status")
+    unknown = sorted({task["status"] for task in tasks} - set(statuses))
+    if unknown:
+        raise Unseen("the Stop input's background_tasks has a status the guard does not "
+                     f"know: {', '.join(unknown)}")
+    waking = [task for task in tasks if task["type"] in kinds]
+    if tasks and not waking:
+        kinds = ", ".join(sorted({task["type"] for task in tasks}))
+        raise Unseen(f"the Stop input lists only work not known to wake a controller: {kinds}")
+    if not tasks and event.get("session_crons"):
+        raise Unseen("the Stop input lists a scheduled wake-up, which the guard does not "
+                     "count as a child")
+    return waking
+
+
+def agy_event(event):
+    """agy's camelCase Stop payload as the fields `decide` reads. agy writes every field,
+    zero values included, so a missing or mistyped one is an unreadable input unless the
+    termination is agy's own. A refire after `continue` carries executionNum > 0, and the
+    listed terminations are agy's own; both are the loop-breaker, checked before the
+    session so a retry is never held."""
+    reason = event.get("terminationReason")
+    own_end = isinstance(reason, str) and reason in AGY_NON_BLOCKING
+    count = event.get("executionNum")
+    if not own_end and (type(count) is not int or count < 0):
+        raise Unreadable("the Stop input has no non-negative integer executionNum")
+    retry = own_end or count > 0
+    session = event.get("conversationId")
+    if not retry and (not isinstance(session, str) or not session):
+        raise Unreadable("the Stop input has no conversationId, so held claims cannot be checked")
+    return {"hook_event_name": "Stop", "session_id": session, "stop_hook_active": retry,
+            "fully_idle": event.get("fullyIdle")}
+
+
+def parse_claims(text):
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ReadFailed(f"tasks claims printed something that is not JSON: {error}") from None
+    if not isinstance(doc, dict) or not isinstance(doc.get("claims"), list):
+        raise ReadFailed("tasks claims printed no claims list")
+    for entry in doc["claims"]:
+        if not isinstance(entry, dict) or any(field not in entry for field in CLAIM_FIELDS):
+            raise ReadFailed(f"tasks claims printed a claim without {', '.join(CLAIM_FIELDS)}")
+        if not isinstance(entry["live"], bool) or not isinstance(entry["session"], str):
+            raise ReadFailed(f"tasks claims printed a malformed claim for {entry['id']}")
+        if "root_session" in entry and (not isinstance(entry["root_session"], str) or not entry["root_session"]):
+            raise ReadFailed(f"tasks claims printed a malformed root_session for {entry['id']}")
+    return doc["claims"]
+
+
+def held(claims, harness, event):
+    worker = event["hook_event_name"] == "SubagentStop"
+    actor = event["agent_id"] if worker else event["session_id"]
+    wanted = {actor, f"codex:{actor}"} if harness == "codex" else {
+        actor, *(f"{name}:{actor}" for name in HARNESSES)
+    }
+    own = [r for r in claims if r["live"] and r["session"] in wanted]
+    related = [] if worker or harness != "codex" else [
+        r for r in claims if r["live"] and r["session"] not in wanted
+        and r.get("root_session") == f"codex:{event['session_id']}"
+    ]
+    return own, related
+
+def detached(harness):
+    """The clause naming work that never starts the controller's next turn."""
+    if harness == "agy":
+        return "an `IsDaemon` command or a job detached with `&` or `nohup` never does"
+    return "a job detached with `&` or `nohup` never does"
+
+
+def not_running_child(harness):
+    """The sentence naming detached work that is never a running child."""
+    if harness == "agy":
+        return "An `IsDaemon` command or a job detached with `&` or `nohup` is never a running child."
+    return "A job detached with `&` or `nohup` is never a running child."
+
+
+def child_sentence(harness, wake, unseen):
+    """What the guard knows about children; `unseen` is why it could not look, or None."""
+    if wake is not True:
+        return ""
+    if unseen is None:
+        return ("The Stop input lists no running child, though a child the harness tracks may "
+                "still be running outside this snapshot, or one that just finished may have a "
+                "queued completion that starts your next turn. If such a child is running or "
+                "you have not received its result, and your last message named it, reply with "
+                "one line naming it again and end; the stop that follows is allowed. Without "
+                f"such a child or completion, nothing will start your next turn; {detached(harness)}. ")
+    return (f"The guard cannot see whether a child is running ({unseen}). If one the harness "
+            "tracks is running and your last message named it, reply with one line naming it "
+            "again and end; the stop that follows is allowed, and the child's completion "
+            f"starts your next turn; {detached(harness)}. ")
+
+
+def wait_branch(harness, wake):
+    if wake is True:
+        return ""
+    return ("(4) A child is running: Do not end the turn. Wait on it with "
+            f"{BOUNDED_WAIT[harness]}, act on its result, and if the wait times out, check "
+            f"the child before waiting again. {not_running_child(harness)} ")
+
+
+def _options(harness, wake=None, unseen=None, worker=False):
+    context = "" if worker else child_sentence(harness, wake, unseen)
+    if wake is None and not worker:
+        context += f"Wake inputs are unprobed or unavailable{': ' + unseen if unseen else ''}. "
+    ending = (
+        "If you are a subagent, report and stop only when the assignment is complete or blocked "
+        "on your controller or a person. If work or a check is still running, continue or wait, "
+        f"then report. {not_running_child(harness)} "
+        if worker else wait_branch(harness, wake)
+    )
+    return (
+        context
+        + "If the user told you this turn to stop, wait or only answer, use (2) with "
+        "`--waiting-on user`, not (1). Otherwise do one of these for your own claims before the turn ends: "
+        "(1) Continue: the work is unblocked and yours. "
+        "(2) Park: `tasks park <id> \"<next step>\"`, an action and who takes it, never a "
+        "state; add `--waiting-on user --reason review|decision|approval` only when a person must act. "
+        "(3) Done: `tasks done <id> \"<what landed>\"`. "
+        + ending
+        + "Decisions and Processes in your instructions give the rules."
+    )
+
+
+def reason(harness, own, related, wake=None, unseen=None, worker=False):
+    def names(rows):
+        return ", ".join(f"`{row['id']}` in `{row['worktree']}`" for row in rows)
+    parts = []
+    if own:
+        parts.append(f"You are ending a turn while this session holds a live task claim: {names(own)}. "
+                     + _options(harness, wake, unseen, worker))
+    if related:
+        parts.append(
+            f"Related worker claims remain live: {names(related)}. Inspect the worker's result and claim. "
+            "Only after your own completion/wait result for that specific worker proves its assignment stopped "
+            "with no pending tool, check or background process, recover there with "
+            "`tasks start <id> --force --reason \"<worker-specific completion evidence>\"`, then review or close "
+            "under your own claim. Timeout, silence, root state and a shared PID are not that evidence. "
+            "If work is still running or uncertain, reconcile it and keep waiting. Do not resume the worker "
+            "on that task without a new ownership handoff."
+        )
+        if unseen:
+            parts.append(f"Wake inputs unavailable: {unseen}; repair the facts reader. No wake exception was granted.")
+    return " ".join(parts)
+
+
+def decide(harness, text, read, facts):
+    """None to allow the stop, or a one-shot reason; never mutates ownership."""
+    try:
+        event = json.loads(text)
+    except (ValueError, TypeError, RecursionError) as error:
+        return f"claim-guard: the Stop input could not be read ({error}); if you hold a task claim, act on it before ending the turn."
+    if not isinstance(event, dict):
+        return "claim-guard: the Stop input could not be read (not a JSON object); if you hold a task claim, act on it before ending the turn."
+    if harness == "agy":
+        try:
+            event = agy_event(event)
+        except Unreadable as error:
+            return f"claim-guard: {error}; act on your own claims before ending the turn."
+    if event.get("stop_hook_active") is True:
+        return None
+    name = event.get("hook_event_name")
+    if name not in ("Stop", "SubagentStop") or (name == "SubagentStop" and harness != "codex"):
+        return "claim-guard: unsupported or missing hook_event_name; repair the native hook registration."
+    if not isinstance(event.get("session_id"), str) or not event["session_id"]:
+        return "claim-guard: the Stop input has no session_id, so held claims cannot be checked; act on your own claims before ending the turn."
+    worker = name == "SubagentStop"
+    if worker and (not isinstance(event.get("agent_id"), str) or not event["agent_id"]):
+        return "claim-guard: SubagentStop has no agent_id; repair the worker event before ending the turn."
+    try:
+        own, related = held(read(), harness, event)
+    except Exception as error:
+        return (f"claim-guard: the claims could not be read ({error}), so you may hold a task claim. "
+                + _options(harness, worker=worker) + " If you hold none, say so and end.")
+    if not own and not related:
+        return None
+    if worker:
+        return reason(harness, own, [], worker=True)
+    wake = None
+    unseen = None
+    try:
+        entries = facts()
+        capability = entries["controller-wake"]
+        if capability["status"] == "probed":
+            wake = capability["value"]
+        else:
+            unseen = "unprobed controller-wake"
+        if wake is True:
+            # agy reports in-flight work as one boolean, fullyIdle, not a task list.
+            needed = ("controller-wake-kinds",) if harness == "agy" else (
+                "controller-wake-kinds", "stop-input-in-flight-statuses")
+            unknown = [key for key in needed if entries[key]["status"] != "probed"]
+            if unknown:
+                wake = None
+                unseen = "unprobed " + ", ".join(unknown)
+            elif harness == "agy":
+                idle = event["fully_idle"]
+                blind = sorted({"shell", "subagent"} - set(entries["controller-wake-kinds"]["value"]))
+                if type(idle) is not bool:
+                    unseen = "the Stop input has no boolean fullyIdle field"
+                elif idle is False and blind:
+                    unseen = f"fullyIdle cannot tell a waking child from {', '.join(blind)}"
+                elif idle is False:
+                    return None
+            else:
+                try:
+                    if in_flight(event, entries["controller-wake-kinds"]["value"],
+                                 entries["stop-input-in-flight-statuses"]["value"]):
+                        return None
+                except Unseen as error:
+                    unseen = str(error)
+    except Exception as error:
+        wake = None
+        unseen = f"facts could not be read ({error}); repair hq's installed facts reader"
+    return reason(harness, own, related, wake, unseen)
+
+
+def read_claims(run=subprocess.run):
+    try:
+        done = run(["tasks", "--json", "claims", "--all-projects"], capture_output=True, text=True,
+                   timeout=TIMEOUT_S)
+    except FileNotFoundError:
+        raise ReadFailed("tasks is not on PATH") from None
+    except subprocess.TimeoutExpired:
+        raise ReadFailed(f"tasks claims did not answer within {TIMEOUT_S} s") from None
+    if done.returncode != 0:
+        raise ReadFailed(f"tasks claims exited {done.returncode}: {done.stderr.strip()}")
+    return parse_claims(done.stdout)
+
+
+def parse_facts(text, harness):
+    try:
+        doc = json.loads(text)
+    except (ValueError, TypeError, RecursionError) as error:
+        raise ReadFailed(f"harness-facts printed invalid JSON: {error}") from None
+    if not isinstance(doc, dict) or type(doc.get("schema")) is not int or doc["schema"] != 1:
+        raise ReadFailed("harness-facts printed no schema-1 view")
+    if not isinstance(doc.get("harnesses"), list) or harness not in doc["harnesses"]:
+        raise ReadFailed(f"harness-facts does not declare {harness}")
+    declared = doc.get("facts")
+    if not isinstance(declared, dict):
+        raise ReadFailed("harness-facts printed no facts mapping")
+    selected = {}
+    for name, kind in (("controller-wake", "boolean"),
+                       ("controller-wake-kinds", "set"),
+                       ("stop-input-in-flight-statuses", "set")):
+        fact = declared.get(name)
+        if not isinstance(fact, dict) or fact.get("type") != kind:
+            raise ReadFailed(f"harness-facts printed an invalid {name} fact")
+        entries = fact.get("harness")
+        entry = entries.get(harness) if isinstance(entries, dict) else None
+        if not isinstance(entry, dict) or entry.get("type") != kind or entry.get("status") not in ("probed", "unknown"):
+            raise ReadFailed(f"harness-facts printed an invalid {name} entry for {harness}")
+        if entry["status"] == "probed":
+            value = entry.get("value")
+            valid = type(value) is bool if kind == "boolean" else (
+                isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+            )
+            if not valid:
+                raise ReadFailed(f"harness-facts printed an invalid {name} value for {harness}")
+        selected[name] = entry
+    return selected
+
+def read_facts(harness, command=None, run=subprocess.run):
+    argv = command if command is not None else [str(pathlib.Path.home() / ".agents/bin/harness-facts"), "list"]
+    try:
+        done = run(argv, capture_output=True, text=True, timeout=TIMEOUT_S)
+    except FileNotFoundError:
+        raise ReadFailed("harness-facts is missing; repair hq's installed reader") from None
+    except subprocess.TimeoutExpired:
+        raise ReadFailed(f"harness-facts did not answer within {TIMEOUT_S} s") from None
+    if done.returncode:
+        raise ReadFailed(f"harness-facts exited {done.returncode}: {done.stderr.strip()}")
+    return parse_facts(done.stdout, harness)
+
+def _is_retry(harness, text):
+    # Re-parses the input because decide's own parse is unavailable once decide has crashed.
+    try:
+        event = json.loads(text)
+        if harness == "agy":
+            event = agy_event(event)
+    except Exception:
+        return False
+    return isinstance(event, dict) and event.get("stop_hook_active") is True
+
+
+def main(argv, stdin, stdout):
+    parser = argparse.ArgumentParser(prog="claim-guard")
+    parser.add_argument("--harness", required=True, choices=HARNESSES)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return 1
+    text = ""
+    try:
+        text = stdin.read()
+        verdict = decide(args.harness, text, read_claims, lambda: read_facts(args.harness))
+    except Exception as error:
+        # decide is total; this is a bug. Still never loop on the harness's retry.
+        verdict = None if _is_retry(args.harness, text) else (
+            f"claim-guard failed ({error!r}); if you hold a task claim, act on it before "
+            "ending the turn.")
+    if verdict is not None:
+        # agy holds the turn with "continue"; "block" is Claude Code's and Codex's word.
+        decision = "continue" if args.harness == "agy" else "block"
+        stdout.write(json.dumps({"decision": decision, "reason": f"{verdict}\n{OWNER_LINE}"}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:], sys.stdin, sys.stdout))

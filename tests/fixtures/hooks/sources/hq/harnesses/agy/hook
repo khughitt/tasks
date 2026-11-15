@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""Antigravity CLI (agy) lifecycle hook adapter for SessionStart, PreToolUse, and Stop.
+
+Bridges agy's camelCase JSON hook protocol (where hooks run with cwd set to the config
+directory containing hooks.json) for hq-owned state and hooks not yet covered by relay:
+- SessionStart: heals any detached `~/.gemini/antigravity-cli/settings.json` regular file
+  through `.githooks/harness-state-refresh`, runs profile and capture-notice delegates in
+  workspacePaths[0], and wraps their combined text in agy's injectSteps.systemMessage
+  envelope.
+- PreToolUse: heals any detached `~/.gemini/antigravity-cli/settings.json` regular file
+  and emits empty stdout (agy's no-op, preserving agy's permission flow while relay v0.3.0
+  dispatches before-tool events to ops-guard and familiar-agy).
+- Stop: enforces a one-shot live task claim check for agy:<conversationId> (allowing
+  in-flight waking children when controller-wake is probed true and fullyIdle is false)
+  until ops-33cef9 adds native agy support to claim-guard.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+TIMEOUT_S = 10
+CLAIM_FIELDS = ("id", "prefix", "session", "live", "host", "worktree")
+NON_BLOCKING_REASONS = frozenset({
+    "ERROR",
+    "USER_CANCELED",
+    "MAX_INVOCATIONS",
+    "MAX_FORCED_INVOCATIONS",
+    "MAX_TOKEN_BUDGET_EXCEEDED",
+    "TERMINAL_CUSTOM_HOOK",
+})
+DETACHED_SENTENCE = "A job detached with `&` or `nohup` never wakes a turn. "
+OWNER_LINE = (
+    "(owner: hq; temporary agy adapter until ops-33cef9 lands — "
+    "a wrong or unclear block is feedback, see Feedback in your instructions)"
+)
+
+
+class ReadFailed(Exception):
+    """Claims or capability facts could not be read completely."""
+
+
+def _is_dir(path_str):
+    if not isinstance(path_str, str) or not path_str or "\x00" in path_str:
+        return False
+    try:
+        return Path(path_str).is_dir()
+    except (OSError, ValueError):
+        return False
+
+
+def _workspace_cwd(payload):
+    if not isinstance(payload, dict):
+        return None
+    paths = payload.get("workspacePaths")
+    if (
+        isinstance(paths, list)
+        and paths
+        and isinstance(paths[0], str)
+        and "\x00" not in paths[0]
+        and os.path.isabs(paths[0])
+    ):
+        return paths[0]
+    return None
+
+
+def _profile_failure_line(detail):
+    return f"profile: unresolved — {detail}; run ops-profile session"
+
+
+def refresh_detached_settings(env):
+    """Best-effort adopt and relink `~/.gemini/antigravity-cli/settings.json` when agy replaced it."""
+    home = env.get("HOME")
+    if not isinstance(home, str) or not home or "\x00" in home:
+        return
+    settings = Path(home) / ".gemini" / "antigravity-cli" / "settings.json"
+    try:
+        mode = settings.lstat().st_mode
+    except OSError:
+        return
+    if not stat.S_ISREG(mode):
+        return
+    refresh = ROOT / ".githooks" / "harness-state-refresh"
+    if not refresh.is_file():
+        return
+    child_env = {k: v for k, v in env.items() if k != "CLAUDE_ENV_FILE"}
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        done = subprocess.run(
+            [sys.executable, "-B", str(refresh)],
+            input="",
+            env=child_env,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(f"agy-hook: harness-state-refresh timed out after {TIMEOUT_S} s\n")
+        return
+    except OSError as error:
+        sys.stderr.write(f"agy-hook: harness-state-refresh failed ({error})\n")
+        return
+    if done.returncode != 0:
+        detail = done.stderr.strip() or f"exit {done.returncode}"
+        sys.stderr.write(f"agy-hook: {detail}\n")
+
+
+def handle_session_start(delegates, stdin_text, env):
+    refresh_detached_settings(env)
+    blocks = []
+    if not stdin_text.strip():
+        payload = None
+        blocks.append(_profile_failure_line("agy SessionStart stdin is empty"))
+    else:
+        try:
+            payload = json.loads(stdin_text)
+        except (ValueError, TypeError, RecursionError) as error:
+            payload = None
+            blocks.append(_profile_failure_line(f"agy SessionStart stdin is not JSON ({error})"))
+        else:
+            if not isinstance(payload, dict):
+                payload = None
+                blocks.append(_profile_failure_line("agy SessionStart stdin is not a JSON object"))
+
+    cwd = _workspace_cwd(payload)
+    if payload is not None and cwd is None:
+        blocks.append(_profile_failure_line("agy SessionStart payload has no absolute workspacePaths"))
+
+    transcript = (
+        payload.get("transcriptPath")
+        if isinstance(payload, dict) and isinstance(payload.get("transcriptPath"), str)
+        else None
+    )
+    delegate_input = json.dumps({"cwd": cwd, "transcript_path": transcript})
+    child_env = {k: v for k, v in env.items() if k != "CLAUDE_ENV_FILE"}
+    run_cwd = cwd if _is_dir(cwd) else None
+
+    for raw_target in delegates:
+        target = os.path.expanduser(raw_target)
+        label = Path(target).name
+        if cwd is None and label == "claude-profile":
+            # claude-profile falls back to os.getcwd() (agy's config dir) when cwd is null,
+            # which would resolve the default external profile after profile: unresolved.
+            continue
+        try:
+            done = subprocess.run(
+                [target],
+                input=delegate_input,
+                cwd=run_cwd,
+                env=child_env,
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            msg = f"agy-hook SessionStart: {label} timed out after {TIMEOUT_S} s"
+            blocks.append(_profile_failure_line(msg) if label == "claude-profile" else msg)
+            continue
+        except OSError as error:
+            msg = f"agy-hook SessionStart: {label} failed ({error})"
+            blocks.append(_profile_failure_line(msg) if label == "claude-profile" else msg)
+            continue
+
+        out = done.stdout.strip()
+        if done.returncode != 0:
+            if out:
+                blocks.append(out)
+            else:
+                detail = done.stderr.strip() or "no stderr"
+                msg = f"agy-hook SessionStart: {label} exited {done.returncode} ({detail})"
+                blocks.append(_profile_failure_line(msg) if label == "claude-profile" else msg)
+        elif out:
+            blocks.append(out)
+
+    if not blocks:
+        return {}
+    return {"injectSteps": [{"systemMessage": {"systemMessage": "\n\n".join(blocks)}}]}
+
+
+def handle_pre_tool_use(env):
+    refresh_detached_settings(env)
+
+
+def parse_claims(text):
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ReadFailed(f"tasks claims printed invalid JSON: {error}") from None
+    if not isinstance(doc, dict) or not isinstance(doc.get("claims"), list):
+        raise ReadFailed("tasks claims printed no claims list")
+    for entry in doc["claims"]:
+        if not isinstance(entry, dict) or any(field not in entry for field in CLAIM_FIELDS):
+            raise ReadFailed(f"tasks claims printed a claim without {', '.join(CLAIM_FIELDS)}")
+        if not isinstance(entry["live"], bool) or not isinstance(entry["session"], str):
+            raise ReadFailed(f"tasks claims printed a malformed claim for {entry['id']}")
+    return doc["claims"]
+
+
+def read_claims(tasks_bin, env):
+    try:
+        done = subprocess.run(
+            [tasks_bin, "--json", "claims", "--all-projects"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_S,
+        )
+    except FileNotFoundError:
+        raise ReadFailed(f"{tasks_bin} is not on PATH") from None
+    except subprocess.TimeoutExpired:
+        raise ReadFailed(f"tasks claims did not answer within {TIMEOUT_S} s") from None
+    if done.returncode != 0:
+        raise ReadFailed(f"tasks claims exited {done.returncode}: {done.stderr.strip()}")
+    return parse_claims(done.stdout)
+
+
+def parse_wake_facts(text):
+    try:
+        doc = json.loads(text)
+    except (ValueError, TypeError, RecursionError) as error:
+        raise ReadFailed(f"harness-facts printed invalid JSON: {error}") from None
+    if not isinstance(doc, dict) or type(doc.get("schema")) is not int or doc["schema"] != 1:
+        raise ReadFailed("harness-facts printed no schema-1 view")
+    declared = doc.get("facts")
+    if not isinstance(declared, dict):
+        raise ReadFailed("harness-facts printed no facts mapping")
+    selected = {}
+    for name, kind in (("controller-wake", "boolean"), ("controller-wake-kinds", "set")):
+        fact = declared.get(name)
+        if not isinstance(fact, dict) or fact.get("type") != kind:
+            raise ReadFailed(f"harness-facts printed an invalid {name} fact")
+        entries = fact.get("harness")
+        entry = entries.get("agy") if isinstance(entries, dict) else None
+        if not isinstance(entry, dict) or entry.get("status") not in ("probed", "unknown"):
+            raise ReadFailed(f"harness-facts printed an invalid {name} entry for agy")
+        if entry["status"] == "probed":
+            value = entry.get("value")
+            valid = type(value) is bool if kind == "boolean" else (
+                isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+            )
+            if not valid:
+                raise ReadFailed(f"harness-facts printed an invalid {name} value for agy")
+        selected[name] = entry
+    return selected
+
+
+def read_wake_facts(facts_file, env):
+    argv = [sys.executable, "-B", str(ROOT / "tools" / "harness-facts"), "list"]
+    if facts_file is not None:
+        argv.extend(["--file", facts_file])
+    child_env = {**env, "PYTHONDONTWRITEBYTECODE": "1"}
+    try:
+        done = subprocess.run(argv, env=child_env, capture_output=True, text=True, timeout=TIMEOUT_S)
+    except FileNotFoundError:
+        raise ReadFailed("harness-facts is missing") from None
+    except subprocess.TimeoutExpired:
+        raise ReadFailed(f"harness-facts did not answer within {TIMEOUT_S} s") from None
+    if done.returncode != 0:
+        raise ReadFailed(f"harness-facts exited {done.returncode}: {done.stderr.strip()}")
+    return parse_wake_facts(done.stdout)
+
+
+def _stop_options(wake=None, unseen=None):
+    context = ""
+    detached_tail = DETACHED_SENTENCE
+    if wake is True:
+        if unseen is None:
+            context = (
+                "The Stop input reports fullyIdle: true (no waking background task or subagent is running; "
+                "a daemon started with IsDaemon=true or a job detached with `&` or `nohup` never wakes a turn). "
+                "If a waking child just finished and has a queued completion, reply with one line naming it "
+                "and end; the stop that follows is allowed. "
+            )
+            detached_tail = ""
+        else:
+            context = f"The guard cannot confirm whether a waking child is running ({unseen}). "
+    elif wake is None:
+        context = f"Wake inputs are unprobed or unavailable{': ' + unseen if unseen else ''}. "
+    wait_clause = (
+        ""
+        if wake is True
+        else "(4) A child is running: keep working or wait synchronously for it before ending the turn. "
+    )
+    return (
+        context
+        + "If the user told you this turn to stop, wait or only answer, use (2) with "
+        "`--waiting-on user`, not (1). Otherwise do one of these for your own claims before the turn ends: "
+        "(1) Continue: the work is unblocked and yours. "
+        "(2) Park: `tasks park <id> \"<next step>\"`, an action and who takes it, never a "
+        "state; add `--waiting-on user --reason review|decision|approval` only when a person must act. "
+        "(3) Done: `tasks done <id> \"<what landed>\"`. "
+        + wait_clause
+        + detached_tail
+        + "Decisions and Processes in your instructions give the rules."
+    )
+
+
+def decide_stop(stdin_text, read_claims_fn, read_facts_fn):
+    try:
+        event = json.loads(stdin_text)
+    except (ValueError, TypeError, RecursionError) as error:
+        return f"agy claim-guard: the Stop input could not be read ({error}); if you hold a task claim, act on it before ending the turn."
+    if not isinstance(event, dict):
+        return "agy claim-guard: the Stop input could not be read (not a JSON object); if you hold a task claim, act on it before ending the turn."
+
+    exec_num = event.get("executionNum", 0)
+    if type(exec_num) is not int or exec_num < 0:
+        return "agy claim-guard: the Stop input has an invalid executionNum; if you hold a task claim, act on it before ending the turn."
+    if exec_num > 0:
+        return None
+    if event.get("terminationReason") in NON_BLOCKING_REASONS:
+        return None
+
+    conv_id = event.get("conversationId")
+    if not isinstance(conv_id, str) or not conv_id:
+        return "agy claim-guard: the Stop input has no conversationId, so held claims cannot be checked; act on your own claims before ending the turn."
+
+    try:
+        claims = read_claims_fn()
+    except Exception as error:
+        return (
+            f"agy claim-guard: the claims could not be read ({error}), so you may hold a task claim. "
+            + _stop_options()
+            + " If you hold none, say so and end."
+        )
+
+    wanted = {conv_id, f"agy:{conv_id}"}
+    own = [row for row in claims if row["live"] and row["session"] in wanted]
+    if not own:
+        return None
+
+    wake = None
+    unseen = None
+    try:
+        entries = read_facts_fn()
+        cap = entries["controller-wake"]
+        if cap["status"] == "probed":
+            wake = cap["value"]
+        else:
+            unseen = "unprobed controller-wake"
+        if wake is True:
+            kinds = entries["controller-wake-kinds"]
+            if kinds["status"] != "probed" or not kinds["value"]:
+                wake = None
+                unseen = "unprobed controller-wake-kinds"
+            else:
+                fully_idle = event.get("fullyIdle")
+                if type(fully_idle) is not bool:
+                    unseen = "the Stop input has no boolean fullyIdle field"
+                elif fully_idle is False:
+                    return None
+    except Exception as error:
+        wake = None
+        unseen = f"facts could not be read ({error})"
+
+    names = ", ".join(f"`{row['id']}` in `{row['worktree']}`" for row in own)
+    return f"You are ending a turn while this session holds a live task claim: {names}. " + _stop_options(wake, unseen)
+
+
+def _is_retry(stdin_text):
+    try:
+        event = json.loads(stdin_text)
+    except Exception:
+        return False
+    if not isinstance(event, dict):
+        return False
+    exec_num = event.get("executionNum", 0)
+    return (type(exec_num) is int and exec_num > 0) or event.get("terminationReason") in NON_BLOCKING_REASONS
+
+
+def main(argv, stdin, stdout, env):
+    if not argv:
+        sys.stderr.write("usage: harnesses/agy/hook <SessionStart|PreToolUse|Stop> ...\n")
+        return 2
+    sub = argv[0]
+    raw = stdin.read()
+
+    if sub == "SessionStart":
+        if len(argv) < 2:
+            sys.stderr.write("usage: harnesses/agy/hook SessionStart <hook> [<hook> ...]\n")
+            return 2
+        try:
+            reply = handle_session_start(argv[1:], raw, env)
+        except Exception as error:
+            reply = {
+                "injectSteps": [
+                    {
+                        "systemMessage": {
+                            "systemMessage": _profile_failure_line(f"agy-hook SessionStart crashed ({error!r})")
+                        }
+                    }
+                ]
+            }
+        stdout.write(json.dumps(reply))
+        return 0
+
+    if sub == "PreToolUse":
+        if len(argv) != 1:
+            sys.stderr.write("usage: harnesses/agy/hook PreToolUse\n")
+            return 2
+        try:
+            handle_pre_tool_use(env)
+        except Exception as error:
+            sys.stderr.write(f"agy-hook PreToolUse: {error!r}\n")
+        return 0
+
+    if sub == "Stop":
+        parser = argparse.ArgumentParser(prog="harnesses/agy/hook Stop")
+        parser.add_argument("--tasks", default="tasks")
+        parser.add_argument("--facts-file", default=None)
+        try:
+            args = parser.parse_args(argv[1:])
+        except SystemExit:
+            return 2
+        try:
+            verdict = decide_stop(
+                raw,
+                lambda: read_claims(args.tasks, env),
+                lambda: read_wake_facts(args.facts_file, env),
+            )
+        except Exception as error:
+            verdict = None if _is_retry(raw) else (
+                f"agy claim-guard failed ({error!r}); if you hold a task claim, act on it before ending the turn."
+            )
+        if verdict is None:
+            stdout.write("{}")
+        else:
+            stdout.write(json.dumps({"decision": "continue", "reason": f"{verdict}\n{OWNER_LINE}"}))
+        return 0
+
+    sys.stderr.write(f"harnesses/agy/hook: unknown event {sub!r}\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:], sys.stdin, sys.stdout, os.environ))

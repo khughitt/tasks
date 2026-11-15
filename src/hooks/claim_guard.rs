@@ -90,18 +90,22 @@ pub(super) fn decide(
             "claim-guard: unsupported or missing hook_event_name; repair the native hook registration.",
         );
     }
+    let missing_session = format!(
+        "claim-guard: the Stop input has no {}, so held claims cannot be checked; act on your own claims before ending the turn.",
+        if h == Harness::Agy {
+            "conversationId"
+        } else {
+            "session_id"
+        }
+    );
     let Some(identity) = value(e, "identity").filter(|v| v.is_object()) else {
-        return deny(
-            "claim-guard: the Stop input has no session_id, so held claims cannot be checked; act on your own claims before ending the turn.",
-        );
+        return deny(missing_session);
     };
     let Some(session) = identity["sessionId"]
         .as_str()
         .filter(|s| !s.trim().is_empty() && s.len() <= 1024)
     else {
-        return deny(
-            "claim-guard: the Stop input has no session_id, so held claims cannot be checked; act on your own claims before ending the turn.",
-        );
+        return deny(missing_session);
     };
     if identity["agentId"] != format!("{}:{session}", h.name()) {
         return deny(
@@ -113,7 +117,7 @@ pub(super) fn decide(
         let root = identity["root"].as_str().filter(|s| {
             s.starts_with("codex:")
                 && !s[6..].trim().is_empty()
-                && s.len() <= 1024
+                && s[6..].len() <= 1024
                 && *s != format!("codex:{session}")
         });
         if root.is_none() {
@@ -434,6 +438,27 @@ mod tests {
                 GuardDecision::Allow
             ));
         }
+    }
+    #[test]
+    fn worker_root_uses_the_producers_native_id_bound() {
+        let mut e = event(Harness::Codex);
+        e.event["kind"] = json!("child-stop");
+        e.event["nativeEvent"] = json!("SubagentStop");
+        e.event["identity"]["value"]["root"] = json!(format!("codex:{}", "r".repeat(1024)));
+        assert!(matches!(
+            decide(&e, || Ok(vec![]), |_| panic!("worker facts")),
+            GuardDecision::Allow
+        ));
+    }
+    #[test]
+    fn missing_agy_identity_names_conversation_id() {
+        let mut e = event(Harness::Agy);
+        e.event["identity"] = Value::Null;
+        let GuardDecision::Deny(reason) = decide(&e, || panic!("claims"), |_| panic!("facts"))
+        else {
+            panic!("allowed")
+        };
+        assert!(reason.contains("conversationId"));
     }
     #[test]
     fn complete_read_precedes_child_and_no_claim_skips_facts() {

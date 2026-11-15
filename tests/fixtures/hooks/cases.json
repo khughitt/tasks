@@ -1,0 +1,3098 @@
+[
+  {
+    "id": "own-live",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-claim",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "none",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "foreign-claim",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "foreign",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "stale-claim",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "stale",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "unverifiable-claim",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "unverifiable",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "multiple-own",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "multiple",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "raw-session",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "raw",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "cross-harness-prefix",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "cross",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "retry",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "shell-running",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"shell\",\"status\":\"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "child-pending",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"subagent\",\"status\":\"pending\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "child-with-monitor",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"subagent\",\"status\":\"running\"},{\"type\":\"monitor\",\"status\":\"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "background-empty",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "background-unknown-status",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"shell\",\"status\":\"new\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "background-nonwaking",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"monitor\",\"status\":\"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "background-malformed-tail",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"shell\",\"status\":\"running\"},{}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "background-malformed",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":{}}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "background-malformed-no-claim",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":{}}",
+    "claims": "none",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "cron-only",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[],\"session_crons\":[{\"id\":\"cron\",\"prompt\":\"wake\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "cron-invalid-object",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[],\"session_crons\":{}}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "sessionCrons"
+  },
+  {
+    "id": "cron-invalid-false",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[],\"session_crons\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "sessionCrons"
+  },
+  {
+    "id": "cron-invalid-null",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[],\"session_crons\":null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "sessionCrons"
+  },
+  {
+    "id": "cron-invalid-text",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[],\"session_crons\":\"wake\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "sessionCrons"
+  },
+  {
+    "id": "cron-invalid-malformed-list",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[],\"session_crons\":[{}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "sessionCrons"
+  },
+  {
+    "id": "wake-false",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"background_tasks\":[{\"type\":\"shell\",\"status\":\"running\"}]}",
+    "claims": "own",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "wake-unknown",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": null,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "kinds-unknown",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": null,
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "statuses-unknown",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": null,
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "claims-unreadable",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "read-diagnostic",
+    "broken_store": true,
+    "contains": "claims could not be read"
+  },
+  {
+    "id": "facts-missing",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "read-diagnostic",
+    "facts": "missing",
+    "contains": "facts could not be read"
+  },
+  {
+    "id": "facts-invalid",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "read-diagnostic",
+    "facts": "invalid",
+    "contains": "facts could not be read"
+  },
+  {
+    "id": "facts-nonzero",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "read-diagnostic",
+    "facts": "nonzero",
+    "contains": "facts could not be read"
+  },
+  {
+    "id": "codex-root",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "codex-root-related",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "related",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "codex-root-own-related",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own-related",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "codex-subagent-own",
+    "harness": "codex",
+    "event": "SubagentStop",
+    "native": "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"agent_id\":\"worker\"}",
+    "claims": "worker",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "codex-subagent-root-only",
+    "harness": "codex",
+    "event": "SubagentStop",
+    "native": "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"agent_id\":\"worker\"}",
+    "claims": "own",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "codex-worker-stop-root-only",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"agent_id\":\"worker\"}",
+    "claims": "own",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "allow"
+    ],
+    "classification": "codex-worker-normalization"
+  },
+  {
+    "id": "codex-worker-stop-own",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"agent_id\":\"worker\"}",
+    "claims": "worker",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "codex-worker-normalization",
+    "contains": "If you are a subagent"
+  },
+  {
+    "id": "agy-own",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact",
+    "displaced_expected": "deny"
+  },
+  {
+    "id": "agy-no-claim",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":true}",
+    "claims": "none",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-double-stop",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":1,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-busy",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-blind-shell",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact",
+    "displaced_expected": "allow"
+  },
+  {
+    "id": "agy-blind-subagent",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-empty-kinds",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":false}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-idle-missing",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-idle-invalid",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":\"false\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-count-missing",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "scalar-normalization",
+    "contains": "executionNum"
+  },
+  {
+    "id": "agy-own-end-error",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"ERROR\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"USER_CANCELED\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"MAX_INVOCATIONS\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"MAX_FORCED_INVOCATIONS\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"MAX_TOKEN_BUDGET_EXCEEDED\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"TERMINAL_CUSTOM_HOOK\",\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-count-decimal-one",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":1.0,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "allow"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "agy-count-exponent-one",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":1e0,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "allow"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "agy-count-above-safe-integer",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":9007199254740992,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "deny"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "agy-count-decimal-zero",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0.0,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "agy-count-negative-zero",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":-0.0,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "agy-count-negative",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":-1,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "agy-count-boolean",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":true,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "scalar-normalization"
+  },
+  {
+    "id": "halt-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "halt",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "halt-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "halt",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "halt-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "halt",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-halt-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "none",
+    "expected": [
+      "empty",
+      "empty"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-halt-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "none",
+    "expected": [
+      "empty",
+      "empty"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-halt-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "none",
+    "expected": [
+      "empty",
+      "empty"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-project-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "no-project",
+    "expected": [
+      "empty",
+      "empty"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-project-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "no-project",
+    "expected": [
+      "empty",
+      "empty"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "no-project-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "no-project",
+    "expected": [
+      "empty",
+      "empty"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "unregistered-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "unregistered",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "unregistered-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "unregistered",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "unregistered-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "unregistered",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "corrupt-config-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "corrupt-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "corrupt-config-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "corrupt-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "corrupt-config-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "corrupt-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "missing-cwd-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "missing-cwd",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "missing-cwd-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "missing-cwd",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "missing-cwd-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "missing-cwd",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "bad-scan-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "bad-scan",
+    "expected": [
+      "empty",
+      "error"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "bad-scan-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "bad-scan",
+    "expected": [
+      "empty",
+      "error"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "bad-scan-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "bad-scan",
+    "expected": [
+      "empty",
+      "error"
+    ],
+    "classification": "halt-authority"
+  },
+  {
+    "id": "unknown-status-completed",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": \"completed\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "unknown-status-Running",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": \"Running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "unknown-status-queued",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": \"queued\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "nonwaking-workflow",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"workflow\", \"status\": \"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "nonwaking-remote_agent",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"remote_agent\", \"status\": \"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "malformed-background-0",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "malformed-background-1",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": \"running\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "malformed-background-2",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [[\"running\"]]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "malformed-background-3",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"id\": \"a1\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "malformed-background-4",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": 1}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "malformed-background-5",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"status\": \"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "malformed-background-6",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": [\"running\"]}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "background-over-bound",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}, {\"type\": \"shell\", \"status\": \"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "backgroundTasks"
+  },
+  {
+    "id": "changed-wake-kinds",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": \"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "other"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "changed-wake-statuses",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"shell\", \"status\": \"running\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "queued"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "changed-wake-both",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [{\"type\": \"workflow\", \"status\": \"queued\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "workflow"
+    ],
+    "statuses": [
+      "queued"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-own-end-error-count-0",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"executionNum\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true,
+    "displaced_expected": "deny"
+  },
+  {
+    "id": "agy-own-end-error-count-1",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"executionNum\": \"1\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-error-count-2",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"executionNum\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-error-count-3",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"executionNum\": -1}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-error-count-4",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"executionNum\": 1.0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-error-count-5",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"executionNum\": 9007199254740992}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-error-valid-id",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"ERROR\", \"fullyIdle\": true, \"conversationId\": \"actor\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-count-0",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"executionNum\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-count-1",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"executionNum\": \"1\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-count-2",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"executionNum\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-count-3",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"executionNum\": -1}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-count-4",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"executionNum\": 1.0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-count-5",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"executionNum\": 9007199254740992}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-user_canceled-valid-id",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"USER_CANCELED\", \"fullyIdle\": true, \"conversationId\": \"actor\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-count-0",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-count-1",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": \"1\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-count-2",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-count-3",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": -1}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-count-4",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": 1.0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-count-5",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": 9007199254740992}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_invocations-valid-id",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_INVOCATIONS\", \"fullyIdle\": true, \"conversationId\": \"actor\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-count-0",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-count-1",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": \"1\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-count-2",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-count-3",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": -1}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-count-4",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": 1.0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-count-5",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"executionNum\": 9007199254740992}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_forced_invocations-valid-id",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_FORCED_INVOCATIONS\", \"fullyIdle\": true, \"conversationId\": \"actor\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-count-0",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"executionNum\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-count-1",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"executionNum\": \"1\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-count-2",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"executionNum\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-count-3",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"executionNum\": -1}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-count-4",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"executionNum\": 1.0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-count-5",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"executionNum\": 9007199254740992}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-max_token_budget_exceeded-valid-id",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"MAX_TOKEN_BUDGET_EXCEEDED\", \"fullyIdle\": true, \"conversationId\": \"actor\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-count-0",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"executionNum\": null}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-count-1",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"executionNum\": \"1\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-count-2",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"executionNum\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-count-3",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"executionNum\": -1}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-count-4",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"executionNum\": 1.0}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-count-5",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"executionNum\": 9007199254740992}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-own-end-terminal_custom_hook-valid-id",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"workspacePaths\": [\"$CWD\"], \"terminationReason\": \"TERMINAL_CUSTOM_HOOK\", \"fullyIdle\": true, \"conversationId\": \"actor\"}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "decoder-reject-141",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "not JSON",
+    "claims": "own",
+    "wake": false,
+    "kinds": [],
+    "statuses": [],
+    "classification": "decoder-rejection",
+    "decoder_reject": true
+  },
+  {
+    "id": "decoder-reject-142",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "[]",
+    "claims": "own",
+    "wake": false,
+    "kinds": [],
+    "statuses": [],
+    "classification": "decoder-rejection",
+    "decoder_reject": true
+  },
+  {
+    "id": "decoder-reject-143",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":null,\"cwd\":\"$CWD\"}",
+    "claims": "own",
+    "wake": false,
+    "kinds": [],
+    "statuses": [],
+    "classification": "decoder-rejection",
+    "decoder_reject": true
+  },
+  {
+    "id": "decoder-reject-144",
+    "harness": "codex",
+    "event": "SubagentStop",
+    "native": "{\"session_id\":\"actor\",\"agent_id\":\"\",\"cwd\":\"$CWD\",\"hook_event_name\":\"SubagentStop\"}",
+    "claims": "own",
+    "wake": false,
+    "kinds": [],
+    "statuses": [],
+    "classification": "decoder-rejection",
+    "decoder_reject": true
+  },
+  {
+    "id": "agy-cross-prefix",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"executionNum\":0,\"fullyIdle\":true}",
+    "claims": "cross",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact",
+    "displaced_expected": "allow"
+  },
+  {
+    "id": "codex-cross-prefix",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "cross",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "codex-worker-stop-mixed",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false,\"agent_id\":\"worker\"}",
+    "claims": "own-related",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "codex-worker-normalization",
+    "contains": "If you are a subagent"
+  },
+  {
+    "id": "cron-original-source-schedule",
+    "harness": "claude-code",
+    "event": "Stop",
+    "native": "{\"hook_event_name\": \"Stop\", \"session_id\": \"actor\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"background_tasks\": [], \"session_crons\": [{\"id\": \"c1\", \"schedule\": \"*/5 * * * *\"}]}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "private-uncertainty",
+    "contains": "sessionCrons"
+  },
+  {
+    "id": "codex-own-root-metadata",
+    "harness": "codex",
+    "event": "Stop",
+    "native": "{\"hook_event_name\":\"Stop\",\"session_id\":\"actor\",\"cwd\":\"$CWD\",\"stop_hook_active\":false}",
+    "claims": "own-root",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "agy-count-missing-no-claim",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\":\"actor\",\"workspacePaths\":[\"$CWD\"],\"terminationReason\":\"NO_TOOL_CALL\",\"fullyIdle\":true}",
+    "claims": "none",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "scalar-normalization",
+    "contains": "executionNum",
+    "displaced_expected": "allow"
+  },
+  {
+    "id": "agy-positive-invalid-reason",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"], \"terminationReason\": [], \"executionNum\": 1, \"fullyIdle\": true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "allow",
+      "allow"
+    ],
+    "classification": "exact",
+    "broken_registry": true
+  },
+  {
+    "id": "agy-decoder-152",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "[]",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "classification": "decoder-rejection",
+    "decoder_reject": true
+  },
+  {
+    "id": "agy-decoder-153",
+    "harness": "agy",
+    "event": "Stop",
+    "native": "{\"executionNum\":0,\"fullyIdle\":true}",
+    "claims": "own",
+    "wake": true,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "classification": "exact",
+    "expected": [
+      "deny",
+      "deny"
+    ]
+  },
+  {
+    "id": "codex-worker-max-native-root",
+    "harness": "codex",
+    "event": "SubagentStop",
+    "native": "{\"hook_event_name\": \"SubagentStop\", \"session_id\": \"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\", \"cwd\": \"$CWD\", \"stop_hook_active\": false, \"agent_id\": \"worker\"}",
+    "claims": "worker",
+    "wake": false,
+    "kinds": [
+      "shell",
+      "subagent"
+    ],
+    "statuses": [
+      "running",
+      "pending"
+    ],
+    "expected": [
+      "deny",
+      "deny"
+    ],
+    "classification": "exact"
+  }
+]

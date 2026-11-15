@@ -630,3 +630,105 @@ fn hooks_notice_discovery_avoids_records_admission_commands() {
     assert!(!calls.contains("ls-tree"));
     assert!(!calls.contains("worktree list"));
 }
+
+#[test]
+fn hooks_replay_source_integrity() {
+    assert_eq!(common::hooks::replay("integrity")["verified_sources"], 16);
+}
+#[test]
+fn hooks_replay_smallest() {
+    assert_eq!(common::hooks::replay("smallest")["count"], 5);
+    let decimal = common::hooks::replay_case("agy-count-decimal-one");
+    assert_eq!(decimal.native_decision, "deny");
+    assert_eq!(decimal.subscriber_decision, "allow");
+    assert!(
+        decimal.evidence["native_text"]
+            .as_str()
+            .unwrap()
+            .contains("1.0")
+    );
+    let large = common::hooks::replay_case("agy-count-above-safe-integer");
+    assert_eq!(large.native_decision, "allow");
+    assert_eq!(large.subscriber_decision, "deny");
+    assert_eq!(
+        large.evidence["envelope"]["event"]["facts"]["executionNum"]["status"],
+        "invalid"
+    );
+}
+#[test]
+fn hooks_replay_corpus() {
+    assert!(common::hooks::replay("corpus")["count"].as_u64().unwrap() >= 83);
+}
+
+#[test]
+fn hooks_protocol_failures_are_explicit() {
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let event = envelope("codex", "Stop", "c", &root);
+    let valid = event.to_string();
+    let duplicate = valid.replacen(
+        "\"schema\":2",
+        "\"unknown\":{\"secret\":1,\"secret\":2},\"schema\":2",
+        1,
+    );
+    let mut schema = event.clone();
+    schema["schema"] = json!(1);
+    for bytes in [
+        b"secret not JSON".to_vec(),
+        vec![0xff],
+        duplicate.into_bytes(),
+        schema.to_string().into_bytes(),
+        vec![b' '; 4 * 1024 * 1024 + 1],
+        b"{} {}".to_vec(),
+    ] {
+        for leaf in ["claim-guard", "halt-notice"] {
+            let out = env
+                .cmd(&root)
+                .args(["hook", leaf])
+                .write_stdin(bytes.clone())
+                .output()
+                .unwrap();
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("secret"));
+            if leaf == "claim-guard" {
+                assert_eq!(out.status.code(), Some(0));
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["decision"],
+                    "deny"
+                );
+            } else {
+                assert_eq!(out.status.code(), Some(1));
+                assert!(out.stdout.is_empty());
+            }
+        }
+    }
+    let out = env
+        .cmd(&root)
+        .args(["hook", "halt-notice"])
+        .write_stdin(valid)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    write_claim(&env, "sci", "sci-000001", "codex:c", true);
+    let store = env.claim_store("sci");
+    let mut doc: toml::Value = toml::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
+    doc["claims"]["sci-000001"]["worktree"] = toml::Value::String("\u{1f600}".repeat(5000));
+    std::fs::write(store, toml::to_string(&doc).unwrap()).unwrap();
+    let reply = guard(&env, &root, &event);
+    let reason = reply["reason"].as_str().unwrap();
+    assert!(reason.contains("reply limit") && reason.contains("tasks claims --all-projects"));
+    assert!(reason.encode_utf16().count() <= 10000);
+    env.json(&root, &["add", &"\u{1f600}".repeat(5000), "--tag", "halt"]);
+    let out = env
+        .cmd(&root)
+        .args(["hook", "halt-notice"])
+        .write_stdin(envelope("codex", "SessionStart", "c", &root).to_string())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert!(
+        String::from_utf8(out.stderr)
+            .unwrap()
+            .contains("context exceeds")
+    );
+}

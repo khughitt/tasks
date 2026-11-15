@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""SessionStart: report stale Projects input or delivered lore instructions and a halted
+project, and repair a git index the other host's commits left behind.
+
+Ops checks its fragment, then lore checks its artifact and manifest. A successful
+ops check lets the latter skip a second render. Refresh with `just projects` in
+ops and `just assemble` in lore. This hook never blocks a session, and its one write
+is that repair, recorded first so it can be undone; only validation/drift (exit 1) is
+reported, and execution failures stay silent, except that a halt notice which cannot
+resolve the session's project reports that in one line.
+"""
+import contextlib
+import importlib.machinery
+import importlib.util
+import io
+import json
+import os
+import pathlib
+import shlex
+import subprocess
+import sys
+import tomllib
+
+
+def load(path, name="ops_projects"):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+LINKED = pathlib.Path(__file__).resolve().parent.parent / "bin" / "linked.py"
+
+
+def notice(env):
+    """One line when the block is stale, or None. Never raises."""
+    try:
+        config = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+        registry = config / "tasks" / "projects.toml"
+        if not registry.is_file():
+            return None
+        roots = tomllib.loads(registry.read_text())["projects"]
+        if "ops" not in roots:
+            return None
+        # The `~/` prefix the tracker expands, expanded here too. This repeats two lines
+        # of ops-projects.expand on purpose: the script lives inside the ops root, so it
+        # cannot be imported until the root is resolved.
+        root = str(roots["ops"])
+        ops = pathlib.Path.home() / root[2:] if root.startswith("~/") else pathlib.Path(root)
+        projects = load(ops / "bin" / "ops-projects")
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            code = projects.main(["check", "--brief"], env, str(ops))
+        notices = [captured.getvalue().strip()] if code == 1 and captured.getvalue().strip() else []
+        if "lore" in roots:
+            root = str(roots["lore"])
+            lore = pathlib.Path.home() / root[2:] if root.startswith("~/") else pathlib.Path(root)
+            script = lore / "bin" / "assemble-instructions"
+            try:
+                if script.is_file():
+                    argv = [sys.executable, str(script), "check", "--working-tree"]
+                    if code == 0:
+                        argv.append("--skip-projects-render")
+                    checked = subprocess.run(argv, cwd=lore, env={**os.environ, **env},
+                                             capture_output=True, text=True, timeout=10)
+                    if checked.returncode == 1:
+                        notices.append(checked.stderr.strip() or "assemble-instructions: validation failed")
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return " | ".join(" ".join(notice.splitlines()) for notice in notices) + "\n" if notices else None
+    except Exception:
+        return None
+
+
+OPEN_STATUSES = ("idea", "todo", "doing", "blocked", "shelved")
+
+
+def _prefix_of(cwd, env):
+    """Nearest in-tree prefix, else the linked project, else None.
+    Raises LookupError when the resolver cannot answer."""
+    for directory in [cwd, *cwd.parents]:
+        config = directory / "tasks" / ".config.toml"
+        if config.is_file():
+            try:
+                return tomllib.loads(config.read_text())["prefix"]
+            except (tomllib.TOMLDecodeError, KeyError):
+                return None
+    linked = load(LINKED, "linked")
+    try:
+        project = linked.where(cwd, env)["project"]
+    except (linked.Unavailable, linked.WhereError) as error:
+        raise LookupError(str(error)) from error
+    return project["prefix"] if project else None
+
+
+def halt_notice(env, cwd):
+    """One line when the project cwd is in holds an open task tagged halt, else None.
+    The read is `tasks list --project <prefix>`, which is the registered checkout from a
+    worktree too. Never raises; a failing list is silence, a resolver error is a line."""
+    try:
+        try:
+            prefix = _prefix_of(pathlib.Path(cwd), env)
+        except LookupError as error:
+            detail = " ".join(str(error).split())
+            return f"tasks: cannot tell which project this session is in ({detail}); run `tasks where`\n"
+        if prefix is None:
+            return None
+        flags = [flag for status in OPEN_STATUSES for flag in ("--status", status)]
+        result = subprocess.run(["tasks", "list", "--project", prefix, "--tag", "halt", *flags, "--json"],
+                                capture_output=True, text=True, env=env, timeout=10)
+        if result.returncode != 0:
+            return None
+        halts = json.loads(result.stdout)["tasks"]
+        if not halts:
+            return None
+        halt = sorted(halts, key=lambda t: t.get("created", ""))[0]
+        return (f"halt: {prefix} is under stop-work halt {halt['id']} ({halt['title']}); start it, or "
+                f"override with `tasks start <id> --force --reason \"<why>\"`\n")
+    except Exception:
+        return None
+
+
+INDEX_HEALTH = pathlib.Path(__file__).resolve().parent.parent / "bin" / "git-index-health"
+def sync_root(health):
+    """Share filesystem discovery with the commit guard, independent of ops's HEAD."""
+    return health.sync_root(INDEX_HEALTH)
+
+
+def index_repair(cwd):
+    """Best-effort main-checkout repair with bounded reads and no asynchronous alarm."""
+    try:
+        health = load(INDEX_HEALTH, "git_index_health")
+        read = health.internal_read(cwd, os.environ)
+        common = read(read.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        if common is None or pathlib.Path(common.strip()).name != ".git":
+            return None
+        checkout = pathlib.Path(common.strip()).parent
+        root = sync_root(health)
+        if root is None or not checkout.is_relative_to(root):
+            return None
+        stamp = health.new_stamp()
+        result = health.repair(checkout, health.default_backup_dir(stamp, env=os.environ), stamp,
+                               env=os.environ, limit=read.remaining())
+        if result.state == "repaired":
+            if result.undo_ref is None:
+                return f"index: rebuilt {checkout}'s missing index from HEAD\n"
+            undo = f"git -C {shlex.quote(str(checkout))} read-tree {result.undo_ref}"
+            return f"index: repaired {checkout}, stale from another host's commits; pause repair first, undo with `{undo}`\n"
+        if result.state == "paused":
+            return f"index: {checkout} paused (indexHealth.autoRepair=false)\n"
+        if result.state == "mixed":
+            return (f"index: {checkout} mixed staging with {len(result.paths)} suspected-stale paths; "
+                    "inspect staged and unstaged diffs, then reset only confirmed stale paths\n")
+        if result.state in ("ok", "staged", "busy-operation", "unsupported-index", "unborn"):
+            return None
+        recovery = "" if result.backup_dir is None else f"; recovery: {result.backup_dir}, undo ref {result.undo_ref or 'none'}"
+        return (f"index: {checkout} {result.state}; {result.detail or 'inspect the index and object availability'}"
+                f"{recovery}; once resolved, run `git-index-health --repair "
+                f"{shlex.quote(str(checkout.parent))}`\n")
+    except Exception:
+        return None
+
+if __name__ == "__main__":
+    lines = [notice(os.environ)]
+    try:
+        cwd = pathlib.Path.cwd()
+    except OSError:
+        # A session resumed in a removed directory has no project and no checkout.
+        cwd = None
+    if cwd is not None:
+        lines += [halt_notice(os.environ, cwd), index_repair(cwd)]
+    for line in lines:
+        if line:
+            sys.stdout.write(line)
+    sys.exit(0)

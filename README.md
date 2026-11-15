@@ -117,6 +117,7 @@ Color is opt-in for pretty output; JSON remains unstyled.
 | Question | Reference |
 | --- | --- |
 | How do I choose and record work? | [User guide](docs/user-guide.md) |
+| How do session hooks report claims and halts? | [Hook protocol](docs/hooks.md) |
 | What is stored and returned? | [Task model](docs/task-model.md) |
 | Which settings apply? | [Configuration](docs/configuration.md) |
 | Who holds a task, and how is it released? | [Ownership](docs/ownership.md) |

@@ -1,0 +1,98 @@
+[
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/agy.js",
+    "sha256": "f32c9bc6c7153103128cdc2c813950cbf174df78a9f87e16baa798d22624ad1e"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/ancestry.js",
+    "sha256": "7a6ce71de431a299261071da5ce24771c67ae888dd5f7985e08afddb4529eb7b"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/claude-code.js",
+    "sha256": "e70c475355ed8bdd65d2289f784d4c578e52eeade829ae91c8d9de457c943cb5"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/codex.js",
+    "sha256": "5f9586866472692f4f6e0c9605185d5743d5f6bb8f2e4836284cb703ae68fdd6"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/hook-event.js",
+    "sha256": "b0f7769eba4553d2f54638eb33f96fa6261dd7ab5515dffe86e00ff199903995"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/index.js",
+    "sha256": "67ef1a9e315dbf4d03edd5d52135837eb9f16544fcd7ee26ef848cfaaed12d3c"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/opencode.js",
+    "sha256": "6c62120f55ad5f9720ebb054cf89b0c2be29eb9d42ddedbf89a0f099612b6fe3"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/payload.js",
+    "sha256": "f9fa98735280079fd00385bd9c04bf58831f3e835bf914763a8337d52fd0733f"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/adapters/reply.js",
+    "sha256": "680739ae7775d1acb065c5a85b0ffe0109b86316c2ff1c5b9e1264be7d6ff428"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/bus/proc.js",
+    "sha256": "11e8dfa6904a7e96fbfcb1ccb297be5798c7f97f4cc6c9ef0bb6c07a696ee146"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "src/protocol.js",
+    "sha256": "6022bdb39d2e801cbb1271810fd4b727b40e2f693c7b7b607c15e30dcf8edada"
+  },
+  {
+    "repository": "relay",
+    "commit": "5537ead67def57e5f23d28d772a272dd09234631",
+    "path": "package.json",
+    "sha256": "4e0ad4a61de7d8f9305822696c602c674732b041cbc95ba16137ed34ee0497e4"
+  },
+  {
+    "repository": "ops",
+    "commit": "f1c08d8008a0f1117d01d9913f8d20951d9be7df",
+    "path": "hooks/claim-guard",
+    "sha256": "f4a7155d4290a34a8220e3fd50e6b540c4093caafa38cd54d1d541f29b328f0b"
+  },
+  {
+    "repository": "ops",
+    "commit": "f1c08d8008a0f1117d01d9913f8d20951d9be7df",
+    "path": "hooks/claude-sessionstart",
+    "sha256": "ff9b4351cadce730eb36d2a935943c440b557d3cffa6b1f8888286d33d5c0ab5"
+  },
+  {
+    "repository": "ops",
+    "commit": "f1c08d8008a0f1117d01d9913f8d20951d9be7df",
+    "path": "bin/linked.py",
+    "sha256": "ad76f7be6dda50dc887051b49308bf7ef45116e5d02307df61afb037b9a32d48"
+  },
+  {
+    "repository": "hq",
+    "commit": "4be9f075ae7b15d08a312a39421f1aabcecbc0fb",
+    "path": "harnesses/agy/hook",
+    "sha256": "33945c68854c943eeed2aae343d835a646aa2271fd15d129fd581edae04e5e9b"
+  }
+]

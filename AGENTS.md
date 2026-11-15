@@ -77,6 +77,8 @@ so the tracker on `PATH` is not repointed at a worktree:
   `resolve.rs` (spec/plan links), `complete.rs` (shell completion candidates; best-effort, never errors), `query.rs`, `src/output/` / `format.rs` (JSON default, `--pretty`),
   `hierarchy.rs` (parent validation, subtree walks, forest).
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
+- `src/hooks/`, `tests/hooks.rs` — read-only session subscribers and frozen producer/oracle replay;
+  [hook protocol](docs/hooks.md). Replay requires Python 3 and Node 22 or newer.
 - `tests/attachments.rs` — end-to-end tests for attach, detach, show, check, and rename of task files.
 - `justfile`, `tools/tt`, `.githooks/` — the test front door and its timing wrapper (see Gates).
 - `identity.toml`, `tools/ops-docs` — the project's declared identity and the vendored

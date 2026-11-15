@@ -43,6 +43,10 @@ An open halt in the registered checkout blocks lower-priority starts across
 worktrees. An explicit `start --force --reason "<why>"` records an override;
 it does not prove the displaced process stopped or make an unsafe action safe.
 
+The [session hook subscribers](hooks.md) report held claims at Stop and registered
+halts at SessionStart without changing claims or task records. Their replies carry
+recovery guidance; native route qualification and activation remain separate.
+
 The owner uses `done`, `drop` or `park` to release. Parking does not change task
 status. Its required next step is an action, with `--waiting-on user|agent` and
 optional fixed-list reason: review, decision, approval, environment, dependency,

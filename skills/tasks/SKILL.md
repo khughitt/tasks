@@ -170,6 +170,13 @@ mean those documents were verified.
    halt, use `tasks start <id> --force --reason "<one-line explanation>"`. The reason
    is recorded on both the halt and the started task. Start's reason is free text;
    park's `--reason` below is a fixed choice from its own vocabulary.
+   Session integrations can call `tasks hook claim-guard` on Stop and
+   `tasks hook halt-notice` on SessionStart. They consume relay schema-2 subscriber
+   envelopes, not native payloads. The read-only guard returns allow/deny with
+   recovery guidance; it never parks, releases or overrides a claim. The notice
+   reads the registered halt authority. See the [hook protocol](../../docs/hooks.md)
+   for replies, failures, exemptions and route qualification limits. A configured
+   hook or a deny message grants no activation or override authority.
    A need declared `exclusive` names a host resource (an idle host, a device) and serves
    one session at a time across every project on the host that uses the name. `start`
    records the task's exclusive needs as holds on its claim. `ready`, `next` and `prime`

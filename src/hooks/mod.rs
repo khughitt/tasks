@@ -96,6 +96,27 @@ mod tests {
         assert!(err.is_empty());
     }
     #[test]
+    fn unreadable_stdin_is_explicit_without_quoting_its_error() {
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("fixture secret"))
+            }
+        }
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(claim_guard(&mut Broken, &mut out, &mut err), 0);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&out).unwrap()["decision"],
+            "deny"
+        );
+        assert!(!String::from_utf8(out).unwrap().contains("secret"));
+        let mut out = Vec::new();
+        assert_eq!(halt_notice(&mut Broken, &mut out, &mut err), 1);
+        assert!(out.is_empty());
+        assert!(!String::from_utf8(err).unwrap().contains("secret"));
+    }
+    #[test]
     fn write_failure_is_explicit() {
         struct Broken;
         impl Write for Broken {

@@ -149,3 +149,50 @@ pub fn fingerprint(paths: &[PathBuf]) -> Vec<(PathBuf, String)> {
     found.sort();
     found
 }
+
+pub struct ReplayRow {
+    pub native_decision: String,
+    pub subscriber_decision: String,
+    pub evidence: Value,
+}
+pub fn replay(selection: &str) -> Value {
+    let env = TestEnv::new();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut command = std::process::Command::new("python3");
+    command
+        .env_clear()
+        .envs(super::isolated_env(env.home.path()));
+    if let Some(dir) = std::env::var_os("TASKS_HOOK_REPLAY_EVIDENCE") {
+        command.env("TASKS_HOOK_REPLAY_EVIDENCE", dir);
+    }
+    let out = command
+        .arg(root.join("tests/fixtures/hooks/replay.py"))
+        .arg(if selection == "integrity" {
+            PathBuf::from("integrity")
+        } else {
+            assert_cmd::cargo::cargo_bin("tasks")
+        })
+        .arg(selection)
+        .output()
+        .expect("Python 3 is required for hook replay");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    if let Some(dir) = std::env::var_os("TASKS_HOOK_REPLAY_EVIDENCE") {
+        let file = PathBuf::from(dir).join(format!("{selection}.json"));
+        std::fs::write(file, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    value
+}
+pub fn replay_case(id: &str) -> ReplayRow {
+    let mut evidence = replay(id);
+    let row = evidence["rows"].as_array_mut().unwrap().remove(0);
+    ReplayRow {
+        native_decision: row["native_decision"].as_str().unwrap().into(),
+        subscriber_decision: row["subscriber_decision"].as_str().unwrap().into(),
+        evidence: row,
+    }
+}
