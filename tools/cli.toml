@@ -898,6 +898,22 @@ options = [
   { shared = "all_projects", value = "none" },
 ]
 
+[[cli.tasks.commands]]
+path = ["hook"]
+summary = "Agent session policy subscribers"
+
+[[cli.tasks.commands]]
+path = ["hook", "claim-guard"]
+summary = "Refuse a turn end while this session holds a live task claim"
+protocol = "relay-subscriber-v2"
+exception = "Consumes a relay schema-2 subscriber envelope and writes guard JSON with exit 0 for policy decisions. Ignores global --json, --pretty, --color, --headers, --no-headers and -C, their values/conflicts, and ordinary display environment/config; structural usage, help and version remain standard."
+
+[[cli.tasks.commands]]
+path = ["hook", "halt-notice"]
+summary = "Report the registered project's oldest open halt at session start"
+protocol = "relay-subscriber-v2"
+exception = "Consumes a relay schema-2 subscriber envelope and writes notice JSON; notice failures use stderr and a nonzero exit. Ignores global --json, --pretty, --color, --headers, --no-headers and -C, their values/conflicts, and ordinary display environment/config; structural usage, help and version remain standard."
+
 # ---- walictl
 
 [[cli.walictl.commands]]
@@ -1089,14 +1105,18 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings, long_doing or profile"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings, long_doing, profile or usage-trend"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile", "usage-trend"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
   { shared = "since", role = "bound", value = "when", repeatable = false },
   { shared = "until", role = "bound", value = "when", repeatable = false },
   { names = ["--task"], value = "string" },
+  { names = ["--days"], value = "int", exception = "usage-trend only; exactly one of --days or --since" },
+  { names = ["--bucket"], value = "enum", values = ["day", "week"], exception = "usage-trend only; effective default day" },
+  { names = ["--compact"], value = "none", exception = "usage-trend only; resolved pretty mode only, rejecting --json and OBS_FORMAT=json before index access; explicit --pretty overrides OBS_FORMAT" },
+  { shared = "color", value = "enum", values = ["auto", "always", "never"], exception = "usage-trend only, rejected on other views before index access; styles full and compact pretty output and never adds ANSI to JSON or errors. Reads OBS_COLOR like dashboard summary: explicit --color > nonempty NO_COLOR > OBS_COLOR > effective never; parser default stays unset to detect the explicit flag" },
 ]
 
 [[cli.obs.commands]]
@@ -1155,8 +1175,35 @@ options = [
 
 [[cli.obs.commands]]
 path = ["dashboard", "summary"]
-summary = "print live attention and the snapshot's headline numbers"
+summary = "print the health view: a typical session per harness and model against its 30-day normal"
+exception = "Automation-tier summary and report usage-trend read OBS_COLOR: explicit --color > nonempty NO_COLOR > OBS_COLOR > effective never. Absent color/graph-height parser defaults stay unset to detect explicit flags; help documents effective graph height 2 and color never. Invalid OBS_COLOR uses argparse plain stderr/exit 2 like OBS_FORMAT; other commands ignore OBS_COLOR. Explicit graph-height with effective JSON instead emits invalid_usage JSON on stderr/exit 2."
 options = [
+  { names = ["--window"], value = "enum", values = ["24h", "7d", "30d"], default = "24h" },
+  { names = ["--graph-height"], value = "enum", values = ["1", "2", "3"] },
+  { shared = "color", value = "enum", values = ["auto", "always", "never"] },
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "tasks"]
+summary = "print missed recurrences, aged doc findings and long-doing tasks"
+options = [
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "attention"]
+summary = "print live findings and grouped drift findings"
+options = [
+  { shared = "all", value = "none" },
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "changes"]
+summary = "print change markers and integrated tooling commits"
+options = [
+  { names = ["--window"], value = "enum", values = ["7d", "30d"], default = "7d" },
   { names = ["--out"], value = "path" },
 ]
 
@@ -1594,6 +1641,7 @@ options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
+  { names = ["--key"], value = "string" },
   { names = ["--proposition"], value = "string", required = true },
 ]
 
@@ -1606,23 +1654,18 @@ options = [
   { names = ["--continue"], value = "string" },
   { names = ["--applicability"], value = "string", repeatable = true },
   { names = ["--assumptions"], value = "string", required = true },
-  { names = ["--baseline"], value = "string" },
-  { names = ["--comparison"], value = "string" },
-  { names = ["--conditioning"], value = "string", repeatable = true },
-  { names = ["--contrast"], value = "enum", values = ["levels", "continuous"], required = true },
+  { names = ["--estimand"], value = "string", required = true },
+  { names = ["--standing"], value = "enum", values = ["empirical", "model", "calibrated-model"], required = true },
+  { names = ["--evidence-mode"], value = "enum", values = ["observation", "annotation", "simulation", "derivation", "literature-extraction"], required = true },
+  { names = ["--rule-procedures"], value = "string", repeatable = true, required = true },
+  { names = ["--model"], value = "string" },
+  { names = ["--registers"], value = "string", repeatable = true },
   { names = ["--dataset"], value = "string", required = true },
   { names = ["--equivalence-rule"], value = "string", required = true },
   { names = ["--falsification"], value = "string", required = true },
-  { names = ["--identification"], value = "string", required = true },
-  { names = ["--increment"], value = "string" },
   { names = ["--interpretation-rule"], value = "string", required = true },
-  { names = ["--measure"], value = "string", required = true },
   { names = ["--method"], value = "string", required = true },
   { names = ["--parameters"], value = "string", repeatable = true },
-  { names = ["--quantity"], value = "string" },
-  { names = ["--reference"], value = "string", required = true },
-  { names = ["--scale"], value = "enum", values = ["additive", "multiplicative"], required = true },
-  { names = ["--slot"], value = "int", required = true },
   { names = ["--supersedes"], value = "string" },
   { names = ["--target"], value = "string", required = true },
 ]
@@ -3033,6 +3076,10 @@ verb = "list"
 summary = "The live-agent registry"
 
 [[cli.relay.commands]]
+path = ["whoami"]
+summary = "The agent session this process belongs to"
+
+[[cli.relay.commands]]
 path = ["reap"]
 summary = "Reconcile the registry against live processes"
 options = [
@@ -3065,6 +3112,18 @@ options = [
   { names = ["--node"], value = "path" },
   { names = ["--artifact"], value = "path" },
   { names = ["--apply"], value = "none" },
+  { names = ["--qualification"], value = "path" },
+  { names = ["--session-mode"], value = "string" },
+  { names = ["--event"], value = "string", repeatable = true },
+]
+
+[[cli.relay.commands]]
+path = ["pairs"]
+output = "json"
+summary = "The node, relay and subscriber file each relay hook entry pins, with their digests"
+options = [
+  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex"], required = true, repeatable = false },
+  { names = ["--target"], value = "path", required = true },
 ]
 
 [[cli.relay.commands]]
@@ -3234,7 +3293,7 @@ path = ["peer"]
 summary = "Serve a bounded internal retention session"
 
 [cli.worktree]
-project = "ops"
+project = "hostkit"
 tier = "automation"
 default_output = "pretty"
 env = "WORKTREE"

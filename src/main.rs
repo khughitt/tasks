@@ -25,6 +25,7 @@ mod halt;
 mod hierarchy;
 mod history;
 mod holds;
+mod hooks;
 mod inventory;
 mod lanes;
 mod link;
@@ -116,6 +117,10 @@ fn usage_error(error: &clap::Error) -> String {
 }
 
 fn main() {
+    let args: Vec<_> = std::env::args_os().collect();
+    if let Some(code) = commands::hooks::try_run(&args) {
+        std::process::exit(code);
+    }
     // Must run before anything writes to stdout. Returns immediately unless
     // TASKS_COMPLETE is set, so an ordinary run pays one getenv.
     clap_complete::CompleteEnv::with_factory(cli::Cli::command)

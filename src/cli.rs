@@ -462,6 +462,11 @@ pub struct EditArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Agent session policy subscribers
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
     /// Query retained state and execute verified lifecycle operations.
     Retained {
         #[command(subcommand)]
@@ -1190,6 +1195,14 @@ pub enum Command {
         #[arg(long)]
         all_projects: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HookAction {
+    /// Refuse a turn end while this session holds a live task claim
+    ClaimGuard,
+    /// Report the registered project's oldest open halt at session start
+    HaltNotice,
 }
 
 #[derive(Subcommand, Debug)]

@@ -16,6 +16,7 @@ pub mod feedback;
 pub mod goals;
 pub mod graph;
 pub mod group;
+pub(crate) mod hooks;
 pub mod identity;
 pub mod init;
 pub mod lanes;
@@ -74,6 +75,9 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
         host.ok_or_else(|| Error::Config("ordinary invocation has no host configuration".into()))?;
     let dir = cli.dir.as_deref();
     match cli.command {
+        Command::Hook { .. } => Err(Error::Config(
+            "hook invocation missed protocol entry".into(),
+        )),
         Command::Retained { action } => retained::dispatch(dir, action, host.clone()),
         Command::Attachments { paths } => attachments::run(dir, paths),
         Command::Init {

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 pub mod docs;
 pub mod git_fixture;
+pub mod hooks;
 pub mod multipart;
 pub mod retained;
 pub mod retained_migration;

@@ -102,6 +102,7 @@ impl Output {
 /// fail before running so a presentation error cannot follow a successful mutation.
 pub fn defers_width_error(command: &Command) -> bool {
     match command {
+        Command::Hook { .. } => false,
         Command::Export {
             output: Some(path), ..
         } => path == Path::new("-"),
