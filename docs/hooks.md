@@ -52,6 +52,8 @@ then scans only the registered records authority. In-tree, detached and linked
 projects and their worktrees use that authority. A historical pre-detach config
 must match one verified registered detached pairing; its local records are history.
 There is no unregistered/local fallback, admission traversal or profile resolution.
+Without local config, verified registered code-tree locations (including nested
+projects) still select their authority; ambiguous location/link matches are uncertainty.
 
 No established project or no open halt returns `{}`. Invalid cwd, local config,
 registry or pairing produces a one-line cannot-tell-which-project context with
@@ -59,6 +61,8 @@ registry or pairing produces a one-line cannot-tell-which-project context with
 Among tasks tagged halt in idea, todo, doing, blocked or shelved status, the notice
 selects oldest created time, then task id. Its start/override text grants no override
 permission; the user's instruction still controls that decision.
+Title controls and Unicode line separators are visibly escaped before the wire bound
+is checked; ordinary Unicode title text is preserved.
 
 ## Failure
 

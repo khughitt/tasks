@@ -105,6 +105,11 @@ def repository(env, directory):
 
 def project_fixture(binary, case, env, base, cwd, home):
     notice = case.get("notice")
+    tree_root = cwd
+    if notice == "nested-without-config":
+        repository(env, tree_root)
+        cwd = cwd / "nested"
+        cwd.mkdir()
     detached = notice in ("detached", "historical", "historical-mismatch", "pairing-mismatch")
     linked = notice == "linked-worktree"
     if detached:
@@ -118,10 +123,11 @@ def project_fixture(binary, case, env, base, cwd, home):
         authority = cwd
     assert init["exit"] == 0, f"fixture init: {init}"
     if notice in ("halt", "bad-scan", "detached", "historical", "historical-mismatch", "pairing-mismatch",
-                  "linked-worktree", "in-tree-worktree", "non-directory"):
-        added = run([binary, "add", "Stop work", "--tag", "halt"], "", env, authority)
+                  "linked-worktree", "in-tree-worktree", "in-tree-without-config", "nested-without-config", "non-directory"):
+        added = run([binary, "add", case.get("title", "Stop work"), "--tag", "halt"], "", env, authority)
         assert added["exit"] == 0, f"fixture halt: {added}"
-        halt_path = authority / "tasks" / (json.loads(added["stdout"])["id"] + ".md")
+        case["fixture_halt_id"] = json.loads(added["stdout"])["id"]
+        halt_path = authority / "tasks" / (case["fixture_halt_id"] + ".md")
         if notice == "bad-scan":
             halt_path.write_text("corrupt record")
     if linked:
@@ -130,13 +136,17 @@ def project_fixture(binary, case, env, base, cwd, home):
         with (authority / "tasks/.config.toml").open("a") as stream:
             stream.write("\n[checkout]\npath=" + json.dumps(str(checkout)) + "\n")
         cwd = checkout
-    if notice in ("in-tree-worktree", "unregistered-git"):
+    if notice in ("in-tree-worktree", "in-tree-without-config", "unregistered-git"):
         repository(env, cwd)
-    if notice in ("historical", "linked-worktree", "in-tree-worktree"):
+    if notice == "nested-without-config":
+        git(env, tree_root, "add", "-A")
+        git(env, tree_root, "commit", "-qm", "records")
+    if notice in ("historical", "linked-worktree", "in-tree-worktree", "in-tree-without-config", "nested-without-config"):
         worktree = base / "worktree"
-        git(env, cwd, "worktree", "add", "-q", "-b", "side", str(worktree))
+        checkout = tree_root if notice == "nested-without-config" else cwd
+        git(env, checkout, "worktree", "add", "-q", "-b", "side", str(worktree))
         assert pathlib.Path(git(env, worktree, "rev-parse", "--show-toplevel")) == worktree
-        assert pathlib.Path(git(env, worktree, "rev-parse", "--absolute-git-dir")).is_relative_to(cwd)
+        assert pathlib.Path(git(env, worktree, "rev-parse", "--absolute-git-dir")).is_relative_to(checkout)
         if notice == "historical":
             (worktree / "tasks").mkdir()
             (worktree / "tasks/.config.toml").write_text("prefix='sci'\n")
@@ -144,7 +154,9 @@ def project_fixture(binary, case, env, base, cwd, home):
             git(env, worktree, "commit", "-qm", "historical records")
         if notice == "in-tree-worktree":
             (worktree / "tasks" / halt_path.name).unlink()
-        cwd = worktree
+        cwd = worktree / "nested" if notice == "nested-without-config" else worktree
+        if notice in ("in-tree-without-config", "nested-without-config"):
+            shutil.rmtree(cwd / "tasks")
     if notice in ("historical-mismatch", "pairing-mismatch"):
         foreign = base / "foreign"
         repository(env, foreign)
@@ -216,6 +228,9 @@ def replay(case, binary, identities):
                    native_text=native, envelope=envelope, native_decision=old_decision,
                    subscriber_decision=new_decision, native=original, subscriber=current,
                    decoder=decoded, source_identities=identities, deadline_seconds=TIMEOUT)
+        if case.get("registered_halt"):
+            assert case["fixture_halt_id"] in new.get("context", ""), json.dumps(row)
+            row["fixture_halt_id"] = case["fixture_halt_id"]
         row["evidence_kind"] = "failure-path" if case.get("facts") or case.get("broken_store") else "policy-replay"
         if case["harness"] == "agy" and not notice:
             displaced = run([sys.executable, str(ROOT / "oracle.py"), "hq-evidence"], native, env, base)
@@ -239,6 +254,8 @@ def replay(case, binary, identities):
             assert case["contains"] in new.get("reason", ""), json.dumps(row)
         if "context_contains" in case:
             assert case["context_contains"] in new.get("context", ""), json.dumps(row)
+        if case["classification"] == "halt-presentation":
+            assert new["context"] == old["context"].replace(case["title"], case["rendered_title"], 1), json.dumps(row)
         if case["classification"] == "private-uncertainty" and case.get("claims") != "none":
             assert "child and wake state are unknown" in new["reason"], json.dumps(row)
             for action in ("(1) Continue", "tasks park", "tasks done", "Do not end the turn"):

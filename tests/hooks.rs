@@ -507,6 +507,116 @@ fn hooks_halt_selects_oldest_open_task() {
 }
 
 #[test]
+fn hooks_halt_without_local_config_uses_registered_authority() {
+    use common::hooks::{notice, repository};
+    let mut failures = Vec::new();
+    for nested in [false, true] {
+        let env = TestEnv::new();
+        let base = tempfile::tempdir().unwrap();
+        let main = base.path().join("main");
+        repository(&env, &main);
+        let project = if nested {
+            main.join("nested")
+        } else {
+            main.clone()
+        };
+        std::fs::create_dir_all(&project).unwrap();
+        env.json(&project, &["init", "--prefix", "sci"]);
+        let halt = common::id_of(env.json(&project, &["add", "Registered halt", "--tag", "halt"]));
+        common::git(&main, &["add", "-A"]);
+        common::git(&main, &["commit", "-qm", "records"]);
+        let wt = base.path().join("side");
+        common::git(
+            &main,
+            &["worktree", "add", "-q", "-b", "side", wt.to_str().unwrap()],
+        );
+        common::git_fixture::assert_worktree(env.home.path(), &main, &wt);
+        let cwd = if nested { wt.join("nested") } else { wt };
+        std::fs::remove_dir_all(cwd.join("tasks")).unwrap();
+        assert!(env.json(&cwd, &["where"])["project"].is_null());
+        let reply = notice(&env, &main, &cwd);
+        if !reply["context"].as_str().is_some_and(|s| s.contains(&halt)) {
+            failures.push((nested, reply));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+#[test]
+fn hooks_halt_title_is_visibly_single_line() {
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let title = "Greek β\u{000b}\u{000c}\u{001b}[31m\u{0085}\u{2028}\u{2029}end";
+    let id = common::id_of(env.json(&root, &["add", title, "--tag", "halt"]));
+    let reply = common::hooks::notice(&env, &root, &root);
+    let context = reply["context"].as_str().unwrap();
+    assert!(context.contains("Greek β"));
+    assert!(context.contains(&id));
+    let text = context.strip_suffix('\n').unwrap();
+    assert!(
+        !text
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}')),
+        "{context:?}"
+    );
+    assert!(text.contains("\\u{b}") && text.contains("\\u{1b}") && text.contains("\\u{2028}"));
+    assert!(text.contains("tasks start <id> --force --reason \"<why>\""));
+}
+
+#[test]
+fn hooks_halt_config_free_lookup_respects_git_boundaries_and_ambiguity() {
+    use common::hooks::{notice, repository};
+    let env = TestEnv::new();
+    let base = tempfile::tempdir().unwrap();
+    let main = base.path().join("main");
+    repository(&env, &main);
+    env.json(&main, &["init", "--prefix", "sci"]);
+    let halt = common::id_of(env.json(&main, &["add", "Main halt", "--tag", "halt"]));
+    common::git(&main, &["add", "-A"]);
+    common::git(&main, &["commit", "-qm", "records"]);
+    let side = base.path().join("side");
+    common::git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    common::git_fixture::assert_worktree(env.home.path(), &main, &side);
+    std::fs::remove_dir_all(side.join("tasks")).unwrap();
+    let nested = main.join("nested");
+    repository(&env, &nested);
+    env.json(&nested, &["init", "--prefix", "other"]);
+    env.json(&nested, &["add", "Nested repository halt", "--tag", "halt"]);
+    let cwd = side.join("nested");
+    std::fs::create_dir(&cwd).unwrap();
+    let context = notice(&env, &main, &cwd)["context"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(context.contains(&halt));
+    assert!(!context.contains("Nested repository halt"));
+    let file = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let root = registry["projects"]["sci"].clone();
+    registry["projects"]
+        .as_table_mut()
+        .unwrap()
+        .insert("duplicate".into(), root);
+    std::fs::write(file, toml::to_string(&registry).unwrap()).unwrap();
+    let context = notice(&env, &main, &side)["context"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(context.contains("cannot tell which project") && context.contains("ambiguous"));
+}
+
+#[test]
 fn hooks_notice_ignores_display_and_global_dir() {
     use common::hooks::notice;
     let mut env = TestEnv::new();
@@ -669,8 +779,21 @@ fn hooks_replay_authority_pilot() {
     }
 }
 #[test]
+fn hooks_replay_corrective_pilot() {
+    for id in [
+        "in-tree-without-config-codex",
+        "nested-without-config-codex",
+        "title-controls-codex",
+    ] {
+        assert_eq!(
+            common::hooks::replay_case(id).subscriber_decision,
+            "context"
+        );
+    }
+}
+#[test]
 fn hooks_replay_corpus() {
-    assert_eq!(common::hooks::replay("corpus")["count"], 185);
+    assert_eq!(common::hooks::replay("corpus")["count"], 194);
 }
 
 #[test]

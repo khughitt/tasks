@@ -5,6 +5,65 @@ use crate::repo::{CONFIG_REL, Kind, Project};
 use crate::scope::{Origin, open_registered};
 use std::path::Path;
 
+/// Match registered locations in the main tree to their location in this worktree.
+/// Ordinary `where` intentionally has a narrower in-tree discovery contract.
+fn without_local_config(
+    registry: &Registry,
+    tree: &GitTree,
+    cwd: &Path,
+) -> Result<Option<Project>, String> {
+    let mut locations = Vec::new();
+    if let Some(main) = tree.main_checkout() {
+        for (prefix, root) in &registry.projects {
+            let root = crate::rename::root_identity(root)
+                .map_err(|_| "registered checkout could not be verified")?;
+            let Ok(relative) = root.strip_prefix(&main) else {
+                continue;
+            };
+            if !cwd.starts_with(tree.top.join(relative)) {
+                continue;
+            }
+            // A nested registered repository belongs to its own Git tree.
+            if !relative.as_os_str().is_empty()
+                && GitTree::of(&root)
+                    .map_err(|_| "registered code tree could not be verified")?
+                    .as_ref()
+                    .is_none_or(|t| t.common != tree.common)
+            {
+                continue;
+            }
+            locations.push((relative.components().count(), prefix));
+        }
+    }
+    let nearest = locations.iter().map(|(depth, _)| *depth).max();
+    let candidates: Vec<_> = locations
+        .iter()
+        .filter(|(depth, _)| Some(*depth) == nearest)
+        .map(|(_, prefix)| prefix.as_str())
+        .collect();
+    if candidates.len() > 1 {
+        return Err("registered code-tree location is ambiguous".into());
+    }
+    let linked = project_of_tree(registry, tree)
+        .map_err(|_| "registered code-tree pairing or link could not be established")?;
+    if let Some(project) = linked {
+        if candidates
+            .first()
+            .is_some_and(|prefix| *prefix != project.prefix)
+        {
+            return Err("registered code-tree and link matches disagree".into());
+        }
+        return Ok(Some(project));
+    }
+    candidates
+        .first()
+        .map(|prefix| {
+            open_registered(registry, prefix, Origin::Prefix)
+                .map_err(|_| "registered authority config or pairing is invalid".into())
+        })
+        .transpose()
+}
+
 fn authority(event: &HookInput) -> Result<Option<Project>, String> {
     let cwd = event.event["cwd"]
         .as_str()
@@ -38,11 +97,7 @@ fn authority(event: &HookInput) -> Result<Option<Project>, String> {
     let registry = Registry::load().map_err(|_| "project registry is unreadable")?;
     let Some(local) = local else {
         return tree
-            .map(|t| {
-                project_of_tree(&registry, &t).map_err(|_| {
-                    "registered code-tree pairing or link could not be established".into()
-                })
-            })
+            .map(|t| without_local_config(&registry, &t, &cwd))
             .unwrap_or(Ok(None));
     };
     if registry.project_root(&local.prefix).is_none() {
@@ -98,5 +153,18 @@ pub(super) fn notice(event: &HookInput) -> Result<Option<String>, String> {
         .iter()
         .filter(|t| t.status.is_open() && t.tags.iter().any(|tag| tag == "halt"))
         .min_by(|a, b| a.created.cmp(&b.created).then_with(|| a.id.cmp(&b.id)));
-    Ok(halt.map(|halt|format!("halt: {} is under stop-work halt {} ({}); start it, or override with `tasks start <id> --force --reason \"<why>\"`\n",project.prefix,halt.id,halt.title)))
+    Ok(halt.map(|halt|format!("halt: {} is under stop-work halt {} ({}); start it, or override with `tasks start <id> --force --reason \"<why>\"`\n",project.prefix,halt.id,single_line(&halt.title))))
+}
+
+fn single_line(title: &str) -> String {
+    title
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                c.escape_default().collect::<String>()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }

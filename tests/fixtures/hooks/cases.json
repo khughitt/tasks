@@ -3475,5 +3475,128 @@
     "classification": "halt-authority",
     "broken_registry": true,
     "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "in-tree-without-config-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "in-tree-without-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "registered_halt": true
+  },
+  {
+    "id": "nested-without-config-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "nested-without-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "registered_halt": true
+  },
+  {
+    "id": "title-controls-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "halt",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-presentation",
+    "title": "Greek \u03b2\u000b\f\u001b[31m\u0085\u2028\u2029end",
+    "rendered_title": "Greek \u03b2\\u{b}\\u{c}\\u{1b}[31m\\u{85}\\u{2028}\\u{2029}end",
+    "registered_halt": true
+  },
+  {
+    "id": "in-tree-without-config-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "in-tree-without-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "registered_halt": true
+  },
+  {
+    "id": "nested-without-config-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "nested-without-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "registered_halt": true
+  },
+  {
+    "id": "title-controls-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "halt",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-presentation",
+    "title": "Greek \u03b2\u000b\f\u001b[31m\u0085\u2028\u2029end",
+    "rendered_title": "Greek \u03b2\\u{b}\\u{c}\\u{1b}[31m\\u{85}\\u{2028}\\u{2029}end",
+    "registered_halt": true
+  },
+  {
+    "id": "in-tree-without-config-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "in-tree-without-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "registered_halt": true
+  },
+  {
+    "id": "nested-without-config-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "nested-without-config",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "registered_halt": true
+  },
+  {
+    "id": "title-controls-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "halt",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-presentation",
+    "title": "Greek \u03b2\u000b\f\u001b[31m\u0085\u2028\u2029end",
+    "rendered_title": "Greek \u03b2\\u{b}\\u{c}\\u{1b}[31m\\u{85}\\u{2028}\\u{2029}end",
+    "registered_halt": true
   }
 ]
