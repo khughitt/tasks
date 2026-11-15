@@ -3094,5 +3094,386 @@
       "deny"
     ],
     "classification": "exact"
+  },
+  {
+    "id": "detached-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "detached",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "detached-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "detached",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "detached-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "detached",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "historical-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "historical",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "historical-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "historical",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "historical-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "historical",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "historical-mismatch-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "historical-mismatch",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "historical-mismatch-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "historical-mismatch",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "historical-mismatch-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "historical-mismatch",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "pairing-mismatch-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "pairing-mismatch",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "pairing-mismatch-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "pairing-mismatch",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "pairing-mismatch-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "pairing-mismatch",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "linked-worktree-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "linked-worktree",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "linked-worktree-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "linked-worktree",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "linked-worktree-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "linked-worktree",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "in-tree-worktree-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "in-tree-worktree",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "in-tree-worktree-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "in-tree-worktree",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "in-tree-worktree-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "in-tree-worktree",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "exact"
+  },
+  {
+    "id": "missing-prefix-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "missing-prefix",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "missing-prefix-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "missing-prefix",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "missing-prefix-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "missing-prefix",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "unregistered-git-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "unregistered-git",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "unregistered-git-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "unregistered-git",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "unregistered-git-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "unregistered-git",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "non-directory-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "non-directory",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "non-directory-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "non-directory",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "non-directory-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "non-directory",
+    "expected": [
+      "context",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "broken-registry-codex",
+    "harness": "codex",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "halt",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "broken_registry": true,
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "broken-registry-claude-code",
+    "harness": "claude-code",
+    "event": "SessionStart",
+    "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
+    "notice": "halt",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "broken_registry": true,
+    "context_contains": "cannot tell which project"
+  },
+  {
+    "id": "broken-registry-agy",
+    "harness": "agy",
+    "event": "SessionStart",
+    "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
+    "notice": "halt",
+    "expected": [
+      "empty",
+      "context"
+    ],
+    "classification": "halt-authority",
+    "broken_registry": true,
+    "context_contains": "cannot tell which project"
   }
 ]

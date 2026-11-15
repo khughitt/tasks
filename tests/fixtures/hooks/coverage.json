@@ -1375,7 +1375,12 @@
         "no-halt-codex",
         "no-project-codex",
         "corrupt-config-codex",
-        "bad-scan-codex"
+        "bad-scan-codex",
+        "historical-codex",
+        "linked-worktree-codex",
+        "in-tree-worktree-codex",
+        "pairing-mismatch-codex",
+        "missing-prefix-codex"
       ],
       "boundary": [
         "hooks_halt_authority_matrix",
@@ -1393,7 +1398,12 @@
         "no-halt-codex",
         "no-project-codex",
         "corrupt-config-codex",
-        "bad-scan-codex"
+        "bad-scan-codex",
+        "historical-codex",
+        "linked-worktree-codex",
+        "in-tree-worktree-codex",
+        "pairing-mismatch-codex",
+        "missing-prefix-codex"
       ],
       "boundary": [
         "hooks_halt_authority_matrix",
@@ -1411,7 +1421,12 @@
         "no-halt-codex",
         "no-project-codex",
         "corrupt-config-codex",
-        "bad-scan-codex"
+        "bad-scan-codex",
+        "historical-codex",
+        "linked-worktree-codex",
+        "in-tree-worktree-codex",
+        "pairing-mismatch-codex",
+        "missing-prefix-codex"
       ],
       "boundary": [
         "hooks_halt_authority_matrix",
@@ -1429,7 +1444,12 @@
         "no-halt-codex",
         "no-project-codex",
         "corrupt-config-codex",
-        "bad-scan-codex"
+        "bad-scan-codex",
+        "historical-codex",
+        "linked-worktree-codex",
+        "in-tree-worktree-codex",
+        "pairing-mismatch-codex",
+        "missing-prefix-codex"
       ],
       "boundary": [
         "hooks_halt_authority_matrix",
@@ -1447,7 +1467,12 @@
         "no-halt-codex",
         "no-project-codex",
         "corrupt-config-codex",
-        "bad-scan-codex"
+        "bad-scan-codex",
+        "historical-codex",
+        "linked-worktree-codex",
+        "in-tree-worktree-codex",
+        "pairing-mismatch-codex",
+        "missing-prefix-codex"
       ],
       "boundary": [
         "hooks_halt_authority_matrix",

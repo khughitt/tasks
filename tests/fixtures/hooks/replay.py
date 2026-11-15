@@ -87,30 +87,97 @@ def facts(home, case):
     path.chmod(0o755)
 
 
+def git(env, directory, *args):
+    result = run(["git", "-C", str(directory), *args], "", env, directory)
+    assert result["exit"] == 0, f"fixture git: {result}"
+    return result["stdout"].strip()
+
+
+def repository(env, directory):
+    directory.mkdir(exist_ok=True)
+    git(env, directory, "init", "-q", "-b", "main")
+    assert pathlib.Path(git(env, directory, "rev-parse", "--show-toplevel")) == directory
+    assert pathlib.Path(git(env, directory, "rev-parse", "--absolute-git-dir")).is_relative_to(directory)
+    (directory / "README").write_text("fixture\n")
+    git(env, directory, "add", "-A")
+    git(env, directory, "commit", "-qm", "fixture")
+
+
+def project_fixture(binary, case, env, base, cwd, home):
+    notice = case.get("notice")
+    detached = notice in ("detached", "historical", "historical-mismatch", "pairing-mismatch")
+    linked = notice == "linked-worktree"
+    if detached:
+        repository(env, cwd)
+        records = base / "records"
+        repository(env, records)
+        init = run([binary, "init", "--prefix", "sci", "--records", str(records)], "", env, cwd)
+        authority = records / "sci"
+    else:
+        init = run([binary, "init", "--prefix", "sci"], "", env, cwd)
+        authority = cwd
+    assert init["exit"] == 0, f"fixture init: {init}"
+    if notice in ("halt", "bad-scan", "detached", "historical", "historical-mismatch", "pairing-mismatch",
+                  "linked-worktree", "in-tree-worktree", "non-directory"):
+        added = run([binary, "add", "Stop work", "--tag", "halt"], "", env, authority)
+        assert added["exit"] == 0, f"fixture halt: {added}"
+        halt_path = authority / "tasks" / (json.loads(added["stdout"])["id"] + ".md")
+        if notice == "bad-scan":
+            halt_path.write_text("corrupt record")
+    if linked:
+        checkout = base / "linked-code"
+        repository(env, checkout)
+        with (authority / "tasks/.config.toml").open("a") as stream:
+            stream.write("\n[checkout]\npath=" + json.dumps(str(checkout)) + "\n")
+        cwd = checkout
+    if notice in ("in-tree-worktree", "unregistered-git"):
+        repository(env, cwd)
+    if notice in ("historical", "linked-worktree", "in-tree-worktree"):
+        worktree = base / "worktree"
+        git(env, cwd, "worktree", "add", "-q", "-b", "side", str(worktree))
+        assert pathlib.Path(git(env, worktree, "rev-parse", "--show-toplevel")) == worktree
+        assert pathlib.Path(git(env, worktree, "rev-parse", "--absolute-git-dir")).is_relative_to(cwd)
+        if notice == "historical":
+            (worktree / "tasks").mkdir()
+            (worktree / "tasks/.config.toml").write_text("prefix='sci'\n")
+            git(env, worktree, "add", "tasks")
+            git(env, worktree, "commit", "-qm", "historical records")
+        if notice == "in-tree-worktree":
+            (worktree / "tasks" / halt_path.name).unlink()
+        cwd = worktree
+    if notice in ("historical-mismatch", "pairing-mismatch"):
+        foreign = base / "foreign"
+        repository(env, foreign)
+        if notice == "historical-mismatch":
+            (foreign / "tasks").mkdir()
+            (foreign / "tasks/.config.toml").write_text("prefix='sci'\n")
+            cwd = foreign
+        else:
+            (authority / "tasks/.config.toml").write_text("prefix='sci'\n[checkout]\nkind='detached'\npath=" + json.dumps(str(foreign)) + "\n")
+    if notice in ("unregistered", "unregistered-git"):
+        (home / ".config/tasks/projects.toml").write_text("[projects]\n")
+    elif notice in ("corrupt-config", "missing-prefix"):
+        (cwd / "tasks/.config.toml").write_text("broken [toml" if notice == "corrupt-config" else "[git]\ncommit=false\n")
+    elif notice == "non-directory":
+        cwd = cwd / "README"
+        cwd.write_text("not a directory")
+    elif notice in ("missing-cwd", "no-project"):
+        cwd = base / "other"
+        if notice == "no-project":
+            cwd.mkdir()
+    return cwd
+
+
 def replay(case, binary, identities):
     with tempfile.TemporaryDirectory(prefix="tasks-hook-replay-") as tmp:
-        base = pathlib.Path(tmp)
+        base = pathlib.Path(tmp).resolve()
         home, cwd, private_bin = base / "home", base / "code", base / "bin"
         for path in (home, cwd, private_bin):
             path.mkdir()
         (private_bin / "tasks").symlink_to(binary)
         env = environment(home, private_bin)
-        init = run([binary, "init", "--prefix", "sci"], "", env, cwd)
-        assert init["exit"] == 0, f"fixture init: {init}"
         notice = case.get("notice")
-        if notice in ("halt", "bad-scan"):
-            added = run([binary, "add", "Stop work", "--tag", "halt"], "", env, cwd)
-            assert added["exit"] == 0, f"fixture halt: {added}"
-            if notice == "bad-scan":
-                (cwd / "tasks" / (json.loads(added["stdout"])["id"] + ".md")).write_text("corrupt record")
-        if notice == "unregistered":
-            (home / ".config/tasks/projects.toml").write_text("[projects]\n")
-        elif notice == "corrupt-config":
-            (cwd / "tasks/.config.toml").write_text("broken [toml")
-        elif notice in ("missing-cwd", "no-project"):
-            cwd = base / "other"
-            if notice == "no-project":
-                cwd.mkdir()
+        cwd = project_fixture(binary, case, env, base, cwd, home)
         store = home / ".local/state/tasks/claims/sci.toml"
         mode = case.get("claims", "none")
         if mode not in ("none", "related", "worker"):
@@ -170,6 +237,8 @@ def replay(case, binary, identities):
                 assert new["reason"] == expected["reason"], json.dumps(row)
         if "contains" in case:
             assert case["contains"] in new.get("reason", ""), json.dumps(row)
+        if "context_contains" in case:
+            assert case["context_contains"] in new.get("context", ""), json.dumps(row)
         if case["classification"] == "private-uncertainty" and case.get("claims") != "none":
             assert "child and wake state are unknown" in new["reason"], json.dumps(row)
             for action in ("(1) Continue", "tasks park", "tasks done", "Do not end the turn"):
@@ -209,6 +278,7 @@ def main():
     version = run(["node", "--version"], "", {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}, ROOT)
     assert version["exit"] == 0 and int(version["stdout"].strip().lstrip("v").split(".")[0]) >= 22, "hook replay requires Node >=22"
     cases = json.loads((ROOT / "cases.json").read_text())
+    assert len({case["id"] for case in cases}) == len(cases), "duplicate replay case id"
     if selection == "smallest":
         names = {"own-live", "retry", "shell-running", "halt-codex", "agy-count-decimal-one"}
         cases = [c for c in cases if c["id"] in names]

@@ -656,8 +656,21 @@ fn hooks_replay_smallest() {
     );
 }
 #[test]
+fn hooks_replay_authority_pilot() {
+    for id in [
+        "historical-codex",
+        "linked-worktree-codex",
+        "in-tree-worktree-codex",
+        "pairing-mismatch-codex",
+        "non-directory-codex",
+    ] {
+        let row = common::hooks::replay_case(id);
+        assert_eq!(row.subscriber_decision, "context");
+    }
+}
+#[test]
 fn hooks_replay_corpus() {
-    assert!(common::hooks::replay("corpus")["count"].as_u64().unwrap() >= 83);
+    assert_eq!(common::hooks::replay("corpus")["count"], 185);
 }
 
 #[test]
