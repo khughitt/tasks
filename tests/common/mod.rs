@@ -13,14 +13,39 @@ use tempfile::TempDir;
 /// magenta paints P1 as `38;2;215;95;215`.
 pub const TEST_PALETTE: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7";
 
+fn has_executable(dir: &Path, name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    dir.join(name)
+        .metadata()
+        .is_ok_and(|meta| meta.is_file() && (meta.permissions().mode() & 0o111) != 0)
+}
+
+fn test_path(home: &Path) -> std::ffi::OsString {
+    let host_path = std::env::var_os("PATH").expect("PATH is set");
+    let mut entries = vec![home.join(".fake-bin")];
+    for entry in std::env::split_paths(&host_path) {
+        if has_executable(&entry, "relay") {
+            assert!(
+                !has_executable(&entry, "git") && !has_executable(&entry, "sh"),
+                "dropped host PATH entry {} holds relay alongside git or sh",
+                entry.display()
+            );
+            continue;
+        }
+        entries.push(entry);
+    }
+    std::env::join_paths(entries).expect("valid test PATH entries")
+}
+
 /// The environment every test subprocess starts from, built key by key: nothing of the
-/// invoking process leaks in, and a failing case cannot print a credential. `PATH` is
-/// copied, `HOME` is the test home, git gets an identity and no global or system config,
-/// and `GIT_CEILING_DIRECTORIES` and `TMPDIR` are copied when set. `TASKS_PALETTE` keeps
-/// the child from querying the terminal of whoever runs the suite.
+/// invoking process leaks in, and a failing case cannot print a credential. `PATH` puts
+/// `<home>/.fake-bin` first and drops host entries holding `relay`, `HOME` is the test home,
+/// git gets an identity and no global or system config, and `GIT_CEILING_DIRECTORIES` and
+/// `TMPDIR` are copied when set. `TASKS_PALETTE` keeps the child from querying the terminal
+/// of whoever runs the suite.
 pub fn isolated_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
     let mut vars: Vec<(&'static str, std::ffi::OsString)> = vec![
-        ("PATH", std::env::var_os("PATH").expect("PATH is set")),
+        ("PATH", test_path(home)),
         ("HOME", home.into()),
         ("XDG_CONFIG_HOME", home.join(".config").into()),
         ("XDG_STATE_HOME", home.join(".local/state").into()),
@@ -49,10 +74,28 @@ pub struct TestEnv {
 
 impl TestEnv {
     pub fn new() -> TestEnv {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".fake-bin")).unwrap();
         TestEnv {
-            home: tempfile::tempdir().unwrap(),
+            home,
             dirs: Vec::new(),
         }
+    }
+
+    pub fn fake_bin(&self) -> PathBuf {
+        self.home.path().join(".fake-bin")
+    }
+
+    pub fn fake_relay(&self, script: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = self.fake_bin();
+        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = dir.join(".relay.tmp");
+        let dest = dir.join("relay");
+        std::fs::write(&tmp, script).unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(&tmp, &dest).unwrap();
+        dest
     }
 
     pub fn cmd(&self, dir: &Path) -> Command {
