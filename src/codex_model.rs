@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde_json::Value;
 use std::ffi::OsStr;
 use std::io::Read;

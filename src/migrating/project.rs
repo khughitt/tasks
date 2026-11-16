@@ -937,6 +937,7 @@ fn project_closed_in(
     carried_ids: &BTreeMap<TaskId, TaskId>,
     now: &str,
     wide: &Wide,
+    record_provenance: bool,
 ) -> Result<(Vec<Closed>, Vec<RefusalOut>)> {
     let suffix = format!(" list: sha256:{}", list.sha256);
     let succ = ctx.target.prefix.clone();
@@ -1141,7 +1142,11 @@ fn project_closed_in(
         }
         note.push_str(&suffix);
         let model = if decision == Decision::Close {
-            commands::completion_model()?
+            if record_provenance || !crate::codex_model::triggered() {
+                commands::completion_model(&mut ctx.source.warnings)?
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -1214,9 +1219,10 @@ fn projectable(ctx: &MigrateCtx, list: &LoadedList) -> Result<LoadedList> {
 /// reports all failures). A header mismatch says the list is for another run, so nothing
 /// is projected. The projection is `None` only then; refusal `settle` texts name unassigned
 /// ids as `new:<v1 id>`.
-pub fn explain(
+fn explain_in(
     ctx: &mut MigrateCtx,
     list: &LoadedList,
+    record_provenance: bool,
 ) -> Result<(Option<Projection>, Vec<RefusalOut>)> {
     let mut refusals = super::preflight::check_list(ctx, list)?;
     if refusals.iter().any(|r| r.rule == "header_mismatch") {
@@ -1228,7 +1234,7 @@ pub fn explain(
     refusals.extend(more);
     let wide = release::read(&ctx.registry, &ctx.source.project.root)?;
     ctx.source.warnings.extend(wide.warnings.iter().cloned());
-    let (closed, more) = project_closed_in(ctx, &list, &id_map, &now, &wide)?;
+    let (closed, more) = project_closed_in(ctx, &list, &id_map, &now, &wide, record_provenance)?;
     refusals.extend(more);
     for refusal in &mut refusals {
         refusal.settle = shown(&id_map, &refusal.settle);
@@ -1287,12 +1293,19 @@ pub fn explain(
     ))
 }
 
+pub fn explain(
+    ctx: &mut MigrateCtx,
+    list: &LoadedList,
+) -> Result<(Option<Projection>, Vec<RefusalOut>)> {
+    explain_in(ctx, list, false)
+}
+
 /// `explain` for a run: the projection of a list with no refusal, or every refusal.
 pub fn preflight(
     ctx: &mut MigrateCtx,
     list: &LoadedList,
 ) -> Result<std::result::Result<Projection, Vec<RefusalOut>>> {
-    Ok(match explain(ctx, list)? {
+    Ok(match explain_in(ctx, list, true)? {
         (Some(projection), refusals) if refusals.is_empty() => Ok(projection),
         (_, refusals) => Err(refusals),
     })

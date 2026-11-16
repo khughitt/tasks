@@ -28049,11 +28049,23 @@ fn add_writes_one_stamped_creation_note() {
             Some(root) => assert_eq!(note["root_session"], *root),
             None => assert!(note.get("root_session").is_none(), "{note}"),
         }
+        let has_codex = vars.iter().any(|(k, _)| *k == "CODEX_THREAD_ID");
+        if has_codex {
+            assert_eq!(shown["agent"], "codex", "{vars:?}");
+        }
         let warnings = out["warnings"].as_array().unwrap();
         if vars.len() == 2 && pair.is_none() {
-            let text = serde_json::to_string(warnings).unwrap();
+            assert_eq!(warnings.len(), 2, "{warnings:?}");
+            assert_eq!(warnings[0], "model resolver missing");
+            let text = warnings[1].as_str().unwrap();
             assert!(text.contains("CLAUDE_CODE_SESSION_ID") && text.contains("CODEX_THREAD_ID"));
             assert!(!text.contains("secret"), "{text}");
+        } else if has_codex {
+            assert_eq!(
+                warnings,
+                &vec![serde_json::json!("model resolver missing")],
+                "{warnings:?}"
+            );
         } else {
             assert!(warnings.is_empty(), "{warnings:?}");
         }

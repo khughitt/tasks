@@ -282,6 +282,9 @@ mean those documents were verified.
    `--agent` on `add` only with the harness/model you know (`<harness>/<model>`, or
    the harness alone); when unsure, pass nothing — never guess. `feedback` has no
    flag: supply `TASKS_AGENT=<harness>/<model>` on that invocation when known.
+   Under Codex (`CODEX_THREAD_ID` set), inline `TASKS_AGENT`/`TASKS_MODEL` are
+   ignored in favour of `relay model --harness codex` (unless `source.nearest`
+   names another harness matching `TASKS_AGENT`'s prefix); `--agent` still overrides.
    Under Claude Code the model half is the enclosing session's model.
    Recurring sweeps use `--every 30d` (positive whole days or weeks, up to 36500 days;
    goals cannot recur). `done` closes normally, anchors the next cycle, and writes an
