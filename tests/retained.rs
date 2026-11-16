@@ -1617,18 +1617,17 @@ fn retained_checkpoint_foreign_claim_hints_and_identity_precedence() {
     let host_cfg = f.env.home.path().join(".config/tasks/config.toml");
     std::fs::create_dir_all(host_cfg.parent().unwrap()).unwrap();
     std::fs::write(&host_cfg, "[identity]\nrelay = true\n").unwrap();
-    let out = f
-        .env
-        .cmd(&f.dir)
-        .args([
-            "retained",
-            "checkpoint",
-            &f.id,
-            "--request",
-            req_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let out = common::harness_shim(
+        &f.dir,
+        f.env.home.path(),
+        "codex",
+        &format!(
+            "\"$TASKS_BIN\" retained checkpoint {} --request '{}'",
+            f.id,
+            req_path.display()
+        ),
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
     assert_eq!(common::err_kind(&out), "config", "{out:?}");
     let id_detail = common::err_detail(&out);
     assert!(

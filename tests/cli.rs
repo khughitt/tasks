@@ -19962,6 +19962,7 @@ fn harness_shim_starts_from_isolated_env_and_drops_ambient_variables() {
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .env_clear()
             .envs(common::isolated_env(scratch.path()))
+            .env("CARGO_BIN_EXE_tasks", env!("CARGO_BIN_EXE_tasks"))
             .env("TASKS_SHIM_ENV_CHILD", "1")
             .env("DUMMY_SECRET", "sentinel-secret-value")
             .env("ANTIGRAVITY_CONVERSATION_ID", "leaked-agy-conv")

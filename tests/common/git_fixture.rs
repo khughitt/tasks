@@ -71,6 +71,7 @@ pub fn hostile_parent(test: &str) -> bool {
     let out = Command::new(std::env::current_exe().unwrap())
         .env_clear()
         .envs(super::isolated_env(&home))
+        .env("CARGO_BIN_EXE_tasks", env!("CARGO_BIN_EXE_tasks"))
         .env("TASKS_GIT_FIXTURE_CHILD", "1")
         .env("GIT_DIR", foreign.join(".git"))
         .env("GIT_COMMON_DIR", foreign.join(".git"))

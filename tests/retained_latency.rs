@@ -63,6 +63,7 @@ fn retained_latency_harness_smallest() {
     command
         .env_clear()
         .envs(common::isolated_env(settings.out.as_path()))
+        .env("CARGO_BIN_EXE_tasks", env!("CARGO_BIN_EXE_tasks"))
         .env("TASKS_MEASURE_OUT", &no_request)
         .env("TT_FORCE", "1")
         .args([
@@ -1203,7 +1204,8 @@ impl Fixture {
             self.publication(publication, &result["operation"])?;
         }
         let mut tasks = Vec::new();
-        for id in self.ids[..2].to_vec() {
+        for index in 0..2 {
+            let id = self.ids[index].clone();
             let state = self.state(&id)?;
             require(
                 state["complete"] == true
@@ -2157,10 +2159,9 @@ fn retained_latency_seed_history() {
             if let Some(op) = result["operation"]["operation_id"]
                 .as_str()
                 .and_then(|x| u64::from_str_radix(x, 16).ok())
+                && (1..=6).contains(&op)
             {
-                if (1..=6).contains(&op) {
-                    results.insert(op, result);
-                }
+                results.insert(op, result);
             }
         }
         assert_eq!(results.len(), 6);
@@ -2223,7 +2224,7 @@ fn retained_latency_seed_history() {
             );
             assert_eq!(
                 projection.tasks[index].items[0].payload_sha256,
-                digest(&vec![b'c'; 64])
+                digest(&[b'c'; 64])
             );
         }
         let path = root.path().join(layout).join("seed-inputs.json");
