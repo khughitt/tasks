@@ -92,6 +92,10 @@ work order. Read commands do not acquire claims or perform lifecycle transitions
 `parent` expresses same-project containment. A task with children is a goal;
 it does not become ready itself. `depends` expresses execution order and may
 cross projects. Neither relation implies the other, and cycles are refused.
+`show` lists the tasks that depend on the shown one as `dependents` (pretty
+`dependent` rows), open and closed. Plain `show` finds those in its own project;
+`show --all-projects` also searches every reachable registered project, such as a
+hub goal elsewhere that depends on a cross-project piece. `next` uses its own scope.
 `goals` reports user or mixed-origin goals and their descendants (done goals are
 left out unless `--closed` adds those closed in the last 14 days); dependency
 counts are reported separately and do not redefine the goal's intended scope.
@@ -127,7 +131,7 @@ full titles. Project colors and `--color always` do not change width budgets.
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
 `show` collects every task link in the `── related ──` section: rows run in the
-order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `followed by`, and `child`,
+order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, and `child`,
 formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
 Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
 recency scale); an unresolved target leaves the date blank and prints
@@ -139,7 +143,8 @@ informational citation. Follows does not require an earlier task to close or cha
 readiness, review or completion. Existing source/related links are not converted.
 Show and next display stored outgoing follows rows, including foreign, moved and
 unresolved targets. They also display direct incoming `followed by` rows, including closed follow-ups.
-Plain show searches its local scan; next uses its existing group/all-project scope.
+Plain show searches its local scan, and `show --all-projects` every reachable
+registered project; next uses its existing group/all-project scope.
 No incoming row means none found in that readable scope. After a move, the view
 matches the focal work’s verified move history; old/new ids agree only over the
 same complete scan and history. Incomplete history warns once and keeps direct

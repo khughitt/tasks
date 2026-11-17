@@ -179,10 +179,19 @@ false booleans, zero numbers and empty body remain. Response containers such as
 `tasks` and `warnings` remain arrays, and an empty `next` result is explicit null.
 Summary/park/goal rows are projections, not interchangeable full Task objects.
 Resolved relationship entries on `show` and `next` (`parent`, `children`,
-`depends_on`, `related_to`, `follows_tasks`, `wake_targets` and `source_task`) carry `id`,
+`depends_on`, `dependents`, `related_to`, `follows_tasks`, `followed_by`, `wake_targets` and
+`source_task`) carry `id`,
 `title`, `status` and `updated` (plus `resolved` on `depends_on`, `related_to`, `follows_tasks`,
 `wake_targets` and `source_task`, where unresolved entries omit `title`,
 `status` and `updated`).
+`dependents` lists every task whose `depends` names this one under any spelling of
+its id (a retired prefix counts), open and closed, in ready order, deduplicated by
+canonical id and excluding moved tombstones. Matching is literal: it follows no move
+chain. Plain `show` reads its own project's scan; `show --all-projects` adds every
+other reachable registered project (its own records stay the copy already read) and
+carries unreachable-project warnings; `next` uses its requested scope. The same
+widened scan feeds `followed_by`; no other field changes. A missing field means none
+found in that readable scope, not none elsewhere.
 Additive output fields are allowed; clients should ignore unknown output fields.
 
 JSON success goes to stdout; a clean `tasks check` is silent with exit 0.
@@ -212,8 +221,8 @@ Missing targets remain unresolved with warnings; moved targets display the store
 tombstone. The optional `followed_by` rows (id/title/status/updated) discover direct
 follow-ups, including open, done and dropped work, excluding moved citing records.
 They deduplicate by canonical citing id and use ready ordering, as children do.
-Plain show scans locally; next uses its existing requested local/group/all-project
-scope. A missing field means none found in that readable scope, not none elsewhere.
+Plain show scans locally; `show --all-projects` widens the scan to every reachable
+registered project; next uses its existing requested local/group/all-project scope. A missing field means none found in that readable scope, not none elsewhere.
 
 For an ordinary focal task, inverse matching compares canonical ids without
 looking up follows targets. For moved focal work, the view builds its identity

@@ -645,6 +645,10 @@ pub enum Command {
         /// `step_found` is omitted for an external plan.
         #[arg(long)]
         no_fetch: bool,
+        /// Find dependents and followers in every reachable registered project, not
+        /// only the task's own; other fields are unchanged.
+        #[arg(long)]
+        all_projects: bool,
     },
     /// Print a linked plan or spec body, or a referenced document.
     #[command(group(clap::ArgGroup::new("doc_kind").args(["plan", "spec", "handle"]).required(true)))]
