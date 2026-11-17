@@ -15,24 +15,31 @@ pub fn run(mut ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
     let now = crate::time::parse(&crate::time::now())?;
     let mut nodes = Vec::new();
     let mut captured = Vec::new();
+    let mut opened = Vec::new();
     let mut projects = Vec::new();
-    for (_, tasks) in ctx.scope.scan_each()? {
+    for (project, tasks) in ctx.scope.scan_each()? {
         let start = captured.len();
+        opened.push(project.prefix.clone());
         captured.extend(tasks);
-        projects.push(start..captured.len());
+        projects.push((project.prefix.clone(), start..captured.len()));
     }
+    let hierarchy = crate::hierarchy::view_of(&captured, &opened, &ctx.registry);
     // Activity sees cross-project edges, while each forest keeps its project ordering.
     let activity = crate::activity::ActivityIndex::of_scan(&captured, &ctx.registry, now);
-    for project in projects {
-        let tasks = &captured[project];
-        if let Some(root) = &root
-            && !tasks.iter().any(|task| &task.id == root)
-        {
-            return Err(Error::TaskNotFound(root.to_string()));
+    for (prefix, range) in projects {
+        let tasks = &captured[range];
+        if let Some(root) = &root {
+            let canonical_root = ctx.registry.canonical_id(root);
+            let canonical_prefix = ctx.registry.canonical_prefix(&prefix);
+            if canonical_root.prefix != canonical_prefix || hierarchy.get(&canonical_root).is_none()
+            {
+                return Err(Error::TaskNotFound(root.to_string()));
+            }
         }
         let deps = super::list::review_deps(&mut ctx, tasks)?;
         nodes.extend(crate::hierarchy::forest(
             tasks,
+            &hierarchy,
             &deps,
             root.as_ref(),
             all,

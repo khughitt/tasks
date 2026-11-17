@@ -346,13 +346,23 @@ pub fn attention(
     }
     let mut paused_lane = Vec::new();
     for record in &records {
-        let prefix = registry.canonical_id(&record.id).prefix;
-        let Some(scan) = membership.project(&prefix)? else {
+        let canonical = registry.canonical_id(&record.id);
+        let Some(index) = membership.hierarchy(&canonical.prefix)? else {
             continue;
         };
-        let Some(lane) = hierarchy::paused_lane(scan, record, registry) else {
+        let Some(scan) = membership.project(&canonical.prefix)? else {
             continue;
         };
+        let Some(at) = index.position(&canonical) else {
+            continue;
+        };
+        let Some(lane_slot) = index.enclosing_lane(at) else {
+            continue;
+        };
+        let lane = &scan[lane_slot];
+        if lane.status != Status::Blocked {
+            continue;
+        }
         let id = registry.canonical_id(&lane.id).to_string();
         if paused_lane.contains(&id) || blocked.iter().any(|hit| hit.id == id) {
             continue;
@@ -374,17 +384,16 @@ pub fn attention(
 /// Shelved, dropped, moved and older done goals are never walked.
 pub fn shown<'a>(
     all: &'a [Task],
+    hierarchy: &hierarchy::HierarchyView<'a>,
     registry: &Registry,
     now: OffsetDateTime,
     include_closed: bool,
 ) -> (Vec<&'a Task>, Vec<&'a Task>) {
     let (mut active, mut closed) = (Vec::new(), Vec::new());
     for task in all {
+        let canonical = registry.canonical_id(&task.id);
         if !matches!(task.origin, Some(Origin::User | Origin::Mixed))
-            || !hierarchy::is_goal(
-                task,
-                !hierarchy::children(all, &task.id, registry).is_empty(),
-            )
+            || !hierarchy::is_goal(task, hierarchy.child_count(&canonical) > 0)
         {
             continue;
         }
@@ -407,8 +416,10 @@ pub fn shown<'a>(
 /// Activity means activity among the goal and its members for open rows and closure for
 /// closed rows. Open dependencies change neither order nor flags. Closed rows appear only
 /// when `include_closed` is set. Every number is over the goal's members across projects.
-pub fn goal_rows(
-    all: &[Task],
+#[allow(clippy::too_many_arguments)]
+pub fn goal_rows<'a>(
+    all: &'a [Task],
+    hierarchy: &hierarchy::HierarchyView<'a>,
     membership: &mut Membership<'_>,
     claims: &ClaimSnapshot,
     registry: &Registry,
@@ -418,7 +429,7 @@ pub fn goal_rows(
 ) -> Result<Vec<GoalRow>> {
     let mut open: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
     let mut closed: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
-    let (active, recent) = shown(all, registry, now, include_closed);
+    let (active, recent) = shown(all, hierarchy, registry, now, include_closed);
     for task in active.into_iter().chain(recent) {
         let members = membership.members(task)?;
         let refs: Vec<&Task> = members.iter().collect();

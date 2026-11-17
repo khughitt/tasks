@@ -24,10 +24,12 @@ pub fn run(
     let without = Without::from_env(&without.without, &super::list::vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     let halts = super::list::halt_snapshots(&mut ctx, &all);
     let deps = super::list::review_deps(&mut ctx, &all)?;
     let lanes = rows(
-        &mut ctx, &all, &deps, &claims, &halts, cutoff, &without, now,
+        &mut ctx, &all, &hierarchy, &deps, &claims, &halts, cutoff, &without, now,
     )?;
     let colors = ctx.project_colors();
     let mut out = Output::Lanes(LanesOut {
@@ -46,9 +48,10 @@ pub fn run(
 /// fail the view or `prime`. Holds are read as `ready` reads them. `deps` is
 /// `all`'s dependency view (docs/user-guide.md).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn rows(
+pub(super) fn rows<'a>(
     ctx: &mut ReadCtx,
-    all: &[Task],
+    all: &'a [Task],
+    hierarchy: &'a crate::hierarchy::HierarchyView<'a>,
     deps: &crate::review::Deps,
     claims: &ClaimSnapshot,
     halts: &HashMap<String, HaltSnapshot>,
@@ -63,7 +66,7 @@ pub(super) fn rows(
         return Ok(Vec::new());
     }
     let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
-    for task in crate::lanes::dependency_readers(all, claims, &ctx.registry, now) {
+    for task in crate::lanes::dependency_readers(all, hierarchy, claims, &ctx.registry, now) {
         for dependency in &task.depends {
             if closed.contains_key(dependency) {
                 continue;
@@ -79,6 +82,7 @@ pub(super) fn rows(
     let dependency = |id: &TaskId| closed.get(id).copied().flatten();
     Ok(crate::lanes::build(&Inputs {
         all,
+        hierarchy,
         claims,
         registry: &ctx.registry,
         deps,

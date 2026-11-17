@@ -165,6 +165,7 @@ pub struct LaneRow {
 pub struct Inputs<'a> {
     /// The scope's scan.
     pub all: &'a [Task],
+    pub hierarchy: &'a crate::hierarchy::HierarchyView<'a>,
     pub claims: &'a ClaimSnapshot,
     pub registry: &'a Registry,
     /// `all`'s dependency view, for the rows' review state (docs/user-guide.md).
@@ -249,6 +250,7 @@ fn could_step(task: &Task, claims: &ClaimSnapshot, now: OffsetDateTime) -> bool 
 /// foreign record since garbled or gone) cannot fail `tasks lanes` or `prime`.
 pub fn dependency_readers<'a>(
     all: &'a [Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'a>,
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
@@ -257,7 +259,7 @@ pub fn dependency_readers<'a>(
         .filter(|lane| {
             lane.lane && crate::hierarchy::is_active(lane) && lane.status != Status::Blocked
         })
-        .flat_map(|lane| crate::hierarchy::descendants(all, &lane.id, registry))
+        .flat_map(|lane| hierarchy.descendants(&registry.canonical_id(&lane.id)))
         .filter(|task| is_live(task) && could_step(task, claims, now))
         .collect()
 }
@@ -276,10 +278,8 @@ enum Class<'a> {
 fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
     let claims = inputs.claims;
     let park = claims.park(&task.id);
-    let goal = crate::hierarchy::is_goal(
-        task,
-        !crate::hierarchy::children(inputs.all, &task.id, inputs.registry).is_empty(),
-    );
+    let canonical = inputs.registry.canonical_id(&task.id);
+    let goal = crate::hierarchy::is_goal(task, inputs.hierarchy.child_count(&canonical) > 0);
     // The session gates (`without`, `cutoff`, `halt`) and `depends` stop steps, so they
     // judge only work that could be a step. A sub-goal and work parked on a person are
     // never steps, though a todo of either is a candidate; they and every other non-step
@@ -347,14 +347,17 @@ fn row(inputs: &Inputs, lane: &Task, picked: &mut BTreeMap<String, TaskId>) -> L
     let summary = |task: &Task| {
         TaskSummary::of(
             task,
-            inputs.all,
+            inputs.hierarchy,
             inputs.deps,
             Some(inputs.claims),
             inputs.registry,
             inputs.now,
         )
     };
-    let mut live: Vec<&Task> = crate::hierarchy::descendants(inputs.all, &lane.id, inputs.registry)
+    let canonical_lane = inputs.registry.canonical_id(&lane.id);
+    let mut live: Vec<&Task> = inputs
+        .hierarchy
+        .descendants(&canonical_lane)
         .into_iter()
         .filter(|task| is_live(task))
         .collect();
@@ -580,8 +583,10 @@ mod tests {
         let vocabularies = HashMap::from([("xx", &world.vocabulary)]);
         // The fixture's own session is "me": its claims are this caller's holds.
         let mine = world.holds.mine(|claim| Ok(claim.session == "me")).unwrap();
+        let hierarchy = crate::hierarchy::view_of(all, &["xx".to_string()], &world.registry);
         build(&Inputs {
             all,
+            hierarchy: &hierarchy,
             claims: &world.claims,
             registry: &world.registry,
             deps: &deps,
@@ -873,8 +878,10 @@ mod tests {
             BTreeMap::from([("xx-000006".to_string(), agent_park())]),
             BTreeMap::new(),
         );
+        let registry = Registry::default();
+        let hierarchy = crate::hierarchy::view_of(&all, &["xx".to_string()], &registry);
         let mut readers: Vec<String> =
-            dependency_readers(&all, &claims, &Registry::default(), at(NOW))
+            dependency_readers(&all, &hierarchy, &claims, &registry, at(NOW))
                 .iter()
                 .map(|task| task.id.to_string())
                 .collect();

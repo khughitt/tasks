@@ -3,17 +3,32 @@
 //! its declared pieces (resolved through moves), excluding the goal itself.
 
 use crate::error::Result;
+use crate::hierarchy::HierarchyIndex;
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
+
+struct ProjectScan {
+    tasks: Vec<Task>,
+    index: Arc<HierarchyIndex>,
+}
+
+impl ProjectScan {
+    fn new(tasks: Vec<Task>, registry: &Registry) -> Self {
+        let refs: Vec<&Task> = tasks.iter().collect();
+        let index = Arc::new(HierarchyIndex::new(&refs, registry));
+        ProjectScan { tasks, index }
+    }
+}
 
 /// Goal membership across projects for one command: "every record reachable from the goal
 /// by repeatedly following two edges, excluding the goal itself: 1. `parent` children
 /// (same project), and 2. declared pieces, each resolved through moves" (spec §6.1).
 pub struct Membership<'r> {
     registry: &'r Registry,
-    /// Canonical prefix → that project's records; `None` when it is unreachable.
-    projects: BTreeMap<String, Option<Vec<Task>>>,
+    /// Canonical prefix → that project's records and hierarchy index; `None` when unreachable.
+    projects: BTreeMap<String, Option<ProjectScan>>,
     memo: HashMap<TaskId, Vec<Task>>,
     reached: BTreeSet<String>,
     warnings: Vec<String>,
@@ -24,21 +39,18 @@ impl<'r> Membership<'r> {
     /// entry, and the caller's own unregistered local project is never treated as foreign),
     /// then fills those entries from `scanned`, grouped by canonical prefix.
     pub fn new(registry: &'r Registry, opened: &[String], scanned: &[Task]) -> Self {
-        let mut projects: BTreeMap<String, Option<Vec<Task>>> = opened
+        let mut grouped: BTreeMap<String, Vec<Task>> = opened
             .iter()
-            .map(|prefix| {
-                (
-                    registry.canonical_prefix(prefix).to_string(),
-                    Some(Vec::new()),
-                )
-            })
+            .map(|prefix| (registry.canonical_prefix(prefix).to_string(), Vec::new()))
             .collect();
         for task in scanned {
             let prefix = registry.canonical_id(&task.id).prefix;
-            if let Some(scan) = projects.entry(prefix).or_insert_with(|| Some(Vec::new())) {
-                scan.push(task.clone());
-            }
+            grouped.entry(prefix).or_default().push(task.clone());
         }
+        let projects = grouped
+            .into_iter()
+            .map(|(prefix, tasks)| (prefix, Some(ProjectScan::new(tasks, registry))))
+            .collect();
         Membership {
             registry,
             projects,
@@ -59,11 +71,15 @@ impl<'r> Membership<'r> {
         let mut members = Vec::new();
         let registry = self.registry;
         while let Some(record) = queue.pop_front() {
-            let prefix = registry.canonical_id(&record.id).prefix;
-            let kids: Vec<Task> = match self.project(&prefix)? {
-                Some(scan) => crate::hierarchy::children(scan, &record.id, registry)
-                    .into_iter()
-                    .cloned()
+            let canonical_record = registry.canonical_id(&record.id);
+            let prefix = canonical_record.prefix.clone();
+            let _ = self.project(&prefix)?;
+            let kids: Vec<Task> = match self.projects[&prefix].as_ref() {
+                Some(entry) => entry
+                    .index
+                    .children_of_id(&canonical_record)
+                    .iter()
+                    .map(|&slot| entry.tasks[slot].clone())
                     .collect(),
                 None => Vec::new(),
             };
@@ -98,10 +114,10 @@ impl<'r> Membership<'r> {
     pub fn lookup(&mut self, id: &TaskId) -> Result<Option<Task>> {
         let id = self.registry.canonical_id(id);
         match self.projects.get(&id.prefix) {
-            Some(Some(scan)) => Ok(scan
-                .iter()
-                .find(|task| self.registry.canonical_id(&task.id) == id)
-                .cloned()),
+            Some(Some(entry)) => Ok(entry
+                .index
+                .position(&id)
+                .map(|slot| entry.tasks[slot].clone())),
             Some(None) => Ok(None),
             None => crate::resolve::resolve_registered_canonical(self.registry, &id),
         }
@@ -114,12 +130,23 @@ impl<'r> Membership<'r> {
             let scan = self.open(&prefix)?;
             self.projects.insert(prefix.clone(), scan);
         }
-        Ok(self.projects[&prefix].as_deref())
+        Ok(self.projects[&prefix]
+            .as_ref()
+            .map(|entry| entry.tasks.as_slice()))
+    }
+
+    /// Cached per-project hierarchy index, opening through [`Self::project`] when needed.
+    pub fn hierarchy(&mut self, prefix: &str) -> Result<Option<Arc<HierarchyIndex>>> {
+        let canonical = self.registry.canonical_prefix(prefix).to_string();
+        let _ = self.project(&canonical)?;
+        Ok(self.projects[&canonical]
+            .as_ref()
+            .map(|entry| Arc::clone(&entry.index)))
     }
 
     /// Opens and scans a project not in scope. Each warning is pushed once per prefix,
     /// because the result is cached.
-    fn open(&mut self, prefix: &str) -> Result<Option<Vec<Task>>> {
+    fn open(&mut self, prefix: &str) -> Result<Option<ProjectScan>> {
         let Some(dir) = crate::scope::config_dir(self.registry, prefix) else {
             self.warnings
                 .push(format!("project {prefix} is not registered on this host"));
@@ -138,7 +165,7 @@ impl<'r> Membership<'r> {
         let scan = project
             .scan()
             .map_err(|error| error.in_project(&project.prefix))?;
-        Ok(Some(scan))
+        Ok(Some(ProjectScan::new(scan, self.registry)))
     }
 
     /// Canonical prefixes of every member returned so far.
@@ -162,7 +189,12 @@ impl<'r> Membership<'r> {
             registry,
             projects: projects
                 .into_iter()
-                .map(|(prefix, scan)| (prefix.to_string(), scan))
+                .map(|(prefix, scan)| {
+                    (
+                        prefix.to_string(),
+                        scan.map(|tasks| ProjectScan::new(tasks, registry)),
+                    )
+                })
                 .collect(),
             memo: HashMap::new(),
             reached: BTreeSet::new(),

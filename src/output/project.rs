@@ -264,17 +264,18 @@ impl DeferredInfo {
 }
 
 impl TaskSummary {
-    /// `all` is the scan the row came from; counts are computed against it, and `deps` is
-    /// that scan's dependency view (docs/user-guide.md).
+    /// `hierarchy` is the scan view the row came from; counts are computed against it, and
+    /// `deps` is that scan's dependency view (docs/user-guide.md).
     pub fn of(
         task: &Task,
-        all: &[Task],
+        hierarchy: &crate::hierarchy::HierarchyView<'_>,
         deps: &crate::review::Deps,
         claims: Option<&crate::claims::ClaimSnapshot>,
         registry: &Registry,
         now: OffsetDateTime,
     ) -> TaskSummary {
-        let child_count = crate::hierarchy::children(all, &task.id, registry).len();
+        let canonical = registry.canonical_id(&task.id);
+        let child_count = hierarchy.child_count(&canonical);
         let review_reason = crate::review::state(task, child_count, deps, now);
         TaskSummary {
             id: task.id.to_string(),
@@ -309,10 +310,11 @@ impl TaskSummary {
             depends: task.depends.iter().map(ToString::to_string).collect(),
             wake_on: task.wake_on.clone(),
             parent: task.parent.as_ref().map(ToString::to_string),
-            in_lane: crate::hierarchy::lane_of(all, task, registry),
+            in_lane: hierarchy
+                .lane_of(&canonical)
+                .map(|lane| registry.canonical_id(&lane.id)),
             child_count,
-            open_descendant_count: crate::hierarchy::open_descendants(all, &task.id, registry)
-                .len(),
+            open_descendant_count: hierarchy.open_descendant_count(&canonical),
             claim: claims
                 .and_then(|snapshot| snapshot.get(&task.id))
                 .map(|(claim, live)| ClaimInfo::of(claim, live)),

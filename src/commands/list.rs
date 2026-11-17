@@ -111,8 +111,10 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     check_parent(&filter, &all, |_| false)?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let deps = review_deps(&mut ctx, &all)?;
     let mut tasks = all.clone();
     tasks.retain(|task| {
@@ -132,7 +134,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
                 .is_none_or(|r| task.refs.iter().any(|e| e.reference == r))
             && filter.matches(&Fields::of_task(
                 task,
-                &all,
+                &hierarchy,
                 &deps,
                 &claims,
                 &ctx.registry,
@@ -165,7 +167,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,
@@ -191,7 +193,10 @@ fn list_parked(
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let rows = super::parked::rows_with_records(&mut ctx, &all, &claims, now, waiting_on)?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    let rows =
+        super::parked::rows_with_records(&mut ctx, &all, &hierarchy, &claims, now, waiting_on)?;
     let warnings = std::mem::take(&mut ctx.warnings);
     check_parent(&filter, &all, |parent| {
         rows.iter().any(|(row, _)| {
@@ -199,7 +204,7 @@ fn list_parked(
                 .is_some_and(|fields| fields.parent.as_ref() == Some(parent))
         })
     })?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let tasks = rows
         .into_iter()
         .filter(|(_, task)| {
@@ -292,9 +297,11 @@ fn closing_hint(id: &str, status: Status) -> String {
 
 /// Ready tasks in ready order; pushes a warning per unreachable dependency. `deps` is
 /// `all`'s dependency view (docs/user-guide.md).
+#[allow(clippy::too_many_arguments)]
 pub fn ready_tasks(
     ctx: &mut ReadCtx,
     all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     deps: &crate::review::Deps,
     claims: &crate::claims::ClaimSnapshot,
     snapshots: &HashMap<String, HaltSnapshot>,
@@ -309,7 +316,7 @@ pub fn ready_tasks(
             is_candidate(task, now)
                 && filter.matches(&Fields::of_task(
                     task,
-                    all,
+                    hierarchy,
                     deps,
                     claims,
                     &ctx.registry,
@@ -338,10 +345,8 @@ pub fn ready_tasks(
             }
         }
         // A lane is a goal even before its first child exists.
-        let goal = crate::hierarchy::is_goal(
-            task,
-            !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty(),
-        );
+        let canonical = ctx.registry.canonical_id(&task.id);
+        let goal = crate::hierarchy::is_goal(task, hierarchy.child_count(&canonical) > 0);
         match readiness(task, goal, &lookup, now) {
             Readiness::Ready => ready.push(task.clone()),
             Readiness::Deferred => deferred.push(task.clone()),
@@ -353,16 +358,22 @@ pub fn ready_tasks(
     // leaves here, before the claim and park checks that warn about what they drop, and
     // passes those same checks silently, so the paused count holds only work that would
     // otherwise be offered. A deferred task in a paused lane is in neither count.
-    let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready
-        .into_iter()
-        .partition(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some());
+    let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready.into_iter().partition(|task| {
+        hierarchy
+            .paused_lane(&ctx.registry.canonical_id(&task.id))
+            .is_some()
+    });
     paused.retain(|task| {
         claims.held(&task.id).is_none()
             && !claims
                 .park(&task.id)
                 .is_some_and(|park| park.waiting_on == WaitingOn::User)
     });
-    deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
+    deferred.retain(|task| {
+        hierarchy
+            .paused_lane(&ctx.registry.canonical_id(&task.id))
+            .is_none()
+    });
     let mut me = None;
     ready.retain(|task| match claims.get(&task.id) {
         Some((claim, live)) if !live.is_stale() => {
@@ -479,9 +490,9 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
 /// claim, and park checks to `paused`; this applies the halt, `--without`, and cutoff
 /// gates the caller applies to its own list, without their warnings, then counts each
 /// task once under its lane.
-fn warn_paused(
+pub(crate) fn warn_paused(
     ctx: &mut ReadCtx,
-    all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     mut paused: Vec<Task>,
     snapshots: &HashMap<String, HaltSnapshot>,
     without: &Without,
@@ -496,7 +507,8 @@ fn warn_paused(
     }
     let mut by_lane: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
     for task in &paused {
-        if let Some(lane) = crate::hierarchy::paused_lane(all, task, &ctx.registry) {
+        let canonical = ctx.registry.canonical_id(&task.id);
+        if let Some(lane) = hierarchy.paused_lane(&canonical) {
             by_lane
                 .entry(lane.id.clone())
                 .or_default()
@@ -584,11 +596,15 @@ pub fn ready(
     let mut filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     check_parent(&filter, &all, |_| false)?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let deps = review_deps(&mut ctx, &all)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let mut picked = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
+    let mut picked = ready_tasks(
+        &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, &filter, now,
+    )?;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -610,7 +626,7 @@ pub fn ready(
     }
     warn_paused(
         &mut ctx,
-        &all,
+        &hierarchy,
         picked.paused,
         &snapshots,
         &without,
@@ -625,7 +641,7 @@ pub fn ready(
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts,
         warnings: ctx.warnings,
@@ -659,12 +675,17 @@ pub fn next(
     )?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let deps = review_deps(&mut ctx, &all)?;
-    let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let candidates = super::parked::candidates(&mut ctx, &all, &deps, &claims, &filter, now)?;
+    let _ = super::parked::rows(&mut ctx, &all, &hierarchy, &claims, now)?;
+    let candidates =
+        super::parked::candidates(&mut ctx, &all, &hierarchy, &deps, &claims, &filter, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let ready = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
+    let ready = ready_tasks(
+        &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, &filter, now,
+    )?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;
@@ -704,7 +725,7 @@ pub fn next(
     let mut paused = candidates.paused;
     paused.extend(ready.paused);
     warn_paused(
-        &mut ctx, &all, paused, &snapshots, &without, cutoff, &claims,
+        &mut ctx, &hierarchy, paused, &snapshots, &without, cutoff, &claims,
     );
     let next = match pool.into_iter().next() {
         None => None,
@@ -797,6 +818,8 @@ pub fn prime(
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     let deps = review_deps(&mut ctx, &all)?;
     let upcoming: Vec<OffsetDateTime> = all
         .iter()
@@ -826,7 +849,7 @@ pub fn prime(
     };
     let counts = Counts::of(&all);
     let (left, parked): (Vec<ParkedRow>, Vec<ParkedRow>) =
-        super::parked::rows(&mut ctx, &all, &claims, now)?
+        super::parked::rows(&mut ctx, &all, &hierarchy, &claims, now)?
             .into_iter()
             .partition(closed_after_park);
     for row in &left {
@@ -844,6 +867,7 @@ pub fn prime(
     let mut ready = ready_tasks(
         &mut ctx,
         &all,
+        &hierarchy,
         &deps,
         &claims,
         &snapshots,
@@ -870,9 +894,16 @@ pub fn prime(
         .iter()
         .map(|(project, _, scan)| recorded_review_deps(&mut ctx, project, scan))
         .collect::<Result<_>>()?;
+    let elsewhere_views: Vec<_> = elsewhere
+        .iter()
+        .map(|(project, _, scan)| {
+            crate::hierarchy::view_of(scan, std::slice::from_ref(&project.prefix), &ctx.registry)
+        })
+        .collect();
     sort_list(&mut doing);
     let roadmap = crate::hierarchy::forest(
         &all,
+        &hierarchy,
         &deps,
         None,
         false,
@@ -890,11 +921,11 @@ pub fn prime(
     let mut closeout: Vec<Task> = Vec::new();
     let mut held: Vec<String> = Vec::new();
     'goals: for task in &all {
+        let canonical = ctx.registry.canonical_id(&task.id);
         // Current contract (docs/task-model.md): todo, doing, or blocked; an idea is open but not a candidate
         if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
-            || (task.pieces.is_empty()
-                && crate::hierarchy::children(&all, &task.id, &ctx.registry).is_empty())
-            || !crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry).is_empty()
+            || (task.pieces.is_empty() && hierarchy.child_count(&canonical) == 0)
+            || hierarchy.open_descendant_count(&canonical) > 0
         {
             continue;
         }
@@ -933,7 +964,7 @@ pub fn prime(
     ctx.warnings.extend(held);
     // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
     let lanes = super::lanes::rows(
-        &mut ctx, &all, &deps, &claims, &snapshots, cutoff, &without, now,
+        &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, cutoff, &without, now,
     )?;
     let wide = matches!(ctx.scope, Scope::All { .. });
     for project in ctx.scope.projects() {
@@ -998,7 +1029,7 @@ pub fn prime(
         closed,
         ready: ready
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         parked,
         lanes,
@@ -1008,13 +1039,13 @@ pub fn prime(
                 let source = elsewhere
                     .iter()
                     .position(|(_, found, _)| found.id == task.id);
-                let (scan, deps) = source.map_or((all.as_slice(), &deps), |at| {
-                    (elsewhere[at].2.as_slice(), &elsewhere_deps[at])
+                let (view, deps) = source.map_or((&hierarchy, &deps), |at| {
+                    (&elsewhere_views[at], &elsewhere_deps[at])
                 });
-                let mut row = TaskSummary::of(task, scan, deps, Some(&claims), &ctx.registry, now);
-                if source.is_some() {
+                let mut row = TaskSummary::of(task, view, deps, Some(&claims), &ctx.registry, now);
+                if let Some(at) = source {
                     let mut activity = crate::activity::ActivityIndex::default();
-                    activity.extend_scan(scan, &ctx.registry, now);
+                    activity.extend_scan(&elsewhere[at].2, &ctx.registry, now);
                     row.activity = activity.get(&task.id);
                 }
                 row
@@ -1023,7 +1054,7 @@ pub fn prime(
         roadmap,
         closeout: closeout
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts,
         warnings: ctx.warnings,

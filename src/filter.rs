@@ -134,15 +134,20 @@ impl TaskFilter {
     /// `--under` names a task in scope; its descendants at any depth, never itself, are
     /// what the filter keeps. Runs once the scan exists, before any `matches`; a no-op
     /// without `--under`.
-    pub fn resolve_under(&mut self, all: &[Task], registry: &Registry) -> Result<()> {
+    pub fn resolve_under(
+        &mut self,
+        hierarchy: &crate::hierarchy::HierarchyView<'_>,
+        registry: &Registry,
+    ) -> Result<()> {
         let Some(under) = &self.under else {
             return Ok(());
         };
-        if !all.iter().any(|task| task.id == *under) {
+        if hierarchy.get(under).is_none() {
             return Err(Error::TaskNotFound(under.to_string()));
         }
         self.subtree = Some(
-            crate::hierarchy::descendants(all, under, registry)
+            hierarchy
+                .descendants(under)
                 .into_iter()
                 .map(|task| registry.canonical_id(&task.id))
                 .collect(),
@@ -204,14 +209,16 @@ impl TaskFilter {
 impl<'a> Fields<'a> {
     pub fn of_task(
         task: &'a Task,
-        all: &[Task],
+        hierarchy: &crate::hierarchy::HierarchyView<'_>,
         deps: &crate::review::Deps,
         claims: &ClaimSnapshot,
         registry: &Registry,
         now: OffsetDateTime,
     ) -> Fields<'a> {
+        let id = registry.canonical_id(&task.id);
+        let child_count = hierarchy.child_count(&id);
         Fields {
-            id: registry.canonical_id(&task.id),
+            id,
             status: task.status,
             priority: task.priority,
             size: task.size,
@@ -227,13 +234,7 @@ impl<'a> Fields<'a> {
                 .as_ref()
                 .map(|parent| registry.canonical_id(parent)),
             parallel: task.parallel,
-            needs_review: crate::review::state(
-                task,
-                crate::hierarchy::children(all, &task.id, registry).len(),
-                deps,
-                now,
-            )
-            .is_some(),
+            needs_review: crate::review::state(task, child_count, deps, now).is_some(),
         }
     }
 

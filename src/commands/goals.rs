@@ -15,8 +15,17 @@ pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Re
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;
     let mut membership = Membership::new(&ctx.registry, &prefixes, &all);
+    let records = crate::hierarchy::project_records(&all, &prefixes, &ctx.registry);
+    let mut indexes = crate::hierarchy::ProjectIndexes::new();
+    for prefix in records.keys() {
+        let index = membership
+            .hierarchy(prefix)?
+            .expect("preseeded project in Membership has an index");
+        indexes.insert(prefix.clone(), index);
+    }
+    let hierarchy = crate::hierarchy::HierarchyView::new(records, indexes, &ctx.registry);
     // Only active goals carry attention, so only their members widen the claim stores.
-    let (active, _) = crate::goals::shown(&all, &ctx.registry, now, closed);
+    let (active, _) = crate::goals::shown(&all, &hierarchy, &ctx.registry, now, closed);
     for goal in active {
         membership.members(goal)?;
     }
@@ -27,6 +36,7 @@ pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Re
     let claims = crate::claims::ClaimSnapshot::load(stores.iter().map(String::as_str))?;
     let goals = crate::goals::goal_rows(
         &all,
+        &hierarchy,
         &mut membership,
         &claims,
         &ctx.registry,
