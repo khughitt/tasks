@@ -150,6 +150,8 @@ pub fn apply_fields(
     // `edit --no-depends` clears the list before this runs; `dep --rm` removes one.
     let warnings = dep::add_dependencies(ctx, &resolver, task, &fields.depends)?;
     ctx.warnings.extend(warnings);
+    let warnings = crate::pieces::append(ctx, &resolver, task, &fields.pieces)?;
+    ctx.warnings.extend(warnings);
     if !fields.follows.is_empty() {
         let ids = fields
             .follows

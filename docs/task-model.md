@@ -268,6 +268,17 @@ there are no self-links or canonical duplicates. A lane cannot carry pieces. Par
 checks id syntax only; `check` diagnoses the rest. Empty lists are omitted from
 frontmatter and full Task JSON. No command infers or backfills pieces.
 
+`add --piece REF` and `edit --piece REF` (repeatable) mark REF as a piece and add it to
+`depends` when absent, in one save; a piece already held as a dependency, under any
+spelling, is marked silently, and one already marked warns and changes nothing. The
+target must resolve and must not be a tombstone; done and dropped targets are accepted.
+`edit --rm-piece REF` unmarks a piece and keeps the dependency, `--no-pieces` unmarks
+every piece, and naming one id in both `--piece` and `--rm-piece` is refused. A lane
+cannot take `--piece`. An editor save that changes the list is validated by the same
+rules and resolves newly added pieces. When a piece moves to a still-foreign successor,
+`check`'s `moved_dep` names `tasks edit <goal> --piece <new>` then
+`tasks dep <goal> --rm <old>`.
+
 Because a piece stays a dependency, readiness, `done`'s `open_dependencies` refusal and
 blocker traversal treat it as before. A record that declares pieces is never offered by
 `ready` or `next` and is not unassessed review work; it reaches closeout once it has no

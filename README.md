@@ -75,7 +75,7 @@ tasks add "Emit rows" -p 1 --size s --complexity low --process direct
 tasks prime                      # session context and available work
 tasks ready                      # actionable todo leaves
 tasks tree                       # containment hierarchy
-tasks goals                      # user/mixed goals across projects (--project/--group narrow)
+tasks goals                      # user/mixed goals across projects, counting declared pieces (--project/--group narrow)
 tasks start <id>                 # claim before work
 tasks note <id> "<evidence>"
 tasks park <id> "<next action>"   # releases claim, keeps status

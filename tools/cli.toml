@@ -432,6 +432,7 @@ options = [
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--related"], value = "ref", repeatable = true },
   { names = ["--follows"], value = "ref", repeatable = true },
+  { names = ["--piece"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -628,6 +629,8 @@ options = [
   { names = ["--no-related"], value = "none" },
   { names = ["--rm-follows"], value = "ref", repeatable = true },
   { names = ["--no-follows"], value = "none" },
+  { names = ["--rm-piece"], value = "ref", repeatable = true },
+  { names = ["--no-pieces"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
@@ -644,6 +647,7 @@ options = [
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--related"], value = "ref", repeatable = true },
   { names = ["--follows"], value = "ref", repeatable = true },
+  { names = ["--piece"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -1685,6 +1689,35 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["source"]
+summary = "Record a published work as a source, addressed by its identifier"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--title"], value = "string", required = true },
+  { names = ["--doi"], value = "string" },
+  { names = ["--pmid"], value = "string" },
+  { names = ["--isbn"], value = "string" },
+  { names = ["--accession"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["source-correct"]
+summary = "Add or replace an identifier on a source; its address follows its identifiers"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--address"], value = "string", required = true },
+  { names = ["--grounds"], value = "string", required = true },
+  { names = ["--doi"], value = "string" },
+  { names = ["--pmid"], value = "string" },
+  { names = ["--isbn"], value = "string" },
+  { names = ["--accession"], value = "string" },
+]
+
+[[cli.science.commands]]
 path = ["spec"]
 summary = "Freeze an analysis spec against the kernel's reference rules and mint its record"
 options = [
@@ -1777,6 +1810,18 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["note"]
+summary = "Record a note in the current project: a name, a body, and the world records it is about"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--body"], value = "string", required = true },
+  { names = ["--about"], value = "string", repeatable = true },
+]
+
+[[cli.science.commands]]
 path = ["project"]
 summary = "Start a project: a name and a query over the world"
 options = [
@@ -1836,8 +1881,23 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["record"]
+summary = "Show one record in full: by address, or a source by identifier"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--address"], value = "string" },
+  { names = ["--doi"], value = "string" },
+  { names = ["--pmid"], value = "string" },
+  { names = ["--isbn"], value = "string" },
+  { names = ["--accession"], value = "string" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+]
+
+[[cli.science.commands]]
 path = ["revise"]
-summary = "Revise a project, question, hypothesis, task or decision"
+summary = "Revise a project, question, hypothesis, task, decision or topic"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
@@ -1885,7 +1945,7 @@ options = [
 
 [[cli.science.commands]]
 path = ["project-show"]
-summary = "Show one project: its query and its questions, hypotheses, tasks and decisions"
+summary = "Show one project: its query and its questions, hypotheses, tasks, decisions, topics and notes"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
@@ -1979,6 +2039,18 @@ options = [
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { names = ["--corpus-id"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["topic"]
+summary = "Record a topic in the current project: a background synthesis and the world records it draws on"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--body"], value = "string", required = true },
+  { names = ["--query"], value = "string", required = true },
 ]
 
 [[cli.science.commands]]

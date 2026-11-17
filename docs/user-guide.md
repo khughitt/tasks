@@ -103,7 +103,9 @@ last 14 days). A goal's members are its descendants plus its declared `pieces` a
 their members, in any project ([task model](task-model.md#goal-pieces)); they are
 read through the registry whatever the scope, so narrowing never changes a row's
 numbers. Dependency counts are reported separately and do not redefine the goal's
-intended scope.
+intended scope. Declare a foreign task part of a goal with `tasks edit <goal> --piece
+<id>` (or `add --piece`), which also adds the dependency; `--rm-piece` unmarks one and
+keeps the dependency, `--no-pieces` unmarks all, and `dep --rm` removes both.
 
 The default `goals --sort project` groups canonical project prefixes A–Z, then
 shows newest activity (the newest update on the goal or any member).
