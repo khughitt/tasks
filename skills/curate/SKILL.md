@@ -219,9 +219,14 @@ dependents, the absorb note, and the drop last:
   misses a kept item recorded on another task whose `next_owner` is `task:<id>`: before
   a closure, also search the task records of every registered project (read-only; the
   records directories come from `tasks projects`, each row's `records`, task files under
-  `<records>/tasks/*.md`) for `"next_owner":"task:<id>"`. The guard holds when any match
-  is found, unless that item's later notes on its own task release it or re-home it
-  elsewhere. This search stands until tasks-1abe9f gives the CLI a read for it. The
+  `<records>/tasks/*.md`) with `grep -rlE '"next_owner"[[:space:]]*:[[:space:]]*"task:<id>"'`.
+  The pattern must tolerate whitespace around the colon: records store both
+  `"next_owner":"task:…"` and `"next_owner": "task:…"`. The guard holds when any
+  registered project's records cannot be searched (a row not reachable, or the search
+  errors). For each matching task, read `tasks retained state <matching-task-id>`: the
+  guard holds when it shows an effective kept item whose `next_owner` is `task:<id>`, or
+  is incomplete, blocked or refuses; only an item it shows released or re-homed clears
+  that match. This search stands until tasks-1abe9f gives the CLI a read for it. The
   guard holds for a duplicate too: moving custody to the survivor is a retained
   transfer, which a curation pass does not do;
 - closing a duplicate would need a write to a survivor or open dependent that is
