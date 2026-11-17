@@ -1005,8 +1005,10 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `XDG_CONFIG_HOME=$(mktemp -d) tasks init --prefix <p>` so the registration dies with
   it. If you forget, `tasks unregister <prefix>` removes the entry; project files are
   untouched.
-- Curating the corpus (random open tasks, one bounded maintenance pass each): the
-  `curate` skill, shipped beside this one. Never part of the session protocol.
+- Curating the corpus: the `curate` skill, shipped beside this one, as a sampled pass
+  (`/curate`: random open tasks, one bounded maintenance pass each) or a whole-project
+  sweep (`/curate --all`). Either may close stale and duplicate tasks. Never part of
+  the session protocol.
 
 ## Prefix renames and recovery
 

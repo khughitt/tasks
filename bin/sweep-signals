@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""Drift signals for a project's open tasks, printed as the whole-project sweep's ledger.
+
+Reads, through the `tasks` CLI's JSON only (`where`, `list`, `show --no-fetch`, so no
+external document provider runs), the swept project's open tasks, and `git log` in its
+code checkout, plus directory listings of the checkout and the records directory. Never
+reads record files and writes nothing but the ledger rows on standard output: one header
+row, then one tab-separated row per pool task (idea, todo or blocked, no live claim),
+sorted by id. The last five columns are left empty for the sweep's controller.
+
+The signals are hints: no task is closed or skipped on a signal alone, and their absence
+clears nothing. Any failed `tasks` or `git` call ends the run with exit 1, the command
+named on standard error and nothing on standard output. The one exception is the read of a
+moved task's destination, which when unreadable simply does not count.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+COLUMNS = (
+    "id status updated reviewed awaiting_user deferred_until parked dead_paths cited_closed "
+    "deps_closed touched_commits twins triggers cluster verdict action evidence decided"
+).split()
+POOL = {"idea", "todo", "blocked"}
+ALL_STATUSES = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"]
+PATH = re.compile(r"(?<![\w/.:~-])([\w.-]+(?:/[\w.-]+)+)")
+WORD = re.compile(r"[a-z0-9_-]{3,}")
+STOPWORDS = set("the and for with that from not its when into task tasks".split())
+TWIN_THRESHOLD = 0.4
+MAX_HOPS = 5
+
+
+class Fail(Exception):
+    pass
+
+
+class Sweep:
+    def __init__(self, tasks, root):
+        self.tasks = tasks
+        self.root = root
+        local = subprocess.run(["git", "rev-parse", "--local-env-vars"], capture_output=True,
+                               text=True)
+        if local.returncode != 0:
+            raise Fail(f"git rev-parse --local-env-vars failed: {local.stderr.strip()}")
+        names = set(local.stdout.split())
+        self.env = {k: v for k, v in os.environ.items() if k not in names}
+        self.env["TASKS_FORMAT"] = "json"
+        self.git_counts = {}
+
+    def run(self, argv, check=True):
+        try:
+            out = subprocess.run(argv, capture_output=True, text=True, env=self.env)
+        except OSError as e:
+            raise Fail(f"{' '.join(argv)}: {e}")
+        if check and out.returncode != 0:
+            raise Fail(f"{' '.join(argv)} failed: {out.stderr.strip() or f'exit {out.returncode}'}")
+        return out
+
+    def tasks_json(self, *args):
+        argv = [self.tasks, "-C", self.root, *args]
+        out = self.run(argv)
+        try:
+            return json.loads(out.stdout)
+        except ValueError as e:
+            raise Fail(f"{' '.join(argv)}: bad JSON: {e}")
+
+    def destination(self, task_id):
+        """`show` of a moved task's destination, or None when it cannot be read."""
+        out = self.run([self.tasks, "-C", self.root, "show", task_id, "--no-fetch"], check=False)
+        if out.returncode != 0:
+            return None
+        try:
+            return json.loads(out.stdout)["task"]
+        except (ValueError, KeyError, TypeError):
+            return None
+
+    def follow(self, task_id):
+        """The task a moved id ends at (at most five hops), or None when a destination
+        cannot be read or the chain is too long. The first read is strict."""
+        task = self.tasks_json("show", task_id, "--no-fetch")["task"]
+        hops = 0
+        while task.get("status") == "moved" and task.get("moved_to"):
+            hops += 1
+            if hops > MAX_HOPS:
+                return None
+            task = self.destination(task["moved_to"])
+            if task is None:
+                return None
+        return task
+
+    def git_count(self, checkout, path, since):
+        key = (path, since)
+        if key not in self.git_counts:
+            out = self.run(["git", "-C", checkout, "log", "--oneline", f"--since={since}",
+                            "--", path])
+            self.git_counts[key] = len(out.stdout.splitlines())
+        return self.git_counts[key]
+
+
+def closing_stamp(row):
+    return row.get("closed") or row.get("completed") or row.get("updated") or ""
+
+
+def words(title):
+    return set(WORD.findall(title.lower())) - STOPWORDS
+
+
+def named_paths(text):
+    return {m.rstrip(".") for m in PATH.findall(text)}
+
+
+def sweep(args):
+    s = Sweep(args.tasks, args.root)
+    where = s.tasks_json("where")["project"]
+    prefix, checkout, records = where["prefix"], where["checkout"], where["records"]
+    top = set()
+    for base in (checkout, records):
+        try:
+            top.update(os.listdir(base))
+        except OSError as e:
+            raise Fail(f"cannot list {base}: {e}")
+    top -= {".git", ".worktrees"}
+
+    argv = []
+    for status in ALL_STATUSES:
+        argv += ["--status", status]
+    rows = s.tasks_json("list", *argv)["tasks"]
+    by_id = {r["id"]: r for r in rows}
+    pool = sorted((r for r in rows
+                   if r["status"] in POOL and not (r.get("claim") or {}).get("live")),
+                  key=lambda r: r["id"])
+    cite = re.compile(r"\b" + re.escape(prefix) + r"-[0-9a-f]{6}\b")
+
+    def counts_as_closed(entry_id, entry_status, since):
+        """Whether a cited or depended-on task is closed (after `since`, when given)."""
+        if entry_status == "moved":
+            task = s.follow(entry_id)
+            if task is None:
+                return False
+            status, stamp = task.get("status"), closing_stamp(task)
+        else:
+            status, stamp = entry_status, None
+        if status not in ("done", "dropped"):
+            return False
+        return since is None or stamp > since
+
+    results = []
+    for row in pool:
+        task = s.tasks_json("show", row["id"], "--no-fetch")
+        detail = task["task"]
+        text = f"{detail.get('title', '')}\n{detail.get('body', '')}"
+
+        paths = sorted(named_paths(text))
+        dead, existing = [], []
+        for p in paths:
+            if p.split("/")[0] not in top:
+                continue
+            in_checkout = os.path.exists(os.path.join(checkout, p))
+            if in_checkout:
+                existing.append(p)
+            elif not os.path.exists(os.path.join(records, p)):
+                dead.append(p)
+
+        cited = set()
+        for cid in set(cite.findall(text)) - {row["id"]}:
+            target = by_id.get(cid)
+            if target is None:
+                continue
+            if target["status"] == "moved":
+                if counts_as_closed(cid, "moved", row["updated"]):
+                    cited.add(cid)
+            elif target["status"] in ("done", "dropped") and closing_stamp(target) > row["updated"]:
+                cited.add(cid)
+
+        deps = task.get("depends_on") or []
+        deps_closed = bool(deps) and all(
+            d.get("resolved") and counts_as_closed(d["id"], d.get("status"), None) for d in deps)
+
+        touched = sum(s.git_count(checkout, p, row["updated"]) for p in existing)
+
+        results.append({
+            "row": row, "dead": dead, "cited": sorted(cited), "deps_closed": deps_closed,
+            "touched": touched, "words": words(row["title"]),
+        })
+
+    out = [COLUMNS]
+    for r in results:
+        twins = sorted(o["row"]["id"] for o in results
+                       if o is not r and r["words"] and o["words"]
+                       and len(r["words"] & o["words"]) / len(r["words"] | o["words"])
+                       >= TWIN_THRESHOLD)
+        row = r["row"]
+        triggers = bool(r["dead"]) + bool(r["cited"]) + r["deps_closed"]
+        flag = lambda b: "true" if b else "false"
+        out.append([
+            row["id"], row["status"], row.get("updated", ""), flag(row.get("reviewed")),
+            flag(row.get("awaiting_user")), (row.get("deferred") or {}).get("until") or "",
+            flag(row.get("park")), ",".join(r["dead"]), ",".join(r["cited"]),
+            flag(r["deps_closed"]), str(r["touched"]), ",".join(twins), str(triggers),
+            "", "", "", "", "",
+        ])
+    return "".join("\t".join(line) + "\n" for line in out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Print drift signals for a project's open tasks.")
+    parser.add_argument("--root", default=".", help="the project directory (default: .)")
+    parser.add_argument("--tasks", default="tasks", help="the tasks binary (default: tasks)")
+    args = parser.parse_args()
+    try:
+        text = sweep(args)
+    except Fail as e:
+        print(f"sweep-signals: {e}", file=sys.stderr)
+        return 1
+    sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
