@@ -344,8 +344,9 @@ When every cluster has run, the controller settles the suspicions the workers re
 (the `cross-cluster twin:` entries in `evidence`), reading the candidates in full before
 acting. It reviews both tasks of each pair as a worker would, with its own read for
 revalidation and rule 5 of [One cluster](#one-cluster) before any fold-in, updates both
-rows (committing the ledger in the `docs/notes/` case if any row changed), and records
-`tasks -C <swept root> note <sweep-id> "sweep: cross-cluster pass done"`.
+rows (committing the ledger in the `docs/notes/` case if any row changed, and any task
+records it wrote as [SKILL.md §4](SKILL.md#4-commit-per-touched-project) says), and
+records `tasks -C <swept root> note <sweep-id> "sweep: cross-cluster pass done"`.
 
 ## First closures
 
@@ -433,8 +434,9 @@ In this order:
 At the report path. Its sections, in this order:
 
 - **Counts:** pool size, each verdict, skipped, left, pending, and filed since the
-  snapshot (tasks of any status in the project not in the ledger whose `created` is at
-  or after `<snapshot-stamp>`: `tasks -C <swept root> list` with every `--status`).
+  snapshot (tasks of any status in the project not in the ledger, other than
+  `<sweep-id>`, whose `created` is at or after `<snapshot-stamp>`:
+  `tasks -C <swept root> list` with every `--status`).
 - **Closed:** every closed task with its id, title, prior status, stale or duplicate,
   the evidence, the survivor where there is one, and its undo lines as
   [Closing stale and duplicate tasks](SKILL.md#closing-stale-and-duplicate-tasks)

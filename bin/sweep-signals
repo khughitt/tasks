@@ -159,12 +159,13 @@ def sweep(args):
             raise TypeError("tasks must be a list")
         by_id = {}
         for r in rows:
-            rid, rstatus = r["id"], r["status"]
-            if not isinstance(rid, str) or not isinstance(rstatus, str):
-                raise TypeError("row id and status must be strings")
-            if (not isinstance(r.get("updated", ""), str)
-                    or not isinstance(r.get("title", ""), str)):
-                raise TypeError("row updated and title must be strings")
+            rid, rstatus, rupdated, rtitle = r["id"], r["status"], r["updated"], r["title"]
+            if (not isinstance(rid, str)
+                    or not isinstance(rstatus, str)
+                    or not isinstance(rupdated, str)
+                    or not rupdated
+                    or not isinstance(rtitle, str)):
+                raise TypeError("row id, status, updated and title must be strings")
             claim = r.get("claim")
             if claim is not None and not isinstance(claim, dict):
                 raise TypeError("row claim must be an object")
@@ -197,7 +198,7 @@ def sweep(args):
             detail = task["task"]
             if not isinstance(detail, dict):
                 raise TypeError("task must be an object")
-            title, body = detail.get("title", ""), detail.get("body", "")
+            title, body = detail["title"], detail["body"]
             if not isinstance(title, str) or not isinstance(body, str):
                 raise TypeError("task title and body must be strings")
             text = f"{title}\n{body}"
@@ -224,7 +225,7 @@ def sweep(args):
                 dead.append(p)
 
         cited = set()
-        row_updated = row.get("updated", "")
+        row_updated = row["updated"]
         for cid in set(cite.findall(text)) - {row["id"]}:
             target = by_id.get(cid)
             if target is None:
@@ -244,7 +245,7 @@ def sweep(args):
 
         results.append({
             "row": row, "dead": dead, "cited": sorted(cited), "deps_closed": deps_closed,
-            "touched": touched, "words": words(row.get("title", "")),
+            "touched": touched, "words": words(row["title"]),
         })
 
     out = [COLUMNS]
@@ -258,7 +259,7 @@ def sweep(args):
         flag = lambda b: "true" if b else "false"
         until = (row.get("deferred") or {}).get("until")
         out.append([
-            row["id"], row["status"], row.get("updated", ""), flag(row.get("reviewed")),
+            row["id"], row["status"], row["updated"], flag(row.get("reviewed")),
             flag(row.get("awaiting_user")), until if isinstance(until, str) else "",
             flag(row.get("park")), ",".join(r["dead"]), ",".join(r["cited"]),
             flag(r["deps_closed"]), str(r["touched"]), ",".join(twins), str(triggers),

@@ -416,4 +416,32 @@ fn sweep_signals_unexpected_json_shape_reports_command_without_traceback() {
     assert!(stderr.starts_with("sweep-signals:"), "{stderr}");
     assert!(stderr.contains("where"), "{stderr}");
     assert!(!stderr.contains("Traceback"), "{stderr}");
+
+    // A list row missing required `updated` must also fail closed rather than default to "".
+    let root = stub_dir.path().display();
+    let missing_updated = stub_dir.path().join("missing-updated-tasks");
+    std::fs::write(
+        &missing_updated,
+        format!(
+            "#!/bin/sh\ncase \"$3\" in\n  where) printf '{{\"project\":{{\"prefix\":\"aa\",\"checkout\":\"{root}\",\"records\":\"{root}\"}}}}\\n' ;;\n  list) printf '{{\"tasks\":[{{\"id\":\"aa-000001\",\"status\":\"todo\",\"title\":\"No updated\"}}]}}\\n' ;;\n  show) printf '{{\"task\":{{\"title\":\"No updated\",\"body\":\"\"}}}}\\n' ;;\nesac\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&missing_updated, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(script())
+        .args(["--root", stub_dir.path().to_str().unwrap()])
+        .args(["--tasks", missing_updated.to_str().unwrap()])
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
+        .output()
+        .unwrap();
+    let stderr = stderr_of(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(out.stdout.is_empty());
+    assert!(stderr.starts_with("sweep-signals:"), "{stderr}");
+    assert!(stderr.contains("list"), "{stderr}");
+    assert!(!stderr.contains("Traceback"), "{stderr}");
 }
