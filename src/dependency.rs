@@ -48,18 +48,18 @@ pub fn verdict(task: Option<&Task>) -> Verdict {
 }
 
 /// Every task in `scan` whose `depends` names `target` under any spelling (a retired
-/// prefix counts). The match is literal: it does not follow move chains. `target` is
-/// canonicalized here. Shared by `show`'s dependents and `move`'s inbound inventory.
+/// prefix counts). The match is literal: it does not follow move chains. `target` must
+/// already be canonical; it is not canonicalized again (see `Registry::canonical_id`).
+/// Shared by `show`'s dependents and `move`'s inbound inventory.
 pub fn dependents<'a>(
     registry: &'a Registry,
     scan: &'a [Task],
-    target: &TaskId,
+    target: &'a TaskId,
 ) -> impl Iterator<Item = &'a Task> + 'a {
-    let target = registry.canonical_id(target);
     scan.iter().filter(move |task| {
         task.depends
             .iter()
-            .any(|dep| registry.canonical_id(dep) == target)
+            .any(|dep| registry.canonical_id(dep) == *target)
     })
 }
 

@@ -48,6 +48,7 @@ fn widen(
     let (scope, opened) = crate::scope::Scope::open_all(registry, &project.root)?;
     warnings.extend(opened);
     let own = registry.canonical_prefix(&project.prefix);
+    // Not `scan_each`: that would scan this project's registered copy only to drop it.
     for other in scope.projects().iter().filter(|other| other.prefix != own) {
         all.extend(
             other
@@ -306,12 +307,13 @@ pub fn describe(
         warnings.push(warning.clone());
     }
     let following = crate::follows::followers(registry, all, &identity);
-    let mut depending: Vec<&Task> = crate::dependency::dependents(registry, all, &task.id)
-        .filter(|candidate| candidate.status != crate::model::Status::Moved)
-        .collect();
-    depending.sort_by(|a, b| crate::query::ready_order(a, b));
-    let mut seen = std::collections::BTreeSet::new();
-    depending.retain(|candidate| seen.insert(registry.canonical_id(&candidate.id)));
+    let canonical = registry.canonical_id(&task.id);
+    let depending = crate::query::ready_unique(
+        registry,
+        crate::dependency::dependents(registry, all, &canonical)
+            .filter(|candidate| candidate.status != crate::model::Status::Moved)
+            .collect(),
+    );
     let dependents = depending.iter().map(|task| related(task)).collect();
     let followed_by = following.iter().map(|task| related(task)).collect();
     let mut kids = crate::hierarchy::children(all, &task.id, registry);

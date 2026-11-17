@@ -161,7 +161,7 @@ pub(crate) fn followers<'a>(
     all: &'a [Task],
     identity: &IdentitySet,
 ) -> Vec<&'a Task> {
-    let mut found: Vec<_> = all
+    let found: Vec<_> = all
         .iter()
         .filter(|task| {
             task.status != crate::model::Status::Moved
@@ -172,10 +172,7 @@ pub(crate) fn followers<'a>(
                     .any(|id| identity.ids.contains(&registry.canonical_id(id)))
         })
         .collect();
-    found.sort_by(|a, b| crate::query::ready_order(a, b));
-    let mut seen = std::collections::BTreeSet::new();
-    found.retain(|task| seen.insert(registry.canonical_id(&task.id)));
-    found
+    crate::query::ready_unique(registry, found)
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! `show` lists the tasks whose `depends` names the shown task: from the scan it already
 //! holds by default, and from every reachable registered project under `--all-projects`.
 mod common;
-use common::{TestEnv, id_of};
+use common::{TestEnv, git, id_of};
 use serde_json::Value;
 
 fn dependents(shown: &Value) -> Vec<String> {
@@ -118,4 +118,72 @@ fn show_dependents_skips_moved_tombstones() {
         vec![successor]
     );
     assert!(e.json(&aa, &["show", &q]).get("dependents").is_none());
+}
+
+#[test]
+fn show_dependents_all_projects_from_a_worktree_keeps_its_copy_once() {
+    let mut e = TestEnv::new();
+    let main = e.init("aa");
+    let _bb = e.init("bb");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let q = id_of(e.json(&main, &["add", "Prerequisite"]));
+    let dependent = id_of(e.json(&main, &["add", "Dependent"]));
+    e.json(&main, &["dep", &dependent, "--on", &q]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    // Lower priority sorts the worktree copy after a stale registered copy, so a
+    // duplicate that slipped past the own-project filter would win the dedupe.
+    e.json(
+        &side,
+        &["edit", &dependent, "-p", "4", "--title", "Edited here"],
+    );
+    e.json(&side, &["done", &dependent, "--force", "worktree only"]);
+    let wide = e.json(&side, &["show", &q, "--all-projects"]);
+    assert_eq!(dependents(&wide), vec![dependent.clone()]);
+    assert_eq!(wide["dependents"][0]["status"], "done");
+    assert_eq!(wide["dependents"][0]["title"], "Edited here");
+    assert_eq!(
+        e.json(&main, &["show", &q, "--all-projects"])["dependents"][0]["status"],
+        "todo"
+    );
+}
+
+#[test]
+fn show_dependents_all_projects_warns_about_unreachable_projects() {
+    let mut e = TestEnv::new();
+    let aa = e.init("aa");
+    let bb = e.init("bb");
+    let q = id_of(e.json(&aa, &["add", "Prerequisite"]));
+    std::fs::remove_file(bb.join("tasks/.config.toml")).unwrap();
+    let wide = e.json(&aa, &["show", &q, "--all-projects"]);
+    let warnings: Vec<_> = wide["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("project bb at ") && w.ends_with(" is unreachable")),
+        "{warnings:?}"
+    );
+    assert!(
+        e.json(&aa, &["show", &q])["warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
