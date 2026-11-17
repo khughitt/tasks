@@ -169,33 +169,6 @@ fn follows_reader_semantic_findings_remain_readable() {
 }
 
 #[test]
-fn follows_reader_editor_changes_refused_atomically() {
-    for edit in [
-        "sed -i '/^tags:/i follows: [aa-000001]' \"$1\"",
-        "sed -i '/^follows:/d' \"$1\"",
-        "sed -i 's/follows: .*/follows: [aa-000002, aa-000001]/' \"$1\"",
-    ] {
-        let mut env = TestEnv::new();
-        let aa = env.init("aa");
-        let a = id_of(env.json(&aa, &["add", "A"]));
-        if !edit.contains("/^tags:/") {
-            raw(&env, &aa, &a, "follows", &["aa-000001", "aa-000002"]);
-        }
-        let before = env.read(&aa, &format!("tasks/{a}.md"));
-        let script = editor_script(&aa, edit);
-        let out = env
-            .cmd(&aa)
-            .env("EDITOR", script)
-            .args(["edit", &a, "--editor"])
-            .output()
-            .unwrap();
-        assert!(!out.status.success(), "{out:?}");
-        assert!(String::from_utf8_lossy(&out.stderr).contains("follows"));
-        assert_eq!(env.read(&aa, &format!("tasks/{a}.md")), before);
-    }
-}
-
-#[test]
 fn follows_reader_lifecycle_move_rename_and_held_citations() {
     let mut env = TestEnv::new();
     let aa = env.init("aa");

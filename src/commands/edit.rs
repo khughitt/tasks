@@ -176,7 +176,10 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         || !args.rm_tags.is_empty()
         || !fields.related.is_empty()
         || !args.rm_related.is_empty()
-        || args.no_related;
+        || args.no_related
+        || !fields.follows.is_empty()
+        || !args.rm_follows.is_empty()
+        || args.no_follows;
     if !has_flags {
         if !args.editor && !std::io::stdin().is_terminal() {
             return Err(Error::Editor(
@@ -304,6 +307,32 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
             )));
         }
     }
+    let follows_additions = args
+        .fields
+        .follows
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    let mut follows_removed = args
+        .rm_follows
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(both) = follows_additions
+        .iter()
+        .find(|id| follows_removed.contains(id))
+    {
+        return Err(Error::Validation(format!(
+            "{both} is named by both --follows and --rm-follows"
+        )));
+    }
+    if args.no_follows {
+        follows_removed = task.follows.clone();
+        task.follows.clear();
+    }
+    if !args.rm_follows.is_empty() {
+        crate::follows::remove(&ctx.registry, &mut task, &follows_removed)?;
+    }
     let related_additions = args
         .fields
         .related
@@ -333,6 +362,7 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
     let related_change = crate::related::RelatedChange {
         added: task.related[related_before_adds..].to_vec(),
+        follows_removed,
         removed: related_removals,
         cleared: args.no_related,
         editor_changed: false,
@@ -480,11 +510,6 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ctx.project.read_archive(&original.id, archive)
     })
     .map_err(keep)?;
-    if edited.follows != original.follows {
-        return Err(keep(Error::Validation(
-            "follows changes are disabled until reader rollout is complete".into(),
-        )));
-    }
     check_invariants(&original, &edited).map_err(keep)?;
     crate::review::stamp_edited(&original, &mut edited);
     // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it
@@ -530,10 +555,22 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             crate::tombstone::refuse_reference(&found, "dependency").map_err(keep)?;
         }
     }
+    crate::follows::validate_edit(&ctx.registry, &resolver, &original, &edited).map_err(keep)?;
     crate::related::validate_editor_related(&ctx.registry, &resolver, &original, &edited)
         .map_err(keep)?;
     let related_change = crate::related::RelatedChange {
         added: Vec::new(),
+        follows_removed: original
+            .follows
+            .iter()
+            .filter(|id| {
+                !edited
+                    .follows
+                    .iter()
+                    .any(|kept| ctx.registry.canonical_id(kept) == ctx.registry.canonical_id(id))
+            })
+            .cloned()
+            .collect(),
         removed: Vec::new(),
         cleared: false,
         editor_changed: edited.related != original.related,

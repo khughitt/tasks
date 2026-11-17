@@ -16,6 +16,7 @@ mod doc_fetch;
 mod ellipsis;
 mod error;
 mod filter;
+mod follows;
 mod format;
 mod frontmatter;
 mod git;

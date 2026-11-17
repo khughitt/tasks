@@ -1080,6 +1080,43 @@ removes ordinary retirement subject to the handoff bound above.
 Its ids keep resolving, `--all-projects` and `--group` reads leave it out, and `--project` reads warn. The project lifecycle
 runbook in ops has the whole procedure.
 
+## Choose task relations
+
+| Field | Assertion |
+| --- | --- |
+| `parent` | A constituent of this same-project goal; children are its inverse. |
+| `depends` | Completion of that task is required under the dependency contract. |
+| `wake_on` | Closure is evidence to review this shelved task again. |
+| `follows` | Additional work arising from earlier work: deferred work, extension, requested change or correction. |
+| `source` | The single filing/derivation origin: a capture, brief, message, URL or originating task. |
+| `related` | An informational citation whose meaning is in its prose. |
+
+Set follows explicitly with repeatable `add --follows REF` or `edit --follows REF`;
+remove with repeatable `edit --rm-follows REF`, clear with `edit --no-follows`.
+Follows requires neither closure nor waiting, and asserts no replacement. Never
+infer it from prose, source, concerns notes, dates, subject similarity or a plan.
+Fields may overlap when each assertion is independently true. Preserve existing
+source/related values: no historical conversion or backfill, including on touch.
+
+A new deferred follow-up filed from a brief keeps that brief as source and sets
+`--follows OLD`; it can name several predecessors. Source/title add reuse writes
+nothing, including supplied follows: explicitly edit the returned task if needed.
+A new correction to closed work sets follows and keeps the existing exact note
+`concerns: <task-id> <defect|change|extension> — <one line>`; do not reinterpret
+historical concerns. Until lore/obs adopt coordinated conventions, retain their
+existing source/concerns requirements and set follows additionally when justified.
+Ordinary plan steps use parent, not automatic follows. A cross-project effort's
+hub depends on its pieces for completion accounting; source alone supplies no
+membership or prerequisite. New work continuing a dropped task may follow it;
+a replacement does not satisfy the dropped obligation automatically. A move is the
+same work: follow its live successor, not its tombstone merely because it moved.
+If provenance is uncertain, leave source unset. If a stronger relation is uncertain,
+keep a prose citation/related rather than inventing it.
+
+Show and next display outgoing follows, including foreign and unresolved ids.
+Incoming followed-by discovery and show --all-projects are not shipped in this
+release. Absence of outgoing rows does not establish absence of follow-ups elsewhere.
+
 ## Task references
 
 When filing or scoping, put documents the work cites in repeatable `--ref` entries

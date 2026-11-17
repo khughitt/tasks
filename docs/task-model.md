@@ -52,7 +52,7 @@ optional booleans false, and other optional values absent.
 | `depends`, `parent` | Execution dependency ids (foreign allowed); optional same-project containment parent. |
 | `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. Written by add/edit --related, edit --rm-related and edit --no-related. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
-| `follows` | Optional ordered task-id list for additional work continuing earlier work; foreign ids allowed. Reader release preserves and displays stored lists, including duplicates; no writer flags, inference or historical conversion. Editor changes (including removal/reorder) refuse until writer activation. Never gates execution or review. |
+| `follows` | Optional ordered task-id list for additional work continuing earlier work; foreign ids allowed. Explicit add/edit writers append; edit removes or clears, and editor changes validate. No inference or historical conversion. Never gates execution or review. |
 | `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status and `updated` timestamp; that display reads the record and changes nothing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |
 | `origin` | Current judgment `user`, `agent`, `mixed`; absent means unknown. |
@@ -199,7 +199,7 @@ Install the updated binary on every host that reads synced records before record
 carrying new keys sync; verify one host end to end, and the other hosts updated
 by the same install path are covered.
 
-## Follows reader release
+## Follows links
 
 `follows` means this task contains additional work arising from named earlier tasks,
 without asserting closure, prerequisites or replacement. Existing `source` (filing
@@ -215,7 +215,19 @@ Check warns `self_follows`, `duplicate_follows` (canonical aliases included), an
 `dangling_follows` for missing local targets. Foreign targets are resolved on show,
 not globally scanned by check. Tombstone follows produces the `follows_status`
 error. Unchanged lists, including semantic errors, survive unrelated editor saves
-and non-editor writes. Reader-stage editor changes refuse atomically.
+and non-editor writes. Explicit flags validate the resulting list, rejecting
+canonical duplicates and self-links. Changed editor lists validate their entire
+shape and resolve only new targets; unchanged unreachable ids remain preserved.
+New missing or moved targets refuse. Add/edit `--follows REF` appends, edit
+`--rm-follows REF` removes an existing canonical id, and `--no-follows` clears.
+Clear conflicts with add/remove; the same id in add and remove refuses atomically.
+Repeated additions deduplicate; stored additions warn unchanged.
+
+Apply follows changes before citation linking: both held and same-write removed
+follows ids suppress automatic related links by cited and resolved spelling.
+Explicit related overlap remains allowed; existing related values are never pruned.
+A later separate citation after removal may add related. Source/title idempotent
+add reuse writes nothing, including supplied follows flags.
 
 Prefix rename rewrites local follows ids. Move preserves the list on the successor
 and clears the tombstone; inbound stored links remain unchanged. Migration remaps

@@ -431,6 +431,7 @@ options = [
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--related"], value = "ref", repeatable = true },
+  { names = ["--follows"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -624,6 +625,8 @@ options = [
   { names = ["--no-depends"], value = "none" },
   { names = ["--rm-related"], value = "ref", repeatable = true },
   { names = ["--no-related"], value = "none" },
+  { names = ["--rm-follows"], value = "ref", repeatable = true },
+  { names = ["--no-follows"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
@@ -639,6 +642,7 @@ options = [
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--related"], value = "ref", repeatable = true },
+  { names = ["--follows"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -1243,6 +1247,40 @@ options = [
 path = ["index-state"]
 output = "json"
 summary = "print each indexed file's retention readiness and indexed-byte evidence"
+
+[[cli.obs.commands]]
+path = ["spend"]
+summary = "Compute, publish and replay live spend signals"
+
+[[cli.obs.commands]]
+path = ["spend", "baseline"]
+output = "json"
+summary = "Compute per-harness spend thresholds from the index"
+
+[[cli.obs.commands]]
+path = ["spend", "watch"]
+output = "json"
+summary = "Run one live spend cycle and publish spend signals"
+
+[[cli.obs.commands]]
+path = ["spend", "replay"]
+output = "json"
+summary = "Replay the spend detector day by day over the index"
+options = [
+  { names = ["--from"], value = "string", required = true },
+  { names = ["--to"], value = "string", required = true },
+  { names = ["--expect"], value = "string", repeatable = true },
+  { names = ["--lead"], value = "string", repeatable = true },
+]
+
+[[cli.obs.commands]]
+path = ["spend", "seed-history"]
+output = "json"
+summary = "Import an accepted replay's episodes into an empty spend state history"
+options = [
+  { names = ["--from-replay"], value = "path", required = true },
+  { names = ["--sha256"], value = "string", required = true },
+]
 
 # ---- lit
 
@@ -2552,7 +2590,52 @@ args = [{ name = "map-ref", value = "ref", required = true }]
 path = ["op"]
 output = "json"
 summary = "Send one raw op through the CLI's transport and print its result"
-args = [{ name = "op", value = "string", required = true }]
+exception = "JSON input requires exactly one literal JSON or - positional, including under --self; --capture-paste instead requires zero positionals. --origin, --capture-paste or --self select restricted HTTP mode. Structured error stderr requires explicit --json; op's result-only JSON stdout does not imply JSON errors."
+args = [{ name = "op", value = "string", required = false }]
+options = [
+  { names = ["--origin"], value = "string" },
+  { names = ["--capture-paste"], value = "none" },
+  { names = ["--stdin-terminator"], value = "string" },
+  { names = ["--via-agent"], value = "string" },
+  { names = ["--via-model"], value = "string" },
+  { names = ["--self"], value = "none" },
+  { shared = "tag", role = "set", value = "string", repeatable = true },
+]
+
+[[cli.mindful.commands]]
+path = ["runtime"]
+summary = "Inspect configuration, check or install the Mindful runtime"
+
+[[cli.mindful.commands]]
+path = ["runtime", "show"]
+verb = "show"
+summary = "Show resolved runtime configuration without opening a store"
+
+[[cli.mindful.commands]]
+path = ["runtime", "check"]
+verb = "check"
+summary = "Check installed runtime configuration and running-service agreement"
+exception = "Pretty is silent when clean and prints findings on discrepancy. JSON always emits the automation result, even when clean; a discrepancy exits 1, while inability to run is a stderr failure."
+options = [
+  { names = ["--running"], value = "none" },
+  { names = ["--service"], value = "string", default = "mindful-web.service" },
+]
+
+[[cli.mindful.commands]]
+path = ["runtime", "install"]
+summary = "Preview or apply runtime launcher links and rendered units"
+exception = "Package-specific installation, dry-run by default; --apply enacts the diff. Neither mode grants service activation authority or enables/restarts services."
+options = [{ names = ["--apply"], value = "none" }]
+
+[[cli.mindful.commands]]
+path = ["notice"]
+summary = "Mindful notice subscribers"
+
+[[cli.mindful.commands]]
+path = ["notice", "session-start"]
+summary = "Report capture backlog context at session start"
+protocol = "relay-subscriber-v2"
+exception = "Consumes a relay schema-2 session-start event SubscriberEnvelope; valid input outputs {} or nonempty context with exit 0, including operational unavailable context. Invalid JSON/schema/type/event is exit 1 with safe stderr and no stdout; structural argv errors are exit 2. Ignores MINDFUL_FORMAT, MINDFUL_COLOR and global --json, --pretty and --color values/conflicts before display validation. Standard help and root version remain store/input-free stdout preflights."
 
 [[cli.mindful.commands]]
 path = ["relate"]
@@ -3254,7 +3337,7 @@ options = [
 ]
 
 [cli.git-index-retention]
-project = "ops"
+project = "hostkit"
 tier = "automation"
 default_output = "pretty"
 env = "GIT-INDEX-RETENTION"
@@ -3315,9 +3398,9 @@ path = ["rm"]
 summary = "Harvest, inspect, unlock and remove a managed worktree"
 args = [{name = "target", value = "path", required = true}]
 
-# Minimal sweep adoption; existing survey, repair and guard modes are outside this inventory.
+# Sweep and subscriber adoption; existing survey, repair and guard modes are outside this inventory.
 [cli.git-index-health]
-project = "ops"
+project = "hostkit"
 tier = "automation"
 default_output = "pretty"
 env = "GIT-INDEX-HEALTH"
@@ -3326,3 +3409,9 @@ protocol = "one-shot textual sweep: non-ok results and complete coverage/count s
 [[cli.git-index-health.commands]]
 path = []
 options = [{names = ["--sweep"], value = "none"}]
+
+[[cli.git-index-health.commands]]
+path = ["--session-start"]
+summary = "Repair the session checkout index and report its recovery notice"
+protocol = "relay-subscriber-v2"
+exception = "Consumes a relay schema-2 subscriber envelope and writes notice JSON; notice failures use stderr and a nonzero exit. Ignores global --json, --pretty, --color, --headers, --no-headers and -C, their values/conflicts, and ordinary display environment/config; structural usage, help and version remain standard."

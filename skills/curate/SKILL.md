@@ -199,3 +199,8 @@ A research task filed by a scope pass already has its shape: keep the five field
 [the scope skill's §5](../scope/SKILL.md#5-make-follow-ups-answerable) intact. Goals and
 plan steps are left out: no pass has drawn one yet, and plan headings already template a
 step.
+
+When recommending a new continuation follow-up for scope, name its explicit follows
+target and actual filing source separately, using the tasks skill's relation table.
+A citation alone remains related. This adds no maintenance write permission: do not
+backfill/retype links, and leave filing or relation changes to the scoped owner.

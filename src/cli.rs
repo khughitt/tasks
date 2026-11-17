@@ -312,6 +312,9 @@ pub struct FieldArgs {
     /// and `--no-related`.
     #[arg(long = "related", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
     pub related: Vec<String>,
+    /// Continue earlier work (repeatable); edit appends to the list.
+    #[arg(long = "follows", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
+    pub follows: Vec<String>,
     #[arg(long)]
     pub spec: Option<String>,
     #[arg(long)]
@@ -342,7 +345,7 @@ pub struct EditArgs {
         "no_awaiting_user", "no_every", "no_defer", "no_source", "no_agent",
         "no_spec", "no_plan", "no_step", "no_complexity", "no_process", "no_origin", "model",
         "no_model", "rm_tags", "no_tags", "rm_needs", "no_needs", "no_depends",
-        "rm_related", "no_related",
+        "rm_related", "no_related", "follows", "rm_follows", "no_follows",
         "refs", "body", "priority", "size", "complexity", "process", "origin", "parallel",
         "lane", "every", "defer", "tags", "needs", "depends", "related", "spec", "plan",
         "step", "parent", "source", "agent"
@@ -456,6 +459,12 @@ pub struct EditArgs {
     /// Clear every related task.
     #[arg(long, conflicts_with_all = ["related", "rm_related"])]
     pub no_related: bool,
+    /// Remove a continuation link (repeatable).
+    #[arg(long = "rm-follows", value_name = "REF", conflicts_with = "no_follows", add = ArgValueCompleter::new(crate::complete::resolvable))]
+    pub rm_follows: Vec<String>,
+    /// Clear all continuation links.
+    #[arg(long, conflicts_with_all = ["follows", "rm_follows"])]
+    pub no_follows: bool,
     #[command(flatten)]
     pub fields: FieldArgs,
 }

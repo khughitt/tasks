@@ -13,6 +13,7 @@ use crate::resolve::Resolver;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RelatedChange {
     pub added: Vec<TaskId>,
+    pub follows_removed: Vec<TaskId>,
     pub removed: Vec<TaskId>,
     pub cleared: bool,
     pub editor_changed: bool,
@@ -299,10 +300,14 @@ pub fn link_citations(
                 let c = registry.canonical_id(r);
                 c == cited_canonical || c == dest_canonical
             })
-            || change.removed.iter().any(|r| {
-                let c = registry.canonical_id(r);
-                c == cited_canonical || c == dest_canonical
-            })
+            || change
+                .follows_removed
+                .iter()
+                .chain(&change.removed)
+                .any(|r| {
+                    let c = registry.canonical_id(r);
+                    c == cited_canonical || c == dest_canonical
+                })
             || child_of_task
             || would_link.contains(&dest_canonical);
 

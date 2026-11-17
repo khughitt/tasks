@@ -127,6 +127,7 @@ pub fn run(
     apply_fields(&mut ctx, &mut task, &fields, None)?;
     let related_change = crate::related::RelatedChange {
         added: task.related.clone(),
+        follows_removed: Vec::new(),
         removed: Vec::new(),
         cleared: false,
         editor_changed: false,
