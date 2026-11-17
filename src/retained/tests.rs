@@ -845,15 +845,74 @@ fn proof_and_basis_reject_forged_resolution_bad_basis() {
     );
 
     // 2. `proof::validate_history` independently rejects the forged `retention resolution:`
-    //    even when loaded via `basis::read_exact`.
+    //    even when loaded via `basis::read_exact` (both unfiltered and host-filtered).
     let mut head_basis = early.clone();
     head_basis.commit = head_commit;
     let exact = super::basis::read_exact(&project, &id, &head_basis).unwrap();
-    let err = super::proof::validate_history(&project, &exact, None)
-        .expect_err("proof::validate_history must reject forged bad.basis");
+    for filter in [None, Some("h")] {
+        let err = super::proof::validate_history(&project, &exact, filter)
+            .expect_err("proof::validate_history must reject forged bad.basis");
+        assert!(
+            matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+            "expected RetainedHistoryBlocked from proof::validate_history ({filter:?}), got: {err:?}"
+        );
+    }
+
+    // 2b. `proof::validate_history(..., Some("h"))` also rejects a forged `bad.basis` inside
+    //     an other-host `ItemsOutput.resolutions` entry when loaded via `basis::read_exact`.
+    let (op_dir, op_proj) = crate::retained::read::tests::fixture();
+    let mut op_t = task();
+    crate::commands::append_note(&mut op_t, "t", "Custody note: initial").unwrap();
+    write_task(&op_proj, &op_t);
+    crate::retained::read::tests::git(op_dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(op_dir.path(), &["commit", "-qm", "initial op task"]);
+    let op_early = super::basis::read(&op_proj, &id, None).unwrap().basis;
+
+    crate::commands::append_note(&mut op_t, "t", "retained: accidental prose").unwrap();
+    write_task(&op_proj, &op_t);
+    crate::retained::read::tests::git(op_dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(op_dir.path(), &["commit", "-qm", "bad prose"]);
+
+    let mut op_intent = operation("intent", json!({}));
+    op_intent["host"] = json!("other-host");
+    op_intent["input_bases"] = json!([{"task": "sci-000001", "basis": op_early}]);
+    op_intent["request"]["basis"] = json!(op_early);
+    let mut op_items = operation(
+        "items_published",
+        json!({
+            "items": [],
+            "artifacts": [],
+            "resolutions": [{
+                "bad": {"basis": op_early, "ordinal": 2},
+                "successors": [],
+                "reason": "Forged earlier basis commit on other-host ItemsOutput"
+            }]
+        }),
+    );
+    op_items["host"] = json!("other-host");
+    op_items["input_bases"] = json!([{"task": "sci-000001", "basis": op_early}]);
+    op_items["request"]["basis"] = json!(op_early);
+    assert!(decode_operation(&op_items.to_string()).is_ok());
+
+    crate::commands::append_note(&mut op_t, "t", &format!("retention operation: {op_intent}"))
+        .unwrap();
+    crate::commands::append_note(&mut op_t, "t", &format!("retention operation: {op_items}"))
+        .unwrap();
+    write_task(&op_proj, &op_t);
+    crate::retained::read::tests::git(op_dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(
+        op_dir.path(),
+        &["commit", "-qm", "forged other-host items_published"],
+    );
+    let mut op_head_basis = op_early.clone();
+    op_head_basis.commit = crate::retained::read::tests::git(op_dir.path(), &["rev-parse", "HEAD"]);
+    let op_exact = super::basis::read_exact(&op_proj, &id, &op_head_basis).unwrap();
+    let err = super::proof::validate_history(&op_proj, &op_exact, Some("h")).expect_err(
+        "proof::validate_history(..., Some(\"h\")) must reject forged bad.basis on other-host ItemsOutput",
+    );
     assert!(
         matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
-        "expected RetainedHistoryBlocked from proof::validate_history, got: {err:?}"
+        "expected RetainedHistoryBlocked for other-host ItemsOutput.resolutions, got: {err:?}"
     );
 
     // 3. `basis::read` checkpoint-gap guard rejects intervening `retention resolution: ` and `multipart: ` notes.

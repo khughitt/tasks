@@ -45,6 +45,7 @@ struct Correction {
     bad: Source,
     identities: Vec<Identity>,
     reason: String,
+    whole_host: bool,
 }
 struct Inventory {
     records: BTreeMap<Identity, RetentionRecord>,
@@ -138,6 +139,7 @@ fn inventory(
             bad: resolution.bad.clone(),
             identities,
             reason: resolution.reason.clone(),
+            whole_host: diagnostic.identity.is_none(),
         });
     }
     for diagnostic in local.diagnostics.iter().filter(|d| d.resolved_by.is_none()) {
@@ -167,6 +169,13 @@ fn inventory(
             record.cleanup_trigger = d.cleanup_trigger;
         } else {
             records.insert(identity, d.record(&request.host, &id.to_string())?);
+        }
+    }
+    for c in &corrections {
+        if c.whole_host && !records.keys().all(|k| c.identities.contains(k)) {
+            return Err(invalid(
+                "resolution needs the complete blocked inventory on the executing host; recover other-host history explicitly before repair",
+            ));
         }
     }
     for record in records.values() {

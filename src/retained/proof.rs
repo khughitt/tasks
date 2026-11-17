@@ -144,9 +144,6 @@ pub fn validate_history(
             let Ok(note) = decode_operation(raw) else {
                 continue;
             };
-            if host.is_some_and(|h| h != note.host) {
-                continue;
-            }
             if let PhaseOutputs::Items(out) = &note.outputs {
                 for relation in &out.resolutions {
                     basis::verify_bad_source(
@@ -158,6 +155,9 @@ pub fn validate_history(
                         &mut metrics.history_bytes_read,
                     )?;
                 }
+            }
+            if host.is_some_and(|h| h != note.host) {
+                continue;
             }
             let input = super::lineage::participant(&project, &note, &pinned.task.id)?;
             let original_id = TaskId::parse(&input.task)?;

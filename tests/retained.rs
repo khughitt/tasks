@@ -2675,3 +2675,134 @@ fn resolution_rejects_forged_basis_operation_envelope_duplicate_identities_and_s
         "{err_cp}"
     );
 }
+
+#[test]
+fn checkpoint_whole_scope_resolution_must_cover_newly_declared_items() {
+    let f = checkpoint_fixture();
+    let payload = f.dir.join("payload");
+    std::fs::write(&payload, "payload").unwrap();
+    f.seed_note("retained: prose");
+
+    let before_state = f.state();
+    assert_eq!(before_state["complete"], false);
+    assert_eq!(before_state["diagnostics"][0]["scope"], "task");
+    let before_head = f.basis();
+    let task_file = f.records.join(format!("tasks/{}.md", f.id));
+    let before_raw = std::fs::read_to_string(&task_file).unwrap();
+
+    // 1. `declarations: [item]` + `resolutions: [{ bad, declarations: [] }]` must fail in `inventory`
+    //    before `publish::intent` writes any note or request attachment.
+    let mut bad_req = checkpoint_request(&f, 91, json!([declaration(&payload, "evidence")]));
+    bad_req["resolutions"] = json!([{
+        "bad": before_state["diagnostics"][0]["source"],
+        "declarations": [],
+        "reason": "Omitted newly declared item from resolution"
+    }]);
+    let bad_path = f.request("bad-whole-scope.json", &bad_req);
+    let out = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            bad_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "retained_input", "{err}");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("resolution needs the complete blocked inventory on the executing host"),
+        "got: {err}"
+    );
+    assert_eq!(
+        f.basis(),
+        before_head,
+        "no commit may be written before intent"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&task_file).unwrap(),
+        before_raw,
+        "task file must stay untouched before intent"
+    );
+    assert!(
+        !f.records.join(format!("tasks/files/{}", f.id)).exists(),
+        "no request attachment may be written before intent"
+    );
+
+    // 2. Moving `item` into `resolutions[0].declarations` covers the full local inventory and succeeds.
+    let mut good_req = checkpoint_request(&f, 92, json!([]));
+    good_req["resolutions"] = json!([{
+        "bad": before_state["diagnostics"][0]["source"],
+        "declarations": [declaration(&payload, "evidence")],
+        "reason": "Complete local inventory declared in resolution"
+    }]);
+    let res = checkpoint(&f, &good_req);
+    assert_eq!(res["outcome"], "verified", "{res}");
+    assert_eq!(res["counts"]["kept_verified"], 1);
+    let after = f.state();
+    assert_eq!(after["complete"], true, "{after}");
+    assert!(!after["diagnostics"][0]["resolved_by"].is_null());
+
+    // 3. Prior item A + newly declared item B in `request.declarations` with host resolution
+    //    naming only `[A]` is also rejected before `publish::intent`, while `[A, B]` succeeds.
+    let extra = f.dir.join("extra");
+    std::fs::write(&extra, "extra").unwrap();
+    f.seed_note(&format!(
+        "retained: {}",
+        json!({"host": host(), "path": 42})
+    ));
+    let s2 = f.state();
+    assert_eq!(s2["complete"], false);
+    let bad_host_source = s2["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["resolved_by"].is_null())
+        .unwrap()["source"]
+        .clone();
+    let head2 = f.basis();
+    let raw2 = std::fs::read_to_string(&task_file).unwrap();
+
+    let mut partial_req = checkpoint_request(&f, 93, json!([declaration(&extra, "evidence")]));
+    partial_req["resolutions"] = json!([{
+        "bad": bad_host_source,
+        "declarations": [declaration(&payload, "evidence")],
+        "reason": "Omitted newly declared extra item"
+    }]);
+    let partial_path = f.request("partial-host.json", &partial_req);
+    let out2 = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            partial_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out2.status.code(), Some(1), "{out2:?}");
+    let err2: serde_json::Value = serde_json::from_slice(&out2.stderr).unwrap();
+    assert_eq!(err2["error"]["kind"], "retained_input", "{err2}");
+    assert_eq!(f.basis(), head2);
+    assert_eq!(std::fs::read_to_string(&task_file).unwrap(), raw2);
+
+    let mut full_req = checkpoint_request(&f, 94, json!([]));
+    full_req["resolutions"] = json!([{
+        "bad": bad_host_source,
+        "declarations": [
+            declaration(&payload, "evidence"),
+            declaration(&extra, "evidence")
+        ],
+        "reason": "Both prior and newly declared items included"
+    }]);
+    assert_eq!(checkpoint(&f, &full_req)["outcome"], "verified");
+    assert_eq!(f.state()["complete"], true);
+}
