@@ -63,16 +63,17 @@ retained reference document may resolve in the code tree instead.
    - `stale`: *Delivered* (the described thing is in the tree; evidence: the commit) or
      *Premise gone* (what the task assumed is no longer true, such as a removed command or
      a replaced design; evidence: the commit, closed task or document that removed the
-     premise). Closed, not proposed. A task delivered only in part is not stale: rewrite
-     it to the remainder, with the delivered part and its commit stated, as a `refined`
-     edit. An ask that another task or a design explicitly declined, or placed out of
+     premise). Closed, not proposed, unless a guard in
+     [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks) holds. A
+     task delivered only in part is not stale: rewrite it to the remainder, with the
+     delivered part and its commit stated, as a `refined` edit. An ask that another task or a design explicitly declined, or placed out of
      scope, is neither delivered nor covered: on that ground the task is not `stale` and
      not a `duplicate`.
    - `duplicate`: another open task in the same project covers every ask of this one.
-     Closed after the fold-in. Two tasks that only overlap are not duplicates: say so in
-     both bodies and keep both (the other body only when the pass may write that task;
-     otherwise name the overlap in the summary). A design task and the task that
-     implements it are not duplicates.
+     Closed after the fold-in, unless a guard in that section holds. Two tasks that
+     only overlap are not duplicates: say so in both bodies and keep both (the other
+     body only when the pass may write that task; otherwise name the overlap in the
+     summary). A design task and the task that implements it are not duplicates.
    - `decision`: not actionable without a choice the human owns. Write the questions into
      the record (step 5); the summary asks.
    - `decompose`: a goal is missing children it needs. Proposal: the children, one line
@@ -147,6 +148,13 @@ the reason is in the record. Run each form as `tasks -C <root> ...` (§2):
     tasks drop <id> "curate: stale; <pass>; premise gone: <commit, task id or document> <one line>"
     tasks drop <id> "curate: duplicate; <pass>; of <survivor-id>; folded in: <what, or nothing>"
 
+A pass closes only a task it drew: in a sampled pass, a sampled task.
+
+Before a *premise gone* or *duplicate* closure, read
+`tasks show <id> --all-projects` for the closing task. Its `dependents` field and any
+warning that a registered project is unreachable decide the guards below and the
+re-point step.
+
 Before the drop, record the task's status, review marks (`reviewed`, `awaiting_user`)
 and deferral date for the undo: the drop clears them.
 
@@ -155,15 +163,18 @@ and deferral date for the undo: the drop clears them.
 - Pick the survivor: the task with more settled structure (scoped, linked to a spec or
   plan, parented, depended on) stays; on a tie, the older. A task that carries
   attachments is the survivor regardless: attachments and `files:` references resolve
-  only on their own task, and curate does not attach.
+  only on their own task, and curate does not attach. When the survivor is the task
+  the pass drew and the other was not drawn, the pass closes nothing: the drawn
+  task's verdict is `keep` or `refined`, and the other task is named in the summary's
+  **proposed closures** with `not sampled` in place of a guard.
 - Fold in anything only the closing task says: facts, a reproduction, the original
   report text, as a `--body` edit of the survivor. A duplicate feedback report folds in
   as a recurrence: its `from:` tag (`--tag`) and a one-line note on the survivor, which
   is the absorb note below.
 - Re-point every open task that depends on the closing one to the survivor:
   `tasks dep <dependent> --on <survivor-id> --rm <closed-id>`. Dependents are the
-  `dependents` field of `tasks show <id> --all-projects`; `search` does not read
-  dependencies. That field lists closed dependents too. They are history and are left
+  `dependents` field of `tasks show <id> --all-projects` read above; `search` does not
+  read dependencies. That field lists closed dependents too. They are history and are left
   as they are: re-pointing one would rewrite a finished record and leave it depending
   on open work.
 - Keep the user's ask visible. When the closing task carries the user's words (read as
@@ -273,10 +284,11 @@ scope pass.
 
 - Zero new tasks per pass. Curation improves what exists; adding is a proposal.
 - Prefer shorter. A rewrite that grows the body without adding a fact is wrong.
-- Touch only the sampled tasks, with one exception: closing a duplicate writes to the
-  survivor and to open dependents, which may lie outside the sample, and only as
-  [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks) says. A
-  duplicate found in passing is otherwise named in the summary, not edited.
+- Touch only the sampled tasks, with one exception: closing a sampled duplicate writes
+  to the survivor and to open dependents, which may lie outside the sample, and only as
+  [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks) says. It never
+  closes an unsampled task: a duplicate found in passing, including one whose survivor
+  is the sampled task, is named in the summary, not edited.
 
 ## Summary to the human
 
@@ -290,7 +302,7 @@ are the human's, grouped, omitting empty groups:
 - **closed**: id, stale or duplicate, the evidence, the survivor of a duplicate, and
   the undo lines (see [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks));
 - **proposed closures**: id, stale or duplicate, the evidence, and the guard that kept
-  it open;
+  it open (or `not sampled`);
 - **priority changes**: id, from, to, why;
 - **children to add**: the goal, then one line per child;
 - **questions**: id, then the open questions a `decision` verdict wrote into the record.
