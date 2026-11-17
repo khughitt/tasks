@@ -956,3 +956,421 @@ fn proof_and_basis_reject_forged_resolution_bad_basis() {
         );
     }
 }
+
+#[test]
+fn check_manifest_admission_matches_manifest_bytes_with_symlinks_and_escapes() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::check_manifest_admission_matches_manifest_bytes_with_symlinks_and_escapes",
+    ) {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("scratch-container");
+    std::fs::create_dir_all(root.join("nested/sub")).unwrap();
+    std::fs::create_dir_all(root.join("nested/empty")).unwrap();
+    std::fs::create_dir_all(root.join("top-empty")).unwrap();
+    std::fs::write(root.join(".hidden"), vec![b'h'; 4096]).unwrap();
+    std::fs::write(root.join("nested/.dotfile"), vec![b'd'; 4096]).unwrap();
+    std::fs::write(
+        root.join("file with \"quotes\" and spaces.txt"),
+        vec![b'q'; 8192],
+    )
+    .unwrap();
+    std::fs::write(root.join("nested/sub/item 'two'.txt"), vec![b't'; 8192]).unwrap();
+    for idx in 0..8 {
+        std::fs::write(
+            root.join(format!("nested/sub/extra-{idx:02}.txt")),
+            vec![b'x'; 1024],
+        )
+        .unwrap();
+    }
+    std::os::unix::fs::symlink("nonexistent/target\nline", root.join("broken")).unwrap();
+
+    let sock_path = tmp.path().join("observer.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    // Single-threaded isolated child process; safe to scope observer socket env var.
+    unsafe {
+        std::env::set_var("TASKS_RETAINED_TEST_SOCKET", &sock_path);
+    }
+
+    let proj = crate::repo::Project::from_config(
+        tmp.path().to_path_buf(),
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 900\nmultipart_validators = []\n",
+    )
+    .unwrap();
+
+    crate::history::begin_metrics();
+    let before_finish = super::verify::Metrics::default().finish();
+    let placeholder_bytes = super::verify::placeholder_manifest_bytes(&root).unwrap();
+    super::verify::check_manifest_admission(&proj, root.to_str().unwrap(), &root).unwrap();
+    let after_finish = super::verify::Metrics::default().finish();
+
+    unsafe {
+        std::env::remove_var("TASKS_RETAINED_TEST_SOCKET");
+    }
+
+    assert_eq!(
+        after_finish.bytes_hashed - before_finish.bytes_hashed,
+        0,
+        "metadata-only admission precheck must hash zero bytes"
+    );
+    assert!(
+        matches!(
+            listener.accept(),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock
+        ),
+        "check_manifest_admission must emit zero observer events (no inspection event)"
+    );
+
+    let mut real_metrics = super::verify::Metrics::default();
+    let real = super::verify::manifest(&root, &mut real_metrics).unwrap();
+    assert!(real_metrics.bytes_hashed >= 24_576);
+    assert_eq!(placeholder_bytes.len(), real.bytes.len());
+
+    let mut real_decoded = decode_manifest(std::str::from_utf8(&real.bytes).unwrap()).unwrap();
+    for entry in &mut real_decoded.entries {
+        if let ManifestEntry::File { sha256, .. } = entry {
+            *sha256 = "0".repeat(64);
+        }
+    }
+    let normalized_real = serde_json::to_vec(&real_decoded).unwrap();
+    assert_eq!(placeholder_bytes, normalized_real);
+
+    for cap in [120, 256, 512] {
+        let placeholder_parts = crate::multipart::cut::cut(&placeholder_bytes, cap).unwrap();
+        let real_parts = crate::multipart::cut::cut(&real.bytes, cap).unwrap();
+        assert_eq!(
+            placeholder_parts, real_parts,
+            "cut part offsets must match at cap {cap}"
+        );
+    }
+}
+
+#[test]
+fn validate_multipart_manifest_limits_enforces_validators_caps_and_catalog() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::validate_multipart_manifest_limits_enforces_validators_caps_and_catalog",
+    ) {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("tasks")).unwrap();
+    let open_with = |toml_body: &str| -> crate::repo::Project {
+        std::fs::write(tmp.path().join("tasks/.config.toml"), toml_body).unwrap();
+        crate::repo::Project::open(tmp.path()).unwrap()
+    };
+
+    let entries: Vec<_> = (0..35)
+        .map(|i| {
+            json!({
+                "type": "file",
+                "path": format!("member-{i:03}.txt"),
+                "sha256": format!("{i:064x}")
+            })
+        })
+        .collect();
+    let bytes = serde_json::to_vec(&json!({"version": 1, "entries": entries})).unwrap();
+    assert!(bytes.len() > 3500 && bytes.len() < 6000);
+    let sha = crate::multipart::content::sha256_hex(&bytes);
+    let name = format!("retained-manifest-{sha}.json");
+
+    // 1. Undeclared validators -> MultipartValidatorsUndeclared.
+    let p_undeclared = open_with("prefix = 'sci'\n[attachments]\nmax_bytes = 2048\n");
+    let err = super::verify::validate_multipart_manifest_limits(&p_undeclared, &name, &bytes)
+        .unwrap_err();
+    assert_eq!(err.kind(), "multipart_validators_undeclared");
+
+    // 2. Over max_bytes (and max_bytes == 0) -> AttachmentTooLarge.
+    for max_b in [0u64, 3000u64] {
+        let p_max = open_with(&format!(
+            "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_max_bytes = {max_b}\nmultipart_validators = []\n"
+        ));
+        let err =
+            super::verify::validate_multipart_manifest_limits(&p_max, &name, &bytes).unwrap_err();
+        assert_eq!(err.kind(), "attachment_too_large", "max_b={max_b}: {err}");
+    }
+
+    // 3. Over max_parts -> AttachmentTooLarge.
+    let p_parts = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_max_parts = 1\nmultipart_validators = []\n",
+    );
+    let err =
+        super::verify::validate_multipart_manifest_limits(&p_parts, &name, &bytes).unwrap_err();
+    assert_eq!(err.kind(), "attachment_too_large");
+
+    // 4. `.catalog.json` exceeds `attachments.max_bytes` -> AttachmentTooLarge naming `.catalog.json`.
+    let p_cat = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 300\nmultipart_max_parts = 64\nmultipart_validators = []\n",
+    );
+    let err = super::verify::validate_multipart_manifest_limits(&p_cat, &name, &bytes).unwrap_err();
+    assert_eq!(err.kind(), "attachment_too_large");
+    assert!(err.to_string().contains(".catalog.json"), "got: {err}");
+
+    // 5. Validator rejects -> MultipartInvalidContent naming validation_failed.
+    let p_reject = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_validators = [{ match = '*.json', command = ['/bin/sh', '-c', 'echo rejected >&2; exit 1'] }]\n",
+    );
+    let err =
+        super::verify::validate_multipart_manifest_limits(&p_reject, &name, &bytes).unwrap_err();
+    assert_eq!(err.kind(), "multipart_invalid_content");
+    assert!(err.to_string().contains("validation_failed"), "got: {err}");
+
+    // 6. Validator passes -> returns exact PartSlice ranges matching `multipart::cut::cut`.
+    let p_pass = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_validators = [{ match = '*.json', command = ['/bin/sh', '-c', 'cat >/dev/null'] }]\n",
+    );
+    let parts: Vec<crate::multipart::cut::PartSlice> =
+        super::verify::validate_multipart_manifest_limits(&p_pass, &name, &bytes).unwrap();
+    assert_eq!(parts, crate::multipart::cut::cut(&bytes, 2048).unwrap());
+}
+
+fn seed_committed_multipart_manifest(
+    dir: &std::path::Path,
+    project: &crate::repo::Project,
+    t: &mut Task,
+    whole: &[u8],
+) -> (String, String, crate::multipart::declaration::Declaration) {
+    let sha = crate::multipart::content::sha256_hex(whole);
+    let name = format!("retained-manifest-{sha}.json");
+    let ranges = crate::multipart::cut::cut(whole, project.attachments_max_bytes).unwrap();
+    assert_eq!(ranges.len(), 2, "expected 2-part manifest fixture");
+    let files_dir = crate::attachments::task_dir(project, &t.id);
+    std::fs::create_dir_all(&files_dir).unwrap();
+    let mut catalog_parts = Vec::new();
+    for (idx, range) in ranges.iter().enumerate() {
+        let part_name = crate::multipart::names::part_name(&name, idx + 1);
+        let slice = &whole[range.clone()];
+        std::fs::write(files_dir.join(&part_name), slice).unwrap();
+        crate::commands::append_note(
+            t,
+            "t",
+            &crate::attachments::attached_note(&part_name, slice.len() as u64, None),
+        )
+        .unwrap();
+        catalog_parts.push(crate::multipart::catalog::CatalogPart {
+            name: part_name,
+            bytes: slice.len() as u64,
+            sha256: crate::multipart::content::sha256_hex(slice),
+        });
+    }
+    let catalog = crate::multipart::catalog::Catalog {
+        name: name.clone(),
+        bytes: whole.len() as u64,
+        sha256: sha.clone(),
+        parts: catalog_parts,
+    };
+    let catalog_bytes = catalog.to_bytes();
+    let catalog_member = crate::multipart::names::catalog_name(&name);
+    std::fs::write(files_dir.join(&catalog_member), &catalog_bytes).unwrap();
+    crate::commands::append_note(
+        t,
+        "t",
+        &crate::attachments::attached_note(&catalog_member, catalog_bytes.len() as u64, None),
+    )
+    .unwrap();
+    let decl = crate::multipart::declaration::Declaration {
+        name: name.clone(),
+        bytes: whole.len() as u64,
+        parts: ranges.len(),
+        sha256: sha.clone(),
+        catalog_sha256: crate::multipart::content::sha256_hex(&catalog_bytes),
+        caption: None,
+    };
+    crate::commands::append_note(t, "t", &decl.note()).unwrap();
+    let raw = crate::format::serialize_physical(&project.physical_for_save(t).unwrap());
+    std::fs::write(project.task_path(&t.id), raw).unwrap();
+    crate::retained::read::tests::git(dir, &["add", "."]);
+    crate::retained::read::tests::git(dir, &["commit", "-qm", "commit multipart manifest"]);
+    (name, sha, decl)
+}
+
+#[test]
+fn rebuild_multipart_rejects_extra_git_part_member() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::rebuild_multipart_rejects_extra_git_part_member",
+    ) {
+        return;
+    }
+    let (dir, _) = crate::retained::read::tests::fixture();
+    std::fs::write(
+        dir.path().join("tasks/.config.toml"),
+        "prefix = \"sci\"\n[attachments]\nmax_bytes = 1500\nmultipart_validators = []\n",
+    )
+    .unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "config"]);
+    let project =
+        crate::retained::read::start(&crate::repo::Project::open(dir.path()).unwrap()).unwrap();
+
+    let entries: Vec<_> = (0..18)
+        .map(|i| {
+            json!({
+                "type": "file",
+                "path": format!("entry-{i:02}.txt"),
+                "sha256": format!("{i:064x}")
+            })
+        })
+        .collect();
+    let whole = serde_json::to_vec(&json!({"version": 1, "entries": entries})).unwrap();
+    assert!(whole.len() > 1500 && whole.len() < 3000);
+
+    let mut t = task();
+    let (name, _sha, _decl) =
+        seed_committed_multipart_manifest(dir.path(), &project, &mut t, &whole);
+    let clean_commit = crate::retained::read::tests::git(dir.path(), &["rev-parse", "HEAD"]);
+    let refreshed =
+        crate::retained::read::start(&crate::repo::Project::open(dir.path()).unwrap()).unwrap();
+    let ctx = crate::retained::read::at(&refreshed, &refreshed.records).unwrap();
+    let mut history_bytes = 0;
+    let rebuilt = super::basis::rebuild_multipart(
+        &ctx,
+        &clean_commit,
+        ".",
+        "sci-000001",
+        &t,
+        &name,
+        &mut history_bytes,
+    )
+    .unwrap();
+    assert_eq!(rebuilt, whole);
+    assert!(history_bytes > whole.len() as u64);
+
+    // Commit an extra `.part-0003` blob alongside the valid 2-part declaration in `{commit}:{dir}`.
+    let extra_part = crate::multipart::names::part_name(&name, 3);
+    std::fs::write(
+        crate::attachments::task_dir(&refreshed, &t.id).join(&extra_part),
+        b"extra-untracked-in-decl\n",
+    )
+    .unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "extra part-0003"]);
+    let tampered_commit = crate::retained::read::tests::git(dir.path(), &["rev-parse", "HEAD"]);
+    let refreshed2 =
+        crate::retained::read::start(&crate::repo::Project::open(dir.path()).unwrap()).unwrap();
+    let ctx2 = crate::retained::read::at(&refreshed2, &refreshed2.records).unwrap();
+    let err = super::basis::rebuild_multipart(
+        &ctx2,
+        &tampered_commit,
+        ".",
+        "sci-000001",
+        &t,
+        &name,
+        &mut 0,
+    )
+    .unwrap_err();
+    assert_eq!(err.kind(), "multipart_invalid_content");
+    assert!(err.to_string().contains(&extra_part), "got: {err}");
+}
+
+#[test]
+fn verify_artifact_and_read_record_manifest_handle_multipart_and_tampering() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::verify_artifact_and_read_record_manifest_handle_multipart_and_tampering",
+    ) {
+        return;
+    }
+    let (dir, _) = crate::retained::read::tests::fixture();
+    std::fs::write(
+        dir.path().join("tasks/.config.toml"),
+        "prefix = \"sci\"\n[attachments]\nmax_bytes = 1500\nmultipart_validators = []\n",
+    )
+    .unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "config"]);
+    let project = crate::repo::Project::open(dir.path()).unwrap();
+
+    let entries: Vec<_> = (0..18)
+        .map(|i| {
+            json!({
+                "type": "file",
+                "path": format!("entry-{i:02}.txt"),
+                "sha256": format!("{i:064x}")
+            })
+        })
+        .collect();
+    let whole = serde_json::to_vec(&json!({"version": 1, "entries": entries})).unwrap();
+    let mut t = task();
+    let (name, sha, _decl) =
+        seed_committed_multipart_manifest(dir.path(), &project, &mut t, &whole);
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let good_basis = super::basis::read(&project, &id, None).unwrap().basis;
+
+    let locator = ArtifactLocator::Attachment {
+        task: "sci-000001".into(),
+        name: name.clone(),
+        basis: Some(good_basis.clone()),
+        sha256: sha.clone(),
+    };
+    let mut metrics = super::verify::Metrics::default();
+    assert_eq!(
+        super::verify::artifact(&project, &locator, &mut metrics).unwrap(),
+        whole
+    );
+    assert!(metrics.bytes_hashed >= whole.len() as u64);
+    assert!(metrics.history_bytes_read > whole.len() as u64);
+
+    // Direct `payload_digest` dispatch on `ArtifactLocator::Attachment` via `verify::preserved`.
+    super::verify::preserved(&project, &locator, &mut super::verify::Metrics::default()).unwrap();
+
+    // `read_record_manifest` + `preflight_with_task` rebuild live multipart manifest (including
+    // when `t.id` still carries an older prefix after project rename!).
+    let logical_path = crate::attachments::task_dir(&project, &id).join(&name);
+    assert_eq!(
+        super::verify::read_record_manifest(&project, Some(&t), &logical_path).unwrap(),
+        whole
+    );
+    let mut rec = decode_record(&record().to_string()).unwrap();
+    rec.manifest = FieldString::Text(logical_path.to_str().unwrap().into());
+    super::verify::preflight_with_task(&project, Some(&t), &rec, Some(&logical_path)).unwrap();
+
+    // `verify::preflight` continues to reject pre-Manifest-1 / unsupported versions.
+    let v2_path = dir.path().join("historical-v2-manifest.json");
+    std::fs::write(&v2_path, br#"{"version":2,"entries":[]}"#).unwrap();
+    let v2_err = super::verify::preflight(&project, &rec, Some(&v2_path)).unwrap_err();
+    assert!(
+        v2_err
+            .to_string()
+            .contains("unsupported historical manifest format; preserve and migrate it explicitly"),
+        "got: {v2_err}"
+    );
+
+    // Post-rename `current_id` handling in `read_record_manifest`:
+    let mut old_prefix_task = t.clone();
+    old_prefix_task.id = crate::model::TaskId::parse("old-000001").unwrap();
+    assert_eq!(
+        super::verify::read_record_manifest(&project, Some(&old_prefix_task), &logical_path)
+            .unwrap(),
+        whole
+    );
+
+    // Ambiguous ordinary + multipart attachment must fail with exact message.
+    let mut ambig = t.clone();
+    crate::commands::append_note(
+        &mut ambig,
+        "t",
+        &crate::attachments::attached_note(&name, whole.len() as u64, None),
+    )
+    .unwrap();
+    let raw = crate::format::serialize_physical(&project.physical_for_save(&ambig).unwrap());
+    std::fs::write(project.task_path(&ambig.id), raw).unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(
+        dir.path(),
+        &["commit", "-qm", "ambiguous ordinary+multipart"],
+    );
+    let ambig_basis = super::basis::read(&project, &id, None).unwrap().basis;
+    let ambig_loc = ArtifactLocator::Attachment {
+        task: "sci-000001".into(),
+        name: name.clone(),
+        basis: Some(ambig_basis),
+        sha256: sha,
+    };
+    let err = super::verify::artifact(&project, &ambig_loc, &mut super::verify::Metrics::default())
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("preserved attachment is ambiguously both ordinary and multipart"),
+        "got: {err}"
+    );
+}

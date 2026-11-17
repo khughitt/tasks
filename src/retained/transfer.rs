@@ -179,13 +179,19 @@ fn preflight(
             ));
         }
     }
+    let fresh = ctx.phase(from)?.is_none();
     for record in originals {
         let manifest = record
             .manifest
             .value()
             .map(|_| verify::manifest_path(ctx.project(from), &ctx.tasks[from], &record))
             .transpose()?;
-        verify::preflight(ctx.project(from), &record, manifest.as_deref())?;
+        verify::preflight_with_task(
+            ctx.project(from),
+            Some(&ctx.tasks[from].task),
+            &record,
+            manifest.as_deref(),
+        )?;
         let path = verify::current_path(ctx.project(from), &record.path)?;
         if record.kind != "worktree" && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
             let root = path.canonicalize()?;
@@ -195,6 +201,9 @@ fn preflight(
                         "transfer metadata destination lies inside the inventoried container",
                     ));
                 }
+            }
+            if fresh {
+                verify::check_manifest_admission(ctx.project(to), &record.path, &path)?;
             }
         }
     }

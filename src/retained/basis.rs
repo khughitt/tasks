@@ -104,6 +104,62 @@ pub(crate) fn blob(
         .ok_or_else(|| invalid("history byte counter overflow"))?;
     Ok(read.output.stdout)
 }
+pub(crate) fn rebuild_multipart(
+    context: &super::read::ReadContext,
+    commit: &str,
+    records_subdir: &str,
+    task_id: &str,
+    task: &Task,
+    name: &str,
+    history_bytes_read: &mut u64,
+) -> Result<Vec<u8>> {
+    crate::attachments::validate_name(name)?;
+    let Some(crate::multipart::audit::DeclState::Live(declaration)) =
+        crate::multipart::audit::declarations(task).remove(name)
+    else {
+        return Err(Error::RetainedHistoryBlocked(format!(
+            "Missing live multipart declaration for {name} on {task_id} at {commit}"
+        )));
+    };
+    crate::multipart::audit::recovery_bounds(&declaration)?;
+    let dir = format!("{records_subdir}/tasks/files/{task_id}")
+        .trim_start_matches("./")
+        .to_string();
+    if !member_path(&dir) {
+        return Err(invalid("unsafe Git tree path"));
+    }
+    let expected = crate::multipart::names::member_names(name, declaration.parts);
+    let raw = git_context(
+        context,
+        &["ls-tree", "-z", "--name-only", &format!("{commit}:{dir}")],
+    )?;
+    for entry in raw.split(|b| *b == 0).filter(|e| !e.is_empty()) {
+        let entry =
+            std::str::from_utf8(entry).map_err(|_| invalid("Git tree entry must be UTF-8"))?;
+        if crate::multipart::audit::is_member(entry, name)
+            && !expected.iter().any(|member| member == entry)
+        {
+            return Err(Error::MultipartInvalidContent(format!(
+                "multipart artifact {} member {entry}: extra member in attachment directory",
+                declaration.name
+            )));
+        }
+    }
+    crate::multipart::audit::rebuild_with(
+        &declaration,
+        context.attachments_max_bytes(),
+        &crate::attachments::ledger(task),
+        |member, cap| {
+            blob(
+                context,
+                commit,
+                &format!("{dir}/{member}"),
+                Some(cap),
+                history_bytes_read,
+            )
+        },
+    )
+}
 pub(crate) fn context(
     project: &Project,
     id: &TaskId,

@@ -178,17 +178,22 @@ fn inventory(
             ));
         }
     }
+    let fresh = ctx.phase(id)?.is_none();
     for record in records.values() {
         let manifest = record
             .manifest
             .value()
             .map(|_| verify::manifest_path(ctx.project(id), &ctx.tasks[id], record))
             .transpose()?;
-        verify::preflight(ctx.project(id), record, manifest.as_deref())?;
+        verify::preflight_with_task(
+            ctx.project(id),
+            Some(&ctx.tasks[id].task),
+            record,
+            manifest.as_deref(),
+        )?;
         let path = verify::current_path(ctx.project(id), &record.path)?;
-        if (record.kind == "scratch"
-            || std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir())
-                && record.kind != "worktree")
+        let is_dir = std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir());
+        if (record.kind == "scratch" || is_dir && record.kind != "worktree")
             && let Ok(root) = path.canonicalize()
         {
             let target = crate::attachments::task_dir(ctx.project(id), id);
@@ -197,6 +202,9 @@ fn inventory(
                     "checkpoint metadata destination lies inside the inventoried container; use an off-container records layout",
                 ));
             }
+        }
+        if fresh && record.kind != "worktree" && is_dir {
+            verify::check_manifest_admission(ctx.project(id), &record.path, &path)?;
         }
     }
     Ok(Inventory {

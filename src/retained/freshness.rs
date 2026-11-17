@@ -139,6 +139,7 @@ fn range_key(
         &project.retention_lineage,
         &project.retention_recovery,
         project.attachments_max_bytes,
+        &project.multipart,
     ))
     .map_err(super::model::invalid)
 }
@@ -519,10 +520,14 @@ fn working_attachments_allowed(
                         .file_name()
                         .and_then(|s| s.to_str())
                         .ok_or_else(stale)?;
-                    let bytes = allowed
-                        .get(name)
-                        .filter(|_| path.parent() == Some(task_directory.as_path()))
-                        .ok_or_else(stale)?;
+                    if path.parent() != Some(task_directory.as_path()) {
+                        return Err(stale());
+                    }
+                    let Some(bytes) = allowed.get(name) else {
+                        return Err(Error::RetainedStaleBasis(format!(
+                            "Protected attachment directory tasks/files/{id} contains unledgered file {name}; preserve and verify a copy outside tasks/files/{id} if needed, remove the unledgered file to restore the committed preimage, and retry or reconcile"
+                        )));
+                    };
                     if meta.permissions().mode() & 0o100 != 0
                         || super::verify::read_local(&path, project.attachments_max_bytes)?
                             != *bytes
@@ -603,6 +608,7 @@ pub(super) fn context(project: &Project) -> Result<Project> {
         || fresh.retention_lineage != project.retention_lineage
         || fresh.commit_records != project.commit_records
         || fresh.attachments_max_bytes != project.attachments_max_bytes
+        || fresh.multipart != project.multipart
     {
         return Err(stale());
     }
@@ -625,6 +631,9 @@ pub(crate) fn current(
     now.commit = basis::resolve(&fresh, "HEAD")?;
     unchanged(&fresh, id, &pinned.basis, &now, &pinned.task)?;
     basis::read_exact(&fresh, id, &now)?;
+    if attachments {
+        working_attachments(&fresh, id, &now)?;
+    }
     let mut paths = paths(id, &now, &pinned.task);
     if !attachments {
         paths.remove(1);
@@ -645,9 +654,6 @@ pub(crate) fn current(
         **p != format!("{}/tasks/files/{id}", now.records_subdir).trim_start_matches("./")
     }) {
         working_file(&fresh, &now.commit, path, None)?;
-    }
-    if attachments {
-        working_attachments(&fresh, id, &now)?;
     }
     Ok(now)
 }
