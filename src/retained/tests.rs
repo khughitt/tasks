@@ -1,4 +1,4 @@
-use super::{model::*, state};
+use super::{model::*, publish, state};
 use crate::model::Task;
 fn task() -> Task {
     crate::format::parse_physical("---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\ndepends: []\ntags: []\ncreated: 2026-11-03T00:00:00Z\nupdated: 2026-11-03T00:00:00Z\n---\n\n## Notes\n", "fixture").unwrap().assemble(Vec::new())
@@ -444,4 +444,206 @@ fn retained_replay_rejects_missing_phase_items() {
 fn project() -> crate::repo::Project {
     crate::repo::Project::from_config(std::path::PathBuf::from("/fixture"), "prefix = 'sci'")
         .unwrap()
+}
+
+#[test]
+fn validate_record_splits_missing_scratch_manifest_from_invalid_locator() {
+    let mut scratch = record();
+    scratch["kind"] = json!("scratch");
+    let err = decode_record(&scratch.to_string()).unwrap_err().to_string();
+    assert!(err.contains("missing manifest"), "got: {err}");
+
+    let mut scratch_null = scratch.clone();
+    scratch_null["manifest"] = Value::Null;
+    let err = decode_record(&scratch_null.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("missing manifest"), "got: {err}");
+
+    for kind in ["scratch", "evidence"] {
+        for bad_locator in ["files:foo.json", "rel/path.json"] {
+            let mut r = record();
+            r["kind"] = json!(kind);
+            r["manifest"] = json!(bad_locator);
+            let err = decode_record(&r.to_string()).unwrap_err().to_string();
+            assert!(
+                err.contains("manifest locator must start with / or $WORK_ROOT/"),
+                "{kind} {bad_locator}: got {err}"
+            );
+        }
+    }
+
+    let mut evidence_null = record();
+    evidence_null["manifest"] = Value::Null;
+    let err = decode_record(&evidence_null.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("manifest locator must start with / or $WORK_ROOT/"),
+        "evidence null manifest: got {err}"
+    );
+
+    for ok_locator in ["/records/manifest.json", "$WORK_ROOT/sci/manifest.json"] {
+        let mut r = scratch.clone();
+        r["manifest"] = json!(ok_locator);
+        assert!(decode_record(&r.to_string()).is_ok(), "{ok_locator}");
+    }
+
+    let mut unknown = json!({
+        "version": 1,
+        "host": "h",
+        "kind": "scratch",
+        "path": "$WORK_ROOT/sci/dir",
+        "state": "kept",
+        "verification": "unknown",
+        "purpose": "Review",
+        "next_owner": "task:sci-000001",
+        "cleanup_trigger": "After review",
+        "sha256": null,
+        "manifest": null,
+        "verification_action": "Inspect missing directory"
+    });
+    assert!(decode_record(&unknown.to_string()).is_ok());
+
+    unknown["manifest"] = json!("files:foo.json");
+    let err = decode_record(&unknown.to_string()).unwrap_err().to_string();
+    assert!(
+        err.contains("unknown manifest locator must be null or start with / or $WORK_ROOT/"),
+        "unknown bad manifest: got {err}"
+    );
+}
+
+#[test]
+fn decode_resolution_rejects_bad_ordinals() {
+    let valid = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 3},
+        "successors": [4],
+        "reason": "fixed"
+    });
+    let parsed = decode_resolution(&valid.to_string()).expect("valid single successor");
+    assert_eq!(
+        parsed,
+        ResolutionNote {
+            version: 1,
+            bad: Source {
+                basis: basis(),
+                ordinal: 3,
+            },
+            successors: vec![4],
+            reason: "fixed".into(),
+        }
+    );
+
+    let mut empty_succ = valid.clone();
+    empty_succ["successors"] = json!([]);
+    assert!(
+        decode_resolution(&empty_succ.to_string()).is_ok(),
+        "empty successors allowed"
+    );
+
+    let mut v2 = valid.clone();
+    v2["version"] = json!(2);
+    let err = decode_resolution(&v2.to_string()).unwrap_err().to_string();
+    assert!(err.contains("unsupported_version"), "v2 full: got {err}");
+    let err = decode_resolution(r#"{"version":2}"#)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unsupported_version"), "v2 minimal: got {err}");
+
+    let mut zero_bad = valid.clone();
+    zero_bad["bad"]["ordinal"] = json!(0);
+    assert!(decode_resolution(&zero_bad.to_string()).is_err());
+
+    for bad_succ in [json!([3]), json!([2]), json!([4, 4])] {
+        let mut s = valid.clone();
+        s["successors"] = bad_succ.clone();
+        assert!(
+            decode_resolution(&s.to_string()).is_err(),
+            "bad successors {bad_succ} must fail"
+        );
+    }
+
+    for bad_reason in ["", "line1\nline2", "line1\rline2", "line1\0line2"] {
+        let mut s = valid.clone();
+        s["reason"] = json!(bad_reason);
+        assert!(
+            decode_resolution(&s.to_string()).is_err(),
+            "bad reason {bad_reason:?} must fail"
+        );
+    }
+
+    let mut unknown_field = valid.clone();
+    unknown_field["extra"] = json!(1);
+    assert!(decode_resolution(&unknown_field.to_string()).is_err());
+
+    let dup_key = valid.to_string().replacen("{", "{\"version\":1,", 1);
+    assert!(decode_resolution(&dup_key).is_err());
+
+    assert!(publish::reserved("retention resolution: {}"));
+    assert!(publish::reserved("multipart: {}"));
+    assert!(publish::validate_appended_note_syntax("Custody note: ok").is_ok());
+    assert!(
+        publish::validate_appended_note_syntax(&format!("retention resolution: {valid}")).is_ok()
+    );
+    assert!(publish::validate_appended_note_syntax("retention resolution:").is_err());
+    assert!(publish::validate_appended_note_syntax("retention resolution: {}").is_err());
+    assert!(publish::validate_appended_note_syntax("retained:no-space").is_err());
+    assert!(publish::validate_appended_note_syntax("retained: [1, 2]").is_err());
+}
+
+#[test]
+fn check_write_validates_appended_retained_when_prior_note_edited() {
+    let p = project();
+    let reg = crate::registry::Registry::default();
+    let mut old = task();
+    crate::commands::append_note(&mut old, "t", "initial").unwrap();
+    old.notes[0].text = "initial ".into();
+
+    let mut new = old.clone();
+    new.notes[0].text = "initial".into();
+    crate::commands::append_note(&mut new, "t", "retained: created scratch dir").unwrap();
+
+    let err = publish::check_write(&p, &reg, &old, &new, publish::WritePermission::Ordinary)
+        .expect_err("prose retained: note after prior-note trim must fail");
+    match err {
+        crate::error::Error::RetainedInput(msg) => {
+            assert!(
+                msg.contains(
+                    "Note prefix 'retained:' is reserved for Retention-1 JSON item records"
+                ),
+                "got: {msg}"
+            );
+            assert!(msg.contains("Custody note: ..."), "got: {msg}");
+        }
+        other => panic!("expected Error::RetainedInput, got: {other:?}"),
+    }
+}
+
+#[test]
+fn check_write_preserves_trimmed_historical_malformed_retained_note() {
+    let p = project();
+    let reg = crate::registry::Registry::default();
+    let mut old = task();
+    crate::commands::append_note(&mut old, "t", "retained: historical bad prose").unwrap();
+    old.notes[0].text = "retained: historical bad prose ".into();
+
+    let mut new = old.clone();
+    new.notes[0].text = "retained: historical bad prose".into();
+    crate::commands::append_note(&mut new, "t", "Custody note: ok").unwrap();
+    assert_eq!(old.notes.len(), 1);
+    assert_eq!(new.notes.len(), 2);
+
+    publish::check_write(&p, &reg, &old, &new, publish::WritePermission::Ordinary)
+        .expect("existing historical malformed note at ..old.notes.len() must not be re-validated");
+
+    let mut bad_new = old.clone();
+    bad_new.notes[0].text = "retained: historical bad prose".into();
+    crate::commands::append_note(&mut bad_new, "t", "retained: new bad prose").unwrap();
+    let err = publish::check_write(&p, &reg, &old, &bad_new, publish::WritePermission::Ordinary)
+        .expect_err("newly appended malformed retained: note must still fail");
+    assert!(
+        matches!(err, crate::error::Error::RetainedInput(_)),
+        "expected Error::RetainedInput, got: {err:?}"
+    );
 }

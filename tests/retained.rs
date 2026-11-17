@@ -140,7 +140,7 @@ fn retained_state_layouts() {
 fn retained_state_unknown_host() {
     let f = RetainedEnv::new("in-tree");
     f.note(f.record());
-    f.json(&["note", &f.id, "retained: {\"version\":2}"]);
+    f.seed_note("retained: {\"version\":2}");
     let s = f.state();
     assert_eq!(s["complete"], false);
     assert_eq!(s["items"][0]["record"], serde_json::Value::Null);
@@ -2054,4 +2054,105 @@ fn retained_state_shared_reads() {
     }
     assert!(!blobs.is_empty());
     assert_eq!(state, f.state());
+}
+
+#[test]
+fn note_and_edit_reject_malformed_unversioned_and_prose_retained_notes() {
+    let f = RetainedEnv::new("in-tree");
+    let task_file = f.records.join(format!("tasks/{}.md", f.id));
+    let initial_notes = f.json(&["show", &f.id])["task"]["notes"].clone();
+    let parse_retained_input = |out: &std::process::Output| -> String {
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        assert!(out.stdout.is_empty(), "stdout must be empty on error");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["error"]["kind"], "retained_input", "{err}");
+        err["error"]["detail"].as_str().unwrap().to_string()
+    };
+
+    // 1. Prose under reserved 'retained:' prefix via `tasks note`
+    let out = f
+        .cmd()
+        .args(["note", &f.id, "retained: created scratch dir"])
+        .output()
+        .unwrap();
+    let detail = parse_retained_input(&out);
+    assert!(detail.contains("'retained:'"), "got: {detail}");
+    assert!(detail.contains("'Custody note: ...'"), "got: {detail}");
+
+    // 2. Unversioned otherwise-valid JSON record via `tasks note`
+    let unversioned = format!(
+        r#"retained: {{"host":"h","kind":"worktree","path":".worktrees/x","state":"kept","verification":"verified","purpose":"p","next_owner":"task:{}","cleanup_trigger":"c"}}"#,
+        f.id
+    );
+    let out = f
+        .cmd()
+        .args(["note", &f.id, &unversioned])
+        .output()
+        .unwrap();
+    let detail = parse_retained_input(&out);
+    assert!(
+        detail.contains(r#"newly written retained: records require integer "version": 1"#),
+        "got: {detail}"
+    );
+
+    // 3. Invalid v1 semantics (`state: "released"` with `next_owner: "task:<id>"`)
+    let bad_released = format!(
+        r#"retained: {{"version":1,"host":"h","kind":"worktree","path":".worktrees/x","state":"released","verification":"verified","purpose":"p","next_owner":"task:{}","cleanup_trigger":"none"}}"#,
+        f.id
+    );
+    let out = f
+        .cmd()
+        .args(["note", &f.id, &bad_released])
+        .output()
+        .unwrap();
+    let _ = parse_retained_input(&out);
+
+    // 4. `tasks note <id> --stdin` fails atomically with 1-based line number and zero notes written
+    let out = f
+        .cmd()
+        .args(["note", &f.id, "--stdin"])
+        .write_stdin("Custody note: ok\nretained: bad prose\n")
+        .output()
+        .unwrap();
+    let detail = parse_retained_input(&out);
+    assert!(detail.contains("stdin line 2:"), "got: {detail}");
+    assert!(detail.contains("'retained:'"), "got: {detail}");
+    assert!(detail.contains("'Custody note: ...'"), "got: {detail}");
+    assert_eq!(
+        f.json(&["show", &f.id])["task"]["notes"],
+        initial_notes,
+        "failed --stdin batch must write zero notes"
+    );
+
+    // 5. Lifecycle note writers (`block`) also fail with `retained_input`, while `edit --editor`
+    //    cannot append notes and CAN trim trailing spaces on historical malformed `retained:` notes.
+    let before_raw = std::fs::read_to_string(&task_file).unwrap();
+    let out = f
+        .cmd()
+        .args(["block", &f.id, "retained: blocked prose"])
+        .output()
+        .unwrap();
+    let detail = parse_retained_input(&out);
+    assert!(detail.contains("'retained:'"), "got: {detail}");
+    assert!(detail.contains("'Custody note: ...'"), "got: {detail}");
+    assert_eq!(std::fs::read_to_string(&task_file).unwrap(), before_raw);
+
+    let raw_with_historical =
+        format!("{before_raw}- 2026-11-03T00:00:00Z (fixture): retained: historical bad prose \n");
+    std::fs::write(&task_file, &raw_with_historical).unwrap();
+    let trim_editor = common::editor_script(
+        f.env.home.path(),
+        r#"sed -i 's/historical bad prose $/historical bad prose/' "$1""#,
+    );
+    let out = f
+        .cmd()
+        .env("EDITOR", &trim_editor)
+        .args(["edit", &f.id, "--editor"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "trimming historical malformed note via edit --editor must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

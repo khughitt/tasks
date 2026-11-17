@@ -56,13 +56,15 @@ pub(crate) fn pending_here(project: &Project, task: &Task) -> Result<Option<Pend
     }
     one_pending(live.into_iter())
 }
-pub(super) fn reserved(text: &str) -> bool {
+pub fn reserved(text: &str) -> bool {
     [
         "retained:",
         "retention operation:",
         "retention checkpoint:",
+        "retention resolution:",
         "attached:",
         "detached:",
+        "multipart:",
     ]
     .iter()
     .any(|p| text.starts_with(p))
@@ -132,6 +134,57 @@ pub fn project_permission(project: &Project, identity: bool) -> Result<()> {
     }
     Ok(())
 }
+fn reserved_retained_error(detail: impl std::fmt::Display) -> Error {
+    invalid(format!(
+        "Note prefix 'retained:' is reserved for Retention-1 JSON item records ('retained: {{\"version\":1,...}}'); for ordinary prose use a non-reserved prefix such as 'Custody note: ...' ({detail})"
+    ))
+}
+
+pub fn validate_appended_note_syntax(text: &str) -> Result<()> {
+    if text.starts_with("retention operation:")
+        || text
+            .strip_prefix("retention checkpoint:")
+            .is_some_and(|s| s.trim_start().starts_with('{'))
+    {
+        return Err(invalid(
+            "machine retention envelopes require the owned retained publication path",
+        ));
+    }
+    if let Some((crate::attachments::Ledger::Detached, name)) =
+        crate::attachments::parse_ledger_note(text)
+        && protected(name)
+    {
+        return Err(invalid(
+            "protected retained evidence cannot be detached by a generic note",
+        ));
+    }
+    if text.starts_with("retained:") {
+        let raw = text
+            .strip_prefix("retained: ")
+            .ok_or_else(|| reserved_retained_error("missing space after 'retained:'"))?;
+        if !raw.trim_start().starts_with('{') {
+            let detail = strict(raw.as_bytes())
+                .err()
+                .map_or_else(|| "expected JSON object".to_string(), |e| e.to_string());
+            return Err(reserved_retained_error(detail));
+        }
+        strict(raw.as_bytes()).map_err(reserved_retained_error)?;
+        let record = decode_record(raw)?;
+        if record.version != Some(1) {
+            return Err(invalid(
+                "newly written retained: records require integer \"version\": 1",
+            ));
+        }
+    }
+    if text.starts_with("retention resolution:") {
+        let raw = text
+            .strip_prefix("retention resolution: ")
+            .ok_or_else(|| invalid("missing space after 'retention resolution:'"))?;
+        decode_resolution(raw)?;
+    }
+    Ok(())
+}
+
 pub fn check_write(
     project: &Project,
     registry: &Registry,
@@ -152,25 +205,9 @@ pub fn check_write(
             "immutable retained operation history cannot be rewritten",
         ));
     }
-    if new.notes.starts_with(&old.notes) {
+    if new.notes.len() >= old.notes.len() {
         for n in &new.notes[old.notes.len()..] {
-            if n.text.starts_with("retention operation:")
-                || n.text
-                    .strip_prefix("retention checkpoint:")
-                    .is_some_and(|s| s.trim_start().starts_with('{'))
-            {
-                return Err(invalid(
-                    "machine retention envelopes require the owned retained publication path",
-                ));
-            }
-            if let Some((crate::attachments::Ledger::Detached, name)) =
-                crate::attachments::parse_ledger_note(&n.text)
-                && protected(name)
-            {
-                return Err(invalid(
-                    "protected retained evidence cannot be detached by a generic note",
-                ));
-            }
+            validate_appended_note_syntax(&n.text)?;
         }
     }
     if pending_here(project, old)?.is_none() {
