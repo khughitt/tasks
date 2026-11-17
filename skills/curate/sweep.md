@@ -190,14 +190,14 @@ The worker brief gives:
 - the swept root, `.project.records` and `.project.checkout`, and the rule that every
   `tasks` command is `tasks -C <swept root> ...` and every `git log` or code search runs
   in the checkout;
-- the four rules below, and the sections
+- the five rules below, and the sections
   [When deeper evidence is owed](#when-deeper-evidence-is-owed), [Ideas](#ideas),
   [Tasks the sweep does not write](#tasks-the-sweep-does-not-write) and
   [Rows that left the pool](#rows-that-left-the-pool).
 
 The worker reads every task in the cluster (`tasks -C <swept root> show <id>`, keeping
 `task.updated`) and the documents they link, then follows SKILL.md §3 for each with
-these four rules:
+these five rules:
 
 1. **Closures before rewording.** Settle duplicates and stale tasks first; reword
    second.
@@ -210,6 +210,20 @@ these four rules:
    worker's own read, and skip a task that became active, claimed or changed since that
    read, with the reason in its row. A duplicate closure revalidates every task it
    writes, not only the one it closes.
+5. **Never fold in twice.** Before a duplicate's fold-in, read the survivor's notes and
+   finish only what an earlier session of this sweep left undone. SKILL.md writes the
+   fold-in, the origin edit and its note, the re-pointed dependents and the absorb note,
+   in that order, and the drop last:
+   - The survivor carries `curate: absorbed <closing-id>; <sweep-id>; ...`: the fold-in,
+     origin edit and re-pointing are done. Only the drop remains: revalidate the closing
+     task and drop it.
+   - No such absorb note, but the survivor's body already holds what only the closing
+     task said: the fold-in is done; do not fold in again. Write the origin edit and its
+     note unless the survivor already carries
+     `origin: <user|mixed> after absorbing <closing-id>; <sweep-id>; ...`, re-point each
+     open dependent the closing task's `dependents` field still lists, then write the
+     absorb note and the drop.
+   - Otherwise the closure starts from the fold-in.
 
 Scope of a worker's writes:
 
@@ -231,9 +245,10 @@ ledger. The controller writes the rows, appends `cross-cluster twin: <id>` to th
 `evidence` of each row a suspicion names, and at each cluster boundary commits the
 ledger and the task records the cluster wrote:
 
-- Ledger, `docs/notes/` case: `git -C <records> add -- <ledger>` then
-  `git -C <records> commit -m "chore(curate): sweep <sweep-id> cluster <nn>" -- <ledger>`,
-  unless the project's profile or own instructions leave records uncommitted.
+- Ledger, `docs/notes/` case:
+  `tasks -C <swept root> commit <ledger> -m "chore(curate): sweep <sweep-id> cluster <nn>"`,
+  with the ledger's records-relative path, unless the project's profile or own
+  instructions leave records uncommitted.
   Persistent-storage case: nothing to commit.
 - Task records: as [SKILL.md §4](SKILL.md#4-commit-per-touched-project) says. Never push.
 
@@ -284,13 +299,17 @@ A sweep never scopes: it does not promote, brief or mark an idea reviewed.
 A row whose task, at the worker's first read, has been started, claimed, parked or
 closed since the snapshot gets verdict `left`, the reason in `evidence`, and no write.
 A task that passes that read but fails revalidation before the write is `skipped`.
+A task closed by a drop message naming this sweep, or whose latest note is a proposal
+naming this sweep, has not left the pool: it is this sweep's own verdict, recorded as
+[Stopping and resuming](#stopping-and-resuming) says.
 
 ## Cross-cluster pass
 
 When every cluster has run, the controller settles the suspicions the workers returned
 (the `cross-cluster twin:` entries in `evidence`), reading the candidates in full before
 acting. It reviews both tasks of each pair as a worker would, with its own read for
-revalidation, and updates both rows.
+revalidation and rule 5 of [One cluster](#one-cluster) before any fold-in, and updates
+both rows.
 
 ## First closures
 
@@ -316,33 +335,48 @@ In the persistent-storage case, account for the ledger as a retained item at the
 `tasks -C <swept root> start <sweep-id>`, find the ledger from the snapshot note, and
 continue with the first cluster that has a row with no verdict.
 
-A cluster whose worker stopped mid-way (some of its rows have no verdict) is reconciled
-from the records before it runs again. Every drop message and note this sweep writes
-names the sweep task id, so for each row without a verdict the controller reads the
-task, its notes and, for a duplicate, the survivor:
+Every cluster that has any row without a verdict is reconciled from the records before
+it runs, whether some or all of its rows lack one: a worker can stop after its writes
+and before returning, and a controller can stop before writing the rows it got. Every
+drop message and note this sweep writes names the sweep task id, so for each row
+without a verdict the controller reads the task (`tasks -C <swept root> show <id>`) and
+its notes:
 
-- a drop message naming this sweep: verdict `stale` or `duplicate`, action `closed`;
-- an absorb note naming this sweep on a survivor whose closing task is still open: the
-  fold-in reached the survivor; finish the closure from where it stopped (dependents,
-  then the drop) without folding in again;
-- a proposal note naming this sweep: a verdict, action `proposed`, not a pending row;
-- a `refined` edit leaves no note: a task whose `updated` is later than the snapshot and
-  that carries none of the above is re-read and reviewed again.
+- a drop message naming this sweep: verdict `stale` or `duplicate`, action `closed`,
+  the drop message's evidence, and an `undo:` record built from the row's snapshot
+  columns (`status`, `reviewed`, `awaiting_user`, `deferred_until`), since the drop
+  cleared those fields on the record;
+- a latest note that is a proposal naming this sweep: its verdict (`decision`,
+  `decompose`, or a guarded `stale` or `duplicate`), action `proposed`, not a pending
+  row;
+- anything else: no verdict yet. A half-finished duplicate closure leaves nothing on
+  the closing task, and a `refined` edit leaves no note, so these rows go back to the
+  worker, whose rule 5 finishes a closure whose fold-in reached the survivor without
+  folding in twice.
 
 Then the worker re-reads each remaining task of that cluster.
 
 ## Close
 
-Run `tasks -C <swept root> check`; write the report; close the sweep task. Tasks
-skipped at revalidation get one retry here: review each `skipped` row's task again, and
-a second skip stays `skipped`.
+In this order:
 
-- `check`: fix a finding the sweep's own writes caused; name any other in the report.
-- Write the session note (as at a stop), then the report, and commit both ledger and
-  report as at a cluster boundary.
-- In the persistent-storage case, account for the ledger and report as retained items
-  before closing.
-- `tasks -C <swept root> done <sweep-id> "<counts>; report <path>"`.
+1. **Retry.** Tasks skipped at revalidation get one retry: review each `skipped` row's
+   task again, as a worker would; a second skip stays `skipped`.
+2. **Check.** Run `tasks -C <swept root> check`. Fix a finding the sweep's own writes
+   caused; name any other in the report.
+3. **Report.** Write the session note (as at a stop), then the report.
+4. **Commit.** In the `docs/notes/` case, commit the final ledger and the report
+   together, unless the project's profile or own instructions leave records
+   uncommitted:
+
+       tasks -C <swept root> commit <ledger> <report> -m "chore(curate): sweep <sweep-id> report"
+
+   with both paths records-relative (`docs/notes/...`). Commit the task records the
+   retry wrote as [SKILL.md §4](SKILL.md#4-commit-per-touched-project) says. Never push.
+   In the persistent-storage case, account for the ledger and report as retained items
+   instead.
+5. **Close** the sweep task:
+   `tasks -C <swept root> done <sweep-id> "<counts>; report <path>"`.
 
 ## The report
 
