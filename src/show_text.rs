@@ -448,7 +448,7 @@ fn hang(line: &str) -> usize {
 }
 
 /// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <date>  <title>`,
-/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `child`.
+/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `followed by`, `child`.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
     let date_of = |updated: Option<&str>| match updated {
         Some(ts) => present::date(ts),
@@ -514,6 +514,16 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             date_of(source.updated.as_deref()),
             source.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &source.id).filter(|_| source.resolved),
+        ));
+    }
+    for follower in &o.followed_by {
+        rows.push((
+            "followed by",
+            follower.id.as_str(),
+            present::status(follower.status),
+            present::date(&follower.updated),
+            follower.title.as_str(),
+            color(o, &follower.id),
         ));
     }
     for child in &o.children {
@@ -826,6 +836,7 @@ mod tests {
             depends_on: vec![],
             related_to: vec![],
             follows_tasks: vec![],
+            followed_by: vec![],
             wake_targets: vec![],
             source_task: None,
             parent: None,
@@ -1168,6 +1179,56 @@ mod tests {
                 "{painted:?}"
             );
         }
+    }
+
+    #[test]
+    fn follows_inverse_rows_order_color_dates_and_wrap() {
+        let mut o = fields();
+        o.source_task = Some(DepInfo {
+            id: "sci-000001".into(),
+            title: Some("Source".into()),
+            status: Some(Status::Todo),
+            updated: Some("2026-01-01T00:00:00Z".into()),
+            resolved: true,
+        });
+        o.followed_by = vec![Related {
+            id: "fam-000002".into(),
+            title: "Alpha beta gamma delta epsilon".into(),
+            status: Status::Done,
+            updated: "2020-01-01T00:00:00Z".into(),
+        }];
+        o.children = vec![Related {
+            id: "sci-000003".into(),
+            title: "Child".into(),
+            status: Status::Todo,
+            updated: "2026-01-03T00:00:00Z".into(),
+        }];
+        o.project_colors.insert(
+            "fam".into(),
+            Rgb {
+                r: 51,
+                g: 102,
+                b: 153,
+            },
+        );
+        let text = render(&o, &plain(), Some(56));
+        let block = text.split_once("── related ").unwrap().1;
+        assert!(block.find("source").unwrap() < block.find("followed by").unwrap());
+        assert!(block.find("followed by").unwrap() < block.find("child").unwrap());
+        let lines: Vec<_> = block
+            .lines()
+            .skip(1)
+            .take_while(|line| !line.is_empty())
+            .collect();
+        assert!(lines.len() >= 5, "{lines:?}");
+        assert!(
+            lines.iter().all(|line| line.chars().count() <= 56),
+            "{lines:?}"
+        );
+        assert!(block.contains("2020-01-01"));
+        let painter = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false);
+        let painted = render(&o, &painter, Some(120));
+        assert!(painted.contains("fam-000002\x1b[0m"), "{painted:?}");
     }
 
     #[test]

@@ -267,6 +267,20 @@ pub fn describe(
         },
         None => None,
     };
+    let identity = crate::follows::identity_set(registry, &task, |id| {
+        match all
+            .iter()
+            .find(|candidate| registry.canonical_id(&candidate.id) == *id)
+        {
+            Some(found) => Ok(Some(found.clone())),
+            None => resolver.resolve_canonical_task(id),
+        }
+    });
+    if let Some(warning) = &identity.warning {
+        warnings.push(warning.clone());
+    }
+    let following = crate::follows::followers(registry, all, &identity);
+    let followed_by = following.iter().map(|task| related(task)).collect();
     let mut kids = crate::hierarchy::children(all, &task.id, registry);
     kids.sort_by(|a, b| crate::query::ready_order(a, b));
     let children = kids.into_iter().map(related).collect();
@@ -319,7 +333,8 @@ pub fn describe(
         .chain(&task.wake_on)
         .chain(&task.moved_to)
         .chain(&task.moved_from)
-        .chain(source_id.as_ref());
+        .chain(source_id.as_ref())
+        .chain(following.iter().map(|task| &task.id));
     for id in named {
         if !looked_up.contains_key(&id.prefix) {
             let live = registry.canonical_id(id).prefix;
@@ -345,6 +360,7 @@ pub fn describe(
         depends_on,
         related_to,
         follows_tasks,
+        followed_by,
         wake_targets,
         source_task,
         parent,

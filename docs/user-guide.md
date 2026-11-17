@@ -127,7 +127,7 @@ full titles. Project colors and `--color always` do not change width budgets.
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
 `show` collects every task link in the `── related ──` section: rows run in the
-order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, and `child`,
+order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `followed by`, and `child`,
 formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
 Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
 recency scale); an unresolved target leaves the date blank and prints
@@ -138,7 +138,12 @@ one or more earlier tasks. `source` remains its filing origin, and `related` an
 informational citation. Follows does not require an earlier task to close or change
 readiness, review or completion. Existing source/related links are not converted.
 Show and next display stored outgoing follows rows, including foreign, moved and
-unresolved targets. They do not yet discover incoming follow-ups.
+unresolved targets. They also display direct incoming `followed by` rows, including closed follow-ups.
+Plain show searches its local scan; next uses its existing group/all-project scope.
+No incoming row means none found in that readable scope. After a move, the view
+matches the focal work’s verified move history; old/new ids agree only over the
+same complete scan and history. Incomplete history warns once and keeps direct
+matches. A moved follower appears only through its in-scope live successor.
 
 Set it explicitly with repeatable `add --follows REF` or `edit --follows REF`.
 Remove one with `edit ID --rm-follows REF`, or all with `edit ID --no-follows`.
@@ -151,8 +156,8 @@ if it needs follows. Body/source/concerns text never infers follows.
 A new task filed from a brief can keep `--source docs/notes/brief.md` and name
 multiple predecessors with `--follows`. A normal plan constituent uses `--parent`,
 not follows merely because it came from a design. Existing source/related values
-are not retyped or backfilled. Incoming discovery is not shipped yet: show and
-next expose outgoing links only.
+are not retyped or backfilled. Show --all-projects is not shipped yet; use next’s existing widened scope for
+cross-project incoming rows when it selects the focal task.
 
 A lane is a goal marked `--lane`: its descendant tree is one stream of work.
 Lanes cannot nest. A live claim in a lane makes sibling work in that lane busy.

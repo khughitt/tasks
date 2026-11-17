@@ -537,6 +537,8 @@ pub struct ShowFields {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub follows_tasks: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub followed_by: Vec<Related>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub wake_targets: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_task: Option<DepInfo>,

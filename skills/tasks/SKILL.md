@@ -1113,9 +1113,15 @@ same work: follow its live successor, not its tombstone merely because it moved.
 If provenance is uncertain, leave source unset. If a stronger relation is uncertain,
 keep a prose citation/related rather than inventing it.
 
-Show and next display outgoing follows, including foreign and unresolved ids.
-Incoming followed-by discovery and show --all-projects are not shipped in this
-release. Absence of outgoing rows does not establish absence of follow-ups elsewhere.
+Show and next display outgoing follows, including foreign and unresolved ids,
+and direct incoming followed-by rows (open or closed). Plain show searches locally;
+next uses its existing local/group/all-project scope. An absent incoming field means
+none found in that readable scope, not none elsewhere. Move-history matching follows
+the focal work only; incomplete history warns once and keeps direct matches. Old/new
+ids agree over the same complete scan/history, while local results across projects
+can differ. A moved follower contributes only via its in-scope live successor.
+Show --all-projects is not shipped yet; next already has wider scope when it selects
+the focal task. No links are rewritten, and follows never affects next eligibility.
 
 ## Task references
 

@@ -209,7 +209,22 @@ JSON; summary rows do not gain the field. Parsing checks id syntax only.
 
 Show and next preserve stored outgoing order and duplicates in `follows_tasks`.
 Missing targets remain unresolved with warnings; moved targets display the stored
-tombstone. Inverse follow-up discovery is not available in this release.
+tombstone. The optional `followed_by` rows (id/title/status/updated) discover direct
+follow-ups, including open, done and dropped work, excluding moved citing records.
+They deduplicate by canonical citing id and use ready ordering, as children do.
+Plain show scans locally; next uses its existing requested local/group/all-project
+scope. A missing field means none found in that readable scope, not none elsewhere.
+
+For an ordinary focal task, inverse matching compares canonical ids without
+looking up follows targets. For moved focal work, the view builds its identity
+from its own reciprocal move chain, preferring captured records and visiting each
+history id at most once. Missing, inconsistent or looping history gives one
+incomplete-coverage warning; direct and verified-history matches remain visible.
+No task in the focal identity set becomes its own follower. Unrelated broken
+follows never produces inverse warnings or per-edge lookups. Queries for old and
+new identities agree over the same complete scan/history; local results can differ
+after a cross-project move. Source and stored inbound follows remain unchanged.
+Show --all-projects is not shipped yet; next already offers wider discovery.
 
 Check warns `self_follows`, `duplicate_follows` (canonical aliases included), and
 `dangling_follows` for missing local targets. Foreign targets are resolved on show,
