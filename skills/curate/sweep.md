@@ -23,8 +23,9 @@ command in a worker brief, as `tasks -C <swept root> ...`:
 
 - `/curate --all` with no project: apply the unscoped rule of [SKILL.md §2](SKILL.md#2-one-root-per-task)
   (`tasks where`). Then run `tasks resolve <prefix>` for the prefix `where` printed; if
-  the root §2 chose is not that result's `root`, the session is in a code worktree:
-  stop and ask the user to rerun from the main checkout or with `--project <prefix>`.
+  the canonical path (`realpath`) of the root §2 chose is not that of the result's
+  `root`, the session is in a code worktree: stop and ask the user to rerun from the
+  main checkout or with `--project <prefix>`.
 - `--project <prefix>`: run `tasks resolve <prefix>`. Unless it prints exactly one
   result with `status` `resolved`, stop and report its output; never guess a root
   (`tasks root` refuses a bare prefix). The swept root is that result's `root`.
@@ -73,8 +74,11 @@ They live under records `docs/notes/` when that is an authorized private records
   project's own instructions name `docs/notes/` as a home for reports; otherwise no.
 
 When they do not live in `docs/notes/`, they live uncommitted in the sweep task's
-persistent storage (`$WORK_ROOT/<project>/<sweep-id>/`), recorded as a retained item of
-the sweep task under the tasks skill's
+persistent storage under the same file names
+(`$WORK_ROOT/<prefix>/<sweep-id>/<YYYY-MM-DD>-curation-sweep-<sweep-id>-ledger.tsv` and
+`$WORK_ROOT/<prefix>/<sweep-id>/<YYYY-MM-DD>-curation-sweep-<sweep-id>-report.md`, with
+`<prefix>` = `.project.prefix`), recorded as retained items of the sweep task under the
+tasks skill's
 [artifact placement and retention](../tasks/SKILL.md#artifact-placement-and-retention)
 rules. On a host without `WORK_ROOT`, ask the user where before the snapshot.
 
@@ -88,8 +92,10 @@ In the persistent-storage case add no `--ref`: the retained item's note is the l
 
 ## Snapshot
 
-Run the signals script once. Resolve it through the registry and run it by explicit
-path, never from `PATH` or the current directory:
+Capture `<snapshot-stamp>` (`date -u +%Y-%m-%dT%H:%M:%SZ`) immediately before running
+the signals script (using its UTC date as `<YYYY-MM-DD>`), then resolve the script
+through the registry and run it once by explicit path, never from `PATH` or the current
+directory:
 
     tasks resolve tasks        # one result, status resolved; keep its root
     python3 "<tasks root>/bin/sweep-signals" --root <swept root> > <ledger>.tmp && mv <ledger>.tmp <ledger>
@@ -99,11 +105,11 @@ is what the script printed: every task with status `idea`, `todo` or `blocked` a
 live claim, deferred tasks included, with no age window. `doing` and `shelved` tasks are
 out. A non-zero exit prints nothing on standard output and names the failing command on
 standard error: delete the `.tmp` file, stop and report that command. Tasks filed after
-the snapshot are out of this sweep and counted in the report.
+`<snapshot-stamp>` (not in the ledger) are out of this sweep and counted in the report.
 
-Record the snapshot on the sweep task; the report and a resumed session read it:
+Record that pre-run stamp on the sweep task; the report and a resumed session read it:
 
-    tasks -C <swept root> note <sweep-id> "sweep: snapshot <RFC3339 UTC stamp>; pool <n>; ledger <path>"
+    tasks -C <swept root> note <sweep-id> "sweep: snapshot <snapshot-stamp>; pool <n>; ledger <path>"
 
 ### The ledger's columns
 
@@ -142,8 +148,8 @@ What each verdict writes to the row:
 
 | Verdict | Action | Evidence |
 |---|---|---|
-| `keep` | `none` | one phrase on why it is fine (`for scope pass: <why>` when a reviewed idea needs a decision or scoping) |
-| `refined` | `edited` | what changed, since a `refined` edit writes no note |
+| `keep` | `none` (`edited` when modified only to absorb an in-pool duplicate) | one phrase on why it is fine (plus `absorbed <id>` when it absorbed a duplicate; `for scope pass: <why>` when a reviewed idea needs a decision or scoping) |
+| `refined` | `edited` | what changed, since a `refined` edit writes no note (plus `absorbed <id>` when it also absorbed a duplicate) |
 | `stale`, `duplicate` closed | `closed` | the drop message's evidence; for a duplicate also the survivor, what was folded in and the dependents re-pointed; then `undo: <status>[ reviewed][ awaiting_user][ deferred <date>]` as recorded before the drop |
 | `stale`, `duplicate` a guard kept open | `proposed` | `guard: <which>` and the proposal; for a task `doing`, claimed or parked, add `ledger only` (nothing was written to it) |
 | `decision`, `decompose` | `proposed` | the proposal text of its note |
@@ -154,8 +160,7 @@ What each verdict writes to the row:
 
 ## Twins, then clusters
 
-1. **Twins.** The controller reads every pool title once (`tasks -C <swept root> list`
-   with every pool status gives them in one call) together with the `twins` column, and
+1. **Twins.** The controller reads every pool title once (`tasks -C <swept root> list --status idea --status todo --status blocked`, filtered to ids in the ledger so live-claimed and post-snapshot tasks are excluded) together with the `twins` column, and
    lists suspected duplicate pairs: script candidates it judges plausible and pairs it
    finds itself. For each pair it writes `suspect twin: <other id>` into both rows'
    `evidence`, so a resumed session still hands the pair to its worker.
@@ -215,11 +220,18 @@ these five rules:
    fold-in, the origin edit and its note, the re-pointed dependents and the absorb note,
    in that order, and the drop last:
    - The survivor carries `curate: absorbed <closing-id>; <sweep-id>; ...`: the fold-in,
-     origin edit and re-pointing are done. Only the drop remains: revalidate the closing
-     task and drop it.
+     origin edit and earlier re-pointing are done. Re-run the guards of
+     [Closing stale and duplicate tasks](SKILL.md#closing-stale-and-duplicate-tasks)
+     (including `tasks -C <swept root> show <closing-id> --all-projects` and the custody
+     checks): if a guard now holds, do not drop — record the guarded proposal as that
+     section says (`ledger only` when `doing`, claimed or parked). Otherwise re-point any
+     open dependent added since the absorb note (revalidating it and the closing task
+     first), revalidate the closing task, and drop it.
    - No such absorb note, but the survivor's body already holds what only the closing
-     task said: the fold-in is done; do not fold in again. Write the origin edit and its
-     note, where SKILL.md calls for one, unless the survivor already carries
+     task said: the fold-in is done; do not fold in again. Re-run those guards and
+     revalidate every task the remaining steps write; if a guard holds, record the
+     guarded proposal instead. Otherwise write the origin edit and its note, where
+     SKILL.md calls for one, unless the survivor already carries
      `origin: <user|mixed> after absorbing <closing-id>; <sweep-id>; ...`, re-point each
      open dependent the closing task's `dependents` field still lists, then write the
      absorb note and the drop.
@@ -229,11 +241,16 @@ Scope of a worker's writes:
 
 - The tasks it is reviewing are its cluster's pool tasks. It closes only those, and
   writes otherwise only to a duplicate's survivor and open dependents as the closing
-  section allows.
-- A duplicate whose other task is outside the pool (filed after the snapshot, `doing`,
-  `shelved`) is never closed by the sweep. When the pool task is the survivor, its
-  verdict is `keep` or `refined` and the other task goes in the report's proposed
-  closures with `not in pool` where SKILL.md writes `not sampled`.
+  section allows. A pool survivor modified only to absorb a duplicate gets verdict
+  `keep`, action `edited`, and `absorbed <closed-id>` in `evidence` (`refined` and
+  `edited` when it also received `refined` edits of its own).
+- An out-of-pool task (filed after the snapshot, `doing`, `shelved`, or live-claimed at
+  the snapshot) is never closed by the sweep. When the out-of-pool task is the survivor,
+  the pool duplicate is closed into it unless a guard in the closing section holds (a
+  `doing`, live-claimed or parked survivor holds the guard and is recorded as
+  `proposed`). When the pool task is the survivor, its verdict is `keep` or `refined` and
+  the out-of-pool task goes in the report's proposed closures with `not in pool` where
+  SKILL.md writes `not sampled`.
 - An overlap (not a duplicate) with a task outside its cluster is said in its own
   task's body only and named in that row's `evidence`; the controller carries it into
   the report.
@@ -250,7 +267,9 @@ file the controller names (or its final message where it has no file):
 4. for each closure, the guard checks it ran and their results;
 5. CLI friction met, one line each, for the controller to file.
 
-Items 3 and 4 are the record the controller checks closures against, not ledger writes.
+Items 3–5 give the controller the audit trail for [First closures](#first-closures) and
+the report's CLI-friction list without reading worker transcripts; they add no worker
+authority and are not written to the ledger.
 The controller writes the rows, appends `cross-cluster twin: <id>` to the
 `evidence` of each row a suspicion names, and at each cluster boundary commits the
 ledger and the task records the cluster wrote:
@@ -284,15 +303,17 @@ A sweep never scopes: it does not promote, brief or mark an idea reviewed.
   redacts feedback reports. Its other verdict is `keep`.
 - If an unreviewed idea is the survivor of a duplicate, the fold-in is the recurrence
   form only (the `from:` tag and a one-line note, which is the absorb note), with no
-  rewrite of its body.
+  rewrite of its body; its own row is `keep` with action `edited` and
+  `absorbed <closed-id>` in `evidence`.
 
 ## Tasks the sweep does not write
 
 - **Held.** A pool task that carries a park (`parked` is `true` at the snapshot and the
-  park is still there at the worker's read), or an idea marked as waiting on the user
-  (`awaiting_user` is `true`), gets a ledger row with verdict `unwritten`, no write, and
-  a line in the report. Any later note answers a pending proposal, so a stray sweep note
-  would also silently clear a decision the user still owes.
+  park is still there at the worker's read), or an idea whose `awaiting_user` is `true`
+  at the worker's read (whether marked before or after the snapshot), gets a ledger row
+  with verdict `unwritten`, no write, and a line in the report. Any later note answers a
+  pending proposal, so a stray sweep note would also silently clear a decision the user
+  still owes.
 - **Pending proposal.** A task whose latest note starts `curate:` or `scope:` and
   contains `proposal:`:
   - If the proposal is to drop it as stale or duplicate, re-check the evidence; when it
@@ -307,10 +328,14 @@ A sweep never scopes: it does not promote, brief or mark an idea reviewed.
 ## Rows that left the pool
 
 A row whose task, at the worker's first read, has been started, claimed, parked or
-closed since the snapshot gets verdict `left`, the reason in `evidence`, and no write.
-A task that passes that read but fails revalidation before the write is `skipped`.
-A task closed by a drop message naming this sweep, or whose latest note is a proposal
-naming this sweep, has not left the pool: it is this sweep's own verdict, recorded as
+closed since the snapshot gets verdict `left`, the reason in `evidence`, and no write
+(an idea marked `awaiting_user` since the snapshot is **Held** above: `unwritten`; when
+a survivor read in the cluster already carries `curate: absorbed <id>; <sweep-id>; ...`,
+rule 5 of [One cluster](#one-cluster) records `duplicate`, `proposed`, `ledger only`
+instead, and otherwise `left` likewise leaves the task untouched). A task that passes
+that read but fails revalidation before the write is `skipped`. A task closed by a drop message naming
+this sweep, or whose latest note is a proposal naming this sweep, has not left the pool:
+it is this sweep's own verdict, recorded as
 [Stopping and resuming](#stopping-and-resuming) says.
 
 ## Cross-cluster pass
@@ -318,8 +343,10 @@ naming this sweep, has not left the pool: it is this sweep's own verdict, record
 When every cluster has run, the controller settles the suspicions the workers returned
 (the `cross-cluster twin:` entries in `evidence`), reading the candidates in full before
 acting. It reviews both tasks of each pair as a worker would, with its own read for
-revalidation and rule 5 of [One cluster](#one-cluster) before any fold-in, and updates
-both rows.
+revalidation and rule 5 of [One cluster](#one-cluster) before any fold-in, updates both
+rows (committing the ledger in the `docs/notes/` case if any row changed, and any task
+records it wrote as [SKILL.md §4](SKILL.md#4-commit-per-touched-project) says), and
+records `tasks -C <swept root> note <sweep-id> "sweep: cross-cluster pass done"`.
 
 ## First closures
 
@@ -328,22 +355,34 @@ In a project's first sweep (no done task in the project has a title starting
 before the second runs: each drop message's evidence is present and true (the commit
 exists and does what it says, the cited task or document says what is claimed), and for
 a duplicate the survivor holds the fold-in and the absorb note and the dependents point
-to it. A failed check stops the sweep and goes to the user: park the sweep task with
-`--waiting-on user --reason decision`, naming the closure and what failed.
+to it. When the check passes (or the first cluster closed nothing), record
+`tasks -C <swept root> note <sweep-id> "sweep: first closures verified; cluster <nn>"`
+before stopping or starting the second cluster. A failed check stops the sweep and goes
+to the user: park the sweep task with `--waiting-on user --reason decision`, naming the
+closure and what failed.
 
 ## Stopping and resuming
 
-**Stopping.** Stop only at a cluster boundary, after the ledger commit. Record the
-session and park the sweep task with the next cluster as its next step:
+**Stopping.** Stop only at a cluster boundary, after the ledger commit (and after
+[First closures](#first-closures) on cluster `01` of a first sweep). Record the session
+(including `first-cluster tokens <count, or unknown>` in session 1) and park the sweep
+task with the next cluster — or `cross-cluster pass and Close` when `0` rows lack a
+verdict — as its next step:
 
-    tasks -C <swept root> note <sweep-id> "sweep: session <n>; clusters <first>-<last>; tokens <count, or unknown>"
+    tasks -C <swept root> note <sweep-id> "sweep: session <n>; clusters <first>-<last>[; first-cluster tokens <count, or unknown>]; tokens <count, or unknown>"
     tasks -C <swept root> park <sweep-id> "Run /curate --resume <sweep-id>: next cluster <nn>-<slug>, <k> rows without a verdict"
 
 In the persistent-storage case, account for the ledger as a retained item at the park.
 
 **Resuming.** The ledger is the map: the remainder is the rows with no `verdict`. Run
-`tasks -C <swept root> start <sweep-id>`, find the ledger from the snapshot note, and
-continue with the first cluster that has a row with no verdict.
+`tasks -C <swept root> start <sweep-id>` and find the ledger and notes on `<sweep-id>`.
+In a project's first sweep, if cluster `01` is settled and `<sweep-id>` lacks a
+`sweep: first closures verified` note, run [First closures](#first-closures) before
+continuing. Then, if any row has no `verdict`, continue with the first such cluster;
+when every row already has a `verdict`, continue at
+[Cross-cluster pass](#cross-cluster-pass) if `<sweep-id>` lacks
+`sweep: cross-cluster pass done`, at [Close](#close) step 1 (**Retry**) if it lacks
+`sweep: retry done`, and at [Close](#close) step 2 (**Check**) otherwise.
 
 Every cluster that has any row without a verdict is reconciled from the records before
 it runs, whether some or all of its rows lack one: a worker can stop after its writes
@@ -371,7 +410,9 @@ Then the worker re-reads each remaining task of that cluster.
 In this order:
 
 1. **Retry.** Tasks skipped at revalidation get one retry: review each `skipped` row's
-   task again, as a worker would; a second skip stays `skipped`.
+   task again, as a worker would; a second skip stays `skipped`. Record
+   `tasks -C <swept root> note <sweep-id> "sweep: retry done"` once the pass finishes
+   (committing the updated ledger in the `docs/notes/` case if any row changed).
 2. **Check.** Run `tasks -C <swept root> check`. Fix a finding the sweep's own writes
    caused; name any other in the report.
 3. **Report.** Write the session note (as at a stop), then the report.
@@ -393,8 +434,9 @@ In this order:
 At the report path. Its sections, in this order:
 
 - **Counts:** pool size, each verdict, skipped, left, pending, and filed since the
-  snapshot (tasks of any status in the project whose `created` is later than the
-  snapshot stamp: `tasks -C <swept root> list` with every `--status`).
+  snapshot (tasks of any status in the project not in the ledger, other than
+  `<sweep-id>`, whose `created` is at or after `<snapshot-stamp>`:
+  `tasks -C <swept root> list` with every `--status`).
 - **Closed:** every closed task with its id, title, prior status, stale or duplicate,
   the evidence, the survivor where there is one, and its undo lines as
   [Closing stale and duplicate tasks](SKILL.md#closing-stale-and-duplicate-tasks)
@@ -413,8 +455,8 @@ At the report path. Its sections, in this order:
   `deps_closed`), how many tasks it flagged and how many of those ended `stale`,
   `duplicate` or `refined`; and how many `stale`, `duplicate` or `refined` verdicts
   carried no trigger.
-- **Cost:** clusters, sessions, and tokens where the harness showed them, from the
-  sweep task's session notes.
+- **Cost:** clusters, sessions, the first cluster's per-cluster token figure, and total
+  tokens where the harness showed them, from the sweep task's session notes.
 - **CLI friction** met during the sweep, each also filed as feedback to `tasks` when it
   was met (`tasks feedback --project tasks "<one line>" --category friction`).
 

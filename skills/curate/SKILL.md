@@ -6,9 +6,11 @@ description: Use when asked to curate, review, tidy, or audit the task corpus (`
 # curate
 
 One pass improves the tasks it draws. It creates no tasks and changes no priority. It
-closes a stale or duplicate task itself, under the guards in
+refines wording, links and metadata in place, closes a stale or duplicate task itself
+under the guards in
 [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks), and proposes
-everything else to the human at the end. Invoke deliberately:
+new tasks, priority changes, open questions, missing children and guarded closures to
+the human at the end. Invoke deliberately:
 
     /curate [n] [--project <prefix> | --group <name> | --all-projects]
     /curate --all [--project <prefix>]
@@ -193,10 +195,10 @@ and deferral date for the undo: the drop clears them.
   permitted edit, for this case only.
 - Revalidate everything the closure writes. Take each one's `task.updated` when you
   first read it. Immediately before its first write the pass re-reads the closing task,
-  the survivor and each open dependent, and applies §3 step 4 to each (status, live
-  claim, unchanged since read; a claim that cannot be verified reads as live). If any
-  fails, nothing is written and the closure is skipped with the reason; a sweep retries
-  it at its close.
+  the survivor and each open dependent, and applies §3 step 4 to each (status — `shelved`
+  is also allowed on the survivor and open dependents — live claim, unchanged since read;
+  a claim that cannot be verified reads as live). If any fails, nothing is written and
+  the closure is skipped with the reason; a sweep retries it at its close.
 
 Then write, in this order: the fold-in, the origin edit and its note, the re-pointed
 dependents, the absorb note, and the drop last:
@@ -216,19 +218,28 @@ dependents, the absorb note, and the drop last:
   with no `kept` note at all. The guard holds when the query shows an effective kept
   item or an unfinished retention operation, reports its history incomplete or
   blocked, or refuses. The query lists only items recorded on the queried task, so it
-  misses a kept item recorded on another task whose `next_owner` is `task:<id>`: before
-  a closure, also search the task records of every registered project (read-only; the
-  records directories come from `tasks projects`, each row's `records`, task files under
-  `<records>/tasks/*.md`) with `grep -rlE '"next_owner"[[:space:]]*:[[:space:]]*"task:<id>"'`.
-  The pattern must tolerate whitespace around the colon: records store both
-  `"next_owner":"task:…"` and `"next_owner": "task:…"`. The guard holds when any
-  registered project's records cannot be searched (a row not reachable, or the search
-  errors). For each matching task, read `tasks retained state <matching-task-id>`: the
-  guard holds when it shows an effective kept item whose `next_owner` is `task:<id>`, or
-  is incomplete, blocked or refuses; only an item it shows released or re-homed clears
-  that match. This search stands until tasks-1abe9f gives the CLI a read for it. The
-  guard holds for a duplicate too: moving custody to the survivor is a retained
-  transfer, which a curation pass does not do;
+  misses a kept item recorded on another task whose `next_owner` names this task (by
+  `<id>`, a retired-prefix alias, or an earlier `moved_from` id): before a closure, walk
+  `task.moved_from` backwards with `tasks show` to build the canonical id set containing
+  `<id>` and each hop's `task.id` (the guard holds if any `moved_from` hop cannot be
+  read), take each id's six-hex suffix, and search every registered project's task
+  records and note archives (read-only; records directories from `tasks projects`, each
+  row's `records`) with
+  `grep -rlE --include='*.md' --include='*.notes' '"next_owner"[[:space:]]*:[[:space:]]*"task:[a-z][a-z0-9]{0,7}-(<hex6>|...)"' <records>/tasks`.
+  Matching by six-hex suffix catches retired prefixes without parsing `projects.toml`,
+  and the pattern tolerates whitespace around the colon (`"next_owner":"task:…"` and
+  `"next_owner": "task:…"`). `grep` exit `1` means no match; the guard holds when any
+  registered project is unreachable, `<records>/tasks` is missing, or `grep` exits `>= 2`.
+  Keep matches at `<records>/tasks/<other-id>.md` and
+  `<records>/tasks/files/<other-id>/notes-*.notes` (ignoring attached `.md` files under
+  `tasks/files/`), and for each distinct `<other-id>` read
+  `tasks retained state <other-id>`: the guard holds when it is incomplete, blocked or
+  refuses, or shows an effective kept item whose `next_owner` is `task:<owner>` unless
+  `tasks resolve <owner>` returns `results[0].status == "resolved"` with `results[0].id`
+  outside the canonical id set above (released items and items re-homed elsewhere clear
+  that match). This search stands until tasks-1abe9f gives the CLI a read for it. The
+  guard holds for a duplicate too: moving custody to the survivor is a retained transfer,
+  which a curation pass does not do;
 - closing a duplicate would need a write to a survivor or open dependent that is
   `doing`, live-claimed or parked, or to an open dependent in another project, or to a
   survivor that is itself held: its latest note is a pending proposal, or it is an
@@ -265,7 +276,8 @@ For a duplicate it also lists the dependents re-pointed to the survivor and what
 survivor absorbed: undoing the closure does not move those back. The original review
 date cannot be restored.
 
-Nothing is closed for being low value, unclear, old or unlikely.
+Nothing is closed for being low value, unclear, old or unlikely. Those are not verdicts
+the user granted.
 
 ## 4. Commit per touched project
 

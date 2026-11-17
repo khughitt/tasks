@@ -92,7 +92,7 @@ recurrence, filters, blockers and bounded summaries. The
 
 The shipped [tasks](skills/tasks/SKILL.md), [curate](skills/curate/SKILL.md) and
 [scope](skills/scope/SKILL.md) skills cover session work, bounded maintenance and
-idea review. Report tool observations with
+whole-project sweeps (`/curate --all`), and idea review. Report tool observations with
 `tasks feedback --project <prefix> "<title>" --category friction|gap|idea|positive`.
 
 ## Configuration
