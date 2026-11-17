@@ -198,7 +198,13 @@ mean those documents were verified.
    For several notes on one task, `tasks note <id> --stdin < notes.txt` appends one
    per line in order with one save (and one record commit when enabled). It conflicts
    with TEXT. Empty input or any invalid line, including a blank or whitespace-only
-   line, refuses the whole batch before writing; errors name the line number.
+   line or a malformed reserved retention note, refuses the whole batch before
+   writing; errors name the 1-based `stdin line <k>: ...` number (`retained_input`
+   for reserved retention syntax). The `retained:` prefix is reserved on every
+   non-migration write path (`note`, `note --stdin`, `edit`, status transitions) for
+   Retention-1 JSON item records with integer `"version": 1`; non-JSON `retained:`
+   prose refuses and directs ordinary prose to a non-reserved prefix such as
+   `Custody note: ...`.
    Notes share one whole-second `at` timestamp, which is not a unique note identifier.
    `note --stdin` guards the target before reading input; a missing/stale record
    refuses without consuming the stream. Supply the same input again when
@@ -661,15 +667,37 @@ pairing and protected task/archive/attachment paths stayed unchanged through eve
 intervening commit, including merge parents. Request terms keep the original basis;
 phase checks use the last successfully committed/read-back phase. Permitted pending
 ordinary notes and park/start remain resumable without rewriting that phase basis;
-reserved evidence edits still refuse. It includes every known local kept identity
-even when omitted from declarations. Keep request/manifest metadata outside the
-inventoried container.
+reserved evidence edits still refuse. It includes every known local kept identity even when omitted from declarations.
+Keep request/manifest metadata outside the inventoried container.
+On fresh `checkpoint` (participant project) and fresh `transfer` (receiver project),
+directory containers run a metadata-only precheck before `publish::intent` writes
+any reservation or hashes file contents: manifests within `[attachments] max_bytes`
+(default 2 MiB) attach as single-file `retained-manifest-<sha256>.json`; oversized
+manifests publish and verify natively as multipart `.part-NNNN` and `.catalog.json`
+members when `[attachments] multipart_validators` is declared (`[]` or validator
+entries) and manifest bytes, part count, and `.catalog.json` fit `multipart_max_bytes`
+(default 16 MiB, ceiling 256 MiB), `multipart_max_parts` (default 16, ceiling 256),
+and `max_bytes`, keeping `RetentionRecord.manifest` at
+`<records>/tasks/files/<id>/retained-manifest-<sha256>.json` and reusing unchanged
+live multipart manifests without duplicate notes. When `multipart_validators` is
+undeclared (`multipart_validators_undeclared`) or limits are exceeded
+(`attachment_too_large`), fresh `checkpoint`/`transfer` refuses before `intent` with
+zero notes or files written and payloads untouched: declare `multipart_validators`
+(or raise `multipart_max_bytes`/`multipart_max_parts` within 256 MiB / 256 parts)
+and rerun, or retain an off-container `Manifest 1` file under
+`$WORK_ROOT/<project>/<task-id>/` via the manual checkpoint route.
 Retry the same operation id with the same parsed request; preserve prior changed
-payloads through explicit immutable locators. `accounted_unknown` is successful
-accounting, not verification. A completed retry returns historical publication
-references and explicitly leaves current bytes unchecked. Errors keep the durable
-reservation; they do not park or close the task. See README's retained checkpoint
-request and resolution contract.
+payloads through explicit immutable locators. Artifact batches validate all targets
+before writing and roll back newly created files on pre-save failure while preserving
+pre-existing/reused evidence (`; cleanup needs attention: could not remove <path>: ...`
+means rollback unlink/rmdir failed and preimage restoration was skipped); an
+unexpected unledgered file in `tasks/files/<id>/` fails `working_preimage` naming
+`tasks/files/<id>/<name>` so you can preserve/verify a copy outside `tasks/files/<id>`
+if needed and remove the unledgered file before retry or reconcile.
+`accounted_unknown` is successful accounting, not verification. A completed retry
+returns historical publication references and explicitly leaves current bytes
+unchecked. Errors keep the durable reservation; they do not park or close the task.
+See [retained lifecycle](../../docs/retention.md) for request and resolution contracts.
 
 `tasks retained transfer <from> <to> --request <path>` moves selected custody after
 both owned starts and participant-fresh input bases. Its strict request lists the
@@ -681,21 +709,49 @@ request after interruption; committed release needs only missing final receipts.
 A completed retry returns dated historical results, not current verification.
 `tasks retained reconcile <coordinator> --request <path>` explicitly ends an
 irrecoverable pending operation using a stable directive and fresh participant
-bases. It keeps custody, records unknown observations, verifies all ready commits,
+bases. It keeps custody, records unknown observations (including degrading an
+over-cap generated directory manifest during `reconcile_ready` to `kept`/`unknown`
+rather than failing with `attachment_too_large`), verifies all ready commits,
 and only then ends reservations through the coordinator terminal. It never releases
 bytes or completes the requested transfer/checkpoint; committed sender release
 requires finishing the original operation. Malformed history remains blocked and
-needs explicit repair. Keep original named retained refs available. Use fresh
-checkpoint inputs for later repair; unsupported or malformed retained history
-still requires explicit manual repair.
+needs explicit repair. Keep original named retained refs available.
+
+To repair historical malformed `retained:` item notes without rewriting history or
+running whole-host enumeration, append a source-bound resolution via `tasks note`:
+`retention resolution: {"version":1,"bad":<Source>,"successors":[...],"reason":"..."}`
+(targeting `retained:` item notes only, never `retention operation:` or machine
+`retention checkpoint:` envelopes, with `bad.basis` verified against pinned Git
+history). This works directly on closed (`done`) tasks without reopening
+implementation (`edit --status todo`) or `tasks start` (preserving existing
+attached manifests at `<records>/tasks/files/<id>/<name>` when appending valid
+`version: 1` `retained:` successor notes), on `released` items, on other-host items
+(replayed unfiltered before `--host`), and on 0-item accidental `retained:` prose
+(`"successors": []`, or `CheckpointRequest.resolutions` with `"declarations": []`).
+`verify::preflight` strictly requires integer `version: 1` on existing manifests
+and refuses pre-`Manifest 1` historical formats (`unsupported historical manifest
+format; preserve and migrate it explicitly`). Before `checkpoint` or `transfer` on
+a pre-`Manifest 1` item: (1) leave the historical manifest untouched, build a
+canonical `Manifest 1` file (`{"version":1,"entries":[...]}`) outside the container,
+compute its SHA-256 `<sha>`, and `tasks attach <id> <tmp> --name
+retained-manifest-<sha>.json` (adding `--multipart` when over `max_bytes` with
+`multipart_validators` configured, or placing it under `$WORK_ROOT/<project>/<task-id>/`
+for manual-route projects); (2) append a valid `version: 1` `retained:` successor
+citing `<records>/tasks/files/<id>/retained-manifest-<sha>.json` (or `$WORK_ROOT/...`)
+plus `retention resolution:` if the prior note had a diagnostic, and confirm
+`tasks retained state <id>` reports `complete: true`; (3) run `checkpoint` or
+`transfer` from that refreshed `basis`.
 
 Pending retained operations reserve task/evidence mutation while permitting reads,
-unrelated appended notes, start/claim refresh and park. Complete or reconcile them
-before closure or archival. Terminal archival keeps logical note ordinals; ID-changing
-move/migrate refuse protected retention locators. Rename may preserve them through
-verified Git-anchored retention lineage after complete/reconciled terminal proof. Never detach protected
-retained request, manifest or checkpoint artifacts, or forge machine operation/checkpoint
-notes through `tasks note`.
+unrelated appended notes, start/claim refresh and park (`retention resolution:` and
+`multipart:` are reserved and cannot commute with a pending operation). Complete or
+reconcile them before closure or archival. Terminal archival keeps logical note
+ordinals; ID-changing move/migrate refuse protected retention locators. Rename may
+preserve them through verified Git-anchored retention lineage after
+complete/reconciled terminal proof. Never detach protected retained request,
+manifest (logical `retained-manifest-*.json`, `.catalog.json`, or `.part-NNNN`) or
+checkpoint artifacts, or forge machine operation/checkpoint notes through
+`tasks note`.
 
 ### Record commits
 
@@ -1018,16 +1074,18 @@ commit it with `tasks commit --project <new>` using the completed receipt.
 On the second host, `--adopt` pairs the directory already renamed by sync.
 With retained history, upgrade every participating reader before creating lineage
 config and keep one coordinated writer through rename/commit/adoption. Source
-config, task histories and protected evidence must be committed/verified; pending
-or uncertain retention operations, malformed operation/checkpoint envelopes and
-unsupported item versions still block rename, while malformed plain `retained:`
-item notes carry over unchanged. Rerun an interrupted rename
+config, task histories and protected evidence (including multipart manifest
+declarations and members) must be committed/verified; pending or uncertain
+retention operations, malformed operation/checkpoint/`retention resolution:`
+envelopes and unsupported item versions still block rename, while malformed plain
+`retained:` item notes carry over unchanged. Rerun an interrupted rename
 using its frozen inventory; never rewrite old requests/checkpoints, detach protected
 artifacts or recreate an edge from today's HEAD. Hook-time check validates the
 source at its pinned commit and destination from the live configuration. Current
 operations use current IDs; unchanged old completed requests replay only dated
-results through verified lineage. Generated task-attachment manifests resolve at
-the moved attachment path; payload paths and external manual manifests stay literal.
+results through verified lineage. Generated single-file and multipart
+task-attachment manifests resolve at the moved attachment path; payload paths and
+external manual manifests stay literal.
 Rehearsals must isolate both `XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` so no live registry or park is touched. `git checkout .` alone is
 not an undo; follow the [manual rollback procedure](../../docs/project-operations.md#prefix-rollback).

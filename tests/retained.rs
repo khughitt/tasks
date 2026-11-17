@@ -3849,3 +3849,78 @@ fn publish_batch_pass1_rejects_mixed_small_and_over_cap_without_partial_files() 
         );
     }
 }
+
+#[test]
+fn detach_refuses_logical_and_member_multipart_retained_manifests() {
+    let f = checkpoint_fixture();
+    configure_attachments(&f.records, "max_bytes = 2048\nmultipart_validators = []\n");
+    let container = f.dir.join("multipart-protected-container");
+    let _ = build_approx_5k_container(&container);
+
+    let cp_res = checkpoint(
+        &f,
+        &checkpoint_request(&f, 701, json!([declaration(&container, "scratch")])),
+    );
+    assert_eq!(cp_res["outcome"], "verified", "{cp_res}");
+    let manifest_sha = f.state()["items"][0]["record"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let logical = format!("retained-manifest-{manifest_sha}.json");
+    let catalog = format!("{logical}.catalog.json");
+    let part1 = format!("{logical}.part-0001");
+    let files_dir = f.records.join(format!("tasks/files/{}", f.id));
+    assert!(!files_dir.join(&logical).exists());
+    assert!(files_dir.join(&catalog).is_file());
+    assert!(files_dir.join(&part1).is_file());
+
+    let before = f.basis();
+    for target in [&logical, &catalog, &part1] {
+        let out = f
+            .cmd()
+            .args(["detach", &f.id, target, "disposal"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "target {target}: {out:?}");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(
+            err["error"]["kind"], "retained_history_blocked",
+            "target {target}: {err}"
+        );
+        assert!(
+            err["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("is protected retained evidence"),
+            "target {target}: {err}"
+        );
+        assert_eq!(f.basis(), before);
+    }
+
+    for note_text in [
+        format!("detached: {part1}"),
+        format!("detached: {part1}: disposal"),
+        format!("detached: {catalog}: disposal"),
+        format!("detached: {logical}: disposal"),
+    ] {
+        let out = f.cmd().args(["note", &f.id, &note_text]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "note {note_text:?}: {out:?}");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(
+            err["error"]["kind"], "retained_input",
+            "note {note_text:?}: {err}"
+        );
+        assert!(
+            err["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("protected retained evidence cannot be detached by a generic note"),
+            "note {note_text:?}: {err}"
+        );
+        assert_eq!(f.basis(), before);
+    }
+
+    assert!(files_dir.join(&catalog).is_file());
+    assert!(files_dir.join(&part1).is_file());
+}

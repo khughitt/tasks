@@ -47,12 +47,21 @@ locator rules, schemas, or `check` JSON shapes.
 
 ## Retention records and manifests
 
-Notes beginning `retained: ` contain strict JSON. New records use integer version
-1; the history reader explicitly supports unversioned predecessors without rewriting
-them. Duplicate keys, unknown fields/versions and wrong types fail; unsupported
-history is never silently interpreted as a current subset. Identity within a task
-is exactly host/kind/path. Path spelling remains stable; tokens are data, not shell
-commands.
+Notes beginning `retained: ` contain strict JSON. Every non-migration write path
+(`tasks note`, `tasks note --stdin`, `tasks edit`, and lifecycle status transitions)
+validates newly appended `retained:` notes before saving, leaving already-persisted
+notes and new-file `move`/`migrate` copies untouched. The `retained:` prefix is
+reserved for Retention-1 JSON item records with integer `version: 1`: missing the
+space after `retained:` or supplying non-JSON prose fails with `retained_input` and
+directs ordinary prose to a non-reserved prefix such as `Custody note: ...`;
+unversioned `retained:` JSON fails because newly written records require integer
+`version: 1`. `tasks note <id> --stdin` validates every normalized line before
+writing or committing any note in the batch and reports 1-based `stdin line <k>: ...`
+on failure. The history reader continues to support valid historical unversioned
+records without rewriting them. Duplicate keys, unknown fields/versions and wrong
+types fail; unsupported history is never silently interpreted as a current subset.
+Identity within a task is exactly host/kind/path. Path spelling remains stable;
+tokens are data, not shell commands.
 
 | Record field | Contract |
 | --- | --- |
@@ -67,14 +76,24 @@ commands.
 Verified worktrees omit content digest/manifest and carry Git/ignored-file
 observations. Verified data files have exact SHA256; directories need complete
 manifest and its digest (required structurally for scratch, checked semantically
-for evidence directories). Unknown data uses null current sha256 and a concrete
-action; unknown directories name the last located manifest or null. Unknown
+for evidence directories). Under `verification: "verified"`, an absent or null
+`scratch` manifest fails as `missing manifest`, while any non-absent manifest
+locator not starting with `/` or `$WORK_ROOT/` (such as `files:<name>` or a
+relative path) fails as `manifest locator must start with / or $WORK_ROOT/`.
+Unknown data uses null current sha256 and a concrete action; unknown directories
+name the last located manifest or null, and any non-absent non-null manifest
+locator not starting with `/` or `$WORK_ROOT/` fails as
+`unknown manifest locator must be null or start with / or $WORK_ROOT/`. Unknown
 worktrees still omit digest/manifest. Released records use verified, owner/trigger
 none and omit digest/manifest/handoff/action; prior evidence remains in history.
 Open-owner and real handoff/disposition rules require policy checks beyond JSON.
 
 Manifest 1 is `{version:1,entries:[...]}`; members have path and type file
-(sha256), directory, or symlink (literal target). Paths are normalized relative
+(sha256), directory, or symlink (literal target). Preflight strictly requires
+integer `version: 1` on existing record manifests and refuses pre-`Manifest 1` or
+unversioned historical formats (`unsupported historical manifest format; preserve
+and migrate it explicitly`); historical formats never acquire `Manifest 1`
+authority by inference. Paths are normalized relative
 components: no absolute/drive prefix, backslash, empty, dot or dot-dot components.
 Include hidden files, empty directories and literal links without following them.
 Sort by path and hash exact saved UTF-8 bytes. Duplicate paths, special/unreadable/
@@ -82,10 +101,15 @@ unstable members or incomplete enumeration fail semantic verification. A manifes
 does not retain symlink target bytes or reconstruct missing member versions.
 
 Keep each manifest outside its inventoried container, with retrievable exact old
-members. Independent child identities retain their own owners/dispositions even
-when included in an enclosing manifest. Do not exclude metadata to fit a cap.
-Attachment/layout refusal keeps raw evidence and an incomplete accounting action;
-it does not authorize a guessed storage root or loss of the only copy.
+members. Generated task-attachment manifests keep the canonical locator
+`<records>/tasks/files/<id>/retained-manifest-<sha256>.json` in
+`RetentionRecord.manifest` whether stored as a single file within `[attachments]
+max_bytes` or split into `.part-NNNN` and `.catalog.json` members through
+`[attachments] multipart_validators`. Independent child identities retain their
+own owners/dispositions even when included in an enclosing manifest. Do not
+exclude metadata to fit a cap. Attachment/layout refusal keeps raw evidence and an
+incomplete accounting action; it does not authorize a guessed storage root or loss
+of the only copy.
 
 ## Bases, sources and artifact locators
 
@@ -104,17 +128,22 @@ objects are shared by state, requests and receipts; digests are 64 lowercase hex
 | Directory locator | type directory, host, path, manifest (Git/attachment locator, never nested directory). |
 | Declaration | kind, path, purpose, cleanup_trigger. |
 | Preservation | identity, artifact (locator for previous bytes). |
-| Resolution | bad (Source), declarations (complete correction), reason. |
+| Resolution | bad (Source), declarations (complete correction, `[]` only when 0 identities exist in host/task scope), reason. |
+| ResolutionNote | version=1, bad (Source), successors (distinct positive ordinals `> bad.ordinal`, `[]` allowed for 0-item host/task diagnostics), reason. |
 | Publication | task, phase, basis. |
 | Mapping | sender Identity, receiver Identity. |
 | Counts | kept_verified, kept_unknown, released (nonnegative integer counts). |
 
 Attachment basis may be omitted only inside its own task's committed note: it
-pins to that containing publication. Foreign locators and preservation artifacts
-in requests require explicit bases, including directory manifests. This prevents
-self-referential commit hashes without weakening immutable retrieval. A basis
-must match actual task/project/layout and reachable retained branch, not merely
-pass field-shape checks. Keep named refs and required Git objects available.
+pins to that containing publication. Logical `retained-manifest-<sha256>.json`
+attachment locators resolve either a single-blob `attached:` entry or a live
+`multipart:` declaration whose `.part-NNNN` and `.catalog.json` members are all
+attached at the pinned basis, reconstructing bytes through `ReadContext`. Foreign
+locators and preservation artifacts in requests require explicit bases, including
+directory manifests. This prevents self-referential commit hashes without weakening
+immutable retrieval. A basis must match actual task/project/layout and reachable
+retained branch, not merely pass field-shape checks. Keep named refs and required
+Git objects available.
 
 ## Participant freshness
 
@@ -152,12 +181,19 @@ For a pending operation, ordinary appended notes and their accompanying owner,
 complexity and update metadata changes from park/start may commute. Each intervening edge
 must fit those retry rules, keep attachment/archive trees and task mode unchanged,
 and match the task writer's exact serialized output. Reserved retention/evidence
-notes, byte-only edits and their reverts still refuse. This exception never changes
-P or weakens new admission.
+notes (`retained:`, `retention operation:`, `retention checkpoint:`,
+`retention resolution:`, `attached:`, `detached:`, and `multipart:`), byte-only
+edits and their reverts still refuse, and none of those prefixes may appear
+between a complete machine checkpoint's `basis` and its publication. This
+exception never changes P or weakens new admission.
 
 New admission also compares live task/archive files and the complete attachment
 tree against committed bytes and modes, including index changes, ignored/untracked
-additions and unexpected directories or symlinks. These checks do not replace full
+additions and unexpected directories or symlinks. Any pre-existing unledgered file
+under `tasks/files/<id>/` fails `working_preimage` (`retained_stale_basis`) naming
+`tasks/files/<id>/<name>` with instructions to preserve and verify a copy outside
+`tasks/files/<id>` if needed, remove the unledgered file to restore the committed
+preimage, and retry or reconcile. These checks do not replace full
 payload verification or authorize recursive proof pruning. No new history-proof
 walk is added to admission.
 
@@ -214,12 +250,42 @@ manifest inside its container refuse. An unknown successor does not erase the
 prior-version requirement; later checkpoints recheck referenced preservation.
 Use an explicitly verified replacement locator to repair unavailable prior storage.
 
-Resolutions bind exact bad basis/ordinal with complete declarations and reason,
-covering its blocked identity or all known identities in host/task scope. A scope
-spanning other hosts needs explicit history recovery. Native checkpoints publish
-changed observations/artifacts, verify that commit, recheck history, then publish
-checkpoint plus completed receipt. No kept local items yields no_local_items
-without an empty checkpoint. The command neither parks nor closes the task.
+On fresh `checkpoint` (against the participant project) and fresh `transfer`
+(against the receiver project), existing directory containers run a metadata-only
+precheck before `publish::intent` writes a reservation or hashes file contents:
+the CLI computes exact `Manifest 1` UTF-8 byte length, exact newline `cut` part
+count, and `.catalog.json` byte size against `[attachments] max_bytes`. Missing
+or unmanifestable directories skip pre-`intent` refusal so post-`intent`
+observation records `kept`/`unknown`. Manifests within `[attachments] max_bytes`
+(default 2 MiB) publish as single-file `retained-manifest-<sha256>.json`
+attachments. When a manifest exceeds `max_bytes` and `[attachments]
+multipart_validators` is declared in `<prefix>/tasks/.config.toml` (for example
+`[]` or validator entries) and the manifest, part count, and `.catalog.json` fit
+`multipart_max_bytes` (default 16 MiB, ceiling 256 MiB), `multipart_max_parts`
+(default 16, ceiling 256), and `max_bytes`, `checkpoint` and `transfer` publish
+and verify `Manifest 1` natively as `.part-NNNN` and `.catalog.json` members
+under `tasks/files/<id>/`, keeping `RetentionRecord.manifest` and
+`ArtifactLocator::Attachment` at `retained-manifest-<sha256>.json` and reusing
+unchanged live multipart manifests without duplicate notes. When
+`multipart_validators` is undeclared (`multipart_validators_undeclared`) or a
+multipart limit is exceeded (`attachment_too_large`), fresh `checkpoint`/`transfer`
+refuses cleanly before `publish::intent` with zero notes or files written and
+payloads untouched; declare `multipart_validators` (and raise `multipart_max_bytes`
+or `multipart_max_parts` within the 256 MiB / 256-part ceiling) and rerun, or
+retain an off-container `Manifest 1` file under `$WORK_ROOT/<project>/<task-id>/`
+via the manual checkpoint route.
+
+Resolutions in `CheckpointRequest` bind exact bad basis/ordinal with complete
+declarations and reason, covering its blocked identity or all known identities in
+host/task scope; `declarations: []` is accepted when zero identities exist in the
+blocked `host` or `task` scope (for example 0-item accidental `retained:` prose),
+publishing `items_published` with `resolutions` before completing with outcome
+`no_local_items` and `checkpoint: null`. A scope spanning other hosts needs
+explicit history recovery (or standalone `retention resolution:` below). Native
+checkpoints publish changed observations/artifacts, verify that commit, recheck
+history, then publish checkpoint plus completed receipt. No kept local items
+yields `no_local_items` without an empty checkpoint. The command neither parks nor
+closes the task.
 
 ## Transfers and reconciliation
 
@@ -247,12 +313,80 @@ binding exact ready bases. Ready alone leaves reservation active. A committed
 sender release refuses reconciliation: finish original receipts instead.
 
 Reconciliation keeps current custody and independent exceptions. Unknown/missing
-payloads remain kept/unknown, malformed history stays blocked. It observes effective
-history rather than applying abandoned replacements/corrections; use a fresh
-checkpoint for repair. Reconciled means neither transferred nor host-checkpointed.
-Counts describe interpretable ready-basis history; actions preserve blocked scopes.
-Terminal replay checks immutable directives/publications without rehashing current
-payloads; a new observation needs fresh bases.
+payloads remain kept/unknown, malformed history stays blocked. When a directory's
+generated manifest exceeds `[attachments] max_bytes` during `reconcile_ready` and
+is not already a live attachment on the task, reconciliation degrades that
+observation to `kept`/`unknown` (naming the generated byte count vs `max_bytes`
+and instructing the operator to configure `[attachments] multipart_validators`
+and run a fresh `tasks retained checkpoint`, or use the manual off-container
+manifest route) instead of failing with `attachment_too_large`. Reconciliation
+observes effective history rather than applying abandoned replacements/corrections;
+use a fresh checkpoint or `retention resolution:` for repair. Reconciled means
+neither transferred nor host-checkpointed. Counts describe interpretable
+ready-basis history; actions preserve blocked scopes. Terminal replay checks
+immutable directives/publications without rehashing current payloads; a new
+observation needs fresh bases.
+
+## Source-bound history repair and historical manifest adoption
+
+Historical malformed `retained:` item notes can be repaired without rewriting
+history or running whole-host filesystem enumeration by appending a standalone
+`retention resolution: <json>` note via `tasks note`:
+
+```json
+{"version":1,"bad":{"basis":{...},"ordinal":12},"successors":[14],"reason":"Repair legacy manifest locator"}
+```
+
+`retention resolution:` targets only `retained:` item notes (never
+`retention operation:` or machine `retention checkpoint:` envelopes). Write-time
+admission (`publish::check_write`), `basis::read`, and `proof::validate_history`
+verify `bad.basis` against pinned Git history (`..bad.ordinal` exact note-prefix
+equality across ordinary, renamed `lineage`, and `retention_recovery` histories);
+a forged committed `bad.basis` fails both `tasks retained state` and lifecycle
+mutations with `retained_history_blocked`. Replay evaluates all hosts unfiltered
+before applying `--host`, and enforces scope coverage on `successors` (each must
+be a valid `version: 1` `retained:` note ordinal with `bad.ordinal < s <
+resolution_ordinal`):
+
+- **Closed (`done`) tasks and existing attachments:** `tasks note` works directly
+  on `done` tasks without reopening implementation (`tasks edit --status todo`)
+  or `tasks start`. When a malformed note cited a relative or `files:<name>`
+  attachment locator whose manifest already lives in `tasks/files/<id>/<name>`,
+  keep that attached file untouched, append a valid `version: 1` `retained:`
+  successor citing `<records>/tasks/files/<id>/<name>`, and append
+  `retention resolution:` citing the successor ordinal.
+- **`released` items and other-host items:** Append a valid `version: 1`
+  `retained:` successor (`state: "released"` or the affected host's record) and
+  bind its ordinal in `successors`; `tasks retained state --host <local>` sees
+  and clears other-host diagnostics cleanly.
+- **0-item accidental `retained:` prose:** When an accidental `retained:` note
+  quarantined a `host` or `task` scope that has zero prior valid identities,
+  append `retention resolution:` with `"successors": []` (no successor item note
+  needed), then record any intended prose under a non-reserved prefix such as
+  `Custody note: ...`.
+
+Because `verify::preflight` strictly requires integer `version: 1` and refuses
+pre-`Manifest 1` historical manifests (`unsupported historical manifest format;
+preserve and migrate it explicitly`), adopt a pre-`Manifest 1` directory manifest
+explicitly before running `checkpoint` or `transfer`:
+
+1. Keep the historical manifest file untouched, generate a canonical `Manifest 1`
+   JSON file (`{"version":1,"entries":[...]}`) outside the inventoried container,
+   compute its SHA-256 `<sha>`, and attach it to the owning task (`tasks attach
+   <id> <tmp-manifest> --name retained-manifest-<sha>.json`, adding `--multipart`
+   when over `[attachments] max_bytes` with `multipart_validators` configured; or
+   place it under `$WORK_ROOT/<project>/<task-id>/` on manual-route projects).
+2. Append a valid `version: 1` `retained:` successor record naming `"sha256":
+   "<sha>"` and `"manifest":
+   "<records>/tasks/files/<id>/retained-manifest-<sha>.json"` (or the
+   `$WORK_ROOT/...` path); if the prior `retained:` note had a diagnostic in
+   `tasks retained state <id>`, append `retention resolution:` binding `"bad"` to
+   `"successors": [<successor-ordinal>]` (or supply `resolutions` in
+   `CheckpointRequest`), and confirm `tasks retained state <id>` reports
+   `complete: true`.
+3. Run `tasks retained checkpoint <id> --request <path>` or `tasks retained
+   transfer <from> <to> --request <path>` using the refreshed `basis` from
+   `tasks retained state`.
 
 ## Phase and checkpoint envelopes
 
@@ -296,7 +430,13 @@ bytes; accounted_unknown records complete accounting with unresolved observation
 Incomplete publication is nonzero and retains reservation plus durable phase.
 
 Retry reestablishes ownership and validates immutable intent/prior publications,
-adopting only byte-identical interrupted attachments before hooks. Exact committed
+adopting only byte-identical interrupted attachments (including interrupted
+multipart `.part-NNNN` and `.catalog.json` manifest members) before hooks.
+Artifact batches validate all names, caps, and multipart validators before writing
+any file, and roll back newly created files in reverse order on pre-save failure
+while preserving pre-existing/reused evidence; if rollback unlink or directory
+removal fails, `; cleanup needs attention: could not remove <path>: <cleanup>` is
+appended without claiming a restored preimage. Exact committed
 completion replays original bases/counts with a warning that current payloads
 were not inspected. An uncommitted completion is preserved before a fresh inspection.
 Conflicting bytes/branches/stale bases or missing history refuse; journals lost
@@ -322,8 +462,11 @@ Only unrelated appended ordinary notes can commute. Pending intent permits queri
 unrelated notes, normal claim refresh/start and park;
 closure, archival and competing task/evidence changes wait for finish/reconcile.
 Move/migrate still refuse operation history and protected retained-op requests,
-retained-manifests/checkpoints. Project rename has the verified lineage route
-below. Protected evidence cannot be detached. No force bypass is provided.
+retained-manifests (including `.catalog.json` and `.part-NNNN` multipart members)
+and retained-checkpoints. Project rename has the verified lineage route
+below. Protected evidence (logical and multipart member names alike) cannot be
+detached by `tasks detach` or generic `detached:` notes. No force bypass is
+provided.
 
 Metrics wall_ns measures the operation's elapsed interval, including prefix-lock
 waits and payload inspection; it is not the sum of commit-lock hold intervals.
@@ -344,24 +487,27 @@ It freezes a [retention lineage](configuration.md) edge and target config bytes
 in the existing rename inventory. It preserves old envelopes, ordinals, task
 suffixes, hashes, retained refs and original Git paths byte for byte.
 
-An unresolved diagnostic on a `retention operation:` or machine
-`retention checkpoint:` envelope refuses rename, and fails post-rename `tasks check`
-for the renamed source history; an operation citing a malformed `retained:` ordinal
-is such a diagnostic, and so is an item note of an unsupported version. A malformed
-plain `retained:` item note does not block: rename carries the note unchanged, so
-`tasks retained state` reports the same diagnostic, still unresolved, under the new ID.
+An unresolved diagnostic on a `retention operation:`, machine
+`retention checkpoint:`, or `retention resolution:` envelope refuses rename, and
+fails post-rename `tasks check` for the renamed source history; an operation
+citing a malformed `retained:` ordinal is such a diagnostic, and so is an item
+note of an unsupported version. A malformed plain `retained:` item note does not
+block: rename carries the note unchanged, so `tasks retained state` reports the
+same diagnostic, still unresolved, under the new ID.
 
 Current state queries return the current task ID/basis. An explicit historical
 `--at` returns the ID and exact basis from that revision, even when requested
 through the current ID. Nested historical envelopes remain unchanged. Readers
-verify every intervening edge and original blob at its declared path/ref; missing
-proof is a recovery error. Publication lookup remains in the original epoch.
+verify every intervening edge and original blob (or multipart manifest member set
+through `ReadContext`) at its declared path/ref; missing proof is a recovery
+error. Publication lookup remains in the original epoch.
 
 New operations require current canonical task IDs and participant-fresh input bases.
 Custody matching accepts an old next_owner only through verified lineage. Rename
 alone does not rewrite item records or move payloads. A recorded generated manifest
-inside a renamed task attachment directory resolves to its moved attachment only
-with the original observation, ledger, lineage and exact digest verified. External
+(single-file or multipart `retained-manifest-<sha256>.json`) inside a renamed task
+attachment directory resolves to its moved attachment only with the original
+observation, ledger/multipart declaration, lineage and exact digest verified. External
 manual manifest paths retain their literal resolution; arbitrary host-root
 relocations are not inferred. A detached rename that would relocate the records
 Git root itself refuses before intent and needs an explicit relocation route. A subsequent observation publishes any changed

@@ -69,10 +69,32 @@ pub fn reserved(text: &str) -> bool {
     .iter()
     .any(|p| text.starts_with(p))
 }
+fn is_logical_manifest(name: &str) -> bool {
+    name.starts_with("retained-manifest-")
+        && name.ends_with(".json")
+        && !name.ends_with(".catalog.json")
+        && name.len() > "retained-manifest-.json".len()
+}
+pub(crate) fn manifest_member_logical(name: &str) -> Option<&str> {
+    let logical = if let Some(logical) = name.strip_suffix(".catalog.json") {
+        logical
+    } else if let Some((logical, suffix)) = name.rsplit_once(".part-")
+        && suffix.len() == 4
+        && suffix.bytes().all(|b| b.is_ascii_digit())
+    {
+        logical
+    } else {
+        return None;
+    };
+    (is_logical_manifest(logical) && crate::multipart::audit::is_member(name, logical))
+        .then_some(logical)
+}
 pub fn protected(name: &str) -> bool {
     (name.starts_with("retained-op-") && name.ends_with(".request.json"))
         || ((name.starts_with("retained-manifest-") || name.starts_with("retained-checkpoint-"))
-            && name.ends_with(".json"))
+            && name.ends_with(".json")
+            && !name.ends_with(".catalog.json"))
+        || manifest_member_logical(name).is_some()
 }
 pub enum WriteAction<'a> {
     Archive,
@@ -150,10 +172,15 @@ pub fn validate_appended_note_syntax(text: &str) -> Result<()> {
             "machine retention envelopes require the owned retained publication path",
         ));
     }
-    if let Some((crate::attachments::Ledger::Detached, name)) =
-        crate::attachments::parse_ledger_note(text)
-        && protected(name)
-    {
+    let detached_protected =
+        crate::attachments::parse_ledger_note(text).is_some_and(|(entry, name)| {
+            entry == crate::attachments::Ledger::Detached && protected(name)
+        }) || text
+            .strip_prefix("detached:")
+            .map(str::trim_start)
+            .map(|rest| rest.split_once(':').map_or(rest, |(name, _)| name).trim())
+            .is_some_and(protected);
+    if detached_protected {
         return Err(invalid(
             "protected retained evidence cannot be detached by a generic note",
         ));
@@ -1764,10 +1791,8 @@ pub fn validate_since(
                     )
                 } else if note.text.starts_with("multipart:") {
                     multipart_notes.contains(&note.text)
-                } else if note.text.starts_with("retention resolution:") {
-                    false
                 } else {
-                    true
+                    !note.text.starts_with("retention resolution:")
                 };
                 if !valid {
                     return Err(Error::RetainedStaleBasis("Intervening retention/evidence note is not bound to this operation's receipts; recover its exact reserved input".into()));
@@ -4140,5 +4165,47 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn protected_matches_logical_and_multipart_manifest_members() {
+        for expected_protected in [
+            "retained-op-a.request.json",
+            "retained-checkpoint-a.json",
+            "retained-manifest-a.json",
+            "retained-manifest-a.json.catalog.json",
+            "retained-manifest-a.json.part-0001",
+            "retained-manifest-a.json.part-9999",
+        ] {
+            assert!(
+                protected(expected_protected),
+                "{expected_protected} should be protected"
+            );
+        }
+        for not_protected in [
+            "retained-manifest-a.json.part-001",
+            "retained-manifest-a.json.part-00001",
+            "retained-manifest-a.json.part-abcd",
+            "retained-manifest-.json.part-0001",
+            "retained-checkpoint-a.json.part-0001",
+            "other-manifest-a.json.part-0001",
+            "evidence.txt",
+        ] {
+            assert!(
+                !protected(not_protected),
+                "{not_protected} should not be protected"
+            );
+        }
+        for note in [
+            "detached: retained-manifest-a.json.part-0001",
+            "detached: retained-manifest-a.json.part-0001: disposal",
+            "detached: retained-manifest-a.json.catalog.json: disposal",
+        ] {
+            assert!(
+                validate_appended_note_syntax(note).is_err(),
+                "{note} should fail validate_appended_note_syntax"
+            );
+        }
+        assert!(validate_appended_note_syntax("detached: evidence.txt: obsolete").is_ok());
     }
 }
