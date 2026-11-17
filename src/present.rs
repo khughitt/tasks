@@ -51,6 +51,38 @@ pub fn id(id: &str, project: Option<Rgb>) -> Span {
     Span::styled(id, project.map_or(Style::Chrome, Style::Id))
 }
 
+/// A goal id: bold, in its project's fixed id shade when assigned, else bold alone.
+pub fn goal_id(id: &str, project: Option<Rgb>) -> Span {
+    Span::styled(id, Style::GoalId(project))
+}
+
+/// One tree connector segment painted at its column depth.
+pub fn tree_guide(segment: &str, project: Option<Rgb>, depth: usize) -> Span {
+    Span::styled(
+        segment,
+        Style::TreeGuide {
+            color: project,
+            depth,
+        },
+    )
+}
+
+/// Compact `work` cell for a goal row (`4/7`, `4/7 +3`, `-`, `- ?1`, `- +3 ?1`, etc.).
+pub fn goal_work(work: &crate::output::GoalWork) -> Span {
+    let mut text = if work.pieces.total == 0 {
+        "-".to_string()
+    } else {
+        format!("{}/{}", work.pieces.done, work.pieces.total)
+    };
+    if work.pieces.ideas > 0 {
+        text.push_str(&format!(" +{}", work.pieces.ideas));
+    }
+    if work.unresolved_pieces > 0 {
+        text.push_str(&format!(" ?{}", work.unresolved_pieces));
+    }
+    Span::plain(text)
+}
+
 /// The review prefix of an id cell: marked, reserved, or absent.
 pub fn review_mark(needs_review: bool, reserved: bool) -> Span {
     let text = match (reserved, needs_review) {
@@ -183,6 +215,18 @@ mod tests {
         assert_eq!(id("xx-000001", None).style, Some(Style::Chrome));
         let rgb = Rgb { r: 1, g: 2, b: 3 };
         assert_eq!(id("xx-000001", Some(rgb)).style, Some(Style::Id(rgb)));
+        assert_eq!(goal_id("xx-000001", None).style, Some(Style::GoalId(None)));
+        assert_eq!(
+            goal_id("xx-000001", Some(rgb)).style,
+            Some(Style::GoalId(Some(rgb)))
+        );
+        assert_eq!(
+            tree_guide("├─ ", Some(rgb), 2).style,
+            Some(Style::TreeGuide {
+                color: Some(rgb),
+                depth: 2,
+            })
+        );
         assert_eq!(title("T", Some(rgb), None).style, Some(Style::Project(rgb)));
         assert_eq!(
             title("T", Some(rgb), Some(crate::style::Activity(128))).style,
@@ -287,6 +331,8 @@ mod tests {
                 "Style::Date(",
                 "Style::Project(",
                 "Style::Id(",
+                "Style::GoalId(",
+                "Style::TreeGuide",
                 "Style::Title",
             ] {
                 assert!(

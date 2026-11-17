@@ -412,3 +412,426 @@ fn progress_metadata_warnings_dedup() {
         );
     }
 }
+
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for t in chars.by_ref() {
+                if t.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn progress_display_members_match_goals() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+
+    let f_done = add(&env, &bb, "Foreign done piece", &[]);
+    env.json(&bb, &["done", &f_done]);
+    let f_idea = add(&env, &bb, "Foreign idea piece", &["--status", "idea"]);
+
+    let root = add(
+        &env,
+        &aa,
+        "Umbrella goal",
+        &["--origin", "user", "--piece", &f_done, "--piece", &f_idea],
+    );
+    let hidden_done = add(&env, &aa, "Hidden completed child", &["--parent", &root]);
+    env.json(&aa, &["done", &hidden_done]);
+
+    let closed_anc = add(
+        &env,
+        &aa,
+        "Closed ancestor goal",
+        &["--origin", "user", "--parent", &root],
+    );
+    let open_grand = add(&env, &aa, "Open grandchild", &["--parent", &closed_anc]);
+    env.json(&aa, &["done", &open_grand]);
+    env.json(&aa, &["done", &closed_anc]);
+    env.json(&aa, &["edit", &open_grand, "--status", "todo"]);
+
+    let goals_out = env.json(&aa, &["goals", "--all-projects", "--closed"]);
+    let goal_cell = |id: &str| -> String {
+        let g = goals_out["goals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .unwrap();
+        let p = &g["pieces"];
+        let done = p["done"].as_u64().unwrap();
+        let total = p["total"].as_u64().unwrap();
+        let ideas = p.get("ideas").and_then(Value::as_u64).unwrap_or(0);
+        let mut cell = if total == 0 {
+            "-".to_string()
+        } else {
+            format!("{done}/{total}")
+        };
+        if ideas > 0 {
+            cell.push_str(&format!(" +{ideas}"));
+        }
+        cell
+    };
+    let expected_root = goal_cell(&root);
+    let expected_anc = goal_cell(&closed_anc);
+    // root has: f_done (Done), f_idea (Idea), hidden_done (Done), closed_anc (Done), open_grand (Todo) -> 3/4 +1
+    assert_eq!(expected_root, "3/4 +1");
+    // closed_anc has: open_grand (Todo) -> 0/1
+    assert_eq!(expected_anc, "0/1");
+
+    let prime_pretty = env.pretty(&aa, &["prime"]);
+    let root_line = prime_pretty.lines().find(|l| l.contains(&root)).unwrap();
+    let anc_line = prime_pretty
+        .lines()
+        .find(|l| l.contains(&closed_anc))
+        .unwrap();
+    assert!(root_line.contains(&expected_root), "{root_line}");
+    assert!(anc_line.contains(&expected_anc), "{anc_line}");
+    // Hidden completed child was filtered from tree display, so closed_anc is the only displayed
+    // child of root (`└─ `, not `├─ `), preceded by the 2-cell review prefix reserved in prime.
+    assert!(
+        anc_line.starts_with(&format!("  └─ {closed_anc}")),
+        "{anc_line}"
+    );
+
+    let tree_default = env.pretty(&aa, &["tree"]);
+    assert!(
+        tree_default
+            .lines()
+            .find(|l| l.contains(&root))
+            .unwrap()
+            .contains(&expected_root),
+        "{tree_default}"
+    );
+    let tree_all = env.pretty(&aa, &["tree", "--all"]);
+    assert!(
+        tree_all
+            .lines()
+            .find(|l| l.contains(&root))
+            .unwrap()
+            .contains(&expected_root),
+        "{tree_all}"
+    );
+
+    // Selected root starts at depth zero (`""` tree prefix, after the 2-cell review column)
+    // and keeps identical work counts!
+    let selected = env.pretty(&aa, &["tree", &closed_anc]);
+    let sel_line = selected.lines().find(|l| l.contains(&closed_anc)).unwrap();
+    assert!(
+        sel_line.starts_with(&format!("  {closed_anc}")),
+        "{sel_line}"
+    );
+    assert!(sel_line.contains(&expected_anc), "{sel_line}");
+    assert!(
+        selected
+            .lines()
+            .any(|l| l.starts_with(&format!("* └─ {open_grand}"))),
+        "{selected}"
+    );
+}
+
+#[test]
+fn progress_display_goal_kinds() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let unreg = env.init("unreg");
+
+    // 1. Childless lane -> `-`
+    let empty_lane = add(&env, &aa, "Empty lane", &["--lane"]);
+
+    // 2. Childless piece hub with missing piece -> `- ?1`, and ideas + missing piece -> `- +3 ?1`
+    let missing_piece = add(&env, &unreg, "Vanishing piece", &[]);
+    let missing_hub = add(
+        &env,
+        &aa,
+        "Missing piece hub",
+        &["--origin", "agent", "--piece", &missing_piece],
+    );
+    let ideas_missing_goal = add(
+        &env,
+        &aa,
+        "Ideas and missing goal",
+        &["--origin", "mixed", "--piece", &missing_piece],
+    );
+    for idx in 1..=3 {
+        add(
+            &env,
+            &aa,
+            &format!("Idea {idx}"),
+            &["--status", "idea", "--parent", &ideas_missing_goal],
+        );
+    }
+    std::fs::remove_file(unreg.join(format!("tasks/{missing_piece}.md"))).unwrap();
+
+    // 3. Excluded statuses (shelved, dropped, moved) do not enter done/total/ideas -> `- +1`
+    let cc = env.init("cc");
+    let mv_piece = add(&env, &bb, "Moved foreign piece", &[]);
+    let excluded_goal = add(&env, &aa, "Excluded children goal", &["--piece", &mv_piece]);
+    let sh = add(&env, &aa, "Shelved kid", &["--parent", &excluded_goal]);
+    env.json(&aa, &["shelve", &sh, "later", "--defer", "30d"]);
+    let dr = add(&env, &aa, "Dropped kid", &["--parent", &excluded_goal]);
+    env.json(&aa, &["drop", &dr, "not needed"]);
+    let moved_out = env.json(&bb, &["move", &mv_piece, "--to", "cc"]);
+    let successor = moved_out["id"].as_str().unwrap();
+    env.json(&cc, &["drop", successor, "abandoned after move"]);
+    let _open_keep = add(
+        &env,
+        &aa,
+        "Idea only kid",
+        &["--status", "idea", "--parent", &excluded_goal],
+    );
+
+    // 4. Closeout + Doing goal occurrences in prime
+    let close_goal = add(&env, &aa, "Closeout ready goal", &["--origin", "user"]);
+    let close_kid = add(&env, &aa, "Done kid", &["--parent", &close_goal]);
+    env.json(&aa, &["done", &close_kid]);
+
+    let doing_goal = add(&env, &aa, "Doing active goal", &[]);
+    let doing_kid = add(&env, &aa, "Open doing kid", &["--parent", &doing_goal]);
+    let _ = doing_kid;
+    env.json(&aa, &["start", &doing_goal]);
+
+    let _ = bb;
+    let prime_pretty = env.pretty(&aa, &["prime"]);
+
+    // Verify exact cells across sections:
+    assert!(
+        prime_pretty
+            .lines()
+            .any(|l| l.contains(&empty_lane) && l.contains(" - ")),
+        "{prime_pretty}"
+    );
+    assert!(
+        prime_pretty
+            .lines()
+            .any(|l| l.contains(&missing_hub) && l.contains("- ?1")),
+        "{prime_pretty}"
+    );
+    assert!(
+        prime_pretty
+            .lines()
+            .any(|l| l.contains(&ideas_missing_goal) && l.contains("- +3 ?1")),
+        "{prime_pretty}"
+    );
+    assert!(
+        prime_pretty
+            .lines()
+            .any(|l| l.contains(&excluded_goal) && l.contains("- +1")),
+        "{prime_pretty}"
+    );
+    // close_goal in closeout: 1/1; doing_goal in both roadmap and doing: 0/1
+    let close_hits: Vec<&str> = prime_pretty
+        .lines()
+        .filter(|l| l.contains(&close_goal) && l.contains("1/1"))
+        .collect();
+    assert!(!close_hits.is_empty(), "{prime_pretty}");
+    let doing_hits: Vec<&str> = prime_pretty
+        .lines()
+        .filter(|l| l.contains(&doing_goal) && l.contains("0/1"))
+        .collect();
+    assert!(
+        doing_hits.len() >= 2,
+        "doing goal should show 0/1 in both roadmap and doing:\n{prime_pretty}"
+    );
+}
+
+#[test]
+fn progress_display_elsewhere_uses_source_scan() {
+    let fixture = build_claimed_checkout_fixture();
+    let prime_pretty = fixture.env.pretty(&fixture.main_aa, &["prime"]);
+
+    // In main_aa's scan, shared_goal has 1 done + 1 todo = 1/2.
+    let shared_line = prime_pretty
+        .lines()
+        .find(|l| l.contains(&fixture.shared_goal))
+        .expect("shared_goal in roadmap");
+    assert!(shared_line.contains("1/2"), "{shared_line}\n{prime_pretty}");
+
+    // In other_wt's scan, claimed_goal has 3 done + 5 todo = 3/8 (including shared_goal's
+    // branch-only extra child and claimed_goal's branch-only foreign piece).
+    let claimed_line = prime_pretty
+        .lines()
+        .find(|l| l.contains(&fixture.claimed_goal))
+        .expect("claimed_goal in doing");
+    assert!(
+        claimed_line.contains("3/8"),
+        "{claimed_line}\n{prime_pretty}"
+    );
+}
+
+#[test]
+fn progress_display_legends_and_width() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let unreg = env.init("unreg");
+
+    // Empty tree stays byte-empty in output::render (`"\n"` after main's trailing newline, matching baseline).
+    assert_eq!(env.pretty(&aa, &["tree"]), "\n");
+
+    // Leaves-only views emit no legend.
+    let leaf = add(&env, &aa, "Standalone leaf", &[]);
+    let leaves_tree = env.pretty(&aa, &["tree"]);
+    assert!(!leaves_tree.contains("work: done/total"), "{leaves_tree}");
+    let leaves_prime = env.pretty(&aa, &["prime"]);
+    assert!(!leaves_prime.contains("work: done/total"), "{leaves_prime}");
+
+    // Base legend (goal with committed work only, no ideas, no missing pieces):
+    let goal = add(&env, &aa, "Plain goal", &[]);
+    env.json(&aa, &["edit", &leaf, "--parent", &goal]);
+    let base = "work: done/total local descendants and declared pieces; tree: local containment";
+
+    let tree_base = env.pretty(&aa, &["tree"]);
+    assert!(tree_base.starts_with(&format!("{base}\n")), "{tree_base:?}");
+    assert!(!tree_base.contains("+N: ideas"), "{tree_base}");
+    assert!(
+        !tree_base.contains("?N: unresolved declared pieces"),
+        "{tree_base}"
+    );
+
+    let prime_base = env.pretty(&aa, &["prime"]);
+    let lines: Vec<&str> = prime_base.lines().collect();
+    assert_eq!(lines[0], "project aa");
+    assert!(lines[1].starts_with("idea "), "{prime_base}");
+    assert_eq!(lines[2], base);
+    assert_eq!(lines[3], "");
+    assert_eq!(lines[4], "closeout:");
+
+    // Add an idea -> appends `; +N: ideas` only.
+    let _idea = add(
+        &env,
+        &aa,
+        "Idea child",
+        &["--status", "idea", "--parent", &goal],
+    );
+    let with_ideas = env.pretty(&aa, &["tree"]);
+    assert!(
+        with_ideas.starts_with(&format!("{base}; +N: ideas\n")),
+        "{with_ideas:?}"
+    );
+
+    // Add an unresolved piece -> appends `; ?N: unresolved declared pieces`, and wraps <= 80 cols!
+    let vanishing = add(&env, &unreg, "Gone piece", &[]);
+    env.json(&aa, &["edit", &goal, "--piece", &vanishing]);
+    std::fs::remove_file(unreg.join(format!("tasks/{vanishing}.md"))).unwrap();
+
+    for extra_args in [
+        &["--pretty", "prime"][..],
+        &["--pretty", "--color", "always", "prime"][..],
+        &["--pretty", "tree"][..],
+        &["--pretty", "--color", "always", "tree"][..],
+    ] {
+        let out = env
+            .cmd(&aa)
+            .env("COLUMNS", "80")
+            .args(extra_args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let clean = strip_ansi(&stdout);
+        assert!(clean.contains("+N: ideas"), "{clean}");
+        assert!(clean.contains("?N: unresolved declared pieces"), "{clean}");
+        for line in clean.lines() {
+            assert!(
+                line.chars().count() <= 80,
+                "exceeded 80 cols ({}) in {extra_args:?}: {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    // With `--headers`: headers do not suppress the legend, the legend still wraps within
+    // COLUMNS=80 (and carry no header row of its own), and table headers appear on data tables.
+    for cmd in ["prime", "tree"] {
+        let out = env
+            .cmd(&aa)
+            .env("COLUMNS", "80")
+            .args(["--pretty", "--headers", cmd])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let clean = strip_ansi(&String::from_utf8(out.stdout).unwrap());
+        assert!(clean.contains("+N: ideas"), "{clean}");
+        assert!(clean.contains("?N: unresolved declared pieces"), "{clean}");
+        assert!(
+            clean
+                .lines()
+                .any(|l| l.contains("status") && l.contains("work")),
+            "{clean}"
+        );
+        for line in clean
+            .lines()
+            .filter(|l| l.starts_with("work:") || l.starts_with("containment") || l.contains("?N:"))
+        {
+            assert!(
+                line.chars().count() <= 80,
+                "legend line exceeded 80 cols: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn progress_display_empty_fixed_floor() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let long_title =
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron";
+    let leaf = add(&env, &aa, long_title, &[]);
+    // Mark leaf `doing` so it is unadorned (`needs_review == false`, process `-`):
+    // id(9) + P(2) + size(1) + cx(1) + process(1) + status("doing"=5) + work(max(0,1)=1) + date(10) + title(20) + 8*gap(16) = 66.
+    env.json(&aa, &["start", &leaf]);
+    assert_eq!(leaf.len(), 9);
+    let computed_min = 9 + 2 + 1 + 1 + 1 + 5 + 1 + 10 + 20 + 8 * 2;
+    assert_eq!(computed_min, 66);
+
+    for width in [66usize, 80usize] {
+        for cmd in ["tree", "prime"] {
+            let out = env
+                .cmd(&aa)
+                .env("COLUMNS", width.to_string())
+                .args(["--pretty", cmd])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            let text = String::from_utf8(out.stdout).unwrap();
+            assert!(
+                text.lines().any(|l| l.contains("omicron")),
+                "{cmd} at {width}: {text}"
+            );
+            for line in text.lines() {
+                assert!(
+                    line.chars().count() <= width,
+                    "{cmd} at COLUMNS={width} overflowed ({} cols): {line:?}\n{text}",
+                    line.chars().count()
+                );
+            }
+        }
+    }
+
+    // One column below the computed minimum (65 < 66): deliberate Mode::Unwrapped single-line row!
+    let unwrapped_tree = env
+        .cmd(&aa)
+        .env("COLUMNS", "65")
+        .args(["--pretty", "tree"])
+        .output()
+        .unwrap();
+    let tree_65 = String::from_utf8(unwrapped_tree.stdout).unwrap();
+    assert_eq!(
+        tree_65.trim_end().lines().count(),
+        1,
+        "below floor 66 should render unwrapped: {tree_65:?}"
+    );
+    assert!(tree_65.contains(long_title), "{tree_65:?}");
+}

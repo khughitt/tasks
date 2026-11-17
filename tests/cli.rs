@@ -7325,10 +7325,10 @@ fn tree_nests_prunes_and_orders() {
 
     let out = env.cmd(&dir).args(["--pretty", "tree"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(&format!("{goal}      P1")), "{text}");
+    assert!(text.contains(&format!("{goal}        P1")), "{text}");
     assert!(
-        text.contains(&format!("  {big}    P2")),
-        "children are indented: {text}"
+        text.contains(&format!("└─ {big}     P2")),
+        "children carry tree connectors: {text}"
     );
 }
 

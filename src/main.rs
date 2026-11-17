@@ -350,7 +350,8 @@ fn main() {
                                 ::time::OffsetDateTime::now_utc().date(),
                                 &palette,
                             ))
-                            .with_title_scale(style::TitleScale::new(&palette));
+                            .with_title_scale(style::TitleScale::new(&palette))
+                            .with_tree_scale(style::TreeScale::new(&palette));
                         match palette.magenta {
                             Some(magenta) => painter
                                 .with_priority_scale(style::PriorityScale::new(magenta, &palette)),
