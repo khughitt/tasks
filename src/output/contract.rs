@@ -601,6 +601,13 @@ pub struct HaltRow {
 /// Each in-scope prefix's configured colour (docs/user-guide.md).
 pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalWork {
+    pub pieces: crate::goals::Pieces,
+    pub unresolved_pieces: usize,
+}
+
 #[derive(Serialize, Clone)]
 pub struct TaskSummary {
     pub id: String,
@@ -609,6 +616,9 @@ pub struct TaskSummary {
     pub project_color: Option<crate::palette::Rgb>,
     #[serde(skip)]
     pub activity: Option<crate::style::Activity>,
+    #[allow(dead_code)]
+    #[serde(skip)]
+    pub goal_work: Option<GoalWork>,
     pub status: Status,
     pub priority: u8,
     #[serde(skip_serializing_if = "Option::is_none")]

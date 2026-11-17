@@ -1464,8 +1464,13 @@ pub(crate) mod tests {
             warnings: Vec::new(),
             shorthand: crate::shorthand::Shorthand::new(dir_empty.path().to_path_buf()),
         };
-        let tree_out =
-            crate::commands::tree::run(make_ctx(proj_empty.clone()), None, false).unwrap();
+        let tree_out = crate::commands::tree::run(
+            make_ctx(proj_empty.clone()),
+            None,
+            false,
+            crate::output::Format::Pretty,
+        )
+        .unwrap();
         let painter = crate::style::Painter::new(
             crate::style::ColorMode::Never,
             crate::output::Format::Pretty,
@@ -1485,8 +1490,14 @@ pub(crate) mod tests {
             ""
         );
 
-        let prime_out =
-            crate::commands::list::prime(make_ctx(proj_empty), false, Vec::new(), None).unwrap();
+        let prime_out = crate::commands::list::prime(
+            make_ctx(proj_empty),
+            false,
+            Vec::new(),
+            None,
+            crate::output::Format::Pretty,
+        )
+        .unwrap();
         let prime_json: serde_json::Value = serde_json::from_str(&crate::output::render(
             &prime_out,
             crate::output::Format::Json,

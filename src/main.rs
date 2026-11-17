@@ -300,7 +300,7 @@ fn main() {
         to_stderr(&format!("{}\n", output::render_error(error)));
         std::process::exit(1);
     }
-    match commands::run(cli, host) {
+    match commands::run(cli, host, format) {
         Ok(out) => {
             let raw = match &out {
                 output::Output::Doc(doc) => Some((doc.body.as_bytes(), &doc.warnings)),

@@ -2324,7 +2324,7 @@ mod tests {
         argv.extend(args);
         let cli = <crate::cli::Cli as clap::Parser>::try_parse_from(argv).unwrap();
         let host = std::sync::Arc::new(crate::config::HostConfig::default());
-        let out = match crate::commands::run(cli, Some(host)) {
+        let out = match crate::commands::run(cli, Some(host), crate::output::Format::Json) {
             Ok(out) => out,
             Err(err) => {
                 eprintln!("{err}");
@@ -2741,7 +2741,11 @@ mod tests {
                     }
                 }))
             });
-            let result = crate::commands::run(cli, Some(Arc::new(HostConfig::default())));
+            let result = crate::commands::run(
+                cli,
+                Some(Arc::new(HostConfig::default())),
+                crate::output::Format::Json,
+            );
             if case == "unrelated" {
                 let crate::output::Output::RetainedState(out) = result.unwrap() else {
                     panic!("state output")

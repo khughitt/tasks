@@ -263,6 +263,26 @@ impl DeferredInfo {
     }
 }
 
+impl super::GoalWork {
+    pub fn of(
+        task: &Task,
+        child_count: usize,
+        membership: &mut crate::membership::Membership<'_>,
+    ) -> crate::error::Result<Option<Self>> {
+        if !crate::hierarchy::is_goal(task, child_count > 0) {
+            return Ok(None);
+        }
+        let members = membership.members(task)?;
+        let refs: Vec<&Task> = members.iter().collect();
+        let pieces = crate::goals::pieces(&refs);
+        let unresolved_pieces = membership.unresolved_pieces(task)?;
+        Ok(Some(Self {
+            pieces,
+            unresolved_pieces,
+        }))
+    }
+}
+
 impl TaskSummary {
     /// `hierarchy` is the scan view the row came from; counts are computed against it, and
     /// `deps` is that scan's dependency view (docs/user-guide.md).
@@ -282,6 +302,7 @@ impl TaskSummary {
             title: task.title.clone(),
             project_color: None,
             activity: None,
+            goal_work: None,
             status: task.status,
             priority: task.priority,
             size: task.size,
@@ -572,5 +593,190 @@ mod tests {
         let live =
             serde_json::to_value(ClaimInfo::of(&claim, &crate::claims::Liveness::Live)).unwrap();
         assert!(live.get("unverified").is_none(), "{live}");
+    }
+
+    #[test]
+    fn progress_metadata_goal_work_kinds_and_origins() {
+        use crate::hierarchy::tests::task;
+        use crate::membership::Membership;
+        use crate::model::{Origin, TaskId};
+        use crate::output::GoalWork;
+        use crate::registry::Registry;
+
+        let registry = Registry::default();
+        // Shared member fixture: two done members + one todo member -> (2, 3, 0).
+        let mut outer = task("aa-000001", None, Status::Todo);
+        outer.origin = Some(Origin::User);
+        let mut closed_anc = task("aa-000002", Some("aa-000001"), Status::Done);
+        closed_anc.origin = Some(Origin::Mixed);
+        let mut inner = task("aa-000003", Some("aa-000002"), Status::Done);
+        inner.origin = Some(Origin::Agent);
+        let todo_leaf = task("aa-000004", Some("aa-000003"), Status::Todo);
+
+        let mut childless_lane = task("aa-000010", None, Status::Todo);
+        childless_lane.lane = true;
+        childless_lane.origin = None;
+
+        let mut piece_hub = task("aa-000020", None, Status::Todo);
+        piece_hub.depends = vec![
+            TaskId::parse("bb-000001").unwrap(),
+            TaskId::parse("bb-000099").unwrap(),
+        ];
+        piece_hub.pieces = piece_hub.depends.clone();
+
+        let plain_leaf = task("aa-000030", None, Status::Todo);
+
+        let bb_done_root = task("bb-000001", None, Status::Done);
+        let bb_done_child = task("bb-000002", Some("bb-000001"), Status::Done);
+        let bb_todo_child = task("bb-000003", Some("bb-000001"), Status::Todo);
+
+        let aa_scan = vec![
+            outer.clone(),
+            closed_anc.clone(),
+            inner.clone(),
+            todo_leaf.clone(),
+            childless_lane.clone(),
+            piece_hub.clone(),
+            plain_leaf.clone(),
+        ];
+        let bb_scan = vec![bb_done_root, bb_done_child, bb_todo_child];
+        let view = crate::hierarchy::view_of(&aa_scan, &["aa".into()], &registry);
+        let mut membership = Membership::preloaded(
+            &registry,
+            vec![("aa", Some(aa_scan.clone())), ("bb", Some(bb_scan))],
+        );
+
+        let outer_work = GoalWork::of(&outer, view.child_count(&outer.id), &mut membership)
+            .unwrap()
+            .expect("outer goal");
+        assert_eq!(
+            (
+                outer_work.pieces.done,
+                outer_work.pieces.total,
+                outer_work.pieces.ideas
+            ),
+            (2, 3, 0)
+        );
+        assert_eq!(outer_work.unresolved_pieces, 0);
+
+        // Closed ancestor (Done, Mixed) and nested agent-origin goal both receive Some(GoalWork).
+        let closed_work = GoalWork::of(
+            &closed_anc,
+            view.child_count(&closed_anc.id),
+            &mut membership,
+        )
+        .unwrap()
+        .expect("closed ancestor goal");
+        assert_eq!(
+            (
+                closed_work.pieces.done,
+                closed_work.pieces.total,
+                closed_work.pieces.ideas
+            ),
+            (1, 2, 0)
+        );
+
+        let inner_work = GoalWork::of(&inner, view.child_count(&inner.id), &mut membership)
+            .unwrap()
+            .expect("agent-origin sub-goal");
+        assert_eq!(
+            (
+                inner_work.pieces.done,
+                inner_work.pieces.total,
+                inner_work.pieces.ideas
+            ),
+            (0, 1, 0)
+        );
+
+        // Childless lane (origin None) is a goal with (0, 0, 0).
+        let lane_work = GoalWork::of(
+            &childless_lane,
+            view.child_count(&childless_lane.id),
+            &mut membership,
+        )
+        .unwrap()
+        .expect("childless lane is a goal");
+        assert_eq!(
+            (
+                lane_work.pieces.done,
+                lane_work.pieces.total,
+                lane_work.pieces.ideas
+            ),
+            (0, 0, 0)
+        );
+        assert_eq!(lane_work.unresolved_pieces, 0);
+
+        // Childless piece hub counts foreign subtree (2 done, 1 todo) + 1 unresolved piece.
+        let hub_work = GoalWork::of(&piece_hub, view.child_count(&piece_hub.id), &mut membership)
+            .unwrap()
+            .expect("childless piece hub is a goal");
+        assert_eq!(
+            (
+                hub_work.pieces.done,
+                hub_work.pieces.total,
+                hub_work.pieces.ideas
+            ),
+            (2, 3, 0)
+        );
+        assert_eq!(hub_work.unresolved_pieces, 1);
+
+        // Leaf returns None.
+        assert_eq!(
+            GoalWork::of(
+                &plain_leaf,
+                view.child_count(&plain_leaf.id),
+                &mut membership
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            GoalWork::of(&todo_leaf, view.child_count(&todo_leaf.id), &mut membership).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn progress_metadata_elsewhere_checkout_scan_isolation() {
+        use crate::hierarchy::tests::task;
+        use crate::membership::Membership;
+        use crate::output::GoalWork;
+        use crate::registry::Registry;
+
+        let registry = Registry::default();
+        let goal = task("aa-000001", None, Status::Doing);
+        let child_done = task("aa-000002", Some("aa-000001"), Status::Done);
+        let child_extra = task("aa-000003", Some("aa-000001"), Status::Todo);
+
+        let invoking_scan = vec![goal.clone(), child_done.clone()];
+        let elsewhere_scan = vec![goal.clone(), child_done, child_extra];
+
+        let invoking_view = crate::hierarchy::view_of(&invoking_scan, &["aa".into()], &registry);
+        let mut invoking_mem = Membership::new(&registry, &["aa".to_string()], &invoking_scan);
+        let invoking_work = GoalWork::of(
+            &goal,
+            invoking_view.child_count(&goal.id),
+            &mut invoking_mem,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            (invoking_work.pieces.done, invoking_work.pieces.total),
+            (1, 1)
+        );
+
+        let elsewhere_view = crate::hierarchy::view_of(&elsewhere_scan, &["aa".into()], &registry);
+        let mut elsewhere_mem = Membership::new(&registry, &["aa".to_string()], &elsewhere_scan);
+        let elsewhere_work = GoalWork::of(
+            &goal,
+            elsewhere_view.child_count(&goal.id),
+            &mut elsewhere_mem,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            (elsewhere_work.pieces.done, elsewhere_work.pieces.total),
+            (1, 2)
+        );
     }
 }

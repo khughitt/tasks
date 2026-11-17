@@ -1290,6 +1290,7 @@ mod tests {
             title: format!("title {id}"),
             project_color: None,
             activity: None,
+            goal_work: None,
             status: Status::Todo,
             priority: 2,
             size: None,

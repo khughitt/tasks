@@ -768,8 +768,9 @@ fn claimed_elsewhere(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
-) -> Vec<(Project, Task, Vec<Task>)> {
-    let mut found = Vec::new();
+) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+    let mut scans: Vec<(Project, Vec<Task>)> = Vec::new();
+    let mut found: Vec<(usize, Task)> = Vec::new();
     for (key, (claim, liveness)) in claims.iter() {
         if liveness.is_stale() {
             continue;
@@ -787,13 +788,43 @@ fn claimed_elsewhere(
             continue;
         }
         let worktree = std::path::Path::new(&claim.worktree);
-        match super::parked::open_recorded(&id, worktree) {
-            Ok(Some(resolved)) => {
+        if let Some(at) = scans
+            .iter()
+            .position(|(project, _)| project.resume_root() == worktree)
+        {
+            if scans[at].0.prefix == id.prefix
+                && let Some(task) = scans[at].1.iter().find(|task| task.id == id).cloned()
+            {
                 ctx.warnings.push(format!(
                     "{id} is claimed in {}; resume it from that checkout",
                     claim.worktree
                 ));
-                found.push(resolved);
+                found.push((at, task));
+            } else {
+                ctx.warnings.push(format!(
+                    "{id} is claimed in {}, which is unavailable",
+                    claim.worktree
+                ));
+            }
+            continue;
+        }
+        match super::parked::open_recorded(&id, worktree) {
+            Ok(Some((project, task, scan))) => {
+                ctx.warnings.push(format!(
+                    "{id} is claimed in {}; resume it from that checkout",
+                    claim.worktree
+                ));
+                let at = match scans
+                    .iter()
+                    .position(|(existing, _)| existing.root == project.root)
+                {
+                    Some(existing) => existing,
+                    None => {
+                        scans.push((project, scan));
+                        scans.len() - 1
+                    }
+                };
+                found.push((at, task));
             }
             Ok(None) => ctx.warnings.push(format!(
                 "{id} is claimed in {}, which is unavailable",
@@ -805,7 +836,7 @@ fn claimed_elsewhere(
             )),
         }
     }
-    found
+    (scans, found)
 }
 
 pub fn prime(
@@ -813,13 +844,30 @@ pub fn prime(
     closed: bool,
     without: Vec<String>,
     full: Option<Vec<String>>,
+    format: crate::output::Format,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(None)?;
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let prefixes = ctx.scope.prefixes();
-    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    let registry = ctx.registry.clone();
+    let mut membership = (format == crate::output::Format::Pretty)
+        .then(|| crate::membership::Membership::new(&registry, &prefixes, &all));
+    let hierarchy = match &mut membership {
+        Some(membership) => {
+            let records = crate::hierarchy::project_records(&all, &prefixes, &registry);
+            let mut indexes = crate::hierarchy::ProjectIndexes::new();
+            for prefix in records.keys() {
+                let index = membership
+                    .hierarchy(prefix)?
+                    .expect("preseeded project in Membership has an index");
+                indexes.insert(prefix.clone(), index);
+            }
+            crate::hierarchy::HierarchyView::new(records, indexes, &registry)
+        }
+        None => crate::hierarchy::view_of(&all, &prefixes, &registry),
+    };
     let deps = review_deps(&mut ctx, &all)?;
     let upcoming: Vec<OffsetDateTime> = all
         .iter()
@@ -887,21 +935,48 @@ pub fn prime(
         .filter(|task| task.status == Status::Doing || claims.held(&task.id).is_some())
         .cloned()
         .collect();
-    let elsewhere = claimed_elsewhere(&mut ctx, &all, &claims);
-    doing.extend(elsewhere.iter().map(|(_, task, _)| task.clone()));
-    // Each row read from another checkout is judged with that checkout's own scan.
-    let elsewhere_deps: Vec<_> = elsewhere
+    let (elsewhere_scans, elsewhere_rows) = claimed_elsewhere(&mut ctx, &all, &claims);
+    doing.extend(elsewhere_rows.iter().map(|(_, task)| task.clone()));
+    // Each distinct checkout read from claims is judged once with its own scan and cache.
+    let elsewhere_deps: Vec<_> = elsewhere_scans
         .iter()
-        .map(|(project, _, scan)| recorded_review_deps(&mut ctx, project, scan))
+        .map(|(project, scan)| recorded_review_deps(&mut ctx, project, scan))
         .collect::<Result<_>>()?;
-    let elsewhere_views: Vec<_> = elsewhere
+    let mut elsewhere_memberships: Vec<Option<crate::membership::Membership<'_>>> = elsewhere_scans
         .iter()
-        .map(|(project, _, scan)| {
-            crate::hierarchy::view_of(scan, std::slice::from_ref(&project.prefix), &ctx.registry)
+        .map(|(project, scan)| {
+            (format == crate::output::Format::Pretty).then(|| {
+                crate::membership::Membership::new(
+                    &registry,
+                    std::slice::from_ref(&project.prefix),
+                    scan,
+                )
+            })
         })
         .collect();
+    let mut elsewhere_views = Vec::with_capacity(elsewhere_scans.len());
+    for ((project, scan), membership_opt) in
+        elsewhere_scans.iter().zip(elsewhere_memberships.iter_mut())
+    {
+        let opened = std::slice::from_ref(&project.prefix);
+        let view = match membership_opt {
+            Some(em) => {
+                let records = crate::hierarchy::project_records(scan, opened, &registry);
+                let mut indexes = crate::hierarchy::ProjectIndexes::new();
+                for prefix in records.keys() {
+                    let index = em
+                        .hierarchy(prefix)?
+                        .expect("preseeded project in Membership has an index");
+                    indexes.insert(prefix.clone(), index);
+                }
+                crate::hierarchy::HierarchyView::new(records, indexes, &registry)
+            }
+            None => crate::hierarchy::view_of(scan, opened, &registry),
+        };
+        elsewhere_views.push(view);
+    }
     sort_list(&mut doing);
-    let roadmap = crate::hierarchy::forest(
+    let mut roadmap = crate::hierarchy::forest(
         &all,
         &hierarchy,
         &deps,
@@ -963,7 +1038,7 @@ pub fn prime(
     retain_unheld(&mut ctx, &mut ready, now)?;
     ctx.warnings.extend(held);
     // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
-    let lanes = super::lanes::rows(
+    let mut lanes = super::lanes::rows(
         &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, cutoff, &without, now,
     )?;
     let wide = matches!(ctx.scope, Scope::All { .. });
@@ -1014,6 +1089,68 @@ pub fn prime(
             ),
         });
     }
+    let mut ready_rows: Vec<TaskSummary> = ready
+        .iter()
+        .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &registry, now))
+        .collect();
+    let mut doing_rows: Vec<TaskSummary> = Vec::with_capacity(doing.len());
+    for task in &doing {
+        let source = elsewhere_rows
+            .iter()
+            .find(|(_, found)| found.id == task.id)
+            .map(|(at, _)| *at);
+        let (view, row_deps) = source.map_or((&hierarchy, &deps), |at| {
+            (&elsewhere_views[at], &elsewhere_deps[at])
+        });
+        let mut row = TaskSummary::of(task, view, row_deps, Some(&claims), &registry, now);
+        if let Some(at) = source {
+            let mut activity = crate::activity::ActivityIndex::default();
+            activity.extend_scan(&elsewhere_scans[at].1, &registry, now);
+            row.activity = activity.get(&task.id);
+            if let Some(em) = elsewhere_memberships[at].as_mut() {
+                row.goal_work = crate::output::GoalWork::of(task, row.child_count, em)?;
+            }
+        } else if let Some(membership) = membership.as_mut() {
+            row.goal_work = crate::output::GoalWork::of(task, row.child_count, membership)?;
+        }
+        doing_rows.push(row);
+    }
+    let mut closeout_rows: Vec<TaskSummary> = closeout
+        .iter()
+        .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &registry, now))
+        .collect();
+
+    if let Some(membership) = membership.as_mut() {
+        for (task, row) in ready.iter().zip(ready_rows.iter_mut()) {
+            row.goal_work = crate::output::GoalWork::of(task, row.child_count, membership)?;
+        }
+        for lane_row in &mut lanes {
+            let parsed = TaskId::parse(&lane_row.lane.id).expect("lane summary id is valid");
+            let canonical = registry.canonical_id(&parsed);
+            let lane_task = hierarchy
+                .get(&canonical)
+                .expect("lane came from captured hierarchy");
+            lane_row.lane.goal_work =
+                crate::output::GoalWork::of(lane_task, lane_row.lane.child_count, membership)?;
+        }
+        super::tree::populate_tree_goal_work(&mut roadmap, &hierarchy, &registry, membership)?;
+        for (task, row) in closeout.iter().zip(closeout_rows.iter_mut()) {
+            row.goal_work = crate::output::GoalWork::of(task, row.child_count, membership)?;
+        }
+        for warning in membership.take_warnings() {
+            if !ctx.warnings.contains(&warning) {
+                ctx.warnings.push(warning);
+            }
+        }
+    }
+    for em in elsewhere_memberships.iter_mut().flatten() {
+        for warning in em.take_warnings() {
+            if !ctx.warnings.contains(&warning) {
+                ctx.warnings.push(warning);
+            }
+        }
+    }
+
     let colors = ctx.project_colors();
     let mut out = Output::Prime(Box::new(PrimeOut {
         summary: None,
@@ -1027,35 +1164,12 @@ pub fn prime(
         periodic,
         deferred,
         closed,
-        ready: ready
-            .iter()
-            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
-            .collect(),
+        ready: ready_rows,
         parked,
         lanes,
-        doing: doing
-            .iter()
-            .map(|task| {
-                let source = elsewhere
-                    .iter()
-                    .position(|(_, found, _)| found.id == task.id);
-                let (view, deps) = source.map_or((&hierarchy, &deps), |at| {
-                    (&elsewhere_views[at], &elsewhere_deps[at])
-                });
-                let mut row = TaskSummary::of(task, view, deps, Some(&claims), &ctx.registry, now);
-                if let Some(at) = source {
-                    let mut activity = crate::activity::ActivityIndex::default();
-                    activity.extend_scan(&elsewhere[at].2, &ctx.registry, now);
-                    row.activity = activity.get(&task.id);
-                }
-                row
-            })
-            .collect(),
+        doing: doing_rows,
         roadmap,
-        closeout: closeout
-            .iter()
-            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
-            .collect(),
+        closeout: closeout_rows,
         halts,
         warnings: ctx.warnings,
     }));

@@ -854,7 +854,7 @@ mod tests {
             argv.extend(args);
             let cli = <crate::cli::Cli as clap::Parser>::try_parse_from(argv).unwrap();
             let host = std::sync::Arc::new(crate::config::HostConfig::default());
-            match crate::commands::run(cli, Some(host)) {
+            match crate::commands::run(cli, Some(host), crate::output::Format::Json) {
                 Ok(out) => {
                     let rendered = crate::output::render(
                         &out,

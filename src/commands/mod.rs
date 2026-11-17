@@ -67,7 +67,11 @@ fn fetch(no_fetch: bool) -> crate::resolve::Fetch {
     }
 }
 
-fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
+fn dispatch(
+    cli: Cli,
+    host: Option<Arc<HostConfig>>,
+    format: crate::output::Format,
+) -> Result<Output> {
     if let Command::Attachments { paths } = cli.command {
         return attachments::run(cli.dir.as_deref(), paths);
     }
@@ -307,6 +311,7 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
                 closed,
                 without.without,
                 full,
+                format,
             )
         }
         Command::Lanes {
@@ -447,6 +452,7 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             open_id_read_ctx(dir, &scope, id.as_deref(), host.clone())?,
             id,
             all,
+            format,
         ),
         Command::Tags { statuses, scope } => {
             tags::run(open_read_ctx(dir, &scope, host.clone())?, statuses)
@@ -513,11 +519,15 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
     }
 }
 
-pub fn run(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
+pub fn run(
+    cli: Cli,
+    host: Option<Arc<HostConfig>>,
+    format: crate::output::Format,
+) -> Result<Output> {
     crate::history::begin_metrics();
     let started = std::time::Instant::now();
     crate::written::begin(cli.command.commit_verb());
-    let result = dispatch(cli, host);
+    let result = dispatch(cli, host, format);
     // A command that failed after writing leaves its files uncommitted; `prime` lists
     // them. A successful one must have reached `finish`: anything left is a write path
     // that skipped it, which the debug build refuses so the test suite catches it.
