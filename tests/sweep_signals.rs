@@ -140,6 +140,28 @@ fn fixture_and_assert(extra: &[(&str, OsString)]) {
 
     let moved_open = add(&env, &dir, "Moves away open", "x");
     let moved_closed = add(&env, &dir, "Moves away closed", "x");
+    let moved_open_deps = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Depends on moved open",
+            "--status",
+            "todo",
+            "--depends",
+            &moved_open,
+        ],
+    ));
+    let moved_closed_deps = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Depends on moved closed",
+            "--status",
+            "todo",
+            "--depends",
+            &moved_closed,
+        ],
+    ));
     let new_open = id_of(env.json(&dir, &["move", &moved_open, "--to", "bb"]));
     let new_closed = id_of(env.json(&dir, &["move", &moved_closed, "--to", "bb"]));
     let _ = new_open;
@@ -212,6 +234,14 @@ fn fixture_and_assert(extra: &[(&str, OsString)]) {
     assert_eq!(r["deps_closed"], "true");
     assert_eq!(r["triggers"], "1");
 
+    let r = row(&rows, &moved_open_deps);
+    assert_eq!(r["deps_closed"], "false");
+    assert_eq!(r["triggers"], "0");
+
+    let r = row(&rows, &moved_closed_deps);
+    assert_eq!(r["deps_closed"], "true");
+    assert_eq!(r["triggers"], "1");
+
     let r = row(&rows, &touched);
     assert!(r["touched_commits"].parse::<u32>().unwrap() >= 1, "{r:?}");
     assert_eq!(r["triggers"], "0");
@@ -223,10 +253,10 @@ fn fixture_and_assert(extra: &[(&str, OsString)]) {
 #[test]
 fn sweep_signals_reports_each_signal() {
     fixture_and_assert(&[]);
-    header_is_the_column_list();
 }
 
-fn header_is_the_column_list() {
+#[test]
+fn sweep_signals_header_is_the_column_list() {
     let mut env = TestEnv::new();
     let dir = env.init("aa");
     add(&env, &dir, "One", "x");
@@ -321,4 +351,69 @@ fn sweep_signals_non_git_checkout_fails() {
     assert_eq!(code, 1, "{stderr}");
     assert!(rows.is_empty());
     assert!(stderr.contains("git"), "{stderr}");
+}
+
+#[test]
+fn sweep_signals_missing_git_reports_command_without_traceback() {
+    let env = TestEnv::new();
+    let empty_bin = tempfile::tempdir().unwrap();
+    let python = {
+        let lookup = std::process::Command::new("sh")
+            .args(["-c", "command -v python3"])
+            .env_clear()
+            .envs(common::isolated_env(env.home.path()))
+            .output()
+            .unwrap();
+        assert!(lookup.status.success());
+        PathBuf::from(String::from_utf8(lookup.stdout).unwrap().trim())
+    };
+    let out = std::process::Command::new(python)
+        .arg("-I")
+        .arg(script())
+        .args(["--root", env.home.path().to_str().unwrap()])
+        .args([
+            "--tasks",
+            assert_cmd::cargo::cargo_bin("tasks").to_str().unwrap(),
+        ])
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
+        .env("PATH", empty_bin.path())
+        .output()
+        .unwrap();
+    let stderr = stderr_of(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(out.stdout.is_empty());
+    assert!(
+        stderr.starts_with("sweep-signals: git rev-parse --local-env-vars:"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Traceback"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn sweep_signals_unexpected_json_shape_reports_command_without_traceback() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let env = TestEnv::new();
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub = stub_dir.path().join("bad-tasks");
+    std::fs::write(&stub, "#!/bin/sh\nprintf '{}\\n'\n").unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(script())
+        .args(["--root", stub_dir.path().to_str().unwrap()])
+        .args(["--tasks", stub.to_str().unwrap()])
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
+        .output()
+        .unwrap();
+    let stderr = stderr_of(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(out.stdout.is_empty());
+    assert!(stderr.starts_with("sweep-signals:"), "{stderr}");
+    assert!(stderr.contains("where"), "{stderr}");
+    assert!(!stderr.contains("Traceback"), "{stderr}");
 }
