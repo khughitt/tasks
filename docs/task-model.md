@@ -233,7 +233,6 @@ No task in the focal identity set becomes its own follower. Unrelated broken
 follows never produces inverse warnings or per-edge lookups. Queries for old and
 new identities agree over the same complete scan/history; local results can differ
 after a cross-project move. Source and stored inbound follows remain unchanged.
-Show --all-projects is not shipped yet; next already offers wider discovery.
 
 Check warns `self_follows`, `duplicate_follows` (canonical aliases included), and
 `dangling_follows` for missing local targets. Foreign targets are resolved on show,
