@@ -221,7 +221,7 @@ mod inverse_tests {
             "moved_from: oldaa-000001\nmoved_to: cc-000003\n",
         );
         let last = rec("cc-000003", "moved_from: bb-000002\n");
-        let chain = vec![first.clone(), middle, last.clone()];
+        let chain = [first.clone(), middle, last.clone()];
         for focal in [&first, &last] {
             let mut calls = Vec::new();
             let identity = identity_set(&r, focal, |id| {
