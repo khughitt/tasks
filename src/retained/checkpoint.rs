@@ -45,6 +45,7 @@ struct Correction {
     bad: Source,
     identities: Vec<Identity>,
     reason: String,
+    whole_host: bool,
 }
 struct Inventory {
     records: BTreeMap<Identity, RetentionRecord>,
@@ -124,7 +125,7 @@ fn inventory(
                 .map(|i| i.identity.clone())
                 .collect()
         };
-        if identities.is_empty()
+        if (identities.is_empty() && (diagnostic.identity.is_some() || !required.is_empty()))
             || diagnostic.host.as_ref().is_some_and(|h| *h != request.host)
             || required
                 .iter()
@@ -138,6 +139,7 @@ fn inventory(
             bad: resolution.bad.clone(),
             identities,
             reason: resolution.reason.clone(),
+            whole_host: diagnostic.identity.is_none(),
         });
     }
     for diagnostic in local.diagnostics.iter().filter(|d| d.resolved_by.is_none()) {
@@ -169,17 +171,29 @@ fn inventory(
             records.insert(identity, d.record(&request.host, &id.to_string())?);
         }
     }
+    for c in &corrections {
+        if c.whole_host && !records.keys().all(|k| c.identities.contains(k)) {
+            return Err(invalid(
+                "resolution needs the complete blocked inventory on the executing host; recover other-host history explicitly before repair",
+            ));
+        }
+    }
+    let fresh = ctx.phase(id)?.is_none();
     for record in records.values() {
         let manifest = record
             .manifest
             .value()
             .map(|_| verify::manifest_path(ctx.project(id), &ctx.tasks[id], record))
             .transpose()?;
-        verify::preflight(ctx.project(id), record, manifest.as_deref())?;
+        verify::preflight_with_task(
+            ctx.project(id),
+            Some(&ctx.tasks[id].task),
+            record,
+            manifest.as_deref(),
+        )?;
         let path = verify::current_path(ctx.project(id), &record.path)?;
-        if (record.kind == "scratch"
-            || std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir())
-                && record.kind != "worktree")
+        let is_dir = std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir());
+        if (record.kind == "scratch" || is_dir && record.kind != "worktree")
             && let Ok(root) = path.canonicalize()
         {
             let target = crate::attachments::task_dir(ctx.project(id), id);
@@ -188,6 +202,9 @@ fn inventory(
                     "checkpoint metadata destination lies inside the inventoried container; use an off-container records layout",
                 ));
             }
+        }
+        if fresh && record.kind != "worktree" && is_dir {
+            verify::check_manifest_admission(ctx.project(id), &record.path, &path)?;
         }
     }
     Ok(Inventory {
@@ -364,9 +381,11 @@ fn observe(
                 .find(|i| i.identity == identity)
                 .and_then(|i| i.record.as_ref());
             if prior != Some(&observation.record)
-                || crate::attachments::ledger(&ctx.tasks.get(id).expect("participant").task)
-                    .get(&name)
-                    != Some(&crate::attachments::Ledger::Attached)
+                || !super::artifacts::is_live_attachment(
+                    &ctx.tasks.get(id).expect("participant").task,
+                    &name,
+                    &manifest.sha256,
+                )
             {
                 artifacts.insert(
                     name.clone(),
@@ -397,11 +416,10 @@ fn observe(
     }
     let artifact_list = artifacts.into_values().collect::<Vec<_>>();
     let task = &ctx.tasks.get(id).expect("participant").task;
-    let ledger = crate::attachments::ledger(task);
-    let ledger_added = artifact_list
-        .iter()
-        .filter(|a| ledger.get(&a.name) != Some(&crate::attachments::Ledger::Attached))
-        .count();
+    let mut ledger_added = 0usize;
+    for a in &artifact_list {
+        ledger_added += super::artifacts::artifact_note_count(&project, task, a)?;
+    }
     let first = task.notes.len() + ledger_added + 1;
     let ordinals = records
         .iter()
@@ -556,6 +574,55 @@ fn incomplete(ctx: &mut OperationCtx, id: &TaskId, binding: &Binding, error: &Er
     publish::batch(ctx, id, &[], &[checkpoint, receipt])?;
     Ok(())
 }
+fn complete_no_local_items(
+    ctx: &mut OperationCtx,
+    id: &TaskId,
+    request: &CheckpointRequest,
+    binding: &Binding,
+    corrections: Vec<Correction>,
+) -> Result<MutationResult> {
+    if !corrections.is_empty() {
+        let at = crate::time::after(&ctx.tasks.get(id).expect("participant").task.updated)?;
+        let resolutions = corrections
+            .into_iter()
+            .map(|c| ResolutionRelation {
+                bad: c.bad,
+                successors: Vec::new(),
+                reason: c.reason,
+            })
+            .collect();
+        let receipt = publish::receipt(
+            ctx,
+            binding,
+            id,
+            PhaseOutputs::Items(ItemsOutput {
+                items: Vec::new(),
+                artifacts: Vec::new(),
+                resolutions,
+            }),
+            &at,
+        )?;
+        publish::batch(ctx, id, &[], &[receipt])?;
+        publish::stop("items_published");
+    }
+    let at = crate::time::after(&ctx.tasks.get(id).expect("participant").task.updated)?;
+    let counts = counts(&view(ctx, id, &request.host)?)?;
+    let publications = ctx.phase_publications(id)?;
+    let complete = publish::receipt(
+        ctx,
+        binding,
+        id,
+        PhaseOutputs::Completed(CompletedOutput {
+            outcome: "no_local_items".into(),
+            publications,
+            checkpoint: None,
+        }),
+        &at,
+    )?;
+    publish::batch(ctx, id, &[], &[complete])?;
+    publish::result(ctx, "no_local_items".into(), counts, Vec::new(), false)
+}
+
 pub fn run(
     mut ctx: OperationCtx,
     request: CheckpointRequest,
@@ -596,28 +663,19 @@ pub fn run(
     publish::recover_saved(&mut ctx, &id, &binding)?;
     let inventory = inventory(&mut ctx, &id, &request)?;
     publish::intent(&mut ctx, &binding, &id)?;
-    if inventory.records.is_empty() {
-        let at = crate::time::after(&ctx.tasks.get(&id).expect("participant").task.updated)?;
-        let counts = counts(&view(&ctx, &id, &request.host)?)?;
-        let publications = ctx.phase_publications(&id)?;
-        let complete = publish::receipt(
-            &mut ctx,
-            &binding,
-            &id,
-            PhaseOutputs::Completed(CompletedOutput {
-                outcome: "no_local_items".into(),
-                publications,
-                checkpoint: None,
-            }),
-            &at,
-        )?;
-        publish::batch(&mut ctx, &id, &[], &[complete])?;
-        return publish::result(&mut ctx, "no_local_items".into(), counts, Vec::new(), false);
-    }
-    match observe(&mut ctx, &id, &request, &binding, inventory) {
+    let executed = if inventory.records.is_empty() {
+        complete_no_local_items(&mut ctx, &id, &request, &binding, inventory.corrections)
+    } else {
+        observe(&mut ctx, &id, &request, &binding, inventory)
+    };
+    match executed {
         Ok(result) => Ok(result),
         Err(error) => {
-            let failure = incomplete(&mut ctx, &id, &binding, &error);
+            let failure = if ctx.cleanup_failed {
+                Ok(())
+            } else {
+                incomplete(&mut ctx, &id, &binding, &error)
+            };
             let phase = ctx
                 .phase(&id)?
                 .map(|p| p.1.phase)

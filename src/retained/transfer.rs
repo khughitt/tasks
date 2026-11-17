@@ -179,13 +179,19 @@ fn preflight(
             ));
         }
     }
+    let fresh = ctx.phase(from)?.is_none();
     for record in originals {
         let manifest = record
             .manifest
             .value()
             .map(|_| verify::manifest_path(ctx.project(from), &ctx.tasks[from], &record))
             .transpose()?;
-        verify::preflight(ctx.project(from), &record, manifest.as_deref())?;
+        verify::preflight_with_task(
+            ctx.project(from),
+            Some(&ctx.tasks[from].task),
+            &record,
+            manifest.as_deref(),
+        )?;
         let path = verify::current_path(ctx.project(from), &record.path)?;
         if record.kind != "worktree" && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
             let root = path.canonicalize()?;
@@ -195,6 +201,9 @@ fn preflight(
                         "transfer metadata destination lies inside the inventoried container",
                     ));
                 }
+            }
+            if fresh {
+                verify::check_manifest_admission(ctx.project(to), &record.path, &path)?;
             }
         }
     }
@@ -272,11 +281,10 @@ fn receiver(
         artifacts.insert(name.clone(), NewArtifact { name, bytes });
     }
     let artifacts = artifacts.into_values().collect::<Vec<_>>();
-    let ledger = crate::attachments::ledger(&ctx.tasks[to].task);
-    let added = artifacts
-        .iter()
-        .filter(|a| ledger.get(&a.name) != Some(&crate::attachments::Ledger::Attached))
-        .count();
+    let mut added = 0usize;
+    for a in &artifacts {
+        added += super::artifacts::artifact_note_count(ctx.project(to), &ctx.tasks[to].task, a)?;
+    }
     let first = ctx.tasks[to].task.notes.len() + added + 1;
     let at = crate::time::after(&ctx.tasks[to].task.updated)?;
     let mut notes = receiving
@@ -551,7 +559,11 @@ pub fn run(
     match result {
         Ok(out) => Ok(out),
         Err(error) => {
-            let failure = incomplete(&mut ctx, &from, &binding, &error);
+            let failure = if ctx.cleanup_failed {
+                Ok(())
+            } else {
+                incomplete(&mut ctx, &from, &binding, &error)
+            };
             let suffix = failure
                 .err()
                 .map(|e| format!("; incomplete receipt failed: {e}"))

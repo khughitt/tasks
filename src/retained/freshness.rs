@@ -139,6 +139,7 @@ fn range_key(
         &project.retention_lineage,
         &project.retention_recovery,
         project.attachments_max_bytes,
+        &project.multipart,
     ))
     .map_err(super::model::invalid)
 }
@@ -519,10 +520,14 @@ fn working_attachments_allowed(
                         .file_name()
                         .and_then(|s| s.to_str())
                         .ok_or_else(stale)?;
-                    let bytes = allowed
-                        .get(name)
-                        .filter(|_| path.parent() == Some(task_directory.as_path()))
-                        .ok_or_else(stale)?;
+                    if path.parent() != Some(task_directory.as_path()) {
+                        return Err(stale());
+                    }
+                    let Some(bytes) = allowed.get(name) else {
+                        return Err(Error::RetainedStaleBasis(format!(
+                            "Protected attachment directory tasks/files/{id} contains unledgered file {name}; preserve and verify a copy outside tasks/files/{id} if needed, remove the unledgered file to restore the committed preimage, and retry or reconcile"
+                        )));
+                    };
                     if meta.permissions().mode() & 0o100 != 0
                         || super::verify::read_local(&path, project.attachments_max_bytes)?
                             != *bytes
@@ -603,6 +608,7 @@ pub(super) fn context(project: &Project) -> Result<Project> {
         || fresh.retention_lineage != project.retention_lineage
         || fresh.commit_records != project.commit_records
         || fresh.attachments_max_bytes != project.attachments_max_bytes
+        || fresh.multipart != project.multipart
     {
         return Err(stale());
     }
@@ -625,6 +631,10 @@ pub(crate) fn current(
     now.commit = basis::resolve(&fresh, "HEAD")?;
     unchanged(&fresh, id, &pinned.basis, &now, &pinned.task)?;
     basis::read_exact(&fresh, id, &now)?;
+    let files_dir = format!("{}/tasks/files/{id}", now.records_subdir)
+        .trim_start_matches("./")
+        .to_string();
+    let files_prefix = format!("{files_dir}/");
     let mut paths = paths(id, &now, &pinned.task);
     if !attachments {
         paths.remove(1);
@@ -638,12 +648,28 @@ pub(crate) fn current(
         "--",
     ];
     args.extend(paths.iter().map(String::as_str));
-    if !basis::git(&fresh, &args)?.is_empty() {
+    let status = basis::git(&fresh, &args)?;
+    if !status.is_empty() {
+        let only_untracked_attachments = attachments
+            && status
+                .split(|b| *b == 0)
+                .filter(|entry| !entry.is_empty())
+                .all(|entry| {
+                    entry
+                        .strip_prefix(b"?? ")
+                        .or_else(|| entry.strip_prefix(b"!! "))
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .is_some_and(|p| p == files_dir || p.starts_with(&files_prefix))
+                });
+        if only_untracked_attachments {
+            for path in paths.iter().filter(|p| **p != files_dir) {
+                working_file(&fresh, &now.commit, path, None)?;
+            }
+            working_attachments(&fresh, id, &now)?;
+        }
         return Err(Error::RetainedStaleBasis("Task or required history has unpublished changes; publish them before querying current retained state, or explicitly select a historical --at basis".into()));
     }
-    for path in paths.iter().filter(|p| {
-        **p != format!("{}/tasks/files/{id}", now.records_subdir).trim_start_matches("./")
-    }) {
+    for path in paths.iter().filter(|p| **p != files_dir) {
         working_file(&fresh, &now.commit, path, None)?;
     }
     if attachments {

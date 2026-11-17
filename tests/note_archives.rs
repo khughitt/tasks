@@ -1270,8 +1270,8 @@ fn archive_growth_and_append_cost() {
             "review: impl round 1 — verdict: accept; findings: none; reviewer: human",
             "concerns: arc-a00001 extension — synthetic follow-up",
             "run: synthetic completed with 1 result",
-            "retained: {\"host\":\"fixture-a\",\"kind\":\"scratch\",\"path\":\"$WORK_ROOT/fixture\",\"state\":\"kept\",\"verification\":\"unknown\",\"sha256\":null,\"manifest\":null,\"purpose\":\"synthetic\",\"next_owner\":\"task:arc-a00001\",\"cleanup_trigger\":\"fixture complete\",\"verification_action\":\"inspect fixture\"}",
-            "retained: {\"host\":\"fixture-a\",\"kind\":\"scratch\",\"path\":\"$WORK_ROOT/fixture\",\"state\":\"released\",\"verification\":\"verified\",\"purpose\":\"synthetic removal\",\"next_owner\":\"none\",\"cleanup_trigger\":\"none\"}",
+            "retained: {\"version\":1,\"host\":\"fixture-a\",\"kind\":\"scratch\",\"path\":\"$WORK_ROOT/fixture\",\"state\":\"kept\",\"verification\":\"unknown\",\"sha256\":null,\"manifest\":null,\"purpose\":\"synthetic\",\"next_owner\":\"task:arc-a00001\",\"cleanup_trigger\":\"fixture complete\",\"verification_action\":\"inspect fixture\"}",
+            "retained: {\"version\":1,\"host\":\"fixture-a\",\"kind\":\"scratch\",\"path\":\"$WORK_ROOT/fixture\",\"state\":\"released\",\"verification\":\"verified\",\"purpose\":\"synthetic removal\",\"next_owner\":\"none\",\"cleanup_trigger\":\"none\"}",
             "retention checkpoint: observed 2026-10-30T00:00:00Z on fixture-a; basis synthetic; retained by main; this host: kept verified 0, kept unknown 0, released 1; changed 1.",
             "retention checkpoint: incomplete; observed 2026-10-30T00:00:00Z on fixture-b; basis unavailable: synthetic; Next: inspect fixture.",
         ] {

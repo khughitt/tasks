@@ -1,7 +1,9 @@
 use crate::error::{Error, Result};
 use std::ops::Range;
 
-pub fn cut(whole: &[u8], max_part: u64) -> Result<Vec<Range<usize>>> {
+pub type PartSlice = Range<usize>;
+
+pub fn cut(whole: &[u8], max_part: u64) -> Result<Vec<PartSlice>> {
     let text =
         std::str::from_utf8(whole).map_err(|error| Error::MultipartNotText(error.to_string()))?;
     if whole.is_empty() {

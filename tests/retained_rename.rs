@@ -1961,3 +1961,330 @@ fn retention_rename_check_peer_context() {
         "duplicate immutable queries: {calls:?}"
     );
 }
+
+#[test]
+fn detached_rename_preserves_and_verifies_multipart_retained_manifests() {
+    use common::retained::host;
+
+    let env = common::TestEnv::new();
+    let root = tempfile::tempdir().unwrap();
+    let code = root.path().join("code");
+    let records_root = root.path().join("records");
+    for repo in [&code, &records_root] {
+        std::fs::create_dir_all(repo).unwrap();
+        git(repo, &["init", "-q", "-b", "main"]);
+        common::git_fixture::assert_repo(env.home.path(), repo);
+        std::fs::write(repo.join("README.md"), "Fixture\n").unwrap();
+        git(repo, &["add", "README.md"]);
+        git(repo, &["commit", "-qm", "seed"]);
+    }
+    env.json(
+        &code,
+        &[
+            "init",
+            "--prefix",
+            "old",
+            "--records",
+            records_root.to_str().unwrap(),
+        ],
+    );
+    let old_records = records_root.join("old");
+    let config_path = old_records.join("tasks/.config.toml");
+    let mut cfg: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    cfg.as_table_mut()
+        .unwrap()
+        .insert("git".into(), toml::from_str("commit = true\n").unwrap());
+    cfg.as_table_mut().unwrap().insert(
+        "attachments".into(),
+        toml::from_str("max_bytes = 2048\nmultipart_validators = []\n").unwrap(),
+    );
+    std::fs::write(&config_path, toml::to_string(&cfg).unwrap()).unwrap();
+    git(&old_records, &["add", "."]);
+    git(&old_records, &["commit", "-qm", "configure old project"]);
+
+    let run_cmd = |args: &[&str]| {
+        let mut c = env.cmd(&code);
+        c.env("TASKS_SESSION", "retained-rename-multipart");
+        c.args(args);
+        c.output().unwrap()
+    };
+    let run_json = |args: &[&str]| -> serde_json::Value {
+        let out = run_cmd(args);
+        assert!(
+            out.status.success(),
+            "{args:?}: stdout={} stderr={}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+
+    let old_id = run_json(&["add", "Multipart rename fixture"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let hex = old_id.split_once('-').unwrap().1.to_string();
+    run_json(&["start", &old_id]);
+
+    let container = code.join("multipart-container");
+    std::fs::create_dir_all(&container).unwrap();
+    for i in 0..42 {
+        let rel = format!("member-{i:03}-payload.txt");
+        let content = format!("payload-{i:03}");
+        std::fs::write(container.join(&rel), content.as_bytes()).unwrap();
+    }
+
+    let pre_state = run_json(&["retained", "state", &old_id]);
+    let req1 = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 1u64),
+        "host": host(),
+        "inputs": [{"task": old_id, "basis": pre_state["basis"]}],
+        "declarations": [declaration(&container, "scratch")],
+    });
+    let req1_path = root.path().join("cp1.json");
+    std::fs::write(&req1_path, serde_json::to_vec(&req1).unwrap()).unwrap();
+    let cp1 = run_json(&[
+        "retained",
+        "checkpoint",
+        &old_id,
+        "--request",
+        req1_path.to_str().unwrap(),
+    ]);
+    assert_eq!(cp1["outcome"], "verified", "{cp1}");
+    let manifest_sha = run_json(&["retained", "state", &old_id])["items"][0]["record"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let logical_name = format!("retained-manifest-{manifest_sha}.json");
+    run_json(&["park", &old_id, "ready for rename"]);
+
+    let old_files = old_records.join(format!("tasks/files/{old_id}"));
+    assert!(!old_files.join(&logical_name).exists());
+    assert!(
+        old_files
+            .join(format!("{logical_name}.catalog.json"))
+            .is_file()
+    );
+    assert!(
+        old_files
+            .join(format!("{logical_name}.part-0001"))
+            .is_file()
+    );
+
+    let cutover_out = common::git_fixture::command(env.home.path(), &old_records)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(cutover_out.status.success());
+    let cutover_commit = String::from_utf8(cutover_out.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Stop after `inventory` once so resume also exercises `lineage::check_staged` on multipart members.
+    let mut stop_cmd = env.cmd(&code);
+    stop_cmd
+        .env("TASKS_SESSION", "retained-rename-multipart")
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "old", "new"]);
+    let stopped = stop_cmd.output().unwrap();
+    assert!(
+        stopped.status.success(),
+        "rename stop_after inventory failed: {}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+
+    // Finish `tasks rename old new` and verify pre-commit + post-commit checks.
+    run_json(&["rename", "old", "new"]);
+    let pre_commit_check = run_cmd(&["check"]);
+    assert!(
+        pre_commit_check.status.success(),
+        "pre-commit check failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&pre_commit_check.stdout),
+        String::from_utf8_lossy(&pre_commit_check.stderr)
+    );
+    run_json(&["commit", "--project", "new"]);
+
+    let new_id = format!("new-{hex}");
+    let new_records = records_root.join("new");
+    let new_files = new_records.join(format!("tasks/files/{new_id}"));
+    assert!(!old_records.exists());
+    assert!(!new_files.join(&logical_name).exists());
+    assert!(
+        new_files
+            .join(format!("{logical_name}.catalog.json"))
+            .is_file()
+    );
+    assert!(
+        new_files
+            .join(format!("{logical_name}.part-0001"))
+            .is_file()
+    );
+
+    // 1. `tasks check` passes on renamed project `new` (`lineage::protected_bytes` and `check_protected_storage`).
+    let post_commit_check = run_cmd(&["check"]);
+    assert!(
+        post_commit_check.status.success(),
+        "post-commit check failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&post_commit_check.stdout),
+        String::from_utf8_lossy(&post_commit_check.stderr)
+    );
+    if !post_commit_check.stdout.is_empty() {
+        let check_report: serde_json::Value =
+            serde_json::from_slice(&post_commit_check.stdout).unwrap();
+        assert_eq!(check_report["errors"], json!([]), "{check_report}");
+        assert!(
+            !check_report["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| {
+                    let k = w["kind"].as_str().unwrap_or("");
+                    k.starts_with("attachment_")
+                        || k.starts_with("multipart_")
+                        || k.starts_with("retention_")
+                }),
+            "{check_report}"
+        );
+    }
+
+    // 2. `tasks retained state new-<hex>` reports `complete: true` and `verified`
+    // (`basis::rebuild_multipart` resolves `old/tasks/files/old-<hex>/...` through `ReadContext`).
+    let state_after_rename = run_json(&["retained", "state", &new_id]);
+    assert_eq!(state_after_rename["complete"], true, "{state_after_rename}");
+    assert_eq!(state_after_rename["task"], new_id);
+    assert_eq!(
+        state_after_rename["items"][0]["record"]["verification"],
+        "verified"
+    );
+    assert_eq!(state_after_rename["items"][0]["record"]["state"], "kept");
+    let historical = run_json(&["retained", "state", &new_id, "--at", &cutover_commit]);
+    assert_eq!(historical["task"], old_id);
+    assert_eq!(historical["complete"], true);
+
+    // 3. Post-rename `tasks retained checkpoint new-<hex>` re-reads the moved multipart manifest
+    // via `lineage::manifest_path` + `verify::read_record_manifest` without digest/cap failure
+    // and reuses/updates custody cleanly.
+    run_json(&["start", &new_id]);
+    let cp2_basis = run_json(&["retained", "state", &new_id])["basis"].clone();
+    let req2 = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 2u64),
+        "host": host(),
+        "inputs": [{"task": new_id, "basis": cp2_basis}],
+        "declarations": [],
+    });
+    let req2_path = root.path().join("cp2.json");
+    std::fs::write(&req2_path, serde_json::to_vec(&req2).unwrap()).unwrap();
+    let cp2 = run_json(&[
+        "retained",
+        "checkpoint",
+        &new_id,
+        "--request",
+        req2_path.to_str().unwrap(),
+    ]);
+    assert_eq!(cp2["outcome"], "verified", "{cp2}");
+    assert_eq!(cp2["counts"]["kept_verified"], 1, "{cp2}");
+    run_json(&["park", &new_id, "after post-rename checkpoint"]);
+
+    let state_after_cp2 = run_json(&["retained", "state", &new_id]);
+    assert_eq!(state_after_cp2["complete"], true, "{state_after_cp2}");
+    assert_eq!(
+        state_after_cp2["items"][0]["record"]["manifest"],
+        new_files.join(&logical_name).to_str().unwrap()
+    );
+    let shown = run_json(&["show", &new_id]);
+    let multipart_decl_notes = shown["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| {
+            n["text"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("multipart: {logical_name} "))
+        })
+        .count();
+    assert_eq!(
+        multipart_decl_notes, 1,
+        "existing live multipart manifest must be reused without duplicate multipart declaration notes"
+    );
+    assert!(run_cmd(&["check"]).status.success());
+
+    // 4. A corrupt `retention resolution:` note on disk blocks `tasks rename` via
+    // `lineage::envelopes_complete` (both on a task with retained history and on a task whose
+    // only retention note is the corrupt `retention resolution:`).
+    let new_task_path = new_records.join(format!("tasks/{new_id}.md"));
+    let clean_task_raw = std::fs::read_to_string(&new_task_path).unwrap();
+    let mut corrupted_raw = clean_task_raw.clone();
+    corrupted_raw
+        .push_str("- 2026-11-17T00:00:00Z (fixture): retention resolution: {\"version\":1}\n");
+    std::fs::write(&new_task_path, corrupted_raw).unwrap();
+    git(&new_records, &["add", new_task_path.to_str().unwrap()]);
+    git(
+        &new_records,
+        &["commit", "-qm", "seed corrupt retention resolution"],
+    );
+
+    let corrupt_state = run_json(&["retained", "state", &new_id]);
+    assert_eq!(corrupt_state["complete"], false, "{corrupt_state}");
+
+    let blocked_rename = run_cmd(&["rename", "new", "third"]);
+    assert_eq!(blocked_rename.status.code(), Some(1), "{blocked_rename:?}");
+    let blocked_err: serde_json::Value = serde_json::from_slice(&blocked_rename.stderr).unwrap();
+    assert_eq!(
+        blocked_err["error"]["kind"], "retained_input",
+        "{blocked_err}"
+    );
+    assert!(
+        blocked_err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("incomplete retention history cannot be renamed"),
+        "{blocked_err}"
+    );
+    assert!(new_records.exists());
+    assert!(!records_root.join("third").exists());
+
+    // Also verify a fresh project whose ONLY retention note is a corrupt `retention resolution:`
+    // is caught by `lineage::relevant` + `lineage::envelopes_complete` during `tasks rename`.
+    let solo_code = root.path().join("solo");
+    std::fs::create_dir_all(&solo_code).unwrap();
+    git(&solo_code, &["init", "-q", "-b", "main"]);
+    common::git_fixture::assert_repo(env.home.path(), &solo_code);
+    env.json(&solo_code, &["init", "--prefix", "sol"]);
+    let solo_id = env.json(&solo_code, &["add", "Solo task"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let solo_task_path = solo_code.join(format!("tasks/{solo_id}.md"));
+    let mut solo_raw = std::fs::read_to_string(&solo_task_path).unwrap();
+    if !solo_raw.contains("\n## Notes\n") {
+        solo_raw.push_str("\n## Notes\n\n");
+    }
+    solo_raw.push_str("- 2026-11-17T00:00:00Z (fixture): retention resolution: broken\n");
+    std::fs::write(&solo_task_path, solo_raw).unwrap();
+    git(&solo_code, &["add", "."]);
+    git(
+        &solo_code,
+        &["commit", "-qm", "solo with corrupt resolution"],
+    );
+
+    let solo_rename = env
+        .cmd(&solo_code)
+        .args(["rename", "sol", "sox"])
+        .output()
+        .unwrap();
+    assert_eq!(solo_rename.status.code(), Some(1), "{solo_rename:?}");
+    let solo_err: serde_json::Value = serde_json::from_slice(&solo_rename.stderr).unwrap();
+    assert_eq!(solo_err["error"]["kind"], "retained_input", "{solo_err}");
+    assert!(
+        solo_err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("incomplete retention history cannot be renamed"),
+        "{solo_err}"
+    );
+}
