@@ -672,25 +672,58 @@ fn progress_display_elsewhere_uses_source_scan() {
 
 #[test]
 fn progress_display_elsewhere_shared_root_detached() {
-    let mut env = TestEnv::new();
-    let main_aa = env.init("aa");
+    let env = TestEnv::new();
+    let records_home = env.home.path().join("records-home");
     let shared_code = env.home.path().join("shared-code");
+    std::fs::create_dir_all(&records_home).unwrap();
     std::fs::create_dir_all(&shared_code).unwrap();
     let shared_code = shared_code.canonicalize().unwrap();
 
+    // Initialize shared_code as an isolated git repository and pair it with records_home
+    // so open_recorded(&id, &shared_code) resolves via GitTree::of + project_of_tree to
+    // the registered detached records directory (records_home/aa)!
+    let git = |args: &[&str]| {
+        let out = common::git_fixture::command(env.home.path(), &shared_code)
+            .args(["-c", "init.defaultBranch=main"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["init", "-q"]);
+    common::git_fixture::assert_repo(env.home.path(), &shared_code);
+    std::fs::write(shared_code.join("README"), "seed\n").unwrap();
+    git(&["add", "README"]);
+    git(&["commit", "-qm", "seed"]);
+
+    // Separate detached records checkout det_1 (populated before pairing aa to records_home)
+    // and invoking checkout det_3 (holding neither goal_1 nor goal_2).
     let det_1 = env.home.path().join("det-rec-1");
-    let det_2 = env.home.path().join("det-rec-2");
-    for d in [&det_1, &det_2] {
+    let det_3 = env.home.path().join("det-rec-3");
+    for d in [&det_1, &det_3] {
         std::fs::create_dir_all(d.join("tasks")).unwrap();
         std::fs::write(d.join("tasks/.config.toml"), "prefix = \"aa\"\n").unwrap();
     }
 
-    // Populate det_1 with claimed goal_1 (1/2) and claimed goal_1b (0/1).
-    let goal_1 = add(&env, &det_1, "Detached 1 goal", &["--origin", "user"]);
-    let g1_done = add(&env, &det_1, "Det 1 done", &["--parent", &goal_1]);
+    // Populate det_1 with claimed goal_1 (aa-000001, 1/2) and goal_1b (0/1).
+    let orig_goal_1 = add(&env, &det_1, "Detached 1 goal", &["--origin", "user"]);
+    let g1_done = add(&env, &det_1, "Det 1 done", &["--parent", &orig_goal_1]);
     env.json(&det_1, &["done", &g1_done]);
-    let _g1_todo = add(&env, &det_1, "Det 1 todo", &["--parent", &goal_1]);
-
+    let g1_todo = add(&env, &det_1, "Det 1 todo", &["--parent", &orig_goal_1]);
+    let goal_1 = "aa-000001".to_string();
+    let det1_tasks = det_1.join("tasks");
+    let g1_body = std::fs::read_to_string(det1_tasks.join(format!("{orig_goal_1}.md")))
+        .unwrap()
+        .replace(&orig_goal_1, &goal_1);
+    std::fs::write(det1_tasks.join(format!("{goal_1}.md")), g1_body).unwrap();
+    std::fs::remove_file(det1_tasks.join(format!("{orig_goal_1}.md"))).unwrap();
+    for kid in [&g1_done, &g1_todo] {
+        let p = det1_tasks.join(format!("{kid}.md"));
+        let txt = std::fs::read_to_string(&p)
+            .unwrap()
+            .replace(&orig_goal_1, &goal_1);
+        std::fs::write(&p, txt).unwrap();
+    }
     let goal_1b = add(
         &env,
         &det_1,
@@ -699,20 +732,61 @@ fn progress_display_elsewhere_shared_root_detached() {
     );
     let _g1b_todo = add(&env, &det_1, "Det 1b todo", &["--parent", &goal_1b]);
 
-    // Populate det_2 with claimed goal_2 (2/3), which does NOT exist in det_1.
-    let goal_2 = add(&env, &det_2, "Detached 2 goal", &["--origin", "user"]);
-    let g2_done_a = add(&env, &det_2, "Det 2 done A", &["--parent", &goal_2]);
-    let g2_done_b = add(&env, &det_2, "Det 2 done B", &["--parent", &goal_2]);
-    env.json(&det_2, &["done", &g2_done_a]);
-    env.json(&det_2, &["done", &g2_done_b]);
-    let _g2_todo = add(&env, &det_2, "Det 2 todo", &["--parent", &goal_2]);
+    env.json(
+        &shared_code,
+        &[
+            "init",
+            "--prefix",
+            "aa",
+            "--records",
+            records_home.to_str().unwrap(),
+        ],
+    );
 
-    // Now mark both det_1 and det_2 as Kind::Detached checkouts sharing [checkout] path = shared_code!
+    // Populate the registered detached project via shared_code with goal_2 (2/3), then rename
+    // goal_2's ID to aa-fffffe so det_1's aa-000001 sorts BEFORE goal_2 in ClaimSnapshot!
+    let orig_goal_2 = add(&env, &shared_code, "Detached 2 goal", &["--origin", "user"]);
+    let g2_done_a = add(
+        &env,
+        &shared_code,
+        "Det 2 done A",
+        &["--parent", &orig_goal_2],
+    );
+    let g2_done_b = add(
+        &env,
+        &shared_code,
+        "Det 2 done B",
+        &["--parent", &orig_goal_2],
+    );
+    env.json(&shared_code, &["done", &g2_done_a]);
+    env.json(&shared_code, &["done", &g2_done_b]);
+    let g2_todo = add(
+        &env,
+        &shared_code,
+        "Det 2 todo",
+        &["--parent", &orig_goal_2],
+    );
+    let goal_2 = "aa-fffffe".to_string();
+    let reg_tasks = records_home.join("aa/tasks");
+    let g2_body = std::fs::read_to_string(reg_tasks.join(format!("{orig_goal_2}.md")))
+        .unwrap()
+        .replace(&orig_goal_2, &goal_2);
+    std::fs::write(reg_tasks.join(format!("{goal_2}.md")), g2_body).unwrap();
+    std::fs::remove_file(reg_tasks.join(format!("{orig_goal_2}.md"))).unwrap();
+    for kid in [&g2_done_a, &g2_done_b, &g2_todo] {
+        let p = reg_tasks.join(format!("{kid}.md"));
+        let txt = std::fs::read_to_string(&p)
+            .unwrap()
+            .replace(&orig_goal_2, &goal_2);
+        std::fs::write(&p, txt).unwrap();
+    }
+    assert!(goal_1 < goal_2);
+
     let detached_cfg = format!(
         "prefix = \"aa\"\n\n[checkout]\npath = \"{}\"\nkind = \"detached\"\n",
         shared_code.display()
     );
-    for d in [&det_1, &det_2] {
+    for d in [&det_1, &det_3] {
         std::fs::write(d.join("tasks/.config.toml"), &detached_cfg).unwrap();
     }
 
@@ -727,8 +801,8 @@ fn progress_display_elsewhere_shared_root_detached() {
         toml::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
     for (id, wt) in [
         (&goal_1, &symlink_det_1),
-        (&goal_1b, &symlink_det_1),
-        (&goal_2, &det_2),
+        (&goal_1b, &det_1),
+        (&goal_2, &shared_code),
     ] {
         store["claims"][id].as_table_mut().unwrap().insert(
             "worktree".into(),
@@ -737,7 +811,7 @@ fn progress_display_elsewhere_shared_root_detached() {
     }
     std::fs::write(&store_path, toml::to_string(&store).unwrap()).unwrap();
 
-    let prime_json = env.json(&main_aa, &["prime"]);
+    let prime_json = env.json(&det_3, &["prime"]);
     let doing_ids: BTreeSet<&str> = prime_json["doing"]
         .as_array()
         .unwrap()
@@ -748,7 +822,7 @@ fn progress_display_elsewhere_shared_root_detached() {
     assert!(doing_ids.contains(goal_1b.as_str()), "{prime_json}");
     assert!(doing_ids.contains(goal_2.as_str()), "{prime_json}");
 
-    let prime_pretty = env.pretty(&main_aa, &["prime"]);
+    let prime_pretty = env.pretty(&det_3, &["prime"]);
     let line_1 = prime_pretty.lines().find(|l| l.contains(&goal_1)).unwrap();
     let line_1b = prime_pretty.lines().find(|l| l.contains(&goal_1b)).unwrap();
     let line_2 = prime_pretty.lines().find(|l| l.contains(&goal_2)).unwrap();

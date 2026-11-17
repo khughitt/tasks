@@ -808,8 +808,7 @@ fn claimed_elsewhere_with(
         let worktree = std::path::Path::new(&claim.worktree);
         if let Some(at) = scans.iter().position(|entry| {
             entry.project.prefix == id.prefix
-                && (entry.project.resume_root() == worktree
-                    || entry.seen_worktrees.iter().any(|seen| seen == worktree))
+                && entry.seen_worktrees.iter().any(|seen| seen == worktree)
         }) {
             if let Some(task) = scans[at].scan.iter().find(|task| task.id == id).cloned() {
                 ctx.warnings.push(format!(
@@ -831,24 +830,35 @@ fn claimed_elsewhere_with(
                     "{id} is claimed in {}; resume it from that checkout",
                     claim.worktree
                 ));
+                let record_seen = |seen: &mut Vec<std::path::PathBuf>| {
+                    let wt = worktree.to_path_buf();
+                    if !seen.contains(&wt) {
+                        seen.push(wt);
+                    }
+                    if let Ok(canon) = worktree.canonicalize()
+                        && !seen.contains(&canon)
+                    {
+                        seen.push(canon);
+                    }
+                };
                 let at = match scans.iter().position(|existing| {
                     existing.project.prefix == project.prefix
                         && existing.project.records == project.records
                         && existing.project.resume_root() == project.resume_root()
                         && existing.project.root == project.root
+                        && existing.scan.iter().any(|t| t.id == task.id)
                 }) {
                     Some(existing) => {
-                        let wt = worktree.to_path_buf();
-                        if !scans[existing].seen_worktrees.contains(&wt) {
-                            scans[existing].seen_worktrees.push(wt);
-                        }
+                        record_seen(&mut scans[existing].seen_worktrees);
                         existing
                     }
                     None => {
+                        let mut seen_worktrees = Vec::new();
+                        record_seen(&mut seen_worktrees);
                         scans.push(CachedCheckout {
                             project,
                             scan,
-                            seen_worktrees: vec![worktree.to_path_buf()],
+                            seen_worktrees,
                         });
                         scans.len() - 1
                     }
@@ -1398,5 +1408,88 @@ mod tests {
         );
         assert_ne!(wt_scans[0].0.resume_root(), wt_scans[1].0.resume_root());
         assert_eq!(wt_found.len(), 2);
+
+        // 3. Deterministic ID order (early_id < mid_id < late_id):
+        //    - early_id claimed via symlink_wt_1 (det_1, whose resume_root() == shared_code!)
+        //    - mid_id claimed via canonical det_1.records (reuses det_1 without rescan)
+        //    - late_id claimed at shared_code (resolves via git/registry to det_2, NOT det_1!)
+        let mut t_early =
+            crate::commands::add::blank(&det_1, "Early det_1".into(), Status::Doing, None).unwrap();
+        t_early.id = TaskId::parse("aa-000001").unwrap();
+        let mut t_mid =
+            crate::commands::add::blank(&det_1, "Mid det_1".into(), Status::Doing, None).unwrap();
+        t_mid.id = TaskId::parse("aa-000002").unwrap();
+        let mut t_late =
+            crate::commands::add::blank(&det_2, "Late det_2".into(), Status::Doing, None).unwrap();
+        t_late.id = TaskId::parse("aa-fffffe").unwrap();
+        det_1.write_task(&ctx.registry, &t_early).unwrap();
+        det_1.write_task(&ctx.registry, &t_mid).unwrap();
+        det_2.write_task(&ctx.registry, &t_late).unwrap();
+
+        let det_2_scan = det_2.scan().unwrap();
+        let mut by_id_order = BTreeMap::new();
+        by_id_order.insert(t_early.id.to_string(), make_claim(&symlink_wt_1));
+        by_id_order.insert(t_mid.id.to_string(), make_claim(&det_1.records));
+        by_id_order.insert(t_late.id.to_string(), make_claim(&shared_code));
+        let claims_order =
+            crate::claims::ClaimSnapshot::from_parts(by_id_order, BTreeMap::new(), BTreeMap::new());
+        ctx.warnings.clear();
+        let mut order_opens = 0usize;
+        let (ord_scans, ord_found) =
+            claimed_elsewhere_with(&mut ctx, &[], &claims_order, |id, wt| {
+                order_opens += 1;
+                if wt == shared_code {
+                    let task = det_2_scan.iter().find(|t| t.id == *id).cloned().unwrap();
+                    Ok(Some((det_2.clone(), task, det_2_scan.clone())))
+                } else {
+                    crate::commands::parked::open_recorded(id, wt)
+                }
+            });
+        assert_eq!(
+            order_opens, 2,
+            "canonical det_1.records must reuse symlink_wt_1 scan while shared_code opens det_2"
+        );
+        assert_eq!(
+            ord_scans.len(),
+            2,
+            "shared_code claim must not falsely match det_1's resume_root()"
+        );
+        assert_eq!(
+            ord_found.len(),
+            3,
+            "late_id at shared_code must not be dropped as unavailable; warnings: {:?}",
+            ctx.warnings
+        );
+
+        // 4. Post-open structural guard: if a second symlink opens the same checkout after a
+        //    concurrent write added a new task absent from the first captured scan, it keeps a
+        //    scan containing that task rather than pairing it with the stale scan.
+        let symlink_wt_1b = dir.path().join("symlink-det-1b");
+        std::os::unix::fs::symlink(&det_1.records, &symlink_wt_1b).unwrap();
+        let mut t_added =
+            crate::commands::add::blank(&det_1, "Concurrent task".into(), Status::Doing, None)
+                .unwrap();
+        t_added.id = TaskId::parse("aa-ffffff").unwrap();
+        let stale_scan = det_1.scan().unwrap();
+        let mut fresh_scan = stale_scan.clone();
+        fresh_scan.push(t_added.clone());
+        let mut by_id_race = BTreeMap::new();
+        by_id_race.insert(t_early.id.to_string(), make_claim(&symlink_wt_1));
+        by_id_race.insert(t_added.id.to_string(), make_claim(&symlink_wt_1b));
+        let claims_race =
+            crate::claims::ClaimSnapshot::from_parts(by_id_race, BTreeMap::new(), BTreeMap::new());
+        let (race_scans, race_found) =
+            claimed_elsewhere_with(&mut ctx, &[], &claims_race, |id, wt| {
+                if wt == symlink_wt_1 {
+                    Ok(Some((det_1.clone(), t_early.clone(), stale_scan.clone())))
+                } else {
+                    assert_eq!(*id, t_added.id);
+                    Ok(Some((det_1.clone(), t_added.clone(), fresh_scan.clone())))
+                }
+            });
+        assert_eq!(race_scans.len(), 2);
+        for (at, task) in &race_found {
+            assert!(race_scans[*at].1.iter().any(|s| s.id == task.id));
+        }
     }
 }
