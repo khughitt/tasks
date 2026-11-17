@@ -1,6 +1,6 @@
 ---
 name: curate
-description: Use when asked to curate, review, tidy, or audit the task corpus (`/curate`). Samples random open tasks and runs one bounded maintenance pass over them; never part of the session protocol.
+description: Use when asked to curate, review, tidy, or audit the task corpus (`/curate`), or to sweep a whole project's open tasks (`/curate --all`, `/curate --resume`). Samples random open tasks and runs one bounded maintenance pass over them, or reviews every open task of one project in clusters; never part of the session protocol.
 ---
 
 # curate
@@ -11,8 +11,12 @@ closes a stale or duplicate task itself, under the guards in
 everything else to the human at the end. Invoke deliberately:
 
     /curate [n] [--project <prefix> | --group <name> | --all-projects]
+    /curate --all [--project <prefix>]
+    /curate --resume <sweep-task>
 
-Default: three tasks from the current project.
+Default: three tasks from the current project. The last two forms are the whole-project
+sweep: for either, read [sweep.md](sweep.md) beside this file and follow it; a sampled
+pass does not read it.
 
 ## 1. Sample
 

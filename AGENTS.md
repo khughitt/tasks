@@ -90,7 +90,10 @@ so the tracker on `PATH` is not repointed at a worktree:
   rows here.
 - `bin/sweep-signals` — the read-only drift-signal script behind `/curate --all`, run by other projects by explicit path; `tests/sweep_signals.rs` covers it.
 - `skills/tasks/SKILL.md` — the agent skill shipped to other projects; keep it in step with CLI changes.
-  `skills/curate/SKILL.md` — the curation pass (`tasks sample`, then bounded edits); same rule.
+  `skills/curate/SKILL.md` — the curation pass (`tasks sample`, then bounded edits) and the
+  whole-project sweep; same rule.
+  `skills/curate/sweep.md` — the sweep procedure, read only for `/curate --all` and
+  `/curate --resume`; same rule.
   `skills/scope/SKILL.md` — the deliberate idea scoping pass; same rule.
 - `docs/` — current typed public references; start with [task model](docs/task-model.md)
   and [project operations](docs/project-operations.md). Specs, plans, briefs and handoffs
