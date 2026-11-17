@@ -467,6 +467,18 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         }
         work.carried.pair.target.follows = follows;
 
+        // pieces. A valid piece is foreign, so it never links two carried records and is
+        // never in the destination; either would make it same-project work.
+        for piece in &work.carried.pair.target.pieces {
+            if map.contains_key(&canonical(piece)) || canonical(piece).prefix == succ {
+                refusals.push(refuse(
+                    &id,
+                    "local_piece",
+                    crate::moving::preflight::local_piece_refusal(&id, piece, &succ),
+                ));
+            }
+        }
+
         // Links.
         let drop_links = match entry.links.as_deref() {
             None => false,

@@ -91,9 +91,10 @@ pub fn render(out: &BlockersOut, painter: &Painter, layout: &Layout) -> String {
     }
 
     let mut footer = vec![
-        "goals: structural only (lanes and records with children); a childless cross-project \
-         closeout hub counts as work"
+        // Two lines so the footer stays inside a 120-column terminal.
+        "goals: structural only (lanes, records with children, and records that declare pieces)"
             .to_string(),
+        "a childless cross-project hub without declared pieces counts as work".to_string(),
         "a goal's impact is not attributed to a goal's children without an explicit dependency"
             .to_string(),
         format!(

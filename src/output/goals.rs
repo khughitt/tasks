@@ -67,12 +67,12 @@ fn attention(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Str
             crate::time::parse(&flag.since).expect("since was parsed when the flag was built");
         let days = (now - since).whole_days();
         parts.push(painter.paint(
-            Style::Error,
+            Style::Warning,
             &format!("{} stalled ({}, {days}d)", flag.count, flag.first),
         ));
     }
     if let Some(flag) = &flags.blocked {
-        let lane = if flags.paused_lane.as_deref() == Some(flag.first.as_str()) {
+        let lane = if flags.paused_lane.contains(&flag.first) {
             ", paused lane"
         } else {
             ""
@@ -84,7 +84,7 @@ fn attention(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Str
     }
     if let Some(flag) = &flags.you {
         parts.push(painter.paint(
-            Style::Emphasis,
+            Style::Urgent,
             &format!("{} you ({})", flag.count, flag.first),
         ));
     }
@@ -117,34 +117,17 @@ fn cells(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Vec<Str
         Some(n) if n > 0 => format!("?{n}"),
         _ => "-".into(),
     };
-    let mut values = vec![
-        present::id(&row.id, row.project_color).paint(painter),
-        present::status(row.status).paint(painter),
-        present::priority(row.priority).paint(painter),
-        work,
-        ideas,
-        deps,
-        unresolved,
-        present::date(row.closed.as_deref().unwrap_or(&row.last_activity)).paint(painter),
-        row.title.clone(),
-        attention(row, painter, now),
-    ];
-    if row.closed.is_some() {
+    if let Some(closed) = row.closed.as_deref() {
         // Closed records carry no attention and use the same dim style as the divider.
-        values = vec![
+        let mut values = vec![
             row.id.clone(),
             row.status.as_str().into(),
             format!("P{}", row.priority),
-            values[3].clone(),
-            values[4].clone(),
-            values[5].clone(),
-            values[6].clone(),
-            crate::time::day(
-                row.closed
-                    .as_deref()
-                    .expect("closed row has a closure date"),
-            )
-            .into(),
+            work,
+            ideas,
+            deps,
+            unresolved,
+            crate::time::day(closed).into(),
             row.title.clone(),
             String::new(),
         ];
@@ -153,8 +136,21 @@ fn cells(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Vec<Str
                 values[field as usize] = painter.paint(Style::Chrome, &values[field as usize]);
             }
         }
+        values
+    } else {
+        vec![
+            present::id(&row.id, row.project_color).paint(painter),
+            present::status(row.status).paint(painter),
+            present::priority(row.priority).paint(painter),
+            work,
+            ideas,
+            deps,
+            unresolved,
+            present::date(&row.last_activity).paint(painter),
+            row.title.clone(),
+            attention(row, painter, now),
+        ]
     }
-    values
 }
 
 fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
@@ -262,7 +258,7 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
     if out.include_closed {
         text.push_str(&paragraph("closed rows use closure date", painter, layout));
     }
-    let mut legend = vec!["work: done/total descendants"];
+    let mut legend = vec!["work: done/total descendants and declared pieces"];
     if has_ideas {
         legend.push("+ideas: uncommitted");
     }
@@ -316,13 +312,16 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
                 .push(("progress", Detail::Wrap(progress.join("; "))));
         }
         if !fields.contains(&Field::Status) {
+            let active = match goal.closed.as_deref() {
+                Some(closed) => crate::time::day(closed),
+                None => crate::time::day(&goal.last_activity),
+            };
             row.details.push((
                 "state",
                 Detail::Wrap(format!(
-                    "status: {}; priority: P{}; active: {}",
+                    "status: {}; priority: P{}; active: {active}",
                     goal.status.as_str(),
                     goal.priority,
-                    crate::time::day(goal.closed.as_deref().unwrap_or(&goal.last_activity))
                 )),
             ));
         }
@@ -371,6 +370,14 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
             painter,
         ));
     }
+    text.push_str(&paragraph(
+        &format!(
+            "parks and claims: host-local evidence from {} (drives stalled and you)",
+            out.park_evidence.host
+        ),
+        painter,
+        layout,
+    ));
     text
 }
 
@@ -480,7 +487,7 @@ mod tests {
                 first: "material-2502a2".into(),
                 since: "2026-11-07T10:00:00Z".into(),
             }),
-            paused_lane: None,
+            paused_lane: Vec::new(),
         });
         GoalsOut {
             include_closed: false,
@@ -610,6 +617,89 @@ mod tests {
                 .contains("+ideas"),
             "{text}"
         );
+        // Mixed open and closed rows where closed work/dependency counters are wider:
+        // shared widths align columns across both sections under headers and forced color.
+        out.goals.truncate(2);
+        out.goals[0].status = Status::Doing;
+        out.goals[0].closed = None;
+        out.goals[0].title = "Open goal".into();
+        out.goals[0].pieces = Pieces {
+            done: 1,
+            total: 2,
+            ideas: 1,
+        };
+        out.goals[0].dependencies = Some(Dependencies {
+            open: 0,
+            total: 3,
+            unresolved: 1,
+        });
+        out.goals[1].status = Status::Done;
+        out.goals[1].closed = Some("2026-11-07T00:00:00Z".into());
+        out.goals[1].title = "Closed goal".into();
+        out.goals[1].pieces = Pieces {
+            done: 1234,
+            total: 5678,
+            ideas: 999,
+        };
+        out.goals[1].dependencies = Some(Dependencies {
+            open: 12,
+            total: 345,
+            unresolved: 67,
+        });
+        let plain = render(&out, &painter(false), &at(140, true));
+        let colored = render(&out, &painter(true), &at(140, true));
+        check_width(&plain, 140);
+        check_width(&colored, 140);
+        assert_eq!(strip(&colored), plain);
+        for visible in [&plain, &strip(&colored)] {
+            let headers: Vec<_> = visible
+                .lines()
+                .filter(|l| l.contains("status") && l.contains("deps") && l.contains("title"))
+                .collect();
+            assert_eq!(headers.len(), 1, "{visible}");
+            let header = headers[0];
+            let open_line = visible
+                .lines()
+                .find(|l| l.starts_with("material-6062fd"))
+                .unwrap();
+            let closed_line = visible
+                .lines()
+                .find(|l| l.starts_with("material-5d6b2c"))
+                .unwrap();
+            let span = |line: &str, token: &str| {
+                let start = line
+                    .find(token)
+                    .unwrap_or_else(|| panic!("missing {token:?} in {line:?}"));
+                (start, start + token.len())
+            };
+            for (h, o, c) in [
+                ("id", "material-6062fd", "material-5d6b2c"),
+                ("status", "doing", "done"),
+                ("P", "P1", "P1"),
+                ("active", "2026-11-08", "2026-11-07"),
+                ("title", "Open goal", "Closed goal"),
+            ] {
+                assert_eq!(span(header, h).0, span(open_line, o).0, "{h}: {visible}");
+                assert_eq!(
+                    span(open_line, o).0,
+                    span(closed_line, c).0,
+                    "{h}: {visible}"
+                );
+            }
+            for (h, o, c) in [
+                ("work", "1/2", "1234/5678"),
+                ("ideas", "+1", "+999"),
+                ("deps", "2/3", "266/345"),
+                ("unres", "?1", "?67"),
+            ] {
+                assert_eq!(span(header, h).1, span(open_line, o).1, "{h}: {visible}");
+                assert_eq!(
+                    span(open_line, o).1,
+                    span(closed_line, c).1,
+                    "{h}: {visible}"
+                );
+            }
+        }
     }
     #[test]
     fn goals_titles_unicode_and_no_width() {
@@ -672,6 +762,51 @@ mod tests {
             assert!(
                 render(&out, &painter(false), &Layout::default())
                     .starts_with(&format!("sort: {expected}"))
+            );
+        }
+    }
+    #[test]
+    fn goals_attention_flags_make_you_visually_primary() {
+        let out = report_fixture();
+        let inline = render(&out, &painter(true), &Layout::default());
+        assert!(
+            inline.contains("\x1b[33m1 stalled (material-6062fd, 3d)\x1b[0m"),
+            "{inline:?}"
+        );
+        assert!(
+            inline.contains("\x1b[31m2 blocked (material-2834d7)\x1b[0m"),
+            "{inline:?}"
+        );
+        assert!(
+            inline.contains("\x1b[1;31m1 you (material-2502a2)\x1b[0m"),
+            "{inline:?}"
+        );
+
+        let narrow = render(&out, &painter(true), &at(80, false));
+        check_width(&narrow, 80);
+        assert!(narrow.contains("\x1b[33mstalled\x1b[0m"), "{narrow:?}");
+        assert!(narrow.contains("\x1b[31mblocked\x1b[0m"), "{narrow:?}");
+        assert!(
+            narrow.contains("\x1b[1;31myou\x1b[0m \x1b[1;31m(material-2502a2)\x1b[0m"),
+            "{narrow:?}"
+        );
+    }
+    #[test]
+    fn goals_footer_names_host_local_park_and_claim_evidence() {
+        let out = report_fixture();
+        for width in [60, 80, 160] {
+            let plain = render(&out, &painter(false), &at(width, false));
+            check_width(&plain, width);
+            let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                normalized.contains(
+                    "parks and claims: host-local evidence from fixture (drives stalled and you)"
+                ),
+                "width={width}: {plain}"
+            );
+            assert!(
+                plain.find("tasks-82e836").unwrap() < plain.find("parks and claims:").unwrap(),
+                "footer must follow goal rows: {plain}"
             );
         }
     }

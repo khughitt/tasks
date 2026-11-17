@@ -174,15 +174,11 @@ pub fn inbound(ctx: &MoveCtx, out: &mut MoveOut) -> Result<()> {
     let (scope, warnings) =
         crate::scope::Scope::open_all_with_retired(&ctx.registry, &ctx.source.project.root)?;
     out.warnings.extend(warnings);
-    for task in scope.scan()? {
-        if task
-            .depends
-            .iter()
-            .any(|dep| ctx.registry.canonical_id(dep) == ctx.source_id)
-        {
-            out.inbound.push(task.id.to_string());
-        }
-    }
+    let scan = scope.scan()?;
+    out.inbound.extend(
+        crate::dependency::dependents(&ctx.registry, &scan, &ctx.source_id)
+            .map(|task| task.id.to_string()),
+    );
     out.inbound.sort();
     Ok(())
 }

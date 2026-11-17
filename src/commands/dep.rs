@@ -151,6 +151,15 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
                 task.id
             )));
         }
+        // A piece must stay a dependency, so removing the dependency unmarks the piece.
+        if crate::pieces::is_piece(&ctx.registry, &task, dependency) {
+            task.pieces
+                .retain(|piece| ctx.registry.canonical_id(piece) != *dependency);
+            ctx.warnings.push(format!(
+                "{dependency} was a piece of {}; removing the dependency unmarked it as a piece",
+                task.id
+            ));
+        }
     }
     let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let warnings = add_dependencies(&ctx, &resolver, &mut task, &on)?;

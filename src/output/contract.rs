@@ -412,6 +412,9 @@ pub struct DepInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
     pub resolved: bool,
+    /// Pretty-only: this dependency is one of the task's declared pieces.
+    #[serde(skip)]
+    pub piece: bool,
 }
 
 #[derive(Serialize)]
@@ -536,6 +539,11 @@ pub struct ShowFields {
     pub related_to: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub follows_tasks: Vec<DepInfo>,
+    /// Tasks whose `depends` names this one, open and closed; moved tombstones omitted.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependents: Vec<Related>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub followed_by: Vec<Related>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub wake_targets: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]

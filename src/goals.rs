@@ -6,6 +6,7 @@ use crate::claims::{ClaimSnapshot, Reason, WaitingOn};
 use crate::dependency::Verdict;
 use crate::error::Result;
 use crate::hierarchy;
+use crate::membership::Membership;
 use crate::model::{Origin, Status, Task, TaskId};
 use crate::palette::Rgb;
 use crate::registry::Registry;
@@ -98,9 +99,9 @@ pub struct Attention {
     pub blocked: Option<Flag>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub you: Option<Flag>,
-    /// Pretty-only: the paused lane counted under `blocked`, so the row can name it.
+    /// Pretty-only: the paused lanes counted under `blocked`, so the row can name one.
     #[serde(skip)]
-    pub paused_lane: Option<String>,
+    pub paused_lane: Vec<String>,
 }
 
 impl Attention {
@@ -231,18 +232,18 @@ pub fn effective_at<'a>(task: &'a Task, claims: &'a ClaimSnapshot) -> &'a str {
 }
 
 /// A record raising a flag, with the timestamp that orders it.
-struct Hit<'a> {
+struct Hit {
     at: OffsetDateTime,
     id: String,
-    since: &'a str,
+    since: String,
 }
 
-impl<'a> Hit<'a> {
-    fn new(id: String, since: &'a str) -> Result<Hit<'a>> {
+impl Hit {
+    fn new(id: String, since: &str) -> Result<Hit> {
         Ok(Hit {
             at: crate::time::parse(since)?,
             id,
-            since,
+            since: since.to_string(),
         })
     }
 }
@@ -255,7 +256,7 @@ fn flag(hits: Vec<Hit>) -> Option<Flag> {
         .map(|first| Flag {
             count,
             first: first.id,
-            since: first.since.to_string(),
+            since: first.since,
         })
 }
 
@@ -268,23 +269,22 @@ fn waits_on_named(task: &Task, claims: &ClaimSnapshot) -> bool {
     })
 }
 
-/// Whether a `doing` record is stalled, and since when. A goal record (it has descendants
-/// or is a lane) is judged by its whole subtree: stalled only when nothing in it is newer
-/// than `STALL_AFTER`, nothing in it is held, and no active record in it waits on
-/// something named; `since` is the subtree's newest stamp.
-fn stalled_since<'a>(
-    task: &'a Task,
-    all: &'a [Task],
-    claims: &'a ClaimSnapshot,
-    registry: &Registry,
+/// Whether a `doing` record is stalled, and since when. A goal record (it has members or is
+/// a lane) is judged by itself and its members: stalled only when nothing among them is
+/// newer than `STALL_AFTER`, nothing among them is held, and no active record among them
+/// waits on something named; `since` is the newest stamp among them.
+fn stalled_since(
+    task: &Task,
+    membership: &mut Membership<'_>,
+    claims: &ClaimSnapshot,
     now: OffsetDateTime,
-) -> Result<Option<Hit<'a>>> {
+) -> Result<Option<Hit>> {
     if waits_on_named(task, claims) {
         return Ok(None);
     }
-    let descendants = hierarchy::descendants(all, &task.id, registry);
-    let hit = if hierarchy::is_goal(task, !descendants.is_empty()) {
-        let subtree: Vec<&Task> = std::iter::once(task).chain(descendants).collect();
+    let members = membership.members(task)?;
+    let hit = if hierarchy::is_goal(task, !members.is_empty()) {
+        let subtree: Vec<&Task> = std::iter::once(task).chain(&members).collect();
         // Someone holds it, or its work waits on something named: not stalled.
         if subtree.iter().any(|record| {
             claims.held(&record.id).is_some()
@@ -298,7 +298,7 @@ fn stalled_since<'a>(
             let parsed = crate::time::parse(at)?;
             if parsed > newest.at {
                 newest.at = parsed;
-                newest.since = at;
+                newest.since = at.to_string();
             }
         }
         newest
@@ -311,17 +311,19 @@ fn stalled_since<'a>(
     Ok((now - hit.at >= STALL_AFTER).then_some(hit))
 }
 
-/// The goal's attention flags over its own record and its active descendants , or
-/// None when it raises none.
+/// The goal's attention flags over its own record and its active members, or None when it
+/// raises none. Each distinct paused lane enclosing the goal or an active member adds one
+/// blocked record, unless that lane is itself already a blocked hit.
 pub fn attention(
     goal: &Task,
-    all: &[Task],
+    members: &[Task],
+    membership: &mut Membership<'_>,
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
 ) -> Result<Option<Attention>> {
     let records: Vec<&Task> = std::iter::once(goal)
-        .chain(hierarchy::descendants(all, &goal.id, registry))
+        .chain(members)
         .filter(|task| hierarchy::is_active(task))
         .collect();
     let (mut stalled, mut blocked, mut you) = (Vec::new(), Vec::new(), Vec::new());
@@ -331,7 +333,7 @@ pub fn attention(
             blocked.push(Hit::new(id(), effective_at(task, claims))?);
         }
         if task.status == Status::Doing
-            && let Some(hit) = stalled_since(task, all, claims, registry, now)?
+            && let Some(hit) = stalled_since(task, membership, claims, now)?
         {
             stalled.push(hit);
         }
@@ -342,87 +344,112 @@ pub fn attention(
             you.push(Hit::new(id(), effective_at(task, claims))?);
         }
     }
-    let paused_lane = hierarchy::paused_lane(all, goal, registry);
-    if let Some(lane) = paused_lane {
-        blocked.push(Hit::new(lane.id.to_string(), effective_at(lane, claims))?);
+    let mut paused_lane = Vec::new();
+    for record in &records {
+        let prefix = registry.canonical_id(&record.id).prefix;
+        let Some(scan) = membership.project(&prefix)? else {
+            continue;
+        };
+        let Some(lane) = hierarchy::paused_lane(scan, record, registry) else {
+            continue;
+        };
+        let id = registry.canonical_id(&lane.id).to_string();
+        if paused_lane.contains(&id) || blocked.iter().any(|hit| hit.id == id) {
+            continue;
+        }
+        blocked.push(Hit::new(id.clone(), effective_at(lane, claims))?);
+        paused_lane.push(id);
     }
     let out = Attention {
         stalled: flag(stalled),
         blocked: flag(blocked),
         you: flag(you),
-        paused_lane: paused_lane.map(|lane| lane.id.to_string()),
+        paused_lane,
     };
     Ok((!out.is_empty()).then_some(out))
 }
 
+/// The goals `goal_rows` emits, split as (active, closed): user or mixed origin goals that
+/// are open, and, only with `include_closed`, those done inside [`CLOSED_WINDOW`].
+/// Shelved, dropped, moved and older done goals are never walked.
+pub fn shown<'a>(
+    all: &'a [Task],
+    registry: &Registry,
+    now: OffsetDateTime,
+    include_closed: bool,
+) -> (Vec<&'a Task>, Vec<&'a Task>) {
+    let (mut active, mut closed) = (Vec::new(), Vec::new());
+    for task in all {
+        if !matches!(task.origin, Some(Origin::User | Origin::Mixed))
+            || !hierarchy::is_goal(
+                task,
+                !hierarchy::children(all, &task.id, registry).is_empty(),
+            )
+        {
+            continue;
+        }
+        match task.status {
+            Status::Idea | Status::Todo | Status::Doing | Status::Blocked => active.push(task),
+            Status::Done if include_closed => {
+                let at = crate::time::parse(closed_at(task))
+                    .expect("closed, completed and updated are validated at parse");
+                if now - at < CLOSED_WINDOW {
+                    closed.push(task);
+                }
+            }
+            Status::Done | Status::Shelved | Status::Dropped | Status::Moved => {}
+        }
+    }
+    (active, closed)
+}
+
 /// The selected rows, ordered within separate open and recently closed sections.
-/// Activity means subtree activity for open rows and closure for closed rows.
-/// Open dependencies change neither order nor
-/// flags. Closed rows appear only when `include_closed` is set. `lookup` reads
-/// one record by canonical id for [`dependencies`].
+/// Activity means activity among the goal and its members for open rows and closure for
+/// closed rows. Open dependencies change neither order nor flags. Closed rows appear only
+/// when `include_closed` is set. Every number is over the goal's members across projects.
 pub fn goal_rows(
     all: &[Task],
+    membership: &mut Membership<'_>,
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
     include_closed: bool,
     order: GoalOrder,
-    mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
 ) -> Result<Vec<GoalRow>> {
     let mut open: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
     let mut closed: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
-    for task in all {
-        if !matches!(task.origin, Some(Origin::User | Origin::Mixed)) {
-            continue;
-        }
-        let descendants = hierarchy::descendants(all, &task.id, registry);
-        if !hierarchy::is_goal(task, !descendants.is_empty()) {
-            continue;
-        }
-        let row = |closed: Option<String>,
-                   attention: Option<Attention>,
-                   dependencies: Option<Dependencies>|
-         -> Result<GoalRow> {
-            Ok(GoalRow {
-                id: task.id.to_string(),
-                title: task.title.clone(),
-                status: task.status,
-                origin: task.origin,
-                priority: task.priority,
-                lane: task.lane,
-                project_color: None,
-                activity: None,
-                last_activity: last_activity(task, &descendants)?,
-                pieces: pieces(&descendants),
-                dependencies,
-                attention,
-                closed,
-            })
+    let (active, recent) = shown(all, registry, now, include_closed);
+    for task in active.into_iter().chain(recent) {
+        let members = membership.members(task)?;
+        let refs: Vec<&Task> = members.iter().collect();
+        let dependencies = dependencies(task, &refs, registry, |id| membership.lookup(id))?;
+        let open_row = task.status != Status::Done;
+        let attention = if open_row {
+            attention(task, &members, membership, claims, registry, now)?
+        } else {
+            None
+        };
+        let stamp = closed_at(task);
+        let row = GoalRow {
+            id: task.id.to_string(),
+            title: task.title.clone(),
+            status: task.status,
+            origin: task.origin,
+            priority: task.priority,
+            lane: task.lane,
+            project_color: None,
+            activity: None,
+            last_activity: last_activity(task, &refs)?,
+            pieces: pieces(&refs),
+            dependencies,
+            attention,
+            closed: (!open_row).then(|| stamp.to_string()),
         };
         let project = registry.canonical_id(&task.id).prefix;
-        match task.status {
-            Status::Idea | Status::Todo | Status::Doing | Status::Blocked => {
-                let row = row(
-                    None,
-                    attention(task, all, claims, registry, now)?,
-                    dependencies(task, &descendants, registry, &mut lookup)?,
-                )?;
-                open.push((crate::time::parse(&row.last_activity)?, project, row));
-            }
-            Status::Done if !include_closed => {}
-            Status::Done => {
-                let stamp = closed_at(task);
-                let at = crate::time::parse(stamp)?;
-                if now - at < CLOSED_WINDOW {
-                    let dependencies = dependencies(task, &descendants, registry, &mut lookup)?;
-                    closed.push((
-                        at,
-                        project,
-                        row(Some(stamp.to_string()), None, dependencies)?,
-                    ));
-                }
-            }
-            Status::Shelved | Status::Dropped | Status::Moved => {}
+        if open_row {
+            open.push((crate::time::parse(&row.last_activity)?, project, row));
+        } else {
+            closed.push((crate::time::parse(stamp)?, project, row));
         }
     }
     let sort = |rows: &mut Vec<(OffsetDateTime, String, GoalRow)>, count_pieces: bool| {
@@ -508,14 +535,50 @@ mod tests {
         leaf.updated = "2099-01-01T00:00:00Z".into();
         let all = vec![goal.clone(), leaf];
         let now = crate::time::parse("2026-11-01T00:00:00Z").unwrap();
+        let registry = Registry::default();
+        let mut membership = Membership::new(&registry, &["aa".to_string()], &all);
+        let members = membership.members(&goal).unwrap();
         let flags = attention(
             &goal,
-            &all,
+            &members,
+            &mut membership,
             &ClaimSnapshot::default(),
-            &Registry::default(),
+            &registry,
             now,
         )
         .unwrap();
+        assert_eq!(flags, None);
+    }
+
+    #[test]
+    fn moved_tombstone_under_goal_is_never_flagged() {
+        let goal = task("aa-000000", None, Status::Todo);
+        let mut moved = task("aa-000001", Some("aa-000000"), Status::Moved);
+        moved.updated = "2026-09-01T00:00:00Z".into();
+        let park = Park {
+            owner: "o".into(),
+            session: "s".into(),
+            host: "h".into(),
+            worktree: "/w".into(),
+            at: "2026-09-01T00:00:00Z".into(),
+            next_step: "next".into(),
+            waiting_on: WaitingOn::User,
+            reason: None,
+            needs: None,
+            minutes: None,
+            title: "aa-000001".into(),
+        };
+        let claims = ClaimSnapshot::from_parts(
+            BTreeMap::new(),
+            BTreeMap::from([("aa-000001".to_string(), park)]),
+            BTreeMap::new(),
+        );
+        let all = vec![goal.clone(), moved];
+        let now = crate::time::parse("2026-11-01T00:00:00Z").unwrap();
+        let registry = Registry::default();
+        let mut membership = Membership::new(&registry, &["aa".to_string()], &all);
+        let members = membership.members(&goal).unwrap();
+        let flags = attention(&goal, &members, &mut membership, &claims, &registry, now).unwrap();
         assert_eq!(flags, None);
     }
 

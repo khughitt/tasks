@@ -491,6 +491,7 @@ mod tests {
             depends: vec![],
             related: vec![],
             follows: vec![],
+            pieces: vec![],
             parent: parent.map(|parent| TaskId::parse(parent).unwrap()),
             tags: vec![],
             source: None,

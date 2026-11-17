@@ -278,7 +278,7 @@ pub fn build(
             goal: if scanned.contains_key(id) {
                 Some(goal(id))
             } else {
-                task.lane.then_some(true)
+                crate::hierarchy::is_goal(task, false).then_some(true)
             },
             cycle: in_cycle.contains(id),
             direct_work_count: 0,

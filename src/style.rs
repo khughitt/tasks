@@ -80,7 +80,9 @@ pub enum Style {
     Status(Status),
     Chrome,
     Emphasis,
+    Warning,
     Error,
+    Urgent,
     Ok,
     /// A date, painted by its distance from today (docs/configuration.md).
     Date(When),
@@ -328,7 +330,9 @@ impl Painter {
             Style::Status(Status::Dropped | Status::Moved) => "2;31".into(),
             Style::Chrome => "2".into(),
             Style::Emphasis => "1".into(),
+            Style::Warning => "33".into(),
             Style::Error => "31".into(),
+            Style::Urgent => "1;31".into(),
             Style::Ok => "32".into(),
         };
         if self.enabled {
@@ -400,7 +404,9 @@ mod tests {
             (Style::Status(Status::Moved), "2;31"),
             (Style::Chrome, "2"),
             (Style::Emphasis, "1"),
+            (Style::Warning, "33"),
             (Style::Error, "31"),
+            (Style::Urgent, "1;31"),
             (Style::Ok, "32"),
             (Style::Heading(None), "1"),
         ] {

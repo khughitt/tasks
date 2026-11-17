@@ -65,9 +65,12 @@ mean those documents were verified.
    duplicate check before filing.
    Never pick a task with children; those are goals. `ready` already omits them.
    A parent must be in the same project, so a goal whose pieces live in other projects
-   holds them as `depends` and is a leaf to the tool: `ready` offers it once its pieces
-   close, for the closeout. Rate it as that closeout (usually `--process direct`), which
-   also takes it out of the `needs_review` queue.
+   declares them with `tasks edit <goal> --piece <id>`: each piece is also a dependency,
+   and declaring one makes the record a goal, so it leaves `ready` and reaches `prime`'s
+   closeout once its children and pieces close. A cross-project hub that only holds
+   foreign work as `depends`, without declared pieces, is still a leaf: `ready` offers it
+   once those close, for the closeout; rate it as that closeout (usually `--process
+   direct`), which also takes it out of the `needs_review` queue.
    A lane (`lane: true`) is a goal too, even before it has children, and every row names
    its lane in `in_lane` (the nearest lane at or above it). A session committed to one
    lane picks with `tasks next --under <lane>`; `--under` also narrows `list` and `ready`
@@ -86,17 +89,19 @@ mean those documents were verified.
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
    `tasks goals` is the person's goals report, not a picker: user or mixed-origin
-   goals across registered projects, grouped by canonical project prefix A–Z and
+   goals across registered projects (`--project <prefix>` or `--group <name>` narrows
+   it; `--all-projects` is the default), grouped by canonical project prefix A–Z and
    then newest subtree activity. `--sort activity` gives global newest activity;
    `--sort priority` gives P0 first, then newest activity. `--reverse` reverses all
    keys within each section; open goals stay before closed ones. Progress counts
-   descendants only: `work` is done/total, `+N` counts ideas, `deps` is satisfied/total
-   prerequisites outside the subtree, and `?N` counts unresolved targets (never
+   descendants and declared pieces: `work` is done/total, `+N` counts ideas, `deps` is
+   satisfied/total prerequisites outside the goal and its pieces, and `?N` counts unresolved targets (never
    satisfied). Fully satisfied dependency sets remain visible as N/N. These pretty
    fractions do not change JSON's open/total/unresolved fields; only array order
    follows the selected sort. A leading legend describes the selected order and
    present counters, including categories moved to labelled details on narrow
-   terminals. Titles clip with `…` at available width, capped at 80 display cells;
+   terminals, and a footer notes that park and claim evidence behind `stalled` and
+   `you` is this host's. Titles clip with `…` at available width, capped at 80 display cells;
    JSON and `show` retain full titles. Headers remain optional. `--closed` adds goals
    closed in the last 14 days in a final section, ordered by closure date within the
    selected mode; the intro names that date distinction. When filing a goal the
@@ -107,15 +112,19 @@ mean those documents were verified.
    `ready`/`next` keep their order. Read `coverage.complete` first: a partial scan
    (unfollowed out-of-scope paths, unresolved references, unreachable projects) gives
    lower-bound counts and observed ranks. `dependencies_cleared_direct_count` is never
-   readiness or permission. Goals are structural only, and a childless closeout hub
-   counts as work. Park and claim evidence is this host's. `attention: user` needs a
+   readiness or permission. Goals are structural only (lanes, records with children,
+   and records that declare pieces); a childless cross-project hub without declared
+   pieces counts as work. Park and claim evidence is this host's. `attention: user` needs a
    recorded wait, so record an approval gate with `park --waiting-on user --reason
    approval` (or `note --reviewed --awaiting-user` on a reviewed idea) rather than only
    in prose; a declared need is a resource, not an approval. How long a blocker has
    blocked is not measured yet.
 3. Run `tasks show <id>` and read the inventory's `required` rows in order before
    starting; use **Task references** below to retrieve them. `show` lists every related row
-   (parent, dependencies, wake targets, related tasks, task-id source, children) with live status.
+   (parent, dependencies, wake targets, related tasks, task-id source, dependents, children)
+   with live status. Dependents (tasks whose `depends` names this one) come from the task's
+   own project; `tasks show <id> --all-projects` also finds them, and followers, in every
+   reachable registered project.
    Read the task's `process` and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
@@ -327,7 +336,7 @@ Project identity colors are assigned by an optional top-level `color = "#RRGGBB"
 invalid values fail with a typed config error. Change the value to recolor or remove the
 key to restore existing styling. Init/reinitialization and prefix rename preserve it.
 Pretty output paints a project's name in that RGB: prefixes in
-`projects`, `groups` and `where`; task ids and titles in table views, and in `show`/`next`
+`projects`, `groups` and `where`; task ids and titles in table views (including `goals`), and in `show`/`next`
 (the overview line included) by the project each id belongs to. IDs use a fixed shade
 mixed 30% toward white from the project color. Activity-aware titles use an independent
 lightness range and may be lighter than IDs; higher activity increases contrast toward
@@ -1021,8 +1030,12 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 - Informational links: `related` holds non-blocking task ids the record cites; it never gates execution, review, or done. Writers link new citations automatically on write (from body text, notes, park next steps, shelve wake text, and close messages). Use `tasks edit <id> --related <id>` for links the prose does not name, and `--rm-related <id>` to remove one; `--no-related` clears the list.
 - Work spanning projects: a goal in the hub project, then one
   `tasks add "<piece>" --project <prefix>` per affected project and one
-  `tasks dep <goal> --on <piece>` each. The goal returns to `ready` when the last piece
-  closes; verify and `tasks done` it then. `tasks root <id>` prints where a piece lives.
+  `tasks edit <goal> --piece <piece>` each, which marks it a piece and adds the
+  dependency. `goals` counts declared pieces as the goal's work; the goal reaches
+  `prime`'s closeout when the last piece closes; verify and `tasks done` it then.
+  `tasks edit <goal> --rm-piece <piece>` unmarks one and keeps the dependency;
+  `tasks dep <goal> --rm <piece>` removes both. `tasks root <id>` prints where a piece
+  lives.
 - Id collision after a merge (git add/add conflict on the same `tasks/<id>.md`): keep one
   file, rename the other to a fresh id, fix its `id` field, then run `tasks check` and
   repair any `depends` it reports. If `tasks/files/<id>/` exists, split it by ledger
@@ -1137,6 +1150,50 @@ rename-receipt commits and explicit config commits remain available. `unretire`
 removes ordinary retirement subject to the handoff bound above.
 Its ids keep resolving, `--all-projects` and `--group` reads leave it out, and `--project` reads warn. The project lifecycle
 runbook in ops has the whole procedure.
+
+## Choose task relations
+
+| Field | Assertion |
+| --- | --- |
+| `parent` | A constituent of this same-project goal; children are its inverse. |
+| `depends` | Completion of that task is required under the dependency contract. |
+| `pieces` | A foreign task that is part of this goal; it is also a dependency. |
+| `wake_on` | Closure is evidence to review this shelved task again. |
+| `follows` | Additional work arising from earlier work: deferred work, extension, requested change or correction. |
+| `source` | The single filing/derivation origin: a capture, brief, message, URL or originating task. |
+| `related` | An informational citation whose meaning is in its prose. |
+
+Set follows explicitly with repeatable `add --follows REF` or `edit --follows REF`;
+remove with repeatable `edit --rm-follows REF`, clear with `edit --no-follows`.
+Follows requires neither closure nor waiting, and asserts no replacement. Never
+infer it from prose, source, concerns notes, dates, subject similarity or a plan.
+Fields may overlap when each assertion is independently true. Preserve existing
+source/related values: no historical conversion or backfill, including on touch.
+
+A new deferred follow-up filed from a brief keeps that brief as source and sets
+`--follows OLD`; it can name several predecessors. Source/title add reuse writes
+nothing, including supplied follows: explicitly edit the returned task if needed.
+A new correction to closed work sets follows and keeps the existing exact note
+`concerns: <task-id> <defect|change|extension> — <one line>`; do not reinterpret
+historical concerns. Until lore/obs adopt coordinated conventions, retain their
+existing source/concerns requirements and set follows additionally when justified.
+Ordinary plan steps use parent, not automatic follows. A cross-project effort's
+hub declares its pieces (`--piece`), which keeps them as dependencies for completion
+and counts them as its work; source alone supplies no membership or prerequisite. New work continuing a dropped task may follow it;
+a replacement does not satisfy the dropped obligation automatically. A move is the
+same work: follow its live successor, not its tombstone merely because it moved.
+If provenance is uncertain, leave source unset. If a stronger relation is uncertain,
+keep a prose citation/related rather than inventing it.
+
+Show and next display outgoing follows, including foreign and unresolved ids,
+and direct incoming followed-by rows (open or closed). Plain show searches locally;
+next uses its existing local/group/all-project scope. An absent incoming field means
+none found in that readable scope, not none elsewhere. Move-history matching follows
+the focal work only; incomplete history warns once and keeps direct matches. Old/new
+ids agree over the same complete scan/history, while local results across projects
+can differ. A moved follower contributes only via its in-scope live successor.
+`show --all-projects` widens that search to every reachable registered project;
+next already has wider scope when it selects the focal task. No links are rewritten, and follows never affects next eligibility.
 
 ## Task references
 

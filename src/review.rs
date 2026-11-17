@@ -133,7 +133,7 @@ pub fn state(
             }
         }
         Status::Todo | Status::Blocked
-            if task.process.is_none() && !task.lane && child_count == 0 =>
+            if task.process.is_none() && !crate::hierarchy::is_goal(task, child_count > 0) =>
         {
             Some(ReviewReason::Unassessed)
         }
