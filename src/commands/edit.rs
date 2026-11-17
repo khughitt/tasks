@@ -179,7 +179,10 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         || args.no_related
         || !fields.follows.is_empty()
         || !args.rm_follows.is_empty()
-        || args.no_follows;
+        || args.no_follows
+        || !fields.pieces.is_empty()
+        || !args.rm_pieces.is_empty()
+        || args.no_pieces;
     if !has_flags {
         if !args.editor && !std::io::stdin().is_terminal() {
             return Err(Error::Editor(
@@ -266,6 +269,33 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     // the one `--depends` used to.
     if args.no_tags {
         task.tags.clear();
+    }
+    // Pieces are unmarked before `--no-depends` clears the list they must stay inside,
+    // so `--no-depends --no-pieces` clears both.
+    let piece_additions = args
+        .fields
+        .pieces
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    let piece_removals = args
+        .rm_pieces
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(both) = piece_additions
+        .iter()
+        .find(|id| piece_removals.contains(id))
+    {
+        return Err(Error::Validation(format!(
+            "{both} is named by both --piece and --rm-piece"
+        )));
+    }
+    if args.no_pieces {
+        task.pieces.clear();
+    }
+    if !piece_removals.is_empty() {
+        crate::pieces::remove(&ctx.registry, &mut task, &piece_removals)?;
     }
     if args.no_depends {
         task.depends.clear();
@@ -711,7 +741,7 @@ fn refuse_stranded_pieces(
     }
     Err(Error::Validation(format!(
         "{} declares pieces ({}); --no-depends would leave them outside depends; name them \
-         again with --depends",
+         again with --depends, or clear them with --no-pieces or --rm-piece",
         task.id,
         stranded.join(", ")
     )))

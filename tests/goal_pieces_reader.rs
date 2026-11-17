@@ -285,9 +285,11 @@ fn pieces_reader_edit_lane_refuses() {
 
 #[test]
 fn pieces_reader_editor_guard() {
+    // Writer stage: an editor save may change pieces, but never break the subset rule.
     let Two { env, aa, bb } = two();
     let x = add(&env, &bb, "Piece", &[]);
     let y = add(&env, &bb, "Other", &[]);
+    let z = add(&env, &bb, "Not a dependency", &[]);
     let hub = add(&env, &aa, "Hub", &[]);
     env.json(&aa, &["dep", &hub, "--on", &x, "--on", &y]);
     raw(&env, &aa, &hub, "pieces", &[&x]);
@@ -296,16 +298,13 @@ fn pieces_reader_editor_guard() {
         &env,
         &aa,
         &hub,
-        &format!("s/^pieces: .*/pieces: [{x}, {y}]/"),
+        &format!("s/^pieces: .*/pieces: [{x}, {z}]/"),
     );
     assert!(
-        added.contains("pieces writers are not enabled yet"),
+        added.contains(&format!(
+            "piece {z} is not a dependency of {hub}; a piece must stay a dependency"
+        )),
         "{added}"
-    );
-    let removed = editor_fail(&env, &aa, &hub, "/^pieces: /d");
-    assert!(
-        removed.contains("pieces writers are not enabled yet"),
-        "{removed}"
     );
     let unlinked = editor_fail(&env, &aa, &hub, &format!("s/^depends: .*/depends: [{y}]/"));
     assert!(

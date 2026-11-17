@@ -315,6 +315,10 @@ pub struct FieldArgs {
     /// Continue earlier work (repeatable); edit appends to the list.
     #[arg(long = "follows", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
     pub follows: Vec<String>,
+    /// Declare a foreign task part of this goal (repeatable); it also becomes a
+    /// dependency. On `edit` this appends; see `--rm-piece` and `--no-pieces`.
+    #[arg(long = "piece", value_name = "REF", add = ArgValueCompleter::new(crate::complete::foreign_resolvable))]
+    pub pieces: Vec<String>,
     #[arg(long)]
     pub spec: Option<String>,
     #[arg(long)]
@@ -345,7 +349,8 @@ pub struct EditArgs {
         "no_awaiting_user", "no_every", "no_defer", "no_source", "no_agent",
         "no_spec", "no_plan", "no_step", "no_complexity", "no_process", "no_origin", "model",
         "no_model", "rm_tags", "no_tags", "rm_needs", "no_needs", "no_depends",
-        "rm_related", "no_related", "follows", "rm_follows", "no_follows",
+        "rm_related", "no_related", "follows", "rm_follows", "no_follows", "pieces",
+        "rm_pieces", "no_pieces",
         "refs", "body", "priority", "size", "complexity", "process", "origin", "parallel",
         "lane", "every", "defer", "tags", "needs", "depends", "related", "spec", "plan",
         "step", "parent", "source", "agent"
@@ -465,6 +470,12 @@ pub struct EditArgs {
     /// Clear all continuation links.
     #[arg(long, conflicts_with_all = ["follows", "rm_follows"])]
     pub no_follows: bool,
+    /// Unmark a declared piece (repeatable); it stays a dependency.
+    #[arg(long = "rm-piece", value_name = "REF", conflicts_with = "no_pieces", add = ArgValueCompleter::new(crate::complete::pieces))]
+    pub rm_pieces: Vec<String>,
+    /// Unmark every declared piece; they stay dependencies.
+    #[arg(long, conflicts_with_all = ["pieces", "rm_pieces"])]
+    pub no_pieces: bool,
     #[command(flatten)]
     pub fields: FieldArgs,
 }

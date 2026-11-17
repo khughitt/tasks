@@ -640,6 +640,22 @@ pub fn destination_ids(current: &OsStr) -> Vec<CompletionCandidate> {
 /// `apply_fields` and `dep::run` both build their `Resolver` on the project being written
 /// to, so a worktree's own ids are the ones `add --project` would reject.
 pub fn resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
+    resolvable_where(current, |_, _| true)
+}
+
+/// `--piece`: resolvable ids outside the written record's own project, since a piece is
+/// always foreign.
+pub fn foreign_resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
+    resolvable_where(current, |task, own| {
+        own.is_none_or(|own| task.id.prefix != own)
+    })
+}
+
+/// Resolvable candidates that `keep` accepts, given the written record's project prefix.
+fn resolvable_where(
+    current: &OsStr,
+    keep: impl Fn(&Task, Option<&str>) -> bool,
+) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
     };
@@ -661,12 +677,23 @@ pub fn resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
     if let Some(subject) = &line.subject {
         tasks.retain(|task| &task.id != subject);
     }
+    tasks.retain(|task| keep(task, base_prefix.as_deref()));
     candidates(tasks, current, prefix.as_deref())
 }
 
 /// `dep --rm`: only what the task already depends on. Removal does not resolve ids, so an
 /// unreachable dependency stays a candidate and simply loses its description.
 pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
+    own_ids(current, |task| &task.depends)
+}
+
+/// `--rm-piece`: only the record's own declared pieces, as `dependencies` offers its
+/// dependencies.
+pub fn pieces(current: &OsStr) -> Vec<CompletionCandidate> {
+    own_ids(current, |task| &task.pieces)
+}
+
+fn own_ids(current: &OsStr, list: impl Fn(&Task) -> &[TaskId]) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
     };
@@ -682,8 +709,7 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
     let mut resolver = crate::resolve::Resolver::new(&project, &registry, &host);
     resolver.set_fetch(crate::resolve::Fetch::Disabled);
     let local = local_prefix(&line);
-    let mut resolved: Vec<(TaskId, Option<Task>, Vec<String>)> = task
-        .depends
+    let mut resolved: Vec<(TaskId, Option<Task>, Vec<String>)> = list(&task)
         .iter()
         .map(|id| (id, offers(id, current, local.as_deref())))
         .filter(|(_, offered)| !offered.is_empty())

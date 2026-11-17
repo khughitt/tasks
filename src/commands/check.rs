@@ -534,6 +534,19 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                             ),
                         ));
                     }
+                    // A piece keeps its mark on the successor: declare it first, then drop
+                    // the tombstone edge, which unmarks the old spelling.
+                    Ok(Some(end)) if crate::pieces::is_piece(&ctx.registry, task, dependency) => {
+                        warnings.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "moved_dep",
+                            format!(
+                                "piece {dependency} moved to {}; run `tasks edit {} --piece {}`, then `tasks dep {} --rm {dependency}`",
+                                end.id, task.id, end.id, task.id
+                            ),
+                        ));
+                    }
                     Ok(Some(end)) => warnings.push(finding(
                         Some(task),
                         file.clone(),
