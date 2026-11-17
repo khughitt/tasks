@@ -520,6 +520,35 @@ mod tests {
     }
 
     #[test]
+    fn moved_tombstone_under_goal_is_never_flagged() {
+        let goal = task("aa-000000", None, Status::Todo);
+        let mut moved = task("aa-000001", Some("aa-000000"), Status::Moved);
+        moved.updated = "2026-09-01T00:00:00Z".into();
+        let park = Park {
+            owner: "o".into(),
+            session: "s".into(),
+            host: "h".into(),
+            worktree: "/w".into(),
+            at: "2026-09-01T00:00:00Z".into(),
+            next_step: "next".into(),
+            waiting_on: WaitingOn::User,
+            reason: None,
+            needs: None,
+            minutes: None,
+            title: "aa-000001".into(),
+        };
+        let claims = ClaimSnapshot::from_parts(
+            BTreeMap::new(),
+            BTreeMap::from([("aa-000001".to_string(), park)]),
+            BTreeMap::new(),
+        );
+        let all = vec![goal.clone(), moved];
+        let now = crate::time::parse("2026-11-01T00:00:00Z").unwrap();
+        let flags = attention(&goal, &all, &claims, &Registry::default(), now).unwrap();
+        assert_eq!(flags, None);
+    }
+
+    #[test]
     fn pieces_skip_moved_shelved_and_dropped() {
         let records = [
             task("aa-000001", Some("aa-000000"), Status::Moved),

@@ -1180,6 +1180,178 @@ fn goals_pretty_contract_legend_keeps_relocated_categories() {
 }
 
 #[test]
+fn pretty_attention_styles_you_bold_red_blocked_red_stalled_yellow() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let g = add(&env, &aa, "Goal", &["--origin", "user"]);
+    let stalled = add(&env, &aa, "stalled", &["--parent", &g]);
+    let blocked = add(&env, &aa, "blocked", &["--parent", &g]);
+    let you = add(&env, &aa, "you", &["--parent", &g]);
+    doing(&env, &aa, "aa", &stalled);
+    set_field(&aa, &stalled, "updated", Some(&ago(4)));
+    env.json(&aa, &["block", &blocked, "waiting"]);
+    park(&env, &aa, &you, &["--waiting-on", "user"]);
+    let output = env
+        .cmd(&aa)
+        .env("COLUMNS", "160")
+        .args(["goals", "--pretty", "--color", "always"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains(&format!("\x1b[33m1 stalled ({stalled}, 4d)\x1b[0m")),
+        "{text:?}"
+    );
+    assert!(
+        text.contains(&format!("\x1b[31m1 blocked ({blocked})\x1b[0m")),
+        "{text:?}"
+    );
+    assert!(
+        text.contains(&format!("\x1b[1;31m1 you ({you})\x1b[0m")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn pretty_footer_names_host_local_park_and_claim_evidence() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, _) = goal_with_child(&env, &aa, "Goal");
+    let json = goals(&env, &aa, &[]);
+    let host = json["park_evidence"]["host"].as_str().unwrap();
+    let text = pretty(&env, &aa);
+    let expected =
+        format!("parks and claims: host-local evidence from {host} (drives stalled and you)");
+    assert!(
+        text.contains(&expected),
+        "expected {expected:?} in:\n{text}"
+    );
+    assert!(
+        text.find(&g).unwrap() < text.find("parks and claims:").unwrap(),
+        "{text}"
+    );
+}
+
+#[test]
+fn future_stamp_goal_sorts_first_without_stalling() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (recent, _) = goal_with_child(&env, &aa, "Recent");
+    let (future, future_leaf) = goal_with_child(&env, &aa, "Future");
+    doing(&env, &aa, "aa", &future_leaf);
+    set_field(&aa, &future_leaf, "updated", Some("2099-01-01T00:00:00Z"));
+    let out = goals(&env, &aa, &[]);
+    assert_eq!(ids(&out), [future.clone(), recent.clone()]);
+    assert_eq!(row(&out, &future)["last_activity"], "2099-01-01T00:00:00Z");
+    assert_eq!(attention(&out, &future), Value::Null);
+    assert_eq!(
+        ids(&goals(&env, &aa, &["--sort", "activity"])),
+        [future.clone(), recent]
+    );
+    let rendered = pretty(&env, &aa);
+    assert!(
+        line_of(&rendered, &future).contains("2099-01-01"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn moved_tombstone_under_goal_is_never_flagged() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    env.init("bb");
+    let g = add(&env, &aa, "G", &["--origin", "user"]);
+    add(&env, &aa, "active", &["--parent", &g]);
+    let moved = add(&env, &aa, "moved", &["--parent", &g]);
+    park(&env, &aa, &moved, &["--waiting-on", "user"]);
+    let store = std::fs::read_to_string(env.claim_store("aa")).unwrap();
+    env.json(&aa, &["start", &moved]);
+    env.json(&aa, &["park", &moved, "clear"]);
+    env.json(&aa, &["edit", &moved, "--no-parent"]);
+    env.json(&aa, &["move", &moved, "--to", "bb"]);
+    // Legacy or hand-edited tombstone still naming the goal as parent with a leftover user park.
+    set_field(&aa, &moved, "parent", Some(&g));
+    set_field(&aa, &moved, "updated", Some(&ago(5)));
+    std::fs::write(env.claim_store("aa"), store).unwrap();
+    let out = goals(&env, &aa, &["--project", "aa"]);
+    assert_eq!(
+        row(&out, &g)["pieces"],
+        serde_json::json!({"done": 0, "total": 1})
+    );
+    assert_eq!(attention(&out, &g), Value::Null);
+}
+
+#[test]
+fn doing_goal_waiting_on_dependency_park_is_not_stalled() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, leaf) = goal_with_child(&env, &aa, "G");
+    doing(&env, &aa, "aa", &g);
+    park(&env, &aa, &leaf, &["--reason", "dependency"]);
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &leaf, &stamp);
+    for id in [&g, &leaf] {
+        set_field(&aa, id, "updated", Some(&stamp));
+    }
+    assert_eq!(attention(&goals(&env, &aa, &[]), &g), Value::Null);
+}
+
+#[test]
+fn shelved_user_parked_descendant_does_not_exempt_doing_goal() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, shelved) = goal_with_child(&env, &aa, "G");
+    let other = add(&env, &aa, "other", &["--parent", &g]);
+    doing(&env, &aa, "aa", &g);
+    park(&env, &aa, &shelved, &["--waiting-on", "user"]);
+    let store = std::fs::read_to_string(env.claim_store("aa")).unwrap();
+    env.json(&aa, &["shelve", &shelved, "--defer", "2099-01-01", "later"]);
+    std::fs::write(env.claim_store("aa"), store).unwrap();
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &shelved, &stamp);
+    for id in [&g, &shelved, &other] {
+        set_field(&aa, id, "updated", Some(&stamp));
+    }
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert!(flags.get("you").is_none(), "{flags}");
+    assert_eq!(
+        flags["stalled"],
+        serde_json::json!({"count": 1, "first": g, "since": stamp})
+    );
+}
+
+#[test]
+fn stale_doing_sibling_still_flagged_beside_named_wait() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let (g, waiting) = goal_with_child(&env, &aa, "G");
+    let stale = add(&env, &aa, "stale", &["--parent", &g]);
+    doing(&env, &aa, "aa", &g);
+    doing(&env, &aa, "aa", &stale);
+    park(
+        &env,
+        &aa,
+        &waiting,
+        &["--waiting-on", "user", "--reason", "review"],
+    );
+    let stamp = ago(4);
+    set_park_at(&env, "aa", &waiting, &stamp);
+    for id in [&g, &waiting, &stale] {
+        set_field(&aa, id, "updated", Some(&stamp));
+    }
+    let flags = attention(&goals(&env, &aa, &[]), &g);
+    assert_eq!(
+        flags["you"],
+        serde_json::json!({"count": 1, "first": waiting, "since": stamp})
+    );
+    assert_eq!(
+        flags["stalled"],
+        serde_json::json!({"count": 1, "first": stale, "since": stamp})
+    );
+}
+
+#[test]
 fn goals_pretty_contract_invalid_width_stays_an_error() {
     let mut env = TestEnv::new();
     let aa = env.init("aa");

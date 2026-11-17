@@ -86,7 +86,8 @@ mean those documents were verified.
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
    `tasks goals` is the person's goals report, not a picker: user or mixed-origin
-   goals across registered projects, grouped by canonical project prefix A–Z and
+   goals across registered projects (`--project <prefix>` or `--group <name>` narrows
+   it; `--all-projects` is the default), grouped by canonical project prefix A–Z and
    then newest subtree activity. `--sort activity` gives global newest activity;
    `--sort priority` gives P0 first, then newest activity. `--reverse` reverses all
    keys within each section; open goals stay before closed ones. Progress counts
@@ -96,7 +97,8 @@ mean those documents were verified.
    fractions do not change JSON's open/total/unresolved fields; only array order
    follows the selected sort. A leading legend describes the selected order and
    present counters, including categories moved to labelled details on narrow
-   terminals. Titles clip with `…` at available width, capped at 80 display cells;
+   terminals, and a footer notes that park and claim evidence behind `stalled` and
+   `you` is this host's. Titles clip with `…` at available width, capped at 80 display cells;
    JSON and `show` retain full titles. Headers remain optional. `--closed` adds goals
    closed in the last 14 days in a final section, ordered by closure date within the
    selected mode; the intro names that date distinction. When filing a goal the
@@ -321,7 +323,7 @@ Project identity colors are assigned by an optional top-level `color = "#RRGGBB"
 invalid values fail with a typed config error. Change the value to recolor or remove the
 key to restore existing styling. Init/reinitialization and prefix rename preserve it.
 Pretty output paints a project's name in that RGB: prefixes in
-`projects`, `groups` and `where`; task ids and titles in table views, and in `show`/`next`
+`projects`, `groups` and `where`; task ids and titles in table views (including `goals`), and in `show`/`next`
 (the overview line included) by the project each id belongs to. IDs use a fixed shade
 mixed 30% toward white from the project color. Activity-aware titles use an independent
 lightness range and may be lighter than IDs; higher activity increases contrast toward

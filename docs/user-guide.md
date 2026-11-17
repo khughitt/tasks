@@ -92,9 +92,11 @@ work order. Read commands do not acquire claims or perform lifecycle transitions
 `parent` expresses same-project containment. A task with children is a goal;
 it does not become ready itself. `depends` expresses execution order and may
 cross projects. Neither relation implies the other, and cycles are refused.
-`goals` reports user or mixed-origin goals and their descendants (done goals are
-left out unless `--closed` adds those closed in the last 14 days); dependency
-counts are reported separately and do not redefine the goal's intended scope.
+`goals` reports user or mixed-origin goals and their descendants across
+registered projects (`--project` and `--group` narrow it; `--all-projects` is
+the default; done goals are left out unless `--closed` adds those closed in the
+last 14 days); dependency counts are reported separately and do not redefine
+the goal's intended scope.
 
 The default `goals --sort project` groups canonical project prefixes A–Z, then
 shows newest subtree activity (the newest update on the goal or any descendant).
@@ -116,8 +118,10 @@ its existing open/total/unresolved fields. Optional counter columns appear only
 when a category exists anywhere in the displayed open and closed report.
 
 The selected sort and counter legend appear before data, including with headers
-off. Long titles end in `…` to fit the available space, capped at 80 display cells.
-Attention, then secondary counters, then core metadata move into labelled row
+off, and a footer notes that parks and claims are host-local evidence from the
+running host. Long titles end in `…` to fit the available space, capped at 80
+display cells. Attention (`stalled` in yellow, `blocked` in red, `you` in bold
+red), then secondary counters, then core metadata move into labelled row
 details as space tightens; their legend clauses remain present. `COLUMNS` overrides
 the attached terminal width and must be a positive integer. Pipes with no known
 width keep one row per goal with the title cap; JSON and `tasks show <id>` preserve
@@ -216,8 +220,9 @@ age is not a measurement of how long a person has been blocked.
 ## Route across projects
 
 The default scope is the current project, including a recognized worktree or
-linked checkout. `--project`, `--group` and `--all-projects` are mutually exclusive
-explicit scopes. An explicit scope wins over an id's prefix for scoped reads;
+linked checkout (`quiet` and `goals` instead read all reachable registered
+projects unless `--project` or `--group` narrows them). `--project`, `--group`
+and `--all-projects` are mutually exclusive explicit scopes. An explicit scope wins over an id's prefix for scoped reads;
 otherwise a foreign full id can route through the registry. Id-directed writes
 lock and mutate the target project. A malformed local config is an error, not a
 reason to retry against some other root. Foreign reads normally see the registered
