@@ -1,18 +1,45 @@
 //! `tasks goals`: the goals the user asked for, across projects (records spec
-//! docs/user-guide.md).
+//! docs/user-guide.md). Every number counts the goal's members, read through the registry
+//! whatever the scope, so narrowing never changes a row (docs/task-model.md).
 
 use super::ReadCtx;
 use crate::error::Result;
+use crate::membership::Membership;
 use crate::output::{GoalsOut, Output, ParkEvidence};
+use std::collections::BTreeSet;
 
 /// `closed` adds the goals closed inside [`crate::goals::CLOSED_WINDOW`].
 pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Result<Output> {
-    let (all, claims) = ctx.scan_with_claims()?;
+    let all = ctx.scope.scan()?;
+    let prefixes = ctx.scope.prefixes();
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;
-    let goals = crate::goals::goal_rows(&all, &claims, &ctx.registry, now, closed, order, |id| {
-        super::list::scan_lookup(&ctx, &all, id)
-    })?;
+    let mut membership = Membership::new(&ctx.registry, &prefixes, &all);
+    // Only active goals carry attention, so only their members widen the claim stores.
+    let (active, _) = crate::goals::shown(&all, &ctx.registry, now, closed);
+    for goal in active {
+        membership.members(goal)?;
+    }
+    let stores: BTreeSet<String> = prefixes
+        .into_iter()
+        .chain(membership.reached_prefixes())
+        .collect();
+    let claims = crate::claims::ClaimSnapshot::load(stores.iter().map(String::as_str))?;
+    let goals = crate::goals::goal_rows(
+        &all,
+        &mut membership,
+        &claims,
+        &ctx.registry,
+        now,
+        closed,
+        order,
+    )?;
+    // A project the scope already reported as unreachable is not reported twice.
+    for warning in membership.take_warnings() {
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
     let colors = ctx.project_colors();
     let mut out = Output::Goals(GoalsOut {
         include_closed: closed,

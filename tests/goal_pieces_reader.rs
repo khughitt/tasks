@@ -222,6 +222,10 @@ fn pieces_reader_all_dropped_hub_closes() {
     env.json(&bb, &["drop", &x, "no longer needed"]);
     let prime = env.json(&aa, &["prime"]);
     assert_eq!(ids(&prime["closeout"]), [hub.clone()], "{prime}");
+    let out = env.json(&aa, &["goals"]);
+    let row = goal_row(&out, &hub);
+    assert_eq!(row["pieces"], json!({"done": 0, "total": 0}), "{row}");
+    assert!(row.get("dependencies").is_none(), "{row}");
     env.json(&aa, &["done", &hub, "met"]);
 }
 
@@ -416,4 +420,332 @@ fn pieces_reader_blockers_classify_hub_as_goal() {
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
+}
+
+// ---- goals: membership in every goal number (spec §6) ----
+
+fn goal_row<'a>(out: &'a Value, id: &str) -> &'a Value {
+    out["goals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .unwrap_or_else(|| panic!("no goal row for {id}: {out}"))
+}
+
+/// Rewrites the `<field>: ` frontmatter line of `tasks/<id>.md`, or inserts it before the
+/// closing `---` when absent.
+fn set_field(dir: &Path, id: &str, field: &str, value: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let prefix = format!("{field}:");
+    let mut lines: Vec<String> = Vec::new();
+    let (mut fence, mut found) = (0, false);
+    for line in text.lines() {
+        if line == "---" {
+            fence += 1;
+            if fence == 2 && !found {
+                lines.push(format!("{field}: {value}"));
+                found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+        if fence == 1 && line.starts_with(&prefix) {
+            found = true;
+            lines.push(format!("{field}: {value}"));
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+}
+
+fn ago(days: i64) -> String {
+    let at = time::OffsetDateTime::now_utc() - time::Duration::days(days);
+    at.replace_nanosecond(0)
+        .unwrap()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap()
+}
+
+fn squash(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn line_of<'a>(text: &'a str, id: &str) -> &'a str {
+    text.lines()
+        .find(|line| line.split_whitespace().next() == Some(id))
+        .unwrap_or_else(|| panic!("no line for {id}: {text}"))
+}
+
+/// Goal `aa-g` (user) with done child `aa-c`, done piece `bb-p` with one open child
+/// `bb-q`, and open prerequisite `cc-r` that is not a piece.
+struct Fixture {
+    env: TestEnv,
+    aa: PathBuf,
+    bb: PathBuf,
+    cc: PathBuf,
+    g: String,
+    p: String,
+    q: String,
+}
+
+fn fixture() -> Fixture {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let cc = env.init("cc");
+    let p = add(&env, &bb, "Piece", &[]);
+    let q = add(&env, &bb, "Piece child", &["--parent", &p]);
+    let r = add(&env, &cc, "Prerequisite", &[]);
+    let g = hub(&env, &aa, "Goal", &["--origin", "user"], &[&p]);
+    env.json(&aa, &["dep", &g, "--on", &r]);
+    let c = add(&env, &aa, "Child", &["--parent", &g]);
+    env.json(&aa, &["done", &c, "done"]);
+    set_field(&bb, &p, "status", "done");
+    Fixture {
+        env,
+        aa,
+        bb,
+        cc,
+        g,
+        p,
+        q,
+    }
+}
+
+#[test]
+fn pieces_reader_goals_progress_and_prereqs() {
+    let f = fixture();
+    let out = f.env.json(&f.aa, &["goals"]);
+    let row = goal_row(&out, &f.g);
+    assert_eq!(row["pieces"], json!({"done": 2, "total": 3}), "{row}");
+    assert_eq!(row["dependencies"], json!({"open": 1, "total": 1}), "{row}");
+}
+
+#[test]
+fn pieces_reader_goals_piece_prereq_enters_count() {
+    let f = fixture();
+    let s = add(&f.env, &f.cc, "Piece prerequisite", &[]);
+    f.env.json(&f.bb, &["dep", &f.q, "--on", &s]);
+    let out = f.env.json(&f.aa, &["goals"]);
+    let row = goal_row(&out, &f.g);
+    assert_eq!(row["dependencies"], json!({"open": 2, "total": 2}), "{row}");
+}
+
+#[test]
+fn pieces_reader_goals_unresolved_piece_in_unres() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    let g = hub(&env, &aa, "Goal", &["--origin", "user"], &[&x]);
+    let before = goal_row(&env.json(&aa, &["goals"]), &g)["pieces"].clone();
+    let missing = format!("bb-{}", if x.ends_with('0') { "fffff1" } else { "fffff0" });
+    set_field(&aa, &g, "depends", &format!("[{x}, {missing}, zz-000001]"));
+    set_field(&aa, &g, "pieces", &format!("[{x}, {missing}, zz-000001]"));
+    let out = env.json(&aa, &["goals"]);
+    let row = goal_row(&out, &g);
+    assert_eq!(row["dependencies"]["unresolved"], 2, "{row}");
+    assert_eq!(row["pieces"], before, "{row}");
+    assert!(
+        warnings(&out).contains(&"project zz is not registered on this host".to_string()),
+        "{out}"
+    );
+    let text = env.pretty(&aa, &["goals", "--color", "never"]);
+    assert!(line_of(&text, &g).contains("?2"), "{text}");
+}
+
+#[test]
+fn pieces_reader_goals_subgoal_pieces_count_for_umbrella() {
+    let Two { env, aa, bb } = two();
+    let p = add(&env, &bb, "Piece", &[]);
+    let u = add(&env, &aa, "Umbrella", &["--origin", "user"]);
+    let s = hub(&env, &aa, "Sub-goal", &["--parent", &u], &[&p]);
+    let out = env.json(&aa, &["goals"]);
+    let row = goal_row(&out, &u);
+    // The sub-goal and its piece: both open.
+    assert_eq!(row["pieces"], json!({"done": 0, "total": 2}), "{row}");
+    assert!(row.get("dependencies").is_none(), "{row}");
+    let _ = s;
+}
+
+#[test]
+fn pieces_reader_goals_scope_narrowing_stable() {
+    let f = fixture();
+    let parked = add(&f.env, &f.bb, "Parked on user", &["--parent", &f.p]);
+    let old = add(&f.env, &f.bb, "Old doing", &["--parent", &f.p]);
+    f.env.json(&f.bb, &["edit", &old, "--status", "doing"]);
+    let _ = std::fs::remove_file(f.env.claim_store("bb"));
+    set_field(&f.bb, &old, "updated", &ago(10));
+    common::write_park(&f.env, "bb", &parked, "s1", "user", "/w");
+    let narrow = f.env.json(&f.aa, &["goals", "--project", "aa"]);
+    let wide = f.env.json(&f.aa, &["goals", "--all-projects"]);
+    let (narrow, wide) = (goal_row(&narrow, &f.g), goal_row(&wide, &f.g));
+    for key in ["pieces", "dependencies", "last_activity", "attention"] {
+        assert_eq!(narrow[key], wide[key], "{key}: {narrow} vs {wide}");
+    }
+    assert_eq!(wide["attention"]["you"]["first"], json!(parked), "{wide}");
+    assert_eq!(wide["attention"]["stalled"]["first"], json!(old), "{wide}");
+}
+
+#[test]
+fn pieces_reader_goals_paused_lane_dedup() {
+    let Two { env, aa, bb } = two();
+    let lane_b = add(&env, &bb, "B lane", &["--lane"]);
+    let m1 = add(&env, &bb, "M1", &["--parent", &lane_b]);
+    let m2 = add(&env, &bb, "M2", &["--parent", &lane_b]);
+    let lane_a = add(&env, &aa, "A lane", &["--lane"]);
+    let g = hub(
+        &env,
+        &aa,
+        "Goal",
+        &["--origin", "user", "--parent", &lane_a],
+        &[&m1, &m2],
+    );
+    env.json(&bb, &["block", &lane_b, "why"]);
+    env.json(&aa, &["block", &lane_a, "why"]);
+    set_field(&aa, &lane_a, "updated", &ago(10));
+    set_field(&bb, &lane_b, "updated", &ago(5));
+    let out = env.json(&aa, &["goals"]);
+    let row = goal_row(&out, &g);
+    assert_eq!(row["attention"]["blocked"]["count"], 2, "{row}");
+    let text = env.pretty(&aa, &["goals", "--color", "never"]);
+    assert!(
+        squash(&text).contains(&format!("2 blocked ({lane_a}, paused lane)")),
+        "{text}"
+    );
+}
+
+#[test]
+fn pieces_reader_goals_last_activity_from_piece() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    let g = hub(&env, &aa, "Goal", &["--origin", "user"], &[&x]);
+    set_field(&aa, &g, "updated", &ago(20));
+    let stamp = ago(1);
+    set_field(&bb, &x, "updated", &stamp);
+    let out = env.json(&aa, &["goals"]);
+    assert_eq!(goal_row(&out, &g)["last_activity"], json!(stamp), "{out}");
+}
+
+#[test]
+fn pieces_reader_foreign_scan_error_names_project() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    hub(&env, &aa, "Goal", &["--origin", "user"], &[&x]);
+    std::fs::write(
+        bb.join("tasks/bb-ffffff.md"),
+        "---\nid: bb-ffffff\ntitle: [\n---\n",
+    )
+    .unwrap();
+    let err = stderr_of(&env, &aa, &["goals", "--project", "aa"]);
+    assert!(err.contains("project bb"), "{err}");
+}
+
+#[test]
+fn pieces_reader_alias_spelling_counts_once() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    let g = hub(&env, &aa, "Goal", &["--origin", "user"], &[&x]);
+    env.json(&bb, &["done", &x, "done"]);
+    env.json(&bb, &["rename", "bb", "cc"]);
+    let out = env.json(&aa, &["goals"]);
+    let row = goal_row(&out, &g);
+    assert_eq!(row["pieces"], json!({"done": 1, "total": 1}), "{row}");
+    assert!(row.get("dependencies").is_none(), "{row}");
+}
+
+#[test]
+fn pieces_reader_goals_skip_unshown_goals() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let mm = env.init("mm");
+    let m = add(&env, &mm, "Piece", &[]);
+    let mut goals = Vec::new();
+    for title in ["Dropped", "Shelved", "Old done"] {
+        let g = add(&env, &aa, title, &["--origin", "user"]);
+        set_field(&aa, &g, "depends", &format!("[{m}, zz-000001]"));
+        set_field(&aa, &g, "pieces", &format!("[{m}, zz-000001]"));
+        goals.push(g);
+    }
+    set_field(&aa, &goals[0], "status", "dropped");
+    set_field(&aa, &goals[1], "status", "shelved");
+    set_field(&aa, &goals[1], "defer", "2099-01-01");
+    set_field(&aa, &goals[2], "status", "done");
+    set_field(&aa, &goals[2], "completed", &ago(30));
+    set_field(&aa, &goals[2], "closed", &ago(30));
+    std::fs::write(
+        mm.join("tasks/mm-ffffff.md"),
+        "---\nid: mm-ffffff\ntitle: [\n---\n",
+    )
+    .unwrap();
+    for args in [
+        &["goals", "--project", "aa"][..],
+        &["goals", "--project", "aa", "--closed"],
+    ] {
+        let out = env.json(&aa, args);
+        assert!(
+            !warnings(&out)
+                .iter()
+                .any(|w| w.contains("project zz") || w.contains("project mm")),
+            "{args:?}: {out}"
+        );
+    }
+}
+
+#[test]
+fn pieces_reader_goals_no_duplicate_unreachable_warning() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let nn = env.init("nn");
+    let g = add(&env, &aa, "Goal", &["--origin", "user"]);
+    set_field(&aa, &g, "depends", "[nn-000001]");
+    set_field(&aa, &g, "pieces", "[nn-000001]");
+    std::fs::remove_dir_all(&nn).unwrap();
+    let out = env.json(&aa, &["goals", "--all-projects"]);
+    let about: Vec<String> = warnings(&out)
+        .into_iter()
+        .filter(|w| w.contains("project nn"))
+        .collect();
+    assert_eq!(about.len(), 1, "{out}");
+    assert_eq!(goal_row(&out, &g)["dependencies"]["unresolved"], 1, "{out}");
+}
+
+#[test]
+fn pieces_reader_goals_local_unregistered_and_empty_projects() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let _ee = env.init("ee");
+    let xx = env.init("xx");
+    // Unregister xx: its checkout stays, the registry forgets it.
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    registry["projects"].as_table_mut().unwrap().remove("xx");
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+    let g = add(&env, &aa, "Goal", &["--origin", "user"]);
+    set_field(&aa, &g, "depends", "[ee-000001]");
+    set_field(&aa, &g, "pieces", "[ee-000001]");
+    for dir in [&aa, &xx] {
+        let out = env.json(dir, &["goals"]);
+        assert!(
+            !warnings(&out)
+                .iter()
+                .any(|w| w.contains("is not registered on this host")),
+            "{out}"
+        );
+        assert_eq!(goal_row(&out, &g)["dependencies"]["unresolved"], 1, "{out}");
+    }
+}
+
+#[test]
+fn pieces_reader_goals_legend() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    hub(&env, &aa, "Goal", &["--origin", "user"], &[&x]);
+    let text = env.pretty(&aa, &["goals", "--color", "never"]);
+    assert!(
+        squash(&text).contains("work: done/total descendants and declared pieces"),
+        "{text}"
+    );
 }

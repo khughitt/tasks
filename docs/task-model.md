@@ -53,6 +53,7 @@ optional booleans false, and other optional values absent.
 | `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. Written by add/edit --related, edit --rm-related and edit --no-related. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
 | `follows` | Optional ordered task-id list for additional work continuing earlier work; foreign ids allowed. Explicit add/edit writers append; edit removes or clears, and editor changes validate. No inference or historical conversion. Never gates execution or review. |
+| `pieces` | Foreign tasks that are part of this goal; each is also in `depends`. |
 | `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status and `updated` timestamp; that display reads the record and changes nothing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |
 | `origin` | Current judgment `user`, `agent`, `mixed`; absent means unknown. |
@@ -257,3 +258,29 @@ Prefix rename rewrites local follows ids. Move preserves the list on the success
 and clears the tombstone; inbound stored links remain unchanged. Migration remaps
 carried targets and records `follows OLD carried as NEW`; uncarried targets retain
 their references. Follows never acts as a migration prerequisite.
+
+## Goal pieces
+
+A goal is a record with children, a lane, or a record that declares `pieces`. `pieces`
+lists foreign tasks that are part of the goal: every id is in another project (a
+same-project piece is a child), every piece is also one of the record's `depends`, and
+there are no self-links or canonical duplicates. A lane cannot carry pieces. Parsing
+checks id syntax only; `check` diagnoses the rest. Empty lists are omitted from
+frontmatter and full Task JSON. No command infers or backfills pieces.
+
+Because a piece stays a dependency, readiness, `done`'s `open_dependencies` refusal and
+blocker traversal treat it as before. A record that declares pieces is never offered by
+`ready` or `next` and is not unassessed review work; it reaches closeout once it has no
+open children and every dependency is satisfied. A goal still waiting on one of its own
+pieces stays out of closeout silently; one held only by other prerequisites is named in
+a warning. `dep --rm` of a piece also unmarks it; `edit --no-depends` that would strand
+a piece and `edit --lane` on a record with pieces are refused.
+
+A goal's members are every record reachable from it by repeatedly following `parent`
+children (same project) and declared pieces (resolved through moves), excluding the goal
+itself, so a foreign piece that is itself a goal contributes its own members. `goals`
+counts progress, activity and attention over members, and counts as dependencies only
+targets outside the membership. A piece no record answers, including one in an
+unreachable or unregistered project, is not a member; as a dependency it is counted as
+unresolved, never done or open. Members are read through the registry whatever the
+requested scope.

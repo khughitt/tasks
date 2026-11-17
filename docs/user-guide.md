@@ -96,25 +96,29 @@ cross projects. Neither relation implies the other, and cycles are refused.
 `dependent` rows), open and closed. Plain `show` finds those in its own project;
 `show --all-projects` also searches every reachable registered project, such as a
 hub goal elsewhere that depends on a cross-project piece. `next` uses its own scope.
-`goals` reports user or mixed-origin goals and their descendants across
-registered projects (`--project` and `--group` narrow it; `--all-projects` is
-the default; done goals are left out unless `--closed` adds those closed in the
-last 14 days); dependency counts are reported separately and do not redefine
-the goal's intended scope.
+`goals` reports user or mixed-origin goals and their members across registered
+projects (`--project` and `--group` narrow which goals are listed; `--all-projects`
+is the default; done goals are left out unless `--closed` adds those closed in the
+last 14 days). A goal's members are its descendants plus its declared `pieces` and
+their members, in any project ([task model](task-model.md#goal-pieces)); they are
+read through the registry whatever the scope, so narrowing never changes a row's
+numbers. Dependency counts are reported separately and do not redefine the goal's
+intended scope.
 
 The default `goals --sort project` groups canonical project prefixes A–Z, then
-shows newest subtree activity (the newest update on the goal or any descendant).
+shows newest activity (the newest update on the goal or any member).
 `--sort activity` instead ranks all goals by activity; `--sort priority` ranks P0
-first, then activity. Open ties use descendant total descending and id ascending.
+first, then activity. Open ties use work total descending and id ascending.
 `--reverse` reverses every key, including ties, within each open/closed section;
 it never moves closed goals ahead of open ones. Under `--closed`, closed rows use
 closure dates instead of activity and tie on id, without a descendant-total key.
 Sorting applies to JSON array order too; no JSON fields or counts change.
 
 Pretty progress uses separate aligned columns: `work` is done/total committed
-descendants, `+N` counts ideas, `deps` is satisfied/total distinct prerequisites
-outside the subtree, and `?N` counts unresolved prerequisites (`unres` with headers).
-Work includes done, todo, doing and blocked descendants, excluding the goal itself,
+descendants and declared pieces, `+N` counts ideas, `deps` is satisfied/total distinct
+prerequisites outside the membership, and `?N` counts unresolved prerequisites,
+including declared pieces no record answers (`unres` with headers).
+Work includes done, todo, doing and blocked members, excluding the goal itself,
 ideas, shelved, dropped and moved tasks. Dependency satisfied count is total minus
 open minus unresolved; unknown targets never count as satisfied. Fully satisfied
 sets remain visible as N/N, and rows without prerequisites show a dash. JSON keeps

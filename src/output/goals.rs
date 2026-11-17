@@ -72,7 +72,7 @@ fn attention(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Str
         ));
     }
     if let Some(flag) = &flags.blocked {
-        let lane = if flags.paused_lane.as_deref() == Some(flag.first.as_str()) {
+        let lane = if flags.paused_lane.contains(&flag.first) {
             ", paused lane"
         } else {
             ""
@@ -258,7 +258,7 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
     if out.include_closed {
         text.push_str(&paragraph("closed rows use closure date", painter, layout));
     }
-    let mut legend = vec!["work: done/total descendants"];
+    let mut legend = vec!["work: done/total descendants and declared pieces"];
     if has_ideas {
         legend.push("+ideas: uncommitted");
     }
@@ -487,7 +487,7 @@ mod tests {
                 first: "material-2502a2".into(),
                 since: "2026-11-07T10:00:00Z".into(),
             }),
-            paused_lane: None,
+            paused_lane: Vec::new(),
         });
         GoalsOut {
             include_closed: false,
