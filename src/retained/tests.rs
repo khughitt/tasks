@@ -1374,3 +1374,124 @@ fn verify_artifact_and_read_record_manifest_handle_multipart_and_tampering() {
         "got: {err}"
     );
 }
+
+#[test]
+fn check_manifest_admission_defers_inaccessible_and_special_member_directories() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestorePerms(std::path::PathBuf);
+    impl Drop for RestorePerms {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let proj_undeclared = crate::repo::Project::from_config(
+        tmp.path().to_path_buf(),
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 256\n",
+    )
+    .unwrap();
+
+    // 1. Directory containing a FIFO alongside >256 bytes of entries: `placeholder_manifest_bytes`
+    //    errors, while `check_manifest_admission` defers to post-intent `kept`/`unknown`.
+    let fifo_dir = tmp.path().join("fifo-container");
+    std::fs::create_dir_all(&fifo_dir).unwrap();
+    for i in 0..8 {
+        std::fs::write(fifo_dir.join(format!("item-{i:02}.txt")), "payload").unwrap();
+    }
+    let fifo_path = fifo_dir.join("special-fifo");
+    let c_fifo = std::ffi::CString::new(fifo_path.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_fifo.as_ptr(), 0o600) }, 0);
+    assert!(super::verify::placeholder_manifest_bytes(&fifo_dir).is_err());
+    super::verify::check_manifest_admission(
+        &proj_undeclared,
+        fifo_dir.to_str().unwrap(),
+        &fifo_dir,
+    )
+    .expect("unmanifestable container must defer to post-intent unknown observation");
+
+    // 2. `0000`-mode container directory: `check_manifest_admission` returns `Ok(())`.
+    let locked_dir = tmp.path().join("locked-container");
+    std::fs::create_dir_all(&locked_dir).unwrap();
+    std::fs::write(locked_dir.join("file.txt"), "payload").unwrap();
+    let _guard = RestorePerms(locked_dir.clone());
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if unsafe { libc::geteuid() } != 0 {
+        assert!(super::verify::placeholder_manifest_bytes(&locked_dir).is_err());
+    }
+    super::verify::check_manifest_admission(
+        &proj_undeclared,
+        locked_dir.to_str().unwrap(),
+        &locked_dir,
+    )
+    .expect("0000-mode container must defer to post-intent unknown observation");
+}
+
+#[test]
+fn freshness_current_reports_unpublished_changes_before_unledgered_file() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::freshness_current_reports_unpublished_changes_before_unledgered_file",
+    ) {
+        return;
+    }
+    let (dir, project) = crate::retained::read::tests::fixture();
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", "Custody note: committed seed").unwrap();
+    let committed_raw = crate::format::serialize_physical(&project.physical_for_save(&t).unwrap());
+    std::fs::write(project.task_path(&id), &committed_raw).unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "seed task"]);
+    let pinned = super::basis::read(&project, &id, Some("HEAD")).unwrap();
+
+    // 1. Uncommitted `tasks/sci-000001.md` carrying `attached: ledgered.txt` + untracked
+    //    `tasks/files/sci-000001/ledgered.txt` must report unpublished changes, NOT unledgered file.
+    let files_dir = crate::attachments::task_dir(&project, &id);
+    std::fs::create_dir_all(&files_dir).unwrap();
+    let ledgered = files_dir.join("ledgered.txt");
+    std::fs::write(&ledgered, b"hello").unwrap();
+    let mut uncommitted_task = t.clone();
+    crate::commands::append_note(
+        &mut uncommitted_task,
+        "t",
+        &crate::attachments::attached_note("ledgered.txt", 5, None),
+    )
+    .unwrap();
+    let uncommitted_raw =
+        crate::format::serialize_physical(&project.physical_for_save(&uncommitted_task).unwrap());
+    std::fs::write(project.task_path(&id), &uncommitted_raw).unwrap();
+
+    let err = super::freshness::current(&project, &id, &pinned, true)
+        .expect_err("uncommitted task + attachment must fail freshness::current");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Task or required history has unpublished changes"),
+        "expected unpublished changes message, got: {msg}"
+    );
+    assert!(
+        !msg.contains("unledgered file"),
+        "must not tell caller to delete ledgered uncommitted file: {msg}"
+    );
+
+    // 2. Restore `tasks/sci-000001.md` to committed `HEAD`; now untracked `ledgered.txt` IS an
+    //    unledgered orphan with clean task/index and must emit the specific orphan path diagnostic.
+    std::fs::write(project.task_path(&id), &committed_raw).unwrap();
+    let err_orphan = super::freshness::current(&project, &id, &pinned, true)
+        .expect_err("untracked orphan with clean task/index must fail");
+    assert_eq!(
+        err_orphan.to_string(),
+        "Protected attachment directory tasks/files/sci-000001 contains unledgered file ledgered.txt; preserve and verify a copy outside tasks/files/sci-000001 if needed, remove the unledgered file to restore the committed preimage, and retry or reconcile"
+    );
+
+    // 3. Stage `ledgered.txt` (`git add`) while `tasks/sci-000001.md` stays at `HEAD`: staged index
+    //    change must report unpublished changes rather than unledgered file.
+    crate::retained::read::tests::git(dir.path(), &["add", "tasks/files/sci-000001/ledgered.txt"]);
+    let err_staged = super::freshness::current(&project, &id, &pinned, true)
+        .expect_err("staged attachment must fail");
+    let msg_staged = err_staged.to_string();
+    assert!(
+        msg_staged.contains("Task or required history has unpublished changes"),
+        "expected unpublished changes on staged attachment, got: {msg_staged}"
+    );
+    assert!(!msg_staged.contains("unledgered file"), "got: {msg_staged}");
+}

@@ -334,7 +334,9 @@ pub fn check_manifest_admission(
     identity_path: &str,
     root: &Path,
 ) -> Result<()> {
-    let bytes = placeholder_manifest_bytes(root)?;
+    let Ok(bytes) = placeholder_manifest_bytes(root) else {
+        return Ok(());
+    };
     let bytes_len = bytes.len() as u64;
     if bytes_len <= target_project.attachments_max_bytes {
         return Ok(());

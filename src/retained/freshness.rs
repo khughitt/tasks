@@ -631,9 +631,10 @@ pub(crate) fn current(
     now.commit = basis::resolve(&fresh, "HEAD")?;
     unchanged(&fresh, id, &pinned.basis, &now, &pinned.task)?;
     basis::read_exact(&fresh, id, &now)?;
-    if attachments {
-        working_attachments(&fresh, id, &now)?;
-    }
+    let files_dir = format!("{}/tasks/files/{id}", now.records_subdir)
+        .trim_start_matches("./")
+        .to_string();
+    let files_prefix = format!("{files_dir}/");
     let mut paths = paths(id, &now, &pinned.task);
     if !attachments {
         paths.remove(1);
@@ -647,13 +648,32 @@ pub(crate) fn current(
         "--",
     ];
     args.extend(paths.iter().map(String::as_str));
-    if !basis::git(&fresh, &args)?.is_empty() {
+    let status = basis::git(&fresh, &args)?;
+    if !status.is_empty() {
+        let only_untracked_attachments = attachments
+            && status
+                .split(|b| *b == 0)
+                .filter(|entry| !entry.is_empty())
+                .all(|entry| {
+                    entry
+                        .strip_prefix(b"?? ")
+                        .or_else(|| entry.strip_prefix(b"!! "))
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .is_some_and(|p| p == files_dir || p.starts_with(&files_prefix))
+                });
+        if only_untracked_attachments {
+            for path in paths.iter().filter(|p| **p != files_dir) {
+                working_file(&fresh, &now.commit, path, None)?;
+            }
+            working_attachments(&fresh, id, &now)?;
+        }
         return Err(Error::RetainedStaleBasis("Task or required history has unpublished changes; publish them before querying current retained state, or explicitly select a historical --at basis".into()));
     }
-    for path in paths.iter().filter(|p| {
-        **p != format!("{}/tasks/files/{id}", now.records_subdir).trim_start_matches("./")
-    }) {
+    for path in paths.iter().filter(|p| **p != files_dir) {
         working_file(&fresh, &now.commit, path, None)?;
+    }
+    if attachments {
+        working_attachments(&fresh, id, &now)?;
     }
     Ok(now)
 }

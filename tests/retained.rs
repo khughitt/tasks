@@ -3198,9 +3198,102 @@ fn working_preimage_names_specific_unledgered_file_path() {
     let req = checkpoint_request(&f, 301, json!([declaration(&payload, "evidence")]));
     let req_path = f.request("cp-orphan.json", &req);
 
-    // 1. Fresh checkpoint with unledgered file in tasks/files/<id>/.
     let files_dir = f.records.join(format!("tasks/files/{}", f.id));
     std::fs::create_dir_all(&files_dir).unwrap();
+
+    // 0a. Uncommitted `tasks/<id>.md` + `tasks/files/<id>/ledgered.txt` pair (e.g. unpublished attach)
+    //     must report unpublished changes rather than "unledgered file".
+    let task_md = f.records.join(format!("tasks/{}.md", f.id));
+    let committed_task_md = std::fs::read_to_string(&task_md).unwrap();
+    let ledgered = files_dir.join("ledgered.txt");
+    std::fs::write(&ledgered, b"hello").unwrap();
+    let mut dirty_md = committed_task_md.clone();
+    if !dirty_md.contains("\n## Notes\n") {
+        dirty_md.push_str("\n## Notes\n\n");
+    }
+    dirty_md.push_str("- 2026-11-16T00:00:00Z (fixture): attached: ledgered.txt (5 bytes)\n");
+    std::fs::write(&task_md, &dirty_md).unwrap();
+    let out_dirty_pair = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out_dirty_pair.status.code(), Some(1), "{out_dirty_pair:?}");
+    let err_dirty_pair: serde_json::Value = serde_json::from_slice(&out_dirty_pair.stderr).unwrap();
+    assert_eq!(
+        err_dirty_pair["error"]["kind"], "retained_stale_basis",
+        "{err_dirty_pair}"
+    );
+    let detail_dirty_pair = err_dirty_pair["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail_dirty_pair
+            .to_ascii_lowercase()
+            .contains("unpublished"),
+        "got: {detail_dirty_pair}"
+    );
+    assert!(
+        !detail_dirty_pair.contains("unledgered file"),
+        "got: {detail_dirty_pair}"
+    );
+
+    // 0b. Clean `tasks/<id>.md` at HEAD + unstaged edit to a committed attachment (` M` in git status)
+    //     reaches `freshness::current(..., true)` directly and must report "unpublished changes"
+    //     rather than generic stale or "unledgered file".
+    std::fs::write(&task_md, &committed_task_md).unwrap();
+    std::fs::remove_file(&ledgered).unwrap();
+    let seed_att_src = f.dir.join("seed-att.txt");
+    std::fs::write(&seed_att_src, b"clean").unwrap();
+    f.json(&[
+        "attach",
+        &f.id,
+        seed_att_src.to_str().unwrap(),
+        "--name",
+        "committed-att.txt",
+    ]);
+    let req = checkpoint_request(&f, 301, json!([declaration(&payload, "evidence")]));
+    let req_path = f.request("cp-orphan.json", &req);
+    let committed_att = files_dir.join("committed-att.txt");
+    std::fs::write(&committed_att, b"dirty-edit").unwrap();
+    let out_modified_att = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out_modified_att.status.code(),
+        Some(1),
+        "{out_modified_att:?}"
+    );
+    let err_modified_att: serde_json::Value =
+        serde_json::from_slice(&out_modified_att.stderr).unwrap();
+    assert_eq!(
+        err_modified_att["error"]["kind"], "retained_stale_basis",
+        "{err_modified_att}"
+    );
+    let detail_modified_att = err_modified_att["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail_modified_att.contains("unpublished changes"),
+        "got: {detail_modified_att}"
+    );
+    assert!(
+        !detail_modified_att.contains("unledgered file"),
+        "got: {detail_modified_att}"
+    );
+    std::fs::write(&committed_att, b"clean").unwrap();
+
+    // 1. Fresh checkpoint with unledgered file in tasks/files/<id>/.
     let orphan = files_dir.join("stray-orphan.json");
     std::fs::write(&orphan, b"{\"orphan\":true}").unwrap();
 
@@ -3232,7 +3325,6 @@ fn working_preimage_names_specific_unledgered_file_path() {
     // 2. Remove the unledgered file, stop after `intent`, drop the orphan again, and verify
     //    `working_preimage` during phase retry emits the exact same diagnostic.
     std::fs::remove_file(&orphan).unwrap();
-    std::fs::remove_dir(&files_dir).unwrap();
     let stopped = f
         .cmd()
         .env("TASKS_RETAINED_STOP_AFTER", "intent")
@@ -3499,5 +3591,126 @@ fn artifact_location_and_rebuild_multipart_verify_logical_multipart_and_reject_t
         action_detached_cat
             .contains("preserved multipart attachment lacks a live member ledger entry"),
         "got: {action_detached_cat}"
+    );
+}
+
+#[test]
+fn inaccessible_and_unmanifestable_directories_defer_to_post_intent_unknown() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestorePerms(Vec<std::path::PathBuf>);
+    impl Drop for RestorePerms {
+        fn drop(&mut self) {
+            for p in &self.0 {
+                let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+    }
+
+    let f = checkpoint_fixture();
+    configure_attachments(&f.records, "max_bytes = 1024\n");
+
+    let locked_dir = f.dir.join("locked-root-dir");
+    std::fs::create_dir_all(&locked_dir).unwrap();
+    std::fs::write(locked_dir.join("a.txt"), "payload").unwrap();
+
+    let locked_sub_root = f.dir.join("locked-sub-dir");
+    let locked_sub = locked_sub_root.join("sub");
+    std::fs::create_dir_all(&locked_sub).unwrap();
+    for i in 0..16 {
+        std::fs::write(
+            locked_sub_root.join(format!("member-{i:02}.txt")),
+            "payload",
+        )
+        .unwrap();
+    }
+
+    let fifo_dir = f.dir.join("fifo-container");
+    std::fs::create_dir_all(&fifo_dir).unwrap();
+    for i in 0..16 {
+        std::fs::write(fifo_dir.join(format!("member-{i:02}.txt")), "payload").unwrap();
+    }
+    let fifo_path = fifo_dir.join("pipe");
+    let c_fifo = std::ffi::CString::new(fifo_path.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_fifo.as_ptr(), 0o600) }, 0);
+
+    let _restore = RestorePerms(vec![locked_dir.clone(), locked_sub.clone()]);
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    std::fs::set_permissions(&locked_sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let cp_req = checkpoint_request(
+        &f,
+        501,
+        json!([
+            declaration(&locked_dir, "scratch"),
+            declaration(&locked_sub_root, "scratch"),
+            declaration(&fifo_dir, "scratch"),
+        ]),
+    );
+    let res = checkpoint(&f, &cp_req);
+    assert_eq!(res["outcome"], "accounted_unknown", "{res}");
+    assert_eq!(res["counts"]["kept_unknown"], 3, "{res}");
+    assert_eq!(res["counts"]["kept_verified"], 0, "{res}");
+
+    let state = f.state();
+    assert_eq!(state["complete"], true);
+    assert_eq!(state["items"].as_array().unwrap().len(), 3);
+    for item in state["items"].as_array().unwrap() {
+        assert_eq!(item["record"]["state"], "kept");
+        assert_eq!(item["record"]["verification"], "unknown");
+    }
+
+    // Transfer of an unmanifestable container must also pass preflight into post-intent
+    // `observations` (`retained_history_blocked`: "Transfer evidence remains unknown: ..."),
+    // rather than aborting pre-intent in `check_manifest_admission`.
+    let to = f.json(&["add", "Transfer receiver"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &to]);
+    let to_state = f.json(&["retained", "state", &to]);
+    let fifo_identity = state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["identity"]["path"] == fifo_dir.to_str().unwrap())
+        .unwrap()["identity"]
+        .clone();
+    let tx_req = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 502u64),
+        "host": host(),
+        "inputs": [
+            {"task": f.id, "basis": state["basis"]},
+            {"task": to, "basis": to_state["basis"]}
+        ],
+        "items": [fifo_identity],
+        "purpose": "Transfer unknown fifo container",
+        "cleanup_trigger": "After review"
+    });
+    let tx_path = f.request("tx-unmanifestable.json", &tx_req);
+    let out_tx = f
+        .cmd()
+        .args([
+            "retained",
+            "transfer",
+            &f.id,
+            &to,
+            "--request",
+            tx_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out_tx.status.code(), Some(1), "{out_tx:?}");
+    let err_tx: serde_json::Value = serde_json::from_slice(&out_tx.stderr).unwrap();
+    assert_eq!(
+        err_tx["error"]["kind"], "retained_history_blocked",
+        "{err_tx}"
+    );
+    assert!(
+        err_tx["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Transfer evidence remains unknown:"),
+        "got: {err_tx}"
     );
 }
