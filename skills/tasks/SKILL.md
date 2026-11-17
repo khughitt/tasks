@@ -117,7 +117,10 @@ mean those documents were verified.
    blocked is not measured yet.
 3. Run `tasks show <id>` and read the inventory's `required` rows in order before
    starting; use **Task references** below to retrieve them. `show` lists every related row
-   (parent, dependencies, wake targets, related tasks, task-id source, children) with live status.
+   (parent, dependencies, wake targets, related tasks, task-id source, dependents, children)
+   with live status. Dependents (tasks whose `depends` names this one) come from the task's
+   own project; `tasks show <id> --all-projects` also finds them, and followers, in every
+   reachable registered project.
    Read the task's `process` and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
@@ -1122,8 +1125,8 @@ none found in that readable scope, not none elsewhere. Move-history matching fol
 the focal work only; incomplete history warns once and keeps direct matches. Old/new
 ids agree over the same complete scan/history, while local results across projects
 can differ. A moved follower contributes only via its in-scope live successor.
-Show --all-projects is not shipped yet; next already has wider scope when it selects
-the focal task. No links are rewritten, and follows never affects next eligibility.
+`show --all-projects` widens that search to every reachable registered project;
+next already has wider scope when it selects the focal task. No links are rewritten, and follows never affects next eligibility.
 
 ## Task references
 

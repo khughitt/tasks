@@ -448,7 +448,7 @@ fn hang(line: &str) -> usize {
 }
 
 /// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <date>  <title>`,
-/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `followed by`, `child`.
+/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, `child`.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
     let date_of = |updated: Option<&str>| match updated {
         Some(ts) => present::date(ts),
@@ -514,6 +514,16 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             date_of(source.updated.as_deref()),
             source.title.as_deref().unwrap_or("(unresolved)"),
             color(o, &source.id).filter(|_| source.resolved),
+        ));
+    }
+    for dependent in &o.dependents {
+        rows.push((
+            "dependent",
+            dependent.id.as_str(),
+            present::status(dependent.status),
+            present::date(&dependent.updated),
+            dependent.title.as_str(),
+            color(o, &dependent.id),
         ));
     }
     for follower in &o.followed_by {
@@ -836,6 +846,7 @@ mod tests {
             depends_on: vec![],
             related_to: vec![],
             follows_tasks: vec![],
+            dependents: vec![],
             followed_by: vec![],
             wake_targets: vec![],
             source_task: None,
@@ -1229,6 +1240,38 @@ mod tests {
         let painter = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false);
         let painted = render(&o, &painter, Some(120));
         assert!(painted.contains("fam-000002\x1b[0m"), "{painted:?}");
+    }
+
+    #[test]
+    fn dependent_rows_sit_between_source_and_followed_by() {
+        let mut o = fields();
+        let row = |id: &str, title: &str| Related {
+            id: id.into(),
+            title: title.into(),
+            status: Status::Todo,
+            updated: "2026-01-02T00:00:00Z".into(),
+        };
+        o.source_task = Some(DepInfo {
+            id: "sci-000001".into(),
+            title: Some("Source".into()),
+            status: Some(Status::Todo),
+            updated: Some("2026-01-01T00:00:00Z".into()),
+            resolved: true,
+        });
+        o.dependents = vec![row("fam-000004", "Hub")];
+        o.followed_by = vec![row("sci-000002", "Later")];
+        o.children = vec![row("sci-000003", "Child")];
+        let text = render(&o, &plain(), Some(120));
+        let block = text.split_once("── related ").unwrap().1;
+        let at = |label: &str| {
+            block
+                .find(label)
+                .unwrap_or_else(|| panic!("{label}: {block}"))
+        };
+        assert!(at("source") < at("dependent  "));
+        assert!(at("dependent  ") < at("followed by"));
+        assert!(at("followed by") < at("child"));
+        assert!(block.contains("fam-000004"), "{block}");
     }
 
     #[test]

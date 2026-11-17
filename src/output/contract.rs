@@ -536,6 +536,9 @@ pub struct ShowFields {
     pub related_to: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub follows_tasks: Vec<DepInfo>,
+    /// Tasks whose `depends` names this one, open and closed; moved tombstones omitted.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependents: Vec<Related>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub followed_by: Vec<Related>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

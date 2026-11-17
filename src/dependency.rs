@@ -47,6 +47,22 @@ pub fn verdict(task: Option<&Task>) -> Verdict {
     }
 }
 
+/// Every task in `scan` whose `depends` names `target` under any spelling (a retired
+/// prefix counts). The match is literal: it does not follow move chains. `target` must
+/// already be canonical; it is not canonicalized again (see `Registry::canonical_id`).
+/// Shared by `show`'s dependents and `move`'s inbound inventory.
+pub fn dependents<'a>(
+    registry: &'a Registry,
+    scan: &'a [Task],
+    target: &'a TaskId,
+) -> impl Iterator<Item = &'a Task> + 'a {
+    scan.iter().filter(move |task| {
+        task.depends
+            .iter()
+            .any(|dep| registry.canonical_id(dep) == *target)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

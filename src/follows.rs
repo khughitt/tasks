@@ -161,7 +161,7 @@ pub(crate) fn followers<'a>(
     all: &'a [Task],
     identity: &IdentitySet,
 ) -> Vec<&'a Task> {
-    let mut found: Vec<_> = all
+    let found: Vec<_> = all
         .iter()
         .filter(|task| {
             task.status != crate::model::Status::Moved
@@ -172,10 +172,7 @@ pub(crate) fn followers<'a>(
                     .any(|id| identity.ids.contains(&registry.canonical_id(id)))
         })
         .collect();
-    found.sort_by(|a, b| crate::query::ready_order(a, b));
-    let mut seen = std::collections::BTreeSet::new();
-    found.retain(|task| seen.insert(registry.canonical_id(&task.id)));
-    found
+    crate::query::ready_unique(registry, found)
 }
 
 #[cfg(test)]
@@ -221,7 +218,7 @@ mod inverse_tests {
             "moved_from: oldaa-000001\nmoved_to: cc-000003\n",
         );
         let last = rec("cc-000003", "moved_from: bb-000002\n");
-        let chain = vec![first.clone(), middle, last.clone()];
+        let chain = [first.clone(), middle, last.clone()];
         for focal in [&first, &last] {
             let mut calls = Vec::new();
             let identity = identity_set(&r, focal, |id| {

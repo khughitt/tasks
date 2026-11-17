@@ -9,11 +9,14 @@ use std::collections::HashMap;
 use std::path::Path;
 use time::OffsetDateTime;
 
-pub fn run(mut ctx: Ctx, id: String, fetch: Fetch) -> Result<Output> {
+pub fn run(mut ctx: Ctx, id: String, fetch: Fetch, all_projects: bool) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
-    let (recorded, task, all) = read_record(&mut ctx, &id, &claims)?;
+    let (recorded, task, mut all) = read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
+    if all_projects {
+        widen(&ctx.registry, project, &mut all, &mut ctx.warnings)?;
+    }
     let now = crate::time::parse(&crate::time::now())?;
     let fields = describe(
         project,
@@ -30,6 +33,30 @@ pub fn run(mut ctx: Ctx, id: String, fetch: Fetch) -> Result<Output> {
         fields,
         warnings: ctx.warnings,
     })))
+}
+
+/// `show --all-projects`: add every other reachable registered project's records to the
+/// scan `describe` reads, so its inverse rows (dependents, followers) see them. The
+/// project's own records stay the copy already read, so worktree state is kept and no
+/// record appears twice; same-project fields (parent, children, lane) are unchanged.
+fn widen(
+    registry: &Registry,
+    project: &Project,
+    all: &mut Vec<Task>,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let (scope, opened) = crate::scope::Scope::open_all(registry, &project.root)?;
+    warnings.extend(opened);
+    let own = registry.canonical_prefix(&project.prefix);
+    // Not `scan_each`: that would scan this project's registered copy only to drop it.
+    for other in scope.projects().iter().filter(|other| other.prefix != own) {
+        all.extend(
+            other
+                .scan()
+                .map_err(|error| error.in_project(&other.prefix))?,
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn read_record(
@@ -280,6 +307,14 @@ pub fn describe(
         warnings.push(warning.clone());
     }
     let following = crate::follows::followers(registry, all, &identity);
+    let canonical = registry.canonical_id(&task.id);
+    let depending = crate::query::ready_unique(
+        registry,
+        crate::dependency::dependents(registry, all, &canonical)
+            .filter(|candidate| candidate.status != crate::model::Status::Moved)
+            .collect(),
+    );
+    let dependents = depending.iter().map(|task| related(task)).collect();
     let followed_by = following.iter().map(|task| related(task)).collect();
     let mut kids = crate::hierarchy::children(all, &task.id, registry);
     kids.sort_by(|a, b| crate::query::ready_order(a, b));
@@ -334,6 +369,7 @@ pub fn describe(
         .chain(&task.moved_to)
         .chain(&task.moved_from)
         .chain(source_id.as_ref())
+        .chain(depending.iter().map(|task| &task.id))
         .chain(following.iter().map(|task| &task.id));
     for id in named {
         if !looked_up.contains_key(&id.prefix) {
@@ -360,6 +396,7 @@ pub fn describe(
         depends_on,
         related_to,
         follows_tasks,
+        dependents,
         followed_by,
         wake_targets,
         source_task,

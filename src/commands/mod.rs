@@ -158,9 +158,16 @@ fn dispatch(cli: Cli, host: Option<Arc<HostConfig>>) -> Result<Output> {
             let ctx = open_project_write_ctx(dir, project, host.clone())?;
             add::run(ctx, title, status, origin_session, fields)
         }
-        Command::Show { id, no_fetch } => {
-            show::run(open_id_ctx(dir, &id, host.clone())?, id, fetch(no_fetch))
-        }
+        Command::Show {
+            id,
+            no_fetch,
+            all_projects,
+        } => show::run(
+            open_id_ctx(dir, &id, host.clone())?,
+            id,
+            fetch(no_fetch),
+            all_projects,
+        ),
         Command::Doc {
             id,
             plan,
