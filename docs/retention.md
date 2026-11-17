@@ -461,9 +461,11 @@ under the guard; foreign staging, Git operations and dirty required evidence ref
 Only unrelated appended ordinary notes can commute. Pending intent permits queries,
 unrelated notes, normal claim refresh/start and park;
 closure, archival and competing task/evidence changes wait for finish/reconcile.
-Move/migrate still refuse operation history and protected retained-op requests,
-retained-manifests (including `.catalog.json` and `.part-NNNN` multipart members)
-and retained-checkpoints. Project rename has the verified lineage route
+Move/migrate still refuse tasks carrying `retention operation:`,
+`retention resolution:`, or JSON `retention checkpoint:` envelopes, as well as
+protected retained-op requests, retained-manifests (including `multipart:`
+declarations and `.catalog.json` / `.part-NNNN` multipart members) and
+retained-checkpoints. Project rename has the verified lineage route
 below. Protected evidence (logical and multipart member names alike) cannot be
 detached by `tasks detach` or generic `detached:` notes. No force bypass is
 provided.

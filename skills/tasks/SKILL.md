@@ -755,7 +755,9 @@ Pending retained operations reserve task/evidence mutation while permitting read
 unrelated appended notes, start/claim refresh and park (`retention resolution:` and
 `multipart:` are reserved and cannot commute with a pending operation). Complete or
 reconcile them before closure or archival. Terminal archival keeps logical note
-ordinals; ID-changing move/migrate refuse protected retention locators. Rename may
+ordinals; ID-changing move/migrate refuse tasks carrying `retention operation:`,
+`retention resolution:`, or JSON `retention checkpoint:` envelopes or protected
+retention artifacts (including `multipart:` declarations and members). Rename may
 preserve them through verified Git-anchored retention lineage after
 complete/reconciled terminal proof. Never detach protected retained request,
 manifest (logical `retained-manifest-*.json`, `.catalog.json`, or `.part-NNNN`) or

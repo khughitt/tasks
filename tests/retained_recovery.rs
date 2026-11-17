@@ -142,16 +142,164 @@ fn retained_protected_move() {
         "--name",
         "retained-manifest-a.json",
     ]);
-    f.env.init("fam");
+    let fam = f.env.init("fam");
     let moved = f
         .cmd()
         .args(["move", &f.id, "--to", "fam"])
         .output()
         .unwrap();
     assert!(!moved.status.success(), "{moved:?}");
+    let moved_err: serde_json::Value = serde_json::from_slice(&moved.stderr).unwrap();
+    assert_eq!(moved_err["error"]["kind"], "retained_history_blocked");
     assert!(f.records.join(format!("tasks/{}.md", f.id)).exists());
     let out = f.cmd().args(["rename", "sci", "new"]).output().unwrap();
     assert!(!out.status.success(), "{out:?}");
+
+    // Standalone `retention resolution: ` note (with zero `retention operation:` notes and zero
+    // protected attachments) must refuse both `tasks move` and `tasks migrate` with
+    // `retained_history_blocked` before mutating either project.
+    let mut f_res = RetainedEnv::new("in-tree");
+    let fam_res = f_res.env.init("fam");
+    f_res.seed_note("retained: accidental prose");
+    let state_bad = f_res.state();
+    assert_eq!(state_bad["complete"], false);
+    let resolution = json!({
+        "version": 1,
+        "bad": state_bad["diagnostics"][0]["source"],
+        "successors": [],
+        "reason": "Accidental prose on zero-item task"
+    });
+    f_res.json(&[
+        "note",
+        &f_res.id,
+        &format!("retention resolution: {resolution}"),
+    ]);
+    let state_repaired = f_res.state();
+    assert_eq!(state_repaired["complete"], true);
+    assert!(state_repaired["operations"].as_array().unwrap().is_empty());
+    assert!(
+        !f_res
+            .records
+            .join(format!("tasks/files/{}", f_res.id))
+            .exists()
+    );
+
+    let before_sci = f_res.basis();
+    let move_res = f_res
+        .cmd()
+        .args(["move", &f_res.id, "--to", "fam"])
+        .output()
+        .unwrap();
+    assert_eq!(move_res.status.code(), Some(1), "{move_res:?}");
+    let move_res_err: serde_json::Value = serde_json::from_slice(&move_res.stderr).unwrap();
+    assert_eq!(
+        move_res_err["error"]["kind"], "retained_history_blocked",
+        "{move_res_err}"
+    );
+    assert_eq!(f_res.basis(), before_sci);
+    assert!(
+        f_res
+            .records
+            .join(format!("tasks/{}.md", f_res.id))
+            .exists()
+    );
+    assert!(
+        f_res.env.json(&fam_res, &["list"])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let list_path = f_res.env.home.path().join("migrate-list.toml");
+    f_res.json(&[
+        "migrate",
+        "--to",
+        "fam",
+        "--draft",
+        list_path.to_str().unwrap(),
+    ]);
+    let list_text = std::fs::read_to_string(&list_path)
+        .unwrap()
+        .replace("decision = \"\"", "decision = \"carry\"");
+    std::fs::write(&list_path, list_text).unwrap();
+    for migrate_args in [
+        vec!["migrate", list_path.to_str().unwrap(), "--explain"],
+        vec!["migrate", list_path.to_str().unwrap()],
+    ] {
+        let mig = f_res.cmd().args(&migrate_args).output().unwrap();
+        assert_eq!(mig.status.code(), Some(1), "{migrate_args:?}: {mig:?}");
+        let mig_err: serde_json::Value = serde_json::from_slice(&mig.stderr).unwrap();
+        assert_eq!(
+            mig_err["error"]["kind"], "retained_history_blocked",
+            "{migrate_args:?}: {mig_err}"
+        );
+        assert_eq!(f_res.basis(), before_sci);
+        assert!(
+            f_res.env.json(&fam_res, &["list"])["tasks"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    // JSON `retention checkpoint:` note and protected `multipart:` declaration also block `move`
+    // before mutating either project, while non-JSON prose `retention checkpoint:` remains movable.
+    let cp_id = id_of(f.json(&["add", "JSON checkpoint envelope task"]));
+    let cp_path = f.records.join(format!("tasks/{cp_id}.md"));
+    let mut cp_raw = std::fs::read_to_string(&cp_path).unwrap();
+    if !cp_raw.contains("\n## Notes\n") {
+        cp_raw.push_str("\n## Notes\n\n");
+    }
+    cp_raw.push_str("- 2026-11-03T00:00:00Z (fixture): retention checkpoint: {\"version\":1}\n");
+    std::fs::write(&cp_path, cp_raw).unwrap();
+    common::git(&f.records, &["add", cp_path.to_str().unwrap()]);
+    common::git(&f.records, &["commit", "-qm", "seed json checkpoint note"]);
+
+    let mp_id = id_of(f.json(&["add", "Protected multipart declaration task"]));
+    let mp_path = f.records.join(format!("tasks/{mp_id}.md"));
+    let mut mp_raw = std::fs::read_to_string(&mp_path).unwrap();
+    if !mp_raw.contains("\n## Notes\n") {
+        mp_raw.push_str("\n## Notes\n\n");
+    }
+    mp_raw.push_str(&format!(
+        "- 2026-11-03T00:00:00Z (fixture): multipart: retained-manifest-{}.json (123 bytes, 2 parts, sha256 {}, catalog sha256 {})\n",
+        "a".repeat(64),
+        "a".repeat(64),
+        "b".repeat(64)
+    ));
+    std::fs::write(&mp_path, mp_raw).unwrap();
+    common::git(&f.records, &["add", mp_path.to_str().unwrap()]);
+    common::git(
+        &f.records,
+        &["commit", "-qm", "seed protected multipart declaration"],
+    );
+
+    let before_f = f.basis();
+    for blocked_id in [&cp_id, &mp_id] {
+        let out = f
+            .cmd()
+            .args(["move", blocked_id, "--to", "fam"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{blocked_id}: {out:?}");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(
+            err["error"]["kind"], "retained_history_blocked",
+            "{blocked_id}: {err}"
+        );
+        assert_eq!(f.basis(), before_f);
+        assert!(
+            f.env.json(&fam, &["list"])["tasks"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    let prose_cp_id = id_of(f.json(&["add", "Prose checkpoint note task"]));
+    f.json(&["note", &prose_cp_id, "retention checkpoint: manual prose"]);
+    let moved_prose = f.json(&["move", &prose_cp_id, "--to", "fam"]);
+    assert!(moved_prose["id"].as_str().unwrap().starts_with("fam-"));
 }
 #[test]
 fn retained_reserved_forgery() {

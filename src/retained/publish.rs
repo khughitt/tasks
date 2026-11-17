@@ -113,7 +113,10 @@ pub fn permission(project: &Project, task: &Task, action: WriteAction<'_>) -> Re
     if matches!(action, WriteAction::Identity) {
         let mut artifacts = crate::attachments::ledger(task)
             .keys()
-            .any(|n| protected(n));
+            .any(|n| protected(n))
+            || crate::multipart::audit::declarations(task)
+                .keys()
+                .any(|n| protected(n));
         if crate::attachments::check_storage(project, &task.id)? {
             for entry in std::fs::read_dir(crate::attachments::task_dir(project, &task.id))? {
                 let entry = entry?;
@@ -123,10 +126,13 @@ pub fn permission(project: &Project, task: &Task, action: WriteAction<'_>) -> Re
             }
         }
         if artifacts
-            || task
-                .notes
-                .iter()
-                .any(|n| n.text.starts_with("retention operation: "))
+            || task.notes.iter().any(|n| {
+                n.text.starts_with("retention operation:")
+                    || n.text.starts_with("retention resolution:")
+                    || n.text
+                        .strip_prefix("retention checkpoint:")
+                        .is_some_and(|s| s.trim_start().starts_with('{'))
+            })
         {
             return Err(Error::RetainedHistoryBlocked(format!(
                 "{} carries immutable retention locators; ID-changing transformations require an explicit locator-preservation design",
@@ -4207,5 +4213,65 @@ mod tests {
             );
         }
         assert!(validate_appended_note_syntax("detached: evidence.txt: obsolete").is_ok());
+    }
+
+    #[test]
+    fn identity_permission_refuses_resolution_checkpoint_json_and_protected_multipart() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("tasks")).unwrap();
+        std::fs::write(dir.path().join("tasks/.config.toml"), "prefix = \"sci\"\n").unwrap();
+        let project = Project::open(dir.path()).unwrap();
+        let base_task = || {
+            crate::format::parse_physical(
+                "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\ndepends: []\ntags: []\ncreated: 2026-11-03T00:00:00Z\nupdated: 2026-11-03T00:00:00Z\n---\n\n## Notes\n",
+                "fixture",
+            )
+            .unwrap()
+            .assemble(Vec::new())
+        };
+
+        assert!(permission(&project, &base_task(), WriteAction::Identity).is_ok());
+
+        for allowed_note in [
+            "Custody note: ordinary prose",
+            "retention checkpoint: manual prose without json object",
+            &format!(
+                "multipart: report.json (123 bytes, 2 parts, sha256 {}, catalog sha256 {})",
+                "a".repeat(64),
+                "b".repeat(64)
+            ),
+        ] {
+            let mut t = base_task();
+            crate::commands::append_note(&mut t, "t", allowed_note).unwrap();
+            assert!(
+                permission(&project, &t, WriteAction::Identity).is_ok(),
+                "{allowed_note} should allow WriteAction::Identity"
+            );
+        }
+
+        let mp_manifest = format!(
+            "multipart: retained-manifest-{}.json (123 bytes, 2 parts, sha256 {}, catalog sha256 {})",
+            "a".repeat(64),
+            "a".repeat(64),
+            "b".repeat(64)
+        );
+        for blocked_note in [
+            "retention operation:",
+            "retention operation: broken",
+            "retention resolution:",
+            "retention resolution: {\"version\":1}",
+            "retention checkpoint: {\"version\":1}",
+            "retention checkpoint:{\"version\":1}",
+            mp_manifest.as_str(),
+        ] {
+            let mut t = base_task();
+            crate::commands::append_note(&mut t, "t", blocked_note).unwrap();
+            let err = permission(&project, &t, WriteAction::Identity)
+                .expect_err(&format!("{blocked_note} must block WriteAction::Identity"));
+            assert!(
+                matches!(err, Error::RetainedHistoryBlocked(_)),
+                "expected RetainedHistoryBlocked for {blocked_note}, got {err:?}"
+            );
+        }
     }
 }
