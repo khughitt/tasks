@@ -137,6 +137,29 @@ the attached terminal width and must be a positive integer. Pipes with no known
 width keep one row per goal with the title cap; JSON and `tasks show <id>` preserve
 full titles. Project colors and `--color always` do not change width budgets.
 
+Pretty `prime` (across `closeout`, `lanes`, `roadmap`, `ready` and `doing`) and
+`tree` also reserve a left-aligned `work` column for goals of every origin,
+including childless lanes, childless declared-piece hubs and closed ancestors of
+open work; leaf rows leave `work` blank, and `list`, `ready`, `search`, `parked`
+and standalone `lanes` keep their existing columns. Each goal cell uses the same
+full membership before display filtering (hidden completed children and foreign
+declared-piece subtrees still count, and selecting `tree <id>` keeps the goal's
+full counts while starting at depth zero): `4/7`, `4/7 +3`, or `-` / `- +3` when
+committed work is zero, plus `?N` (`- ?1`, `- +3 ?1`) for distinct unresolved
+declared-piece targets encountered during the membership walk. Unlike `goals`,
+`prime` and `tree` do not walk ordinary `depends` for `work`, so `?N` reflects
+missing declared pieces only; `doing` goals read from another claimed checkout use
+that checkout's scan. Tree containment stays local to each project (foreign pieces
+contribute to `work` without becoming local child nodes), drawn with three-cell
+guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering and blank ID
+cells on wrapped continuations. When any displayed goal is present, a wrapping
+legend (`work: done/total local descendants and declared pieces; tree: local containment`,
+with `; +N: ideas` and `; ?N: unresolved declared pieces` appended only when
+displayed) appears after `prime`'s top summary block or before `tree`'s table;
+empty trees stay empty and leaves-only views omit the legend. Work metadata is
+computed only for resolved pretty output (`--pretty` or `TASKS_FORMAT=pretty`);
+JSON shapes and `prime --summary` are unchanged.
+
 
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
@@ -303,5 +326,12 @@ move through a shared lightness range. On the builtin dark palette, lightness is
 lighter on dark backgrounds and darker on light backgrounds, keeping at least
 3.5:1 contrast. The project hue is preserved, with reduced chroma where needed;
 unusual backgrounds may limit the range. IDs keep their fixed project shade,
-independently of activity, and active titles can be lighter than IDs.
+independently of activity, and active titles can be lighter than IDs. In `prime`
+and `tree` pretty views, goal IDs add bold emphasis (retaining the fixed project ID
+shade when assigned, or bold alone without a project color; standalone `lanes` and
+nested lane pick/active references stay non-bold), and tree guide segments step in
+OKLab by column depth (capped at depth 6) from a muted project shade (or muted
+`fg`/`bg` mix when unassigned) toward readable foreground with at least 3:1
+contrast against `bg` (dim chrome without a resolved palette; plain connectors when
+color is disabled).
 Activity affects presentation only; priorities and work selection keep their order.

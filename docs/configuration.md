@@ -235,7 +235,14 @@ titles on dark backgrounds and darker titles on light backgrounds. Its cold end
 is adjusted when needed to preserve 3.5:1 contrast after RGB quantization; the hot
 end extends 0.30 lightness toward that ink, bounded by black/white. Unusual
 backgrounds may narrow the available range. IDs retain their fixed project shade;
-titles can be lighter than IDs and need not equal the original project color.
+titles can be lighter than IDs and need not equal the original project color. In
+`prime` and `tree` pretty output, goal IDs add bold emphasis (keeping the fixed
+project shade when assigned, or bold alone without a project color), and tree
+connectors step in OKLab across depths 1 through 6 from a muted project shade (or
+muted `fg`/`bg` mix when unassigned) toward `fg` (or the higher-contrast black/white
+endpoint when `fg` misses 3:1), repaired toward that endpoint whenever needed to
+maintain at least 3:1 quantized contrast against `bg` (dim chrome without a
+resolved palette; plain connectors with color off).
 Unassigned project
 titles stay plain, and activity is absent from JSON. Date recency fades over two
 years; priorities use bold/color scales where available. Missing terminal colors

@@ -23,7 +23,12 @@ mean those documents were verified.
 
 1. `tasks prime` — lanes (the efforts meant to run side by side, each with its guidance
    and the step it could take now), roadmap (the open goal tree), closeout (goals whose
-   work is all done), the ready list, and who is working on what.
+   work is all done), the ready list, and who is working on what. In `--pretty` (or
+   `TASKS_FORMAT=pretty`), `prime` and `tree` show a compact `work` column for goals of
+   every origin (`done/total` local descendants and declared pieces, `-` when committed
+   work is zero, `+N` ideas, and `?N` unresolved declared pieces; leaves are blank), a
+   conditional wrapping legend when goals are shown, local-only tree connectors (`├─ `,
+   `└─ `, `│  `), and bold goal IDs; JSON shapes and `prime --summary` are unchanged.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    Read picker warnings for omitted work; see `tasks ready --help` and the
@@ -338,7 +343,10 @@ key to restore existing styling. Init/reinitialization and prefix rename preserv
 Pretty output paints a project's name in that RGB: prefixes in
 `projects`, `groups` and `where`; task ids and titles in table views (including `goals`), and in `show`/`next`
 (the overview line included) by the project each id belongs to. IDs use a fixed shade
-mixed 30% toward white from the project color. Activity-aware titles use an independent
+mixed 30% toward white from the project color (with bold added on goal IDs in `prime`
+and `tree` pretty views, or bold alone without a project color; tree guide segments step
+in OKLab by column depth 1–6 toward `fg` with a 3:1 contrast floor against `bg`, or dim
+chrome without a resolved palette). Activity-aware titles use an independent
 lightness range and may be lighter than IDs; higher activity increases contrast toward
 the more readable of black/white against the theme background, with a 3.5:1 floor.
 Project hue is preserved with chroma reduced to fit sRGB. `claims` stays
