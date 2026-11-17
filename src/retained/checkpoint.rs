@@ -124,7 +124,7 @@ fn inventory(
                 .map(|i| i.identity.clone())
                 .collect()
         };
-        if identities.is_empty()
+        if (identities.is_empty() && (diagnostic.identity.is_some() || !required.is_empty()))
             || diagnostic.host.as_ref().is_some_and(|h| *h != request.host)
             || required
                 .iter()
@@ -556,6 +556,55 @@ fn incomplete(ctx: &mut OperationCtx, id: &TaskId, binding: &Binding, error: &Er
     publish::batch(ctx, id, &[], &[checkpoint, receipt])?;
     Ok(())
 }
+fn complete_no_local_items(
+    ctx: &mut OperationCtx,
+    id: &TaskId,
+    request: &CheckpointRequest,
+    binding: &Binding,
+    corrections: Vec<Correction>,
+) -> Result<MutationResult> {
+    if !corrections.is_empty() {
+        let at = crate::time::after(&ctx.tasks.get(id).expect("participant").task.updated)?;
+        let resolutions = corrections
+            .into_iter()
+            .map(|c| ResolutionRelation {
+                bad: c.bad,
+                successors: Vec::new(),
+                reason: c.reason,
+            })
+            .collect();
+        let receipt = publish::receipt(
+            ctx,
+            binding,
+            id,
+            PhaseOutputs::Items(ItemsOutput {
+                items: Vec::new(),
+                artifacts: Vec::new(),
+                resolutions,
+            }),
+            &at,
+        )?;
+        publish::batch(ctx, id, &[], &[receipt])?;
+        publish::stop("items_published");
+    }
+    let at = crate::time::after(&ctx.tasks.get(id).expect("participant").task.updated)?;
+    let counts = counts(&view(ctx, id, &request.host)?)?;
+    let publications = ctx.phase_publications(id)?;
+    let complete = publish::receipt(
+        ctx,
+        binding,
+        id,
+        PhaseOutputs::Completed(CompletedOutput {
+            outcome: "no_local_items".into(),
+            publications,
+            checkpoint: None,
+        }),
+        &at,
+    )?;
+    publish::batch(ctx, id, &[], &[complete])?;
+    publish::result(ctx, "no_local_items".into(), counts, Vec::new(), false)
+}
+
 pub fn run(
     mut ctx: OperationCtx,
     request: CheckpointRequest,
@@ -596,25 +645,12 @@ pub fn run(
     publish::recover_saved(&mut ctx, &id, &binding)?;
     let inventory = inventory(&mut ctx, &id, &request)?;
     publish::intent(&mut ctx, &binding, &id)?;
-    if inventory.records.is_empty() {
-        let at = crate::time::after(&ctx.tasks.get(&id).expect("participant").task.updated)?;
-        let counts = counts(&view(&ctx, &id, &request.host)?)?;
-        let publications = ctx.phase_publications(&id)?;
-        let complete = publish::receipt(
-            &mut ctx,
-            &binding,
-            &id,
-            PhaseOutputs::Completed(CompletedOutput {
-                outcome: "no_local_items".into(),
-                publications,
-                checkpoint: None,
-            }),
-            &at,
-        )?;
-        publish::batch(&mut ctx, &id, &[], &[complete])?;
-        return publish::result(&mut ctx, "no_local_items".into(), counts, Vec::new(), false);
-    }
-    match observe(&mut ctx, &id, &request, &binding, inventory) {
+    let executed = if inventory.records.is_empty() {
+        complete_no_local_items(&mut ctx, &id, &request, &binding, inventory.corrections)
+    } else {
+        observe(&mut ctx, &id, &request, &binding, inventory)
+    };
+    match executed {
         Ok(result) => Ok(result),
         Err(error) => {
             let failure = incomplete(&mut ctx, &id, &binding, &error);

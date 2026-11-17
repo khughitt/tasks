@@ -185,6 +185,72 @@ pub fn validate_appended_note_syntax(text: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_appended_resolutions(project: &Project, old: &Task, new: &Task) -> Result<()> {
+    if new.notes.len() < old.notes.len() {
+        return Ok(());
+    }
+    for (offset, n) in new.notes[old.notes.len()..].iter().enumerate() {
+        let Some(raw) = n.text.strip_prefix("retention resolution: ") else {
+            continue;
+        };
+        let res_ordinal_usize = old.notes.len() + offset + 1;
+        let res_ordinal = res_ordinal_usize as u64;
+        let note = decode_resolution(raw)?;
+        let bad_ordinal = usize::try_from(note.bad.ordinal).map_err(invalid)?;
+        if bad_ordinal > old.notes.len() {
+            return Err(invalid(
+                "retention resolution bad.ordinal must reference an already-persisted note",
+            ));
+        }
+        let original = super::basis::read_exact(project, &new.id, &note.bad.basis)?;
+        let Some(bad_prefix) = original.task.notes.get(..bad_ordinal) else {
+            return Err(invalid(
+                "retention resolution bad.ordinal is outside its pinned basis history",
+            ));
+        };
+        if new.notes.get(..bad_ordinal) != Some(bad_prefix) {
+            return Err(invalid(
+                "retention resolution source bytes differ from their exact pinned history",
+            ));
+        }
+        if !new.notes[bad_ordinal - 1].text.starts_with("retained:") {
+            return Err(invalid(
+                "retention resolution may only target a retained: item note",
+            ));
+        }
+        let sub = super::lineage::subdir(project)?;
+        let synthetic_basis = Basis {
+            project: project.prefix.clone(),
+            layout: project.kind.as_str().into(),
+            records_subdir: sub.clone(),
+            commit: note.bad.basis.commit.clone(),
+            task_path: super::lineage::task_path(&sub, &new.id),
+            retained_ref: note.bad.basis.retained_ref.clone(),
+        };
+        let mut prefix_task = new.clone();
+        prefix_task.notes.truncate(res_ordinal_usize);
+        let replayed = super::state::replay(project, &prefix_task, &synthetic_basis, None)?;
+        let res_had_diagnostic = replayed
+            .diagnostics
+            .iter()
+            .any(|d| d.source.as_ref().is_some_and(|s| s.ordinal == res_ordinal));
+        let bad_resolved = replayed.diagnostics.iter().any(|d| {
+            d.source
+                .as_ref()
+                .is_some_and(|s| s.ordinal == note.bad.ordinal)
+                && d.resolved_by
+                    .as_ref()
+                    .is_some_and(|s| s.ordinal == res_ordinal)
+        });
+        if res_had_diagnostic || !bad_resolved {
+            return Err(invalid(
+                "retention resolution did not cleanly resolve a diagnostic at bad.ordinal",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn check_write(
     project: &Project,
     registry: &Registry,
@@ -211,6 +277,7 @@ pub fn check_write(
         }
     }
     if pending_here(project, old)?.is_none() {
+        validate_appended_resolutions(project, old, new)?;
         return Ok(());
     }
     let mut allowed = old.clone();

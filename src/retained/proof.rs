@@ -124,6 +124,19 @@ pub fn validate_history(
         super::recovery::operation_epochs(&project, &pinned.task)?;
         let mut requests = BTreeMap::new();
         for (index, entry) in pinned.task.notes.iter().enumerate() {
+            if let Some(raw) = entry.text.strip_prefix("retention resolution: ")
+                && let Ok(resolution) = decode_resolution(raw)
+            {
+                basis::verify_bad_source(
+                    &project,
+                    &pinned.task.id,
+                    &pinned.task.notes,
+                    index,
+                    &resolution.bad,
+                    &mut metrics.history_bytes_read,
+                )?;
+                continue;
+            }
             let Some(raw) = entry.text.strip_prefix("retention operation: ") else {
                 continue;
             };
@@ -133,6 +146,18 @@ pub fn validate_history(
             };
             if host.is_some_and(|h| h != note.host) {
                 continue;
+            }
+            if let PhaseOutputs::Items(out) = &note.outputs {
+                for relation in &out.resolutions {
+                    basis::verify_bad_source(
+                        &project,
+                        &pinned.task.id,
+                        &pinned.task.notes,
+                        index,
+                        &relation.bad,
+                        &mut metrics.history_bytes_read,
+                    )?;
+                }
             }
             let input = super::lineage::participant(&project, &note, &pinned.task.id)?;
             let original_id = TaskId::parse(&input.task)?;

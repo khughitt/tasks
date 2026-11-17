@@ -213,6 +213,34 @@ pub fn validate_locator(project: &Project, id: &TaskId, basis: &Basis) -> Result
     }
     Ok(())
 }
+pub(crate) fn verify_bad_source(
+    project: &Project,
+    id: &TaskId,
+    notes: &[crate::model::Note],
+    index: usize,
+    bad: &Source,
+    history_bytes_read: &mut u64,
+) -> Result<()> {
+    validate_locator(project, id, &bad.basis)?;
+    let original = task_at(project, id, &bad.basis, history_bytes_read)?;
+    let ordinal = usize::try_from(bad.ordinal).map_err(invalid)?;
+    let prefix = original
+        .notes
+        .get(..ordinal)
+        .filter(|_| ordinal > 0 && ordinal <= index)
+        .ok_or_else(|| {
+            Error::RetainedHistoryBlocked(
+                "Correction points outside its preceding source history".into(),
+            )
+        })?;
+    if notes.get(..ordinal) != Some(prefix) {
+        return Err(Error::RetainedHistoryBlocked(
+            "Correction source bytes differ from their exact pinned history".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn read_exact(project: &Project, id: &TaskId, basis: &Basis) -> Result<PinnedTask> {
     validate_locator(project, id, basis)?;
     let mut bytes = 0;
@@ -272,29 +300,26 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
             && let PhaseOutputs::Items(output) = operation.outputs
         {
             for relation in output.resolutions {
-                validate_locator(project, id, &relation.bad.basis)?;
-                let original = task_at(
+                verify_bad_source(
                     project,
                     id,
-                    &relation.bad.basis,
+                    &pinned.task.notes,
+                    index,
+                    &relation.bad,
                     &mut pinned.history_bytes_read,
                 )?;
-                let ordinal = usize::try_from(relation.bad.ordinal).map_err(invalid)?;
-                let prefix = original
-                    .notes
-                    .get(..ordinal)
-                    .filter(|_| ordinal > 0 && ordinal <= index)
-                    .ok_or_else(|| {
-                        Error::RetainedHistoryBlocked(
-                            "Correction points outside its preceding source history".into(),
-                        )
-                    })?;
-                if pinned.task.notes.get(..ordinal) != Some(prefix) {
-                    return Err(Error::RetainedHistoryBlocked(
-                        "Correction source bytes differ from their exact pinned history".into(),
-                    ));
-                }
             }
+        } else if let Some(raw) = note.text.strip_prefix("retention resolution: ")
+            && let Ok(resolution) = decode_resolution(raw)
+        {
+            verify_bad_source(
+                project,
+                id,
+                &pinned.task.notes,
+                index,
+                &resolution.bad,
+                &mut pinned.history_bytes_read,
+            )?;
         }
     }
     // A machine checkpoint's basis is evidence, not an unverified prose count.
@@ -321,6 +346,8 @@ pub fn read(project: &Project, id: &TaskId, at: Option<&str>) -> Result<PinnedTa
                             "attached: ",
                             "detached: ",
                             "retention operation: ",
+                            "retention resolution: ",
+                            "multipart: ",
                         ]
                         .iter()
                         .any(|p| n.text.starts_with(p))

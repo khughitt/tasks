@@ -2156,3 +2156,522 @@ fn note_and_edit_reject_malformed_unversioned_and_prose_retained_notes() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn closed_done_task_repairs_legacy_files_manifest_via_retention_resolution() {
+    use sha2::{Digest, Sha256};
+
+    let f = RetainedEnv::new("detached");
+    let manifest_src = f.dir.join("manifest-src.json");
+    let manifest_bytes = serde_json::to_vec(&json!({
+        "version": 1,
+        "entries": [{"type": "file", "path": "entry", "sha256": "b".repeat(64)}]
+    }))
+    .unwrap();
+    std::fs::write(&manifest_src, &manifest_bytes).unwrap();
+    let manifest_sha = format!("{:x}", Sha256::digest(&manifest_bytes));
+
+    f.json(&[
+        "attach",
+        &f.id,
+        manifest_src.to_str().unwrap(),
+        "--name",
+        "manifest.json",
+    ]);
+    f.json(&["start", &f.id]);
+    f.json(&["done", &f.id, "Completed task"]);
+    assert_eq!(f.json(&["show", &f.id])["task"]["status"], "done");
+
+    let mut bad = f.record();
+    bad["kind"] = json!("scratch");
+    bad["path"] = json!("$WORK_ROOT/sci/scratch-dir");
+    bad["sha256"] = json!(manifest_sha);
+    bad["manifest"] = json!("files:manifest.json");
+    bad["next_owner"] = json!("user");
+    bad["handoff"] = json!("Retained scratch artifacts for review");
+    f.note(bad.clone());
+
+    let before = f.state();
+    assert_eq!(before["complete"], false);
+    assert_eq!(before["diagnostics"].as_array().unwrap().len(), 1);
+    let detail = before["diagnostics"][0]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("manifest locator must start with / or $WORK_ROOT/"),
+        "got: {detail}"
+    );
+    assert_eq!(
+        before["diagnostics"][0]["action"],
+        "Recover exact history, append valid version: 1 'retained:' successor note(s) for each affected identity (or none when no identities exist; use <records>/tasks/files/<id>/<name> for an existing attached manifest, including on closed tasks without reopening), then append 'retention resolution: {\"version\":1,\"bad\":<source>,\"successors\":[...],\"reason\":\"...\"}' or pass resolutions to tasks retained checkpoint"
+    );
+
+    // Repair on closed `done` task via `tasks note` without `tasks start` or reopening.
+    let canonical_manifest = f
+        .records
+        .join(format!("tasks/files/{}/manifest.json", f.id));
+    let mut fixed = bad;
+    fixed["manifest"] = json!(canonical_manifest.to_str().unwrap());
+    f.json(&["note", &f.id, &format!("retained: {fixed}")]);
+    let succ_ordinal = f.json(&["show", &f.id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .len();
+
+    let resolution = json!({
+        "version": 1,
+        "bad": before["diagnostics"][0]["source"],
+        "successors": [succ_ordinal],
+        "reason": "Migrated legacy files: manifest locator to canonical attached path"
+    });
+    f.json(&[
+        "note",
+        &f.id,
+        &format!("retention resolution: {resolution}"),
+    ]);
+
+    assert_eq!(f.json(&["show", &f.id])["task"]["status"], "done");
+    let after = f.state();
+    assert_eq!(after["complete"], true, "{after}");
+    assert_eq!(
+        after["diagnostics"][0]["resolved_by"]["ordinal"],
+        succ_ordinal + 1
+    );
+    assert_eq!(
+        after["items"][0]["record"]["manifest"],
+        canonical_manifest.to_str().unwrap()
+    );
+}
+
+#[test]
+fn resolution_covers_released_other_host_and_zero_item_prose_across_host_filter() {
+    let f = RetainedEnv::new("detached");
+    let local_host = host();
+
+    // 1. Historical malformed `released` note (`next_owner != "none"`) repaired via `tasks note`.
+    let bad_released = json!({
+        "version": 1,
+        "host": local_host,
+        "kind": "evidence",
+        "path": "/data/released-item",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Released evidence",
+        "next_owner": format!("task:{}", f.id),
+        "cleanup_trigger": "none"
+    });
+    f.note(bad_released);
+    let s1 = f.state();
+    assert_eq!(s1["complete"], false);
+    let valid_released = json!({
+        "version": 1,
+        "host": local_host,
+        "kind": "evidence",
+        "path": "/data/released-item",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Released evidence",
+        "next_owner": "none",
+        "cleanup_trigger": "none"
+    });
+    f.json(&["note", &f.id, &format!("retained: {valid_released}")]);
+    let rel_succ = f.json(&["show", &f.id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .len();
+    let rel_res = json!({
+        "version": 1,
+        "bad": s1["diagnostics"][0]["source"],
+        "successors": [rel_succ],
+        "reason": "Corrected released record next_owner to none"
+    });
+    f.json(&["note", &f.id, &format!("retention resolution: {rel_res}")]);
+    assert_eq!(f.state()["complete"], true);
+
+    // 2. Historical malformed note on `"other-host"` repaired by valid `"other-host"` successor
+    //    + `retention resolution:`; both unfiltered and `--host <local>` report `complete: true`.
+    f.seed_note(r#"retained: {"host":"other-host","path":42}"#);
+    let s2 = f.state();
+    assert_eq!(s2["complete"], false);
+    let bad_other_source = s2["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["resolved_by"].is_null())
+        .unwrap()["source"]
+        .clone();
+    let mut valid_other = f.record();
+    valid_other["host"] = json!("other-host");
+    valid_other["path"] = json!("/data/other-host-item");
+    f.json(&["note", &f.id, &format!("retained: {valid_other}")]);
+    let other_succ = f.json(&["show", &f.id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .len();
+    let other_res = json!({
+        "version": 1,
+        "bad": bad_other_source,
+        "successors": [other_succ],
+        "reason": "Recovered other-host inventory"
+    });
+    f.json(&["note", &f.id, &format!("retention resolution: {other_res}")]);
+    let unfiltered = f.state();
+    assert_eq!(unfiltered["complete"], true, "{unfiltered}");
+    let filtered = f.json(&["retained", "state", &f.id, "--host", &local_host]);
+    assert_eq!(filtered["complete"], true, "{filtered}");
+    assert!(
+        filtered["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| !d["resolved_by"].is_null()),
+        "no false unmatched-resolution diagnostic under --host: {filtered}"
+    );
+
+    // 3a. 0-item accidental `"retained: prose"` repaired via `"successors": []` in `retention resolution:`.
+    let prose_note_id = f.json(&["add", "Zero-item prose note repair"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let prose_note_path = f.records.join(format!("tasks/{prose_note_id}.md"));
+    let mut raw = std::fs::read_to_string(&prose_note_path).unwrap();
+    if !raw.contains("\n## Notes\n") {
+        raw.push_str("\n## Notes\n\n");
+    }
+    raw.push_str("- 2026-11-03T00:00:00Z (fixture): retained: prose\n");
+    std::fs::write(&prose_note_path, raw).unwrap();
+    common::git(&f.records, &["add", prose_note_path.to_str().unwrap()]);
+    common::git(&f.records, &["commit", "-qm", "seed 0-item prose note"]);
+
+    let s_prose = f.json(&["retained", "state", &prose_note_id]);
+    assert_eq!(s_prose["complete"], false);
+    let prose_res = json!({
+        "version": 1,
+        "bad": s_prose["diagnostics"][0]["source"],
+        "successors": [],
+        "reason": "Accidental prose on zero-item task"
+    });
+    f.json(&[
+        "note",
+        &prose_note_id,
+        &format!("retention resolution: {prose_res}"),
+    ]);
+    let s_prose_after = f.json(&["retained", "state", &prose_note_id]);
+    assert_eq!(s_prose_after["complete"], true, "{s_prose_after}");
+    assert!(s_prose_after["items"].as_array().unwrap().is_empty());
+    assert!(!s_prose_after["diagnostics"][0]["resolved_by"].is_null());
+
+    // 3b. Sibling 0-item task repaired via 0-item `CheckpointRequest.resolutions` (`declarations: []`).
+    let cp_id = f.json(&["add", "Zero-item checkpoint resolution"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &cp_id]);
+    let cp_path = f.records.join(format!("tasks/{cp_id}.md"));
+    let mut raw_cp = std::fs::read_to_string(&cp_path).unwrap();
+    raw_cp.push_str("- 2026-11-03T00:00:05Z (fixture): retained: prose\n");
+    std::fs::write(&cp_path, raw_cp).unwrap();
+    common::git(&f.records, &["add", cp_path.to_str().unwrap()]);
+    common::git(
+        &f.records,
+        &["commit", "-qm", "seed 0-item checkpoint prose"],
+    );
+
+    let s_cp_before = f.json(&["retained", "state", &cp_id]);
+    assert_eq!(s_cp_before["complete"], false);
+    let cp_req = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 77u64),
+        "host": local_host,
+        "inputs": [{"task": cp_id, "basis": s_cp_before["basis"]}],
+        "declarations": [],
+        "resolutions": [{
+            "bad": s_cp_before["diagnostics"][0]["source"],
+            "declarations": [],
+            "reason": "Zero local items exist; accidental prose cleared"
+        }]
+    });
+    let req_file = f.request("zero-item-res.json", &cp_req);
+    let cp_out = f.json(&[
+        "retained",
+        "checkpoint",
+        &cp_id,
+        "--request",
+        req_file.to_str().unwrap(),
+    ]);
+    assert_eq!(cp_out["outcome"], "no_local_items", "{cp_out}");
+    assert_eq!(cp_out["counts"]["kept_verified"], 0);
+    assert_eq!(cp_out["counts"]["kept_unknown"], 0);
+    assert_eq!(cp_out["counts"]["released"], 0);
+
+    let s_cp_after = f.json(&["retained", "state", &cp_id]);
+    assert_eq!(s_cp_after["complete"], true, "{s_cp_after}");
+    assert!(!s_cp_after["diagnostics"][0]["resolved_by"].is_null());
+    assert!(s_cp_after["checkpoints"].as_array().unwrap().is_empty());
+    let ops = s_cp_after["operations"].as_array().unwrap();
+    let phases: Vec<&str> = ops
+        .iter()
+        .map(|o| o["note"]["phase"].as_str().unwrap())
+        .collect();
+    assert_eq!(phases, vec!["intent", "items_published", "completed"]);
+    assert_eq!(
+        ops[1]["note"]["outputs"]["resolutions"][0]["successors"],
+        json!([])
+    );
+    assert_eq!(ops[2]["note"]["outputs"]["outcome"], "no_local_items");
+    assert!(ops[2]["note"]["outputs"]["checkpoint"].is_null());
+}
+
+#[test]
+fn resolution_rejects_forged_basis_operation_envelope_duplicate_identities_and_self_ordinal() {
+    let f = RetainedEnv::new("detached");
+    let assert_rejected_write = |out: &std::process::Output| {
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        assert!(out.stdout.is_empty(), "stdout must be empty on error");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        let kind = err["error"]["kind"].as_str().unwrap();
+        assert!(
+            matches!(kind, "retained_input" | "retained_history_blocked"),
+            "unexpected error kind: {err}"
+        );
+    };
+
+    // 1. Targeting a `retention operation:` ordinal (or malformed `retention checkpoint:` ordinal)
+    //    is rejected before saving even when no operation is pending.
+    common::retained::seed_historical_operation(
+        &f,
+        common::retained::HistoricalScenario::CheckpointCompleted,
+    );
+    let seeded_state = f.state();
+    let op_ord = seeded_state["operations"][0]["source"]["ordinal"]
+        .as_u64()
+        .unwrap();
+    let op_basis = seeded_state["basis"].clone();
+    f.seed_note(r#"retention checkpoint: {"version":2}"#);
+    let s_cp = f.state();
+    assert_eq!(s_cp["complete"], false);
+    let cp_bad_source = s_cp["diagnostics"][0]["source"].clone();
+    let task_file = f.records.join(format!("tasks/{}.md", f.id));
+    let raw_before = std::fs::read_to_string(&task_file).unwrap();
+
+    for bad_target in [json!({"basis": op_basis, "ordinal": op_ord}), cp_bad_source] {
+        let res_targeting_envelope = json!({
+            "version": 1,
+            "bad": bad_target,
+            "successors": [],
+            "reason": "Try to target operation or checkpoint envelope"
+        });
+        let out = f
+            .cmd()
+            .args([
+                "note",
+                &f.id,
+                &format!("retention resolution: {res_targeting_envelope}"),
+            ])
+            .output()
+            .unwrap();
+        assert_rejected_write(&out);
+        assert_eq!(std::fs::read_to_string(&task_file).unwrap(), raw_before);
+    }
+
+    // 2. Self-ordinal (`bad.ordinal == res_ordinal`) and not-yet-persisted ordinal (`> old.notes.len()`).
+    let current_len = f.json(&["show", &f.id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .len();
+    for bad_ord in [current_len + 1, current_len + 2] {
+        let self_or_future = json!({
+            "version": 1,
+            "bad": {"basis": s_cp["basis"], "ordinal": bad_ord},
+            "successors": [],
+            "reason": "Self or future ordinal"
+        });
+        let out = f
+            .cmd()
+            .args([
+                "note",
+                &f.id,
+                &format!("retention resolution: {self_or_future}"),
+            ])
+            .output()
+            .unwrap();
+        assert_rejected_write(&out);
+        assert_eq!(std::fs::read_to_string(&task_file).unwrap(), raw_before);
+    }
+
+    // Not-yet-persisted ordinal via `--stdin` batch (line 1 adds ordinal `current_len + 1`,
+    // line 2 tries to resolve `current_len + 1` in the same uncommitted save).
+    let unpersisted_batch_res = json!({
+        "version": 1,
+        "bad": {"basis": s_cp["basis"], "ordinal": current_len + 1},
+        "successors": [],
+        "reason": "Unpersisted note in same batch"
+    });
+    let out = f
+        .cmd()
+        .args(["note", &f.id, "--stdin"])
+        .write_stdin(format!(
+            "Custody note: ok\nretention resolution: {unpersisted_batch_res}\n"
+        ))
+        .output()
+        .unwrap();
+    assert_rejected_write(&out);
+    assert_eq!(std::fs::read_to_string(&task_file).unwrap(), raw_before);
+
+    // 3. Forged `bad.basis.commit` and duplicate successor identities `[4, 5]` on a 2-identity host diagnostic.
+    let dup_id = f.json(&["add", "Duplicate identity and forged basis checks"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let dup_file = f.records.join(format!("tasks/{dup_id}.md"));
+    // Start with 0 notes on `dup_id` so ordinals are literally 1..=5.
+    let initial_raw = std::fs::read_to_string(&dup_file).unwrap();
+    let header_only = format!(
+        "{}\n## Notes\n\n",
+        initial_raw.split("\n## Notes").next().unwrap()
+    );
+    std::fs::write(&dup_file, header_only).unwrap();
+    common::git(&f.records, &["add", dup_file.to_str().unwrap()]);
+    common::git(&f.records, &["commit", "-qm", "empty notes on dup task"]);
+    let dup_early_basis = f.json(&["retained", "state", &dup_id])["basis"].clone();
+
+    let mut rec_a = f.record();
+    rec_a["host"] = json!("h");
+    rec_a["path"] = json!("/data/a");
+    rec_a["next_owner"] = json!(format!("task:{dup_id}"));
+    let mut rec_b = rec_a.clone();
+    rec_b["path"] = json!("/data/b");
+
+    let append_committed = |line: &str| {
+        let mut raw = std::fs::read_to_string(&dup_file).unwrap();
+        raw.push_str(&format!("- 2026-11-03T00:00:10Z (fixture): {line}\n"));
+        std::fs::write(&dup_file, raw).unwrap();
+        common::git(&f.records, &["add", dup_file.to_str().unwrap()]);
+        common::git(&f.records, &["commit", "-qm", "seed dup history"]);
+    };
+    append_committed(&format!("retained: {rec_a}")); // ordinal 1 (item A)
+    append_committed(&format!("retained: {rec_b}")); // ordinal 2 (item B)
+    append_committed(r#"retained: {"host":"h","path":42}"#); // ordinal 3 (bad host-scoped)
+    let bad_state = f.json(&["retained", "state", &dup_id]);
+    let real_bad_source = bad_state["diagnostics"][0]["source"].clone();
+    assert_eq!(real_bad_source["ordinal"], 3);
+    append_committed(&format!("retained: {rec_a}")); // ordinal 4 (item A)
+    append_committed(&format!("retained: {rec_a}")); // ordinal 5 (duplicate item A!)
+    let dup_raw_before = std::fs::read_to_string(&dup_file).unwrap();
+
+    // 3a. Forged unreachable commit ("0".repeat(40)) and forged earlier commit (`dup_early_basis`).
+    let mut zero_basis = real_bad_source["basis"].clone();
+    zero_basis["commit"] = json!("0".repeat(40));
+    for forged_basis in [zero_basis, dup_early_basis] {
+        let forged_res = json!({
+            "version": 1,
+            "bad": {"basis": forged_basis, "ordinal": 3},
+            "successors": [4],
+            "reason": "Forged basis commit"
+        });
+        let out = f
+            .cmd()
+            .args([
+                "note",
+                &dup_id,
+                &format!("retention resolution: {forged_res}"),
+            ])
+            .output()
+            .unwrap();
+        assert_rejected_write(&out);
+        assert_eq!(std::fs::read_to_string(&dup_file).unwrap(), dup_raw_before);
+    }
+
+    // 4. Duplicate identities across two successor ordinals `[4, 5]` on a 2-identity host diagnostic.
+    let dup_succ_res = json!({
+        "version": 1,
+        "bad": real_bad_source,
+        "successors": [4, 5],
+        "reason": "Two successor ordinals naming item A twice"
+    });
+    let out = f
+        .cmd()
+        .args([
+            "note",
+            &dup_id,
+            &format!("retention resolution: {dup_succ_res}"),
+        ])
+        .output()
+        .unwrap();
+    assert_rejected_write(&out);
+    assert_eq!(std::fs::read_to_string(&dup_file).unwrap(), dup_raw_before);
+
+    // 5. Tampering a committed task file on a branch to hold a `retention resolution:` with a
+    //    mismatched `bad.basis` commit fails BOTH `tasks retained state` and `tasks retained checkpoint`
+    //    with `retained_history_blocked`.
+    let tamper_id = f.json(&["add", "Tampered committed resolution"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &tamper_id]);
+    let tamper_early = f.json(&["retained", "state", &tamper_id])["basis"].clone();
+    let tamper_notes_before = f.json(&["show", &tamper_id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .len();
+    let tamper_file = f.records.join(format!("tasks/{tamper_id}.md"));
+    let mut raw_t = std::fs::read_to_string(&tamper_file).unwrap();
+    raw_t.push_str("- 2026-11-03T00:00:20Z (fixture): retained: prose\n");
+    std::fs::write(&tamper_file, &raw_t).unwrap();
+    common::git(&f.records, &["add", tamper_file.to_str().unwrap()]);
+    common::git(&f.records, &["commit", "-qm", "tamper prose"]);
+
+    let tampered_res = json!({
+        "version": 1,
+        "bad": {"basis": tamper_early, "ordinal": tamper_notes_before + 1},
+        "successors": [],
+        "reason": "Tampered bad.basis commit on branch"
+    });
+    raw_t.push_str(&format!(
+        "- 2026-11-03T00:00:21Z (fixture): retention resolution: {tampered_res}\n"
+    ));
+    std::fs::write(&tamper_file, &raw_t).unwrap();
+    common::git(&f.records, &["add", tamper_file.to_str().unwrap()]);
+    common::git(
+        &f.records,
+        &["commit", "-qm", "tamper forged resolution commit"],
+    );
+
+    let out_state = f
+        .cmd()
+        .args(["retained", "state", &tamper_id])
+        .output()
+        .unwrap();
+    assert_eq!(out_state.status.code(), Some(1));
+    let err_state: serde_json::Value = serde_json::from_slice(&out_state.stderr).unwrap();
+    assert_eq!(
+        err_state["error"]["kind"], "retained_history_blocked",
+        "{err_state}"
+    );
+
+    let mut head_basis = tamper_early;
+    head_basis["commit"] = json!(f.basis());
+    let cp_req = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 88u64),
+        "host": host(),
+        "inputs": [{"task": tamper_id, "basis": head_basis}],
+        "declarations": []
+    });
+    let req_path = f.request("tampered-cp.json", &cp_req);
+    let out_cp = f
+        .cmd()
+        .args([
+            "retained",
+            "checkpoint",
+            &tamper_id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out_cp.status.code(), Some(1));
+    let err_cp: serde_json::Value = serde_json::from_slice(&out_cp.stderr).unwrap();
+    assert_eq!(
+        err_cp["error"]["kind"], "retained_history_blocked",
+        "{err_cp}"
+    );
+}

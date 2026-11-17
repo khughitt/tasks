@@ -647,3 +647,253 @@ fn check_write_preserves_trimmed_historical_malformed_retained_note() {
         "expected Error::RetainedInput, got: {err:?}"
     );
 }
+
+const EXPECTED_RETAINED_ACTION: &str = "Recover exact history, append valid version: 1 'retained:' successor note(s) for each affected identity (or none when no identities exist; use <records>/tasks/files/<id>/<name> for an existing attached manifest, including on closed tasks without reopening), then append 'retention resolution: {\"version\":1,\"bad\":<source>,\"successors\":[...],\"reason\":\"...\"}' or pass resolutions to tasks retained checkpoint";
+const EXPECTED_ENVELOPE_ACTION: &str =
+    "Publish an explicit source-bound correction after recovering exact history";
+
+#[test]
+fn state_replay_standalone_resolution_scopes_and_rejections() {
+    // 1. Diagnostic.action distinguishes retained: vs operation/checkpoint envelopes,
+    //    and 0-item prose resolves via empty successors in standalone resolution.
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", "retained: accidental prose").unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
+    assert!(!s.complete);
+    assert_eq!(s.diagnostics[0].action, EXPECTED_RETAINED_ACTION);
+    let res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [],
+        "reason": "Accidental prose with zero retained items"
+    });
+    crate::commands::append_note(&mut t, "t", &format!("retention resolution: {res}")).unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
+    assert!(s.complete, "{s:?}");
+    assert_eq!(s.diagnostics[0].resolved_by.as_ref().unwrap().ordinal, 2);
+
+    // 2. Released item diagnostic resolved via valid released successor + retention resolution.
+    let mut t_rel = task();
+    let bad_rel = json!({
+        "version": 1,
+        "host": "h",
+        "kind": "evidence",
+        "path": "/data/a",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Released item",
+        "next_owner": "task:sci-000001",
+        "cleanup_trigger": "none"
+    });
+    crate::commands::append_note(&mut t_rel, "t", &format!("retained: {bad_rel}")).unwrap();
+    let ok_rel = json!({
+        "version": 1,
+        "host": "h",
+        "kind": "evidence",
+        "path": "/data/a",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Released item",
+        "next_owner": "none",
+        "cleanup_trigger": "none"
+    });
+    crate::commands::append_note(&mut t_rel, "t", &format!("retained: {ok_rel}")).unwrap();
+    let res_rel = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [2],
+        "reason": "Fixed released next_owner"
+    });
+    crate::commands::append_note(&mut t_rel, "t", &format!("retention resolution: {res_rel}"))
+        .unwrap();
+    let s = state::replay(&project(), &t_rel, &basis(), None).unwrap();
+    assert!(s.complete, "{s:?}");
+    assert_eq!(s.items[0].record.as_ref().unwrap().state, "released");
+
+    // 3. Other-host diagnostic resolved without false unmatched diagnostic under --host h.
+    let mut t_other = task();
+    crate::commands::append_note(&mut t_other, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(
+        &mut t_other,
+        "t",
+        r#"retained: {"host":"other-host","path":42}"#,
+    )
+    .unwrap();
+    let mut ok_other = record();
+    ok_other["host"] = json!("other-host");
+    ok_other["path"] = json!("/data/other");
+    crate::commands::append_note(&mut t_other, "t", &format!("retained: {ok_other}")).unwrap();
+    let res_other = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 2},
+        "successors": [3],
+        "reason": "Recovered other-host inventory"
+    });
+    crate::commands::append_note(
+        &mut t_other,
+        "t",
+        &format!("retention resolution: {res_other}"),
+    )
+    .unwrap();
+    let full = state::replay(&project(), &t_other, &basis(), None).unwrap();
+    assert!(full.complete, "{full:?}");
+    let local = state::replay(&project(), &t_other, &basis(), Some("h")).unwrap();
+    assert!(local.complete, "{local:?}");
+    assert!(local.diagnostics.is_empty(), "{:?}", local.diagnostics);
+
+    // 4. Rejections in state::replay emit task-scoped diagnostics with envelope action.
+    let mut t_bad_op = task();
+    crate::commands::append_note(&mut t_bad_op, "t", "retention operation: {\"bad\":1}").unwrap();
+    let s_op = state::replay(&project(), &t_bad_op, &basis(), None).unwrap();
+    assert_eq!(s_op.diagnostics[0].action, EXPECTED_ENVELOPE_ACTION);
+    let try_res_op = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [],
+        "reason": "Attempted to suppress operation envelope"
+    });
+    crate::commands::append_note(
+        &mut t_bad_op,
+        "t",
+        &format!("retention resolution: {try_res_op}"),
+    )
+    .unwrap();
+    let s_op = state::replay(&project(), &t_bad_op, &basis(), None).unwrap();
+    assert!(!s_op.complete);
+    assert_eq!(s_op.diagnostics.len(), 2);
+    assert!(s_op.diagnostics[0].resolved_by.is_none());
+    assert_eq!(s_op.diagnostics[1].scope, "task");
+    assert_eq!(s_op.diagnostics[1].code, "malformed_record");
+    assert_eq!(s_op.diagnostics[1].action, EXPECTED_ENVELOPE_ACTION);
+
+    // Unsupported version on retention resolution: emits code == "unsupported_version".
+    let mut t_v2 = task();
+    crate::commands::append_note(&mut t_v2, "t", r#"retention resolution: {"version":2}"#).unwrap();
+    let s_v2 = state::replay(&project(), &t_v2, &basis(), Some("h")).unwrap();
+    assert!(!s_v2.complete);
+    assert_eq!(s_v2.diagnostics[0].code, "unsupported_version");
+    assert_eq!(s_v2.diagnostics[0].scope, "task");
+
+    // Duplicate successor identities [4, 5] on a 2-identity host diagnostic fail coverage.
+    let mut t_dup = task();
+    let mut item_b = record();
+    item_b["path"] = json!("/data/b");
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {item_b}")).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", r#"retained: {"host":"h","path":42}"#).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {}", record())).unwrap();
+    let dup_res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 3},
+        "successors": [4, 5],
+        "reason": "Duplicate item A twice instead of A and B"
+    });
+    crate::commands::append_note(&mut t_dup, "t", &format!("retention resolution: {dup_res}"))
+        .unwrap();
+    let s_dup = state::replay(&project(), &t_dup, &basis(), None).unwrap();
+    assert!(!s_dup.complete);
+    assert!(s_dup.diagnostics[0].resolved_by.is_none());
+    assert_eq!(s_dup.diagnostics[1].source.as_ref().unwrap().ordinal, 6);
+}
+
+#[test]
+fn proof_and_basis_reject_forged_resolution_bad_basis() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::proof_and_basis_reject_forged_resolution_bad_basis",
+    ) {
+        return;
+    }
+    let (dir, project) = crate::retained::read::tests::fixture();
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", "Custody note: initial").unwrap();
+    let write_task = |proj: &crate::repo::Project, task_val: &Task| {
+        let raw = crate::format::serialize_physical(&proj.physical_for_save(task_val).unwrap());
+        std::fs::write(proj.task_path(&task_val.id), raw).unwrap();
+    };
+    write_task(&project, &t);
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "initial task"]);
+    let early = super::basis::read(&project, &id, None).unwrap().basis;
+
+    crate::commands::append_note(&mut t, "t", "retained: accidental prose").unwrap();
+    write_task(&project, &t);
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "bad retained"]);
+
+    // Tamper a resolution note pointing bad.basis at `early` (before ordinal 2 existed).
+    let forged = json!({
+        "version": 1,
+        "bad": {"basis": early, "ordinal": 2},
+        "successors": [],
+        "reason": "Forged earlier basis commit"
+    });
+    crate::commands::append_note(&mut t, "t", &format!("retention resolution: {forged}")).unwrap();
+    write_task(&project, &t);
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "forged resolution"]);
+    let head_commit = crate::retained::read::tests::git(dir.path(), &["rev-parse", "HEAD"]);
+
+    // 1. `basis::read` rejects the forged `retention resolution:` with RetainedHistoryBlocked.
+    let err = super::basis::read(&project, &id, None)
+        .err()
+        .expect("basis::read must reject forged bad.basis");
+    assert!(
+        matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+        "expected RetainedHistoryBlocked from basis::read, got: {err:?}"
+    );
+
+    // 2. `proof::validate_history` independently rejects the forged `retention resolution:`
+    //    even when loaded via `basis::read_exact`.
+    let mut head_basis = early.clone();
+    head_basis.commit = head_commit;
+    let exact = super::basis::read_exact(&project, &id, &head_basis).unwrap();
+    let err = super::proof::validate_history(&project, &exact, None)
+        .expect_err("proof::validate_history must reject forged bad.basis");
+    assert!(
+        matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+        "expected RetainedHistoryBlocked from proof::validate_history, got: {err:?}"
+    );
+
+    // 3. `basis::read` checkpoint-gap guard rejects intervening `retention resolution: ` and `multipart: ` notes.
+    for gap_note in [
+        r#"retention resolution: {"not_decoded":1}"#,
+        r#"multipart: {"not_decoded":1}"#,
+    ] {
+        let (gap_dir, gap_proj) = crate::retained::read::tests::fixture();
+        let mut gap_t = task();
+        crate::commands::append_note(&mut gap_t, "t", &format!("retained: {}", record())).unwrap();
+        write_task(&gap_proj, &gap_t);
+        crate::retained::read::tests::git(gap_dir.path(), &["add", "."]);
+        crate::retained::read::tests::git(gap_dir.path(), &["commit", "-qm", "seed"]);
+        let cp_basis = super::basis::read(&gap_proj, &id, None).unwrap().basis;
+
+        crate::commands::append_note(&mut gap_t, "t", gap_note).unwrap();
+        let cp_json = json!({
+            "version": 1,
+            "operation": {"coordinator": "sci-000001", "operation_id": "0".repeat(32)},
+            "observed_at": "2026-11-03T00:00:00Z",
+            "host": "h",
+            "observer": null,
+            "basis": cp_basis,
+            "scope": {"mode": "all_known_kept_on_host", "host": "h", "other_hosts": "outside_observation"},
+            "counts": {"kept_verified": 1, "kept_unknown": 0, "released": 0},
+            "changed": 0,
+            "actions": [],
+            "complete": true
+        });
+        crate::commands::append_note(&mut gap_t, "t", &format!("retention checkpoint: {cp_json}"))
+            .unwrap();
+        write_task(&gap_proj, &gap_t);
+        crate::retained::read::tests::git(gap_dir.path(), &["add", "."]);
+        crate::retained::read::tests::git(gap_dir.path(), &["commit", "-qm", "gap cp"]);
+        let err = super::basis::read(&gap_proj, &id, None)
+            .err()
+            .unwrap_or_else(|| panic!("gap note {gap_note} must block checkpoint basis"));
+        assert!(
+            matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+            "{gap_note}: got {err:?}"
+        );
+    }
+}

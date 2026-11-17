@@ -40,6 +40,120 @@ pub struct RetainedState {
     pub warnings: Vec<String>,
 }
 
+const RETAINED_DIAGNOSTIC_ACTION: &str = "Recover exact history, append valid version: 1 'retained:' successor note(s) for each affected identity (or none when no identities exist; use <records>/tasks/files/<id>/<name> for an existing attached manifest, including on closed tasks without reopening), then append 'retention resolution: {\"version\":1,\"bad\":<source>,\"successors\":[...],\"reason\":\"...\"}' or pass resolutions to tasks retained checkpoint";
+const ENVELOPE_DIAGNOSTIC_ACTION: &str =
+    "Publish an explicit source-bound correction after recovering exact history";
+
+#[allow(clippy::too_many_arguments)]
+fn apply_resolution(
+    project: &crate::repo::Project,
+    task_id: &crate::model::TaskId,
+    notes: &[crate::model::Note],
+    items: &BTreeMap<Identity, RetainedItem>,
+    diagnostics: &mut [Diagnostic],
+    source: &Source,
+    relation: &ResolutionRelation,
+    operation_host: Option<&str>,
+    standalone: bool,
+) -> Result<()> {
+    if relation.bad.ordinal == 0 || relation.bad.ordinal >= source.ordinal {
+        return Err(invalid(
+            "resolution bad ordinal must precede resolution source",
+        ));
+    }
+    let bad_id = super::lineage::historical_id(&relation.bad.basis)?;
+    if !super::lineage::same(project, &bad_id.to_string(), &task_id.to_string())? {
+        return Err(invalid("resolution bad basis belongs to a different task"));
+    }
+    if !line(&relation.reason) {
+        return Err(invalid("resolution reason must be a non-empty single line"));
+    }
+    let bad_idx = usize::try_from(relation.bad.ordinal - 1).map_err(invalid)?;
+    if standalone
+        && !notes
+            .get(bad_idx)
+            .is_some_and(|n| n.text.starts_with("retained:"))
+    {
+        return Err(invalid(
+            "retention resolution may only target a retained: item note",
+        ));
+    }
+    let mut seen_ordinals = std::collections::BTreeSet::new();
+    let mut seen_identities = std::collections::BTreeSet::new();
+    let mut corrected = Vec::with_capacity(relation.successors.len());
+    for &o in &relation.successors {
+        if o <= relation.bad.ordinal || o >= source.ordinal || !seen_ordinals.insert(o) {
+            return Err(invalid(
+                "resolution successors must be distinct ordinals between bad.ordinal and resolution",
+            ));
+        }
+        let idx = usize::try_from(o - 1).map_err(invalid)?;
+        let raw = notes
+            .get(idx)
+            .and_then(|n| n.text.strip_prefix("retained: "))
+            .ok_or_else(|| invalid("resolution successor is not a retained: item note"))?;
+        let record = decode_record(raw)?;
+        if record.version != Some(1) {
+            return Err(invalid("resolution successor requires version: 1"));
+        }
+        if !standalone
+            && operation_host
+                .is_some_and(|op_host| record.state != "kept" || record.host != op_host)
+        {
+            return Err(invalid(
+                "checkpoint resolution successor must be a kept record on the operation host",
+            ));
+        }
+        let identity = record.identity();
+        if !seen_identities.insert(identity.clone()) {
+            return Err(invalid(
+                "resolution successors must have distinct item identities",
+            ));
+        }
+        corrected.push(identity);
+    }
+    let mut matched = false;
+    let mut covered_any = false;
+    for d in diagnostics.iter_mut() {
+        if d.source
+            .as_ref()
+            .is_some_and(|p| p.ordinal == relation.bad.ordinal)
+        {
+            matched = true;
+            let covered = match (&d.identity, &d.host) {
+                (Some(id), _) => {
+                    !corrected.is_empty()
+                        && if standalone {
+                            corrected.as_slice() == std::slice::from_ref(id)
+                        } else {
+                            corrected.contains(id)
+                        }
+                }
+                (None, Some(h)) => {
+                    corrected.iter().all(|c| c.host == *h)
+                        && items
+                            .keys()
+                            .filter(|i| i.host == *h)
+                            .all(|i| corrected.contains(i))
+                }
+                (None, None) => items.keys().all(|i| corrected.contains(i)),
+            };
+            if covered {
+                d.resolved_by = Some(source.clone());
+                covered_any = true;
+            }
+        }
+    }
+    if standalone && (!matched || !covered_any) {
+        return Err(invalid(if !matched {
+            "retention resolution does not match a diagnostic at bad.ordinal"
+        } else {
+            "retention resolution does not cover all affected identities in scope"
+        }));
+    }
+    Ok(())
+}
+
 pub fn replay(
     project: &crate::repo::Project,
     task: &Task,
@@ -84,7 +198,7 @@ pub fn replay(
                     );
                     Ok(())
                 }
-                Err(e) => Err((raw, e.to_string())),
+                Err(e) => Err((raw, e.to_string(), RETAINED_DIAGNOSTIC_ACTION)),
             }
         } else if let Some(raw) = note.text.strip_prefix("retention operation: ") {
             let decoded = decode_operation(raw).and_then(|n| {
@@ -165,61 +279,19 @@ pub fn replay(
             match decoded {
                 Ok(n) => {
                     if let PhaseOutputs::Items(out) = &n.outputs {
+                        // Exact historical source and successor bytes are verified by the pinned reader.
                         for relation in &out.resolutions {
-                            if relation.bad.ordinal == 0
-                                || relation.bad.ordinal >= source.ordinal
-                                || !super::lineage::same(
-                                    project,
-                                    &super::lineage::historical_id(&relation.bad.basis)?
-                                        .to_string(),
-                                    &task.id.to_string(),
-                                )?
-                                || relation.successors.is_empty()
-                                || relation
-                                    .successors
-                                    .iter()
-                                    .any(|v| *v <= relation.bad.ordinal || *v >= source.ordinal)
-                                || !line(&relation.reason)
-                            {
-                                continue;
-                            }
-                            // Exact historical source and successor bytes are verified by the pinned reader.
-                            for d in &mut s.diagnostics {
-                                if d.source
-                                    .as_ref()
-                                    .is_some_and(|p| p.ordinal == relation.bad.ordinal)
-                                {
-                                    let corrected = relation
-                                        .successors
-                                        .iter()
-                                        .filter_map(|o| {
-                                            task.notes
-                                                .get(*o as usize - 1)
-                                                .and_then(|n| n.text.strip_prefix("retained: "))
-                                                .and_then(|r| decode_record(r).ok())
-                                                .filter(|r| r.version == Some(1))
-                                                .map(|r| r.identity())
-                                        })
-                                        .collect::<Vec<_>>();
-                                    let covered = corrected.len() == relation.successors.len()
-                                        && !corrected.is_empty()
-                                        && if let Some(identity) = &d.identity {
-                                            corrected.contains(identity)
-                                        } else {
-                                            corrected.iter().all(|i| {
-                                                d.host.as_ref().is_none_or(|h| *h == i.host)
-                                            }) && items
-                                                .keys()
-                                                .filter(|i| {
-                                                    d.host.as_ref().is_none_or(|h| *h == i.host)
-                                                })
-                                                .all(|i| corrected.contains(i))
-                                        };
-                                    if covered {
-                                        d.resolved_by = Some(source.clone());
-                                    }
-                                }
-                            }
+                            let _ = apply_resolution(
+                                project,
+                                &task.id,
+                                &task.notes,
+                                &items,
+                                &mut s.diagnostics,
+                                &source,
+                                relation,
+                                Some(&n.host),
+                                false,
+                            );
                         }
                     }
                     s.operations.push(OperationEntry {
@@ -228,7 +300,7 @@ pub fn replay(
                     });
                     Ok(())
                 }
-                Err(e) => Err((raw, e.to_string())),
+                Err(e) => Err((raw, e.to_string(), ENVELOPE_DIAGNOSTIC_ACTION)),
             }
         } else if let Some(raw) = note.text.strip_prefix("retention checkpoint: ") {
             if raw.starts_with('{') {
@@ -268,7 +340,7 @@ pub fn replay(
                         });
                         Ok(())
                     }
-                    Err(e) => Err((raw, e.to_string())),
+                    Err(e) => Err((raw, e.to_string(), ENVELOPE_DIAGNOSTIC_ACTION)),
                 }
             } else {
                 s.checkpoints.push(CheckpointEntry {
@@ -278,10 +350,53 @@ pub fn replay(
                 });
                 Ok(())
             }
+        } else if note.text.starts_with("retention resolution:") {
+            let outcome = note
+                .text
+                .strip_prefix("retention resolution: ")
+                .ok_or_else(|| invalid("missing space after 'retention resolution:'"))
+                .and_then(decode_resolution)
+                .and_then(|res| {
+                    let relation = ResolutionRelation {
+                        bad: res.bad,
+                        successors: res.successors,
+                        reason: res.reason,
+                    };
+                    apply_resolution(
+                        project,
+                        &task.id,
+                        &task.notes,
+                        &items,
+                        &mut s.diagnostics,
+                        &source,
+                        &relation,
+                        None,
+                        true,
+                    )
+                });
+            if let Err(e) = outcome {
+                let detail = e.to_string();
+                s.diagnostics.push(Diagnostic {
+                    code: if detail.contains("unsupported_version") {
+                        "unsupported_version"
+                    } else {
+                        "malformed_record"
+                    }
+                    .into(),
+                    scope: "task".into(),
+                    host: None,
+                    identity: None,
+                    source: Some(source.clone()),
+                    detail,
+                    action: ENVELOPE_DIAGNOSTIC_ACTION.into(),
+                    resolved_by: None,
+                });
+            }
+            Ok(())
         } else {
             Ok(())
         };
-        if let Err((raw, detail)) = parsed {
+        if let Err((raw, detail, action)) = parsed {
             // Partial identity is diagnostic scope only, never a usable predecessor.
             let v = strict(raw.as_bytes()).unwrap_or(Value::Null);
             let h = v
@@ -289,9 +404,6 @@ pub fn replay(
                 .and_then(Value::as_str)
                 .filter(|h| text(h))
                 .map(str::to_string);
-            if host.is_some_and(|filter| h.as_deref().is_some_and(|h| h != filter)) {
-                continue;
-            }
             let identity = serde_json::from_value::<Identity>(
                 serde_json::json!({"host":v.get("host"),"kind":v.get("kind"),"path":v.get("path")}),
             )
@@ -325,9 +437,7 @@ pub fn replay(
                 identity,
                 source: Some(source),
                 detail,
-                action:
-                    "Publish an explicit source-bound correction after recovering exact history"
-                        .into(),
+                action: action.into(),
                 resolved_by: None,
             });
         }
@@ -363,6 +473,8 @@ pub fn replay(
             item.coverage = "unknown".into();
         }
     }
+    s.diagnostics
+        .retain(|d| d.host.is_none() || host.is_none_or(|f| d.host.as_deref() == Some(f)));
     s.complete = s.diagnostics.iter().all(|d| d.resolved_by.is_some());
     s.items = items
         .into_values()
