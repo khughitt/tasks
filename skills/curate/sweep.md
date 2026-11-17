@@ -219,7 +219,7 @@ these five rules:
      task and drop it.
    - No such absorb note, but the survivor's body already holds what only the closing
      task said: the fold-in is done; do not fold in again. Write the origin edit and its
-     note unless the survivor already carries
+     note, where SKILL.md calls for one, unless the survivor already carries
      `origin: <user|mixed> after absorbing <closing-id>; <sweep-id>; ...`, re-point each
      open dependent the closing task's `dependents` field still lists, then write the
      absorb note and the drop.
