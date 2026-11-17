@@ -56,21 +56,45 @@ pub(crate) fn pending_here(project: &Project, task: &Task) -> Result<Option<Pend
     }
     one_pending(live.into_iter())
 }
-pub(super) fn reserved(text: &str) -> bool {
+pub fn reserved(text: &str) -> bool {
     [
         "retained:",
         "retention operation:",
         "retention checkpoint:",
+        "retention resolution:",
         "attached:",
         "detached:",
+        "multipart:",
     ]
     .iter()
     .any(|p| text.starts_with(p))
 }
+fn is_logical_manifest(name: &str) -> bool {
+    name.starts_with("retained-manifest-")
+        && name.ends_with(".json")
+        && !name.ends_with(".catalog.json")
+        && name.len() > "retained-manifest-.json".len()
+}
+pub(crate) fn manifest_member_logical(name: &str) -> Option<&str> {
+    let logical = if let Some(logical) = name.strip_suffix(".catalog.json") {
+        logical
+    } else if let Some((logical, suffix)) = name.rsplit_once(".part-")
+        && suffix.len() == 4
+        && suffix.bytes().all(|b| b.is_ascii_digit())
+    {
+        logical
+    } else {
+        return None;
+    };
+    (is_logical_manifest(logical) && crate::multipart::audit::is_member(name, logical))
+        .then_some(logical)
+}
 pub fn protected(name: &str) -> bool {
     (name.starts_with("retained-op-") && name.ends_with(".request.json"))
         || ((name.starts_with("retained-manifest-") || name.starts_with("retained-checkpoint-"))
-            && name.ends_with(".json"))
+            && name.ends_with(".json")
+            && !name.ends_with(".catalog.json"))
+        || manifest_member_logical(name).is_some()
 }
 pub enum WriteAction<'a> {
     Archive,
@@ -89,7 +113,10 @@ pub fn permission(project: &Project, task: &Task, action: WriteAction<'_>) -> Re
     if matches!(action, WriteAction::Identity) {
         let mut artifacts = crate::attachments::ledger(task)
             .keys()
-            .any(|n| protected(n));
+            .any(|n| protected(n))
+            || crate::multipart::audit::declarations(task)
+                .keys()
+                .any(|n| protected(n));
         if crate::attachments::check_storage(project, &task.id)? {
             for entry in std::fs::read_dir(crate::attachments::task_dir(project, &task.id))? {
                 let entry = entry?;
@@ -99,10 +126,13 @@ pub fn permission(project: &Project, task: &Task, action: WriteAction<'_>) -> Re
             }
         }
         if artifacts
-            || task
-                .notes
-                .iter()
-                .any(|n| n.text.starts_with("retention operation: "))
+            || task.notes.iter().any(|n| {
+                n.text.starts_with("retention operation:")
+                    || n.text.starts_with("retention resolution:")
+                    || n.text
+                        .strip_prefix("retention checkpoint:")
+                        .is_some_and(|s| s.trim_start().starts_with('{'))
+            })
         {
             return Err(Error::RetainedHistoryBlocked(format!(
                 "{} carries immutable retention locators; ID-changing transformations require an explicit locator-preservation design",
@@ -132,6 +162,128 @@ pub fn project_permission(project: &Project, identity: bool) -> Result<()> {
     }
     Ok(())
 }
+fn reserved_retained_error(detail: impl std::fmt::Display) -> Error {
+    invalid(format!(
+        "Note prefix 'retained:' is reserved for Retention-1 JSON item records ('retained: {{\"version\":1,...}}'); for ordinary prose use a non-reserved prefix such as 'Custody note: ...' ({detail})"
+    ))
+}
+
+pub fn validate_appended_note_syntax(text: &str) -> Result<()> {
+    if text.starts_with("retention operation:")
+        || text
+            .strip_prefix("retention checkpoint:")
+            .is_some_and(|s| s.trim_start().starts_with('{'))
+    {
+        return Err(invalid(
+            "machine retention envelopes require the owned retained publication path",
+        ));
+    }
+    let detached_protected =
+        crate::attachments::parse_ledger_note(text).is_some_and(|(entry, name)| {
+            entry == crate::attachments::Ledger::Detached && protected(name)
+        }) || text
+            .strip_prefix("detached:")
+            .map(str::trim_start)
+            .map(|rest| rest.split_once(':').map_or(rest, |(name, _)| name).trim())
+            .is_some_and(protected);
+    if detached_protected {
+        return Err(invalid(
+            "protected retained evidence cannot be detached by a generic note",
+        ));
+    }
+    if text.starts_with("retained:") {
+        let raw = text
+            .strip_prefix("retained: ")
+            .ok_or_else(|| reserved_retained_error("missing space after 'retained:'"))?;
+        if !raw.trim_start().starts_with('{') {
+            let detail = strict(raw.as_bytes())
+                .err()
+                .map_or_else(|| "expected JSON object".to_string(), |e| e.to_string());
+            return Err(reserved_retained_error(detail));
+        }
+        strict(raw.as_bytes()).map_err(reserved_retained_error)?;
+        let record = decode_record(raw)?;
+        if record.version != Some(1) {
+            return Err(invalid(
+                "newly written retained: records require integer \"version\": 1",
+            ));
+        }
+    }
+    if text.starts_with("retention resolution:") {
+        let raw = text
+            .strip_prefix("retention resolution: ")
+            .ok_or_else(|| invalid("missing space after 'retention resolution:'"))?;
+        decode_resolution(raw)?;
+    }
+    Ok(())
+}
+
+fn validate_appended_resolutions(project: &Project, old: &Task, new: &Task) -> Result<()> {
+    if new.notes.len() < old.notes.len() {
+        return Ok(());
+    }
+    for (offset, n) in new.notes[old.notes.len()..].iter().enumerate() {
+        let Some(raw) = n.text.strip_prefix("retention resolution: ") else {
+            continue;
+        };
+        let res_ordinal_usize = old.notes.len() + offset + 1;
+        let res_ordinal = res_ordinal_usize as u64;
+        let note = decode_resolution(raw)?;
+        let bad_ordinal = usize::try_from(note.bad.ordinal).map_err(invalid)?;
+        if bad_ordinal > old.notes.len() {
+            return Err(invalid(
+                "retention resolution bad.ordinal must reference an already-persisted note",
+            ));
+        }
+        let original = super::basis::read_exact(project, &new.id, &note.bad.basis)?;
+        let Some(bad_prefix) = original.task.notes.get(..bad_ordinal) else {
+            return Err(invalid(
+                "retention resolution bad.ordinal is outside its pinned basis history",
+            ));
+        };
+        if new.notes.get(..bad_ordinal) != Some(bad_prefix) {
+            return Err(invalid(
+                "retention resolution source bytes differ from their exact pinned history",
+            ));
+        }
+        if !new.notes[bad_ordinal - 1].text.starts_with("retained:") {
+            return Err(invalid(
+                "retention resolution may only target a retained: item note",
+            ));
+        }
+        let sub = super::lineage::subdir(project)?;
+        let synthetic_basis = Basis {
+            project: project.prefix.clone(),
+            layout: project.kind.as_str().into(),
+            records_subdir: sub.clone(),
+            commit: note.bad.basis.commit.clone(),
+            task_path: super::lineage::task_path(&sub, &new.id),
+            retained_ref: note.bad.basis.retained_ref.clone(),
+        };
+        let mut prefix_task = new.clone();
+        prefix_task.notes.truncate(res_ordinal_usize);
+        let replayed = super::state::replay(project, &prefix_task, &synthetic_basis, None)?;
+        let res_had_diagnostic = replayed
+            .diagnostics
+            .iter()
+            .any(|d| d.source.as_ref().is_some_and(|s| s.ordinal == res_ordinal));
+        let bad_resolved = replayed.diagnostics.iter().any(|d| {
+            d.source
+                .as_ref()
+                .is_some_and(|s| s.ordinal == note.bad.ordinal)
+                && d.resolved_by
+                    .as_ref()
+                    .is_some_and(|s| s.ordinal == res_ordinal)
+        });
+        if res_had_diagnostic || !bad_resolved {
+            return Err(invalid(
+                "retention resolution did not cleanly resolve a diagnostic at bad.ordinal",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn check_write(
     project: &Project,
     registry: &Registry,
@@ -152,28 +304,13 @@ pub fn check_write(
             "immutable retained operation history cannot be rewritten",
         ));
     }
-    if new.notes.starts_with(&old.notes) {
+    if new.notes.len() >= old.notes.len() {
         for n in &new.notes[old.notes.len()..] {
-            if n.text.starts_with("retention operation:")
-                || n.text
-                    .strip_prefix("retention checkpoint:")
-                    .is_some_and(|s| s.trim_start().starts_with('{'))
-            {
-                return Err(invalid(
-                    "machine retention envelopes require the owned retained publication path",
-                ));
-            }
-            if let Some((crate::attachments::Ledger::Detached, name)) =
-                crate::attachments::parse_ledger_note(&n.text)
-                && protected(name)
-            {
-                return Err(invalid(
-                    "protected retained evidence cannot be detached by a generic note",
-                ));
-            }
+            validate_appended_note_syntax(&n.text)?;
         }
     }
     if pending_here(project, old)?.is_none() {
+        validate_appended_resolutions(project, old, new)?;
         return Ok(());
     }
     let mut allowed = old.clone();
@@ -274,6 +411,7 @@ pub struct OperationCtx {
     retry: bool,
     durable_phase: bool,
     pub(super) committed_release: bool,
+    pub(crate) cleanup_failed: bool,
     pub metrics: super::verify::Metrics,
     pub warnings: Vec<String>,
     contexts: BTreeMap<String, crate::commands::Ctx>,
@@ -450,6 +588,7 @@ pub fn open(
         retry,
         durable_phase: false,
         committed_release: false,
+        cleanup_failed: false,
         tasks,
         warnings: op_warnings,
         contexts,
@@ -466,7 +605,7 @@ impl OperationCtx {
             .project
     }
 }
-fn stop_phase(boundary: &str, phase: &str) {
+pub(super) fn stop_phase(boundary: &str, phase: &str) {
     stop(boundary);
     stop(&format!("{boundary}:{phase}"));
 }
@@ -861,13 +1000,15 @@ fn batch_inner(
         } else {
             None
         };
-        let mut allowed = BTreeMap::new();
-        if participant == id {
-            for artifact in artifacts {
-                crate::attachments::validate_name(&artifact.name)?;
-                allowed.insert(artifact.name.clone(), artifact.bytes.as_slice());
-            }
-        }
+        let expanded = if participant == id {
+            super::artifacts::expand_allowed_files(&project, artifacts)?
+        } else {
+            BTreeMap::new()
+        };
+        let allowed = expanded
+            .iter()
+            .map(|(name, bytes)| (name.clone(), bytes.as_slice()))
+            .collect::<BTreeMap<_, _>>();
         super::freshness::working_preimage(&project, participant, &current, staged_raw, &allowed)?;
         if project.read_task(participant)? != ctx.tasks[participant].task {
             return Err(Error::RetainedStaleBasis(
@@ -971,114 +1112,62 @@ fn batch_guarded(
         }
     }
 
-    for artifact in artifacts {
-        crate::attachments::refuse_reserved(&context.project, &task, &artifact.name)?;
-    }
-
-    for artifact in artifacts {
-        crate::attachments::validate_name(&artifact.name)?;
-        if artifact.bytes.len() as u64 > context.project.attachments_max_bytes {
-            return Err(Error::AttachmentTooLarge("Retained artifact exceeds the configured cap; preserve raw bytes and use the labelled portable fallback before retry".into()));
-        }
-        if crate::attachments::ledger(&task).get(&artifact.name)
-            == Some(&crate::attachments::Ledger::Detached)
-        {
-            return Err(invalid(
-                "retained artifact name has a detached history; choose a fresh name before publishing",
-            ));
-        }
-        crate::attachments::check_storage(&context.project, id)?;
-        crate::attachments::ensure_task_dir(&context.project, id)?;
-        let path = crate::attachments::task_dir(&context.project, id).join(&artifact.name);
-        match crate::attachments::entry_state(&path)? {
-            crate::attachments::EntryState::Absent => {
-                crate::attachments::write_new(&path, &artifact.bytes)?
-            }
-            crate::attachments::EntryState::File(_) => {
-                if super::verify::read_local(&path, context.project.attachments_max_bytes)?
-                    != artifact.bytes
-                {
-                    return Err(invalid(
-                        "immutable retained artifact name already holds different bytes",
-                    ));
-                }
-            }
-            crate::attachments::EntryState::Unsafe(detail) => {
-                return Err(Error::AttachmentUnsafe(detail));
-            }
-        }
-        crate::written::record(&context.project.records, &path);
-        let mut parent = path.parent();
-        while let Some(dir) = parent {
-            std::fs::File::open(dir)?.sync_all()?;
-            if dir == context.project.records {
-                break;
-            }
-            parent = dir.parent();
-        }
-        if reused.is_some()
-            && crate::attachments::ledger(&task).get(&artifact.name)
-                != Some(&crate::attachments::Ledger::Attached)
-        {
-            return Err(invalid(
-                "a phase receipt cannot substitute for its missing attachment ledger",
-            ));
-        }
-        match crate::attachments::ledger(&task).get(&artifact.name) {
-            Some(crate::attachments::Ledger::Attached) => {}
-            Some(crate::attachments::Ledger::Detached) => {
+    if reused.is_some() {
+        for artifact in artifacts {
+            let sha = crate::multipart::content::sha256_hex(&artifact.bytes);
+            if !super::artifacts::is_live_attachment(&task, &artifact.name, &sha) {
                 return Err(invalid(
-                    "retained artifact name was detached; preserve that history and use a new immutable name",
+                    "a phase receipt cannot substitute for its missing attachment ledger",
                 ));
             }
-            None => {
-                crate::commands::append_note(
-                    &mut task,
-                    &crate::commands::owner_name(&context.project)?,
-                    &crate::attachments::attached_note(
-                        &artifact.name,
-                        artifact.bytes.len() as u64,
-                        None,
-                    ),
-                )?;
+        }
+    }
+    let prepared = super::artifacts::prepare_batch(&context.project, &task, artifacts)?;
+    let mut start = 0usize;
+    let recovery_for_save = recovery.map(Box::new);
+    super::artifacts::write_and_save_with_rollback(
+        &context.project,
+        id,
+        &operation.phase,
+        &prepared,
+        &mut ctx.cleanup_failed,
+        |prepared| {
+            let owner = crate::commands::owner_name(&context.project)?;
+            for ledger_note in &prepared.ledger_notes {
+                crate::commands::append_note(&mut task, &owner, ledger_note)?;
             }
-        }
-    }
-    stop_phase("artifact", &operation.phase);
-    let start = reused.unwrap_or(task.notes.len());
-    if reused.is_none() {
-        for n in notes {
-            crate::time::parse(&n.at)?;
-            crate::commands::append_note(
-                &mut task,
-                &crate::commands::owner_name(&context.project)?,
-                &n.text,
-            )?;
-            task.notes.last_mut().expect("new note").at = n.at.clone();
-        }
-        let max = notes
-            .iter()
-            .map(|n| n.at.as_str())
-            .chain(std::iter::once(task.updated.as_str()))
-            .max()
-            .expect("updated");
-        task.updated = crate::time::after(max)?;
-    }
-    crate::format::validate_task(&task)?;
-    let (_, problems) = crate::attachments::audit_task(&context.project, &task)?;
-    if !problems.is_empty() {
-        return Err(Error::RetainedHistoryBlocked(format!(
-            "Retained publication attachment audit refused: {problems:?}"
-        )));
-    }
-    context.project.write_task_permitted(
-        &context.registry,
-        &task,
-        || Ok(()),
-        WritePermission::Retained(Authority {
-            key: ctx.key.clone(),
-            recovery: recovery.map(Box::new),
-        }),
+            start = reused.unwrap_or(task.notes.len());
+            if reused.is_none() {
+                for n in notes {
+                    crate::time::parse(&n.at)?;
+                    crate::commands::append_note(&mut task, &owner, &n.text)?;
+                    task.notes.last_mut().expect("new note").at = n.at.clone();
+                }
+                let max = notes
+                    .iter()
+                    .map(|n| n.at.as_str())
+                    .chain(std::iter::once(task.updated.as_str()))
+                    .max()
+                    .expect("updated");
+                task.updated = crate::time::after(max)?;
+            }
+            crate::format::validate_task(&task)?;
+            let (_, problems) = crate::attachments::audit_task(&context.project, &task)?;
+            if !problems.is_empty() {
+                return Err(Error::RetainedHistoryBlocked(format!(
+                    "Retained publication attachment audit refused: {problems:?}"
+                )));
+            }
+            context.project.write_task_permitted(
+                &context.registry,
+                &task,
+                || Ok(()),
+                WritePermission::Retained(Authority {
+                    key: ctx.key.clone(),
+                    recovery: recovery_for_save,
+                }),
+            )
+        },
     )?;
     stop_phase("save", &operation.phase);
     let expected_raw = context.project.read_raw(id)?;
@@ -1122,8 +1211,9 @@ fn batch_guarded(
     super::read::refresh(&context.project)?;
     let pinned = super::basis::read(&context.project, id, None)?;
     ctx.metrics.history_bytes_read += pinned.history_bytes_read;
+    let read_context = super::read::at(&context.project, &context.project.records)?;
     let committed_raw = super::basis::blob(
-        &super::read::at(&context.project, &context.project.records)?,
+        &read_context,
         &pinned.basis.commit,
         &pinned.basis.task_path,
         None,
@@ -1132,19 +1222,32 @@ fn batch_guarded(
     if pinned.task != task || committed_raw != expected_raw.as_bytes() {
         return Err(Error::RetainedHistoryBlocked("Committed retained record differs from intended publication; preserve exact evidence and recover".into()));
     }
-    for artifact in artifacts {
-        let path = format!(
-            "{}/tasks/files/{id}/{}",
-            pinned.basis.records_subdir, artifact.name
-        );
+    for (name, expected_bytes) in &prepared.single_artifacts {
+        let path = format!("{}/tasks/files/{id}/{name}", pinned.basis.records_subdir);
         let bytes = super::basis::blob(
-            &super::read::at(&context.project, &context.project.records)?,
+            &read_context,
             &pinned.basis.commit,
             path.trim_start_matches("./"),
             Some(context.project.attachments_max_bytes),
             &mut ctx.metrics.history_bytes_read,
         )?;
-        if bytes != artifact.bytes {
+        if &bytes != expected_bytes {
+            return Err(invalid(
+                "committed retained artifact differs from exact intended bytes",
+            ));
+        }
+    }
+    for (name, expected_bytes) in &prepared.multipart_artifacts {
+        let bytes = super::basis::rebuild_multipart(
+            &read_context,
+            &pinned.basis.commit,
+            &pinned.basis.records_subdir,
+            &id.to_string(),
+            &pinned.task,
+            name,
+            &mut ctx.metrics.history_bytes_read,
+        )?;
+        if &bytes != expected_bytes {
             return Err(invalid(
                 "committed retained artifact differs from exact intended bytes",
             ));
@@ -1234,6 +1337,7 @@ fn publication_key(
         &project.retention_lineage,
         &project.retention_recovery,
         project.attachments_max_bytes,
+        &project.multipart,
         id,
         operation,
         context,
@@ -1633,7 +1737,9 @@ pub fn validate_since(
             }
             let mut items = std::collections::BTreeSet::new();
             let mut attachments = std::collections::BTreeSet::new();
+            let mut multipart_notes = std::collections::BTreeSet::new();
             let mut checkpoints = std::collections::BTreeSet::new();
+            let live_declarations = crate::multipart::audit::declarations(current);
             for note in &current.notes[old.task.notes.len()..] {
                 if let Some(raw) = note.text.strip_prefix("retention operation: ") {
                     let n = decode_operation(raw)?;
@@ -1652,9 +1758,20 @@ pub fn validate_since(
                         _ => {}
                     }
                     for artifact in observation_artifacts(&project, current, &n)? {
-                        if let ArtifactLocator::Attachment { task, name, .. } = artifact
+                        if let ArtifactLocator::Attachment {
+                            task, name, sha256, ..
+                        } = artifact
                             && task == id.to_string()
                         {
+                            if let Some(crate::multipart::audit::DeclState::Live(decl)) =
+                                live_declarations.get(&name)
+                                && decl.sha256 == sha256
+                            {
+                                attachments.extend(crate::multipart::names::member_names(
+                                    &name, decl.parts,
+                                ));
+                                multipart_notes.insert(decl.note());
+                            }
                             attachments.insert(name);
                         }
                     }
@@ -1678,8 +1795,10 @@ pub fn validate_since(
                                 && attachments.contains(name)
                         },
                     )
+                } else if note.text.starts_with("multipart:") {
+                    multipart_notes.contains(&note.text)
                 } else {
-                    true
+                    !note.text.starts_with("retention resolution:")
                 };
                 if !valid {
                     return Err(Error::RetainedStaleBasis("Intervening retention/evidence note is not bound to this operation's receipts; recover its exact reserved input".into()));
@@ -1836,9 +1955,7 @@ pub(super) fn observation_artifacts(
                 // The producing host's absolute root is not a Git locator. Bind the
                 // generated name to its participant and ledger, then pin at publication.
                 if path.ends_with(&suffix) {
-                    if crate::attachments::ledger(task).get(&name)
-                        != Some(&crate::attachments::Ledger::Attached)
-                    {
+                    if !super::artifacts::is_live_attachment(task, &name, digest) {
                         return Err(invalid("ready manifest lacks an attachment ledger binding"));
                     }
                     artifacts.push(ArtifactLocator::Attachment {
@@ -1985,9 +2102,37 @@ pub fn recover_saved(
             ));
         }
     }
-    let before = crate::attachments::ledger(&original.task);
+    let before_decls = crate::multipart::audit::declarations(&original.task);
+    let mut accounted_members = std::collections::BTreeSet::new();
     let mut artifacts = Vec::new();
+    for (name, state) in crate::multipart::audit::declarations(&working) {
+        if let crate::multipart::audit::DeclState::Live(decl) = state
+            && before_decls.get(&name)
+                != Some(&crate::multipart::audit::DeclState::Live(decl.clone()))
+        {
+            if expected.get(&name) != Some(&decl.sha256) {
+                return Err(invalid(
+                    "unpublished attachment lacks its exact artifact digest in the phase receipt",
+                ));
+            }
+            let bytes = crate::multipart::audit::rebuild(&project, &working, &name, None)?;
+            let hash = super::verify::hash_bytes(&bytes, &mut ctx.metrics);
+            if hash != decl.sha256 {
+                return Err(invalid(
+                    "unpublished attachment lacks its exact artifact digest in the phase receipt",
+                ));
+            }
+            accounted_members.extend(crate::multipart::names::member_names(
+                &decl.name, decl.parts,
+            ));
+            artifacts.push(NewArtifact { name, bytes });
+        }
+    }
+    let before = crate::attachments::ledger(&original.task);
     for (name, state) in crate::attachments::ledger(&working) {
+        if accounted_members.contains(&name) {
+            continue;
+        }
         if state == crate::attachments::Ledger::Attached && before.get(&name) != Some(&state) {
             let bytes = super::verify::read_local(
                 &crate::attachments::task_dir(&project, id).join(&name),
@@ -4026,5 +4171,107 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn protected_matches_logical_and_multipart_manifest_members() {
+        for expected_protected in [
+            "retained-op-a.request.json",
+            "retained-checkpoint-a.json",
+            "retained-manifest-a.json",
+            "retained-manifest-a.json.catalog.json",
+            "retained-manifest-a.json.part-0001",
+            "retained-manifest-a.json.part-9999",
+        ] {
+            assert!(
+                protected(expected_protected),
+                "{expected_protected} should be protected"
+            );
+        }
+        for not_protected in [
+            "retained-manifest-a.json.part-001",
+            "retained-manifest-a.json.part-00001",
+            "retained-manifest-a.json.part-abcd",
+            "retained-manifest-.json.part-0001",
+            "retained-checkpoint-a.json.part-0001",
+            "other-manifest-a.json.part-0001",
+            "evidence.txt",
+        ] {
+            assert!(
+                !protected(not_protected),
+                "{not_protected} should not be protected"
+            );
+        }
+        for note in [
+            "detached: retained-manifest-a.json.part-0001",
+            "detached: retained-manifest-a.json.part-0001: disposal",
+            "detached: retained-manifest-a.json.catalog.json: disposal",
+        ] {
+            assert!(
+                validate_appended_note_syntax(note).is_err(),
+                "{note} should fail validate_appended_note_syntax"
+            );
+        }
+        assert!(validate_appended_note_syntax("detached: evidence.txt: obsolete").is_ok());
+    }
+
+    #[test]
+    fn identity_permission_refuses_resolution_checkpoint_json_and_protected_multipart() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("tasks")).unwrap();
+        std::fs::write(dir.path().join("tasks/.config.toml"), "prefix = \"sci\"\n").unwrap();
+        let project = Project::open(dir.path()).unwrap();
+        let base_task = || {
+            crate::format::parse_physical(
+                "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\ndepends: []\ntags: []\ncreated: 2026-11-03T00:00:00Z\nupdated: 2026-11-03T00:00:00Z\n---\n\n## Notes\n",
+                "fixture",
+            )
+            .unwrap()
+            .assemble(Vec::new())
+        };
+
+        assert!(permission(&project, &base_task(), WriteAction::Identity).is_ok());
+
+        for allowed_note in [
+            "Custody note: ordinary prose",
+            "retention checkpoint: manual prose without json object",
+            &format!(
+                "multipart: report.json (123 bytes, 2 parts, sha256 {}, catalog sha256 {})",
+                "a".repeat(64),
+                "b".repeat(64)
+            ),
+        ] {
+            let mut t = base_task();
+            crate::commands::append_note(&mut t, "t", allowed_note).unwrap();
+            assert!(
+                permission(&project, &t, WriteAction::Identity).is_ok(),
+                "{allowed_note} should allow WriteAction::Identity"
+            );
+        }
+
+        let mp_manifest = format!(
+            "multipart: retained-manifest-{}.json (123 bytes, 2 parts, sha256 {}, catalog sha256 {})",
+            "a".repeat(64),
+            "a".repeat(64),
+            "b".repeat(64)
+        );
+        for blocked_note in [
+            "retention operation:",
+            "retention operation: broken",
+            "retention resolution:",
+            "retention resolution: {\"version\":1}",
+            "retention checkpoint: {\"version\":1}",
+            "retention checkpoint:{\"version\":1}",
+            mp_manifest.as_str(),
+        ] {
+            let mut t = base_task();
+            crate::commands::append_note(&mut t, "t", blocked_note).unwrap();
+            let err = permission(&project, &t, WriteAction::Identity)
+                .expect_err(&format!("{blocked_note} must block WriteAction::Identity"));
+            assert!(
+                matches!(err, Error::RetainedHistoryBlocked(_)),
+                "expected RetainedHistoryBlocked for {blocked_note}, got {err:?}"
+            );
+        }
     }
 }

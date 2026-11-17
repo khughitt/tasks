@@ -1,4 +1,4 @@
-use super::{model::*, state};
+use super::{model::*, publish, state};
 use crate::model::Task;
 fn task() -> Task {
     crate::format::parse_physical("---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\ndepends: []\ntags: []\ncreated: 2026-11-03T00:00:00Z\nupdated: 2026-11-03T00:00:00Z\n---\n\n## Notes\n", "fixture").unwrap().assemble(Vec::new())
@@ -444,4 +444,1054 @@ fn retained_replay_rejects_missing_phase_items() {
 fn project() -> crate::repo::Project {
     crate::repo::Project::from_config(std::path::PathBuf::from("/fixture"), "prefix = 'sci'")
         .unwrap()
+}
+
+#[test]
+fn validate_record_splits_missing_scratch_manifest_from_invalid_locator() {
+    let mut scratch = record();
+    scratch["kind"] = json!("scratch");
+    let err = decode_record(&scratch.to_string()).unwrap_err().to_string();
+    assert!(err.contains("missing manifest"), "got: {err}");
+
+    let mut scratch_null = scratch.clone();
+    scratch_null["manifest"] = Value::Null;
+    let err = decode_record(&scratch_null.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("missing manifest"), "got: {err}");
+
+    for kind in ["scratch", "evidence"] {
+        for bad_locator in ["files:foo.json", "rel/path.json"] {
+            let mut r = record();
+            r["kind"] = json!(kind);
+            r["manifest"] = json!(bad_locator);
+            let err = decode_record(&r.to_string()).unwrap_err().to_string();
+            assert!(
+                err.contains("manifest locator must start with / or $WORK_ROOT/"),
+                "{kind} {bad_locator}: got {err}"
+            );
+        }
+    }
+
+    let mut evidence_null = record();
+    evidence_null["manifest"] = Value::Null;
+    let err = decode_record(&evidence_null.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("manifest locator must start with / or $WORK_ROOT/"),
+        "evidence null manifest: got {err}"
+    );
+
+    for ok_locator in ["/records/manifest.json", "$WORK_ROOT/sci/manifest.json"] {
+        let mut r = scratch.clone();
+        r["manifest"] = json!(ok_locator);
+        assert!(decode_record(&r.to_string()).is_ok(), "{ok_locator}");
+    }
+
+    let mut unknown = json!({
+        "version": 1,
+        "host": "h",
+        "kind": "scratch",
+        "path": "$WORK_ROOT/sci/dir",
+        "state": "kept",
+        "verification": "unknown",
+        "purpose": "Review",
+        "next_owner": "task:sci-000001",
+        "cleanup_trigger": "After review",
+        "sha256": null,
+        "manifest": null,
+        "verification_action": "Inspect missing directory"
+    });
+    assert!(decode_record(&unknown.to_string()).is_ok());
+
+    unknown["manifest"] = json!("files:foo.json");
+    let err = decode_record(&unknown.to_string()).unwrap_err().to_string();
+    assert!(
+        err.contains("unknown manifest locator must be null or start with / or $WORK_ROOT/"),
+        "unknown bad manifest: got {err}"
+    );
+}
+
+#[test]
+fn decode_resolution_rejects_bad_ordinals() {
+    let valid = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 3},
+        "successors": [4],
+        "reason": "fixed"
+    });
+    let parsed = decode_resolution(&valid.to_string()).expect("valid single successor");
+    assert_eq!(
+        parsed,
+        ResolutionNote {
+            version: 1,
+            bad: Source {
+                basis: basis(),
+                ordinal: 3,
+            },
+            successors: vec![4],
+            reason: "fixed".into(),
+        }
+    );
+
+    let mut empty_succ = valid.clone();
+    empty_succ["successors"] = json!([]);
+    assert!(
+        decode_resolution(&empty_succ.to_string()).is_ok(),
+        "empty successors allowed"
+    );
+
+    let mut v2 = valid.clone();
+    v2["version"] = json!(2);
+    let err = decode_resolution(&v2.to_string()).unwrap_err().to_string();
+    assert!(err.contains("unsupported_version"), "v2 full: got {err}");
+    let err = decode_resolution(r#"{"version":2}"#)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unsupported_version"), "v2 minimal: got {err}");
+
+    let mut zero_bad = valid.clone();
+    zero_bad["bad"]["ordinal"] = json!(0);
+    assert!(decode_resolution(&zero_bad.to_string()).is_err());
+
+    for bad_succ in [json!([3]), json!([2]), json!([4, 4])] {
+        let mut s = valid.clone();
+        s["successors"] = bad_succ.clone();
+        assert!(
+            decode_resolution(&s.to_string()).is_err(),
+            "bad successors {bad_succ} must fail"
+        );
+    }
+
+    for bad_reason in ["", "line1\nline2", "line1\rline2", "line1\0line2"] {
+        let mut s = valid.clone();
+        s["reason"] = json!(bad_reason);
+        assert!(
+            decode_resolution(&s.to_string()).is_err(),
+            "bad reason {bad_reason:?} must fail"
+        );
+    }
+
+    let mut unknown_field = valid.clone();
+    unknown_field["extra"] = json!(1);
+    assert!(decode_resolution(&unknown_field.to_string()).is_err());
+
+    let dup_key = valid.to_string().replacen("{", "{\"version\":1,", 1);
+    assert!(decode_resolution(&dup_key).is_err());
+
+    assert!(publish::reserved("retention resolution: {}"));
+    assert!(publish::reserved("multipart: {}"));
+    assert!(publish::validate_appended_note_syntax("Custody note: ok").is_ok());
+    assert!(
+        publish::validate_appended_note_syntax(&format!("retention resolution: {valid}")).is_ok()
+    );
+    assert!(publish::validate_appended_note_syntax("retention resolution:").is_err());
+    assert!(publish::validate_appended_note_syntax("retention resolution: {}").is_err());
+    assert!(publish::validate_appended_note_syntax("retained:no-space").is_err());
+    assert!(publish::validate_appended_note_syntax("retained: [1, 2]").is_err());
+}
+
+#[test]
+fn check_write_validates_appended_retained_when_prior_note_edited() {
+    let p = project();
+    let reg = crate::registry::Registry::default();
+    let mut old = task();
+    crate::commands::append_note(&mut old, "t", "initial").unwrap();
+    old.notes[0].text = "initial ".into();
+
+    let mut new = old.clone();
+    new.notes[0].text = "initial".into();
+    crate::commands::append_note(&mut new, "t", "retained: created scratch dir").unwrap();
+
+    let err = publish::check_write(&p, &reg, &old, &new, publish::WritePermission::Ordinary)
+        .expect_err("prose retained: note after prior-note trim must fail");
+    match err {
+        crate::error::Error::RetainedInput(msg) => {
+            assert!(
+                msg.contains(
+                    "Note prefix 'retained:' is reserved for Retention-1 JSON item records"
+                ),
+                "got: {msg}"
+            );
+            assert!(msg.contains("Custody note: ..."), "got: {msg}");
+        }
+        other => panic!("expected Error::RetainedInput, got: {other:?}"),
+    }
+}
+
+#[test]
+fn check_write_preserves_trimmed_historical_malformed_retained_note() {
+    let p = project();
+    let reg = crate::registry::Registry::default();
+    let mut old = task();
+    crate::commands::append_note(&mut old, "t", "retained: historical bad prose").unwrap();
+    old.notes[0].text = "retained: historical bad prose ".into();
+
+    let mut new = old.clone();
+    new.notes[0].text = "retained: historical bad prose".into();
+    crate::commands::append_note(&mut new, "t", "Custody note: ok").unwrap();
+    assert_eq!(old.notes.len(), 1);
+    assert_eq!(new.notes.len(), 2);
+
+    publish::check_write(&p, &reg, &old, &new, publish::WritePermission::Ordinary)
+        .expect("existing historical malformed note at ..old.notes.len() must not be re-validated");
+
+    let mut bad_new = old.clone();
+    bad_new.notes[0].text = "retained: historical bad prose".into();
+    crate::commands::append_note(&mut bad_new, "t", "retained: new bad prose").unwrap();
+    let err = publish::check_write(&p, &reg, &old, &bad_new, publish::WritePermission::Ordinary)
+        .expect_err("newly appended malformed retained: note must still fail");
+    assert!(
+        matches!(err, crate::error::Error::RetainedInput(_)),
+        "expected Error::RetainedInput, got: {err:?}"
+    );
+}
+
+const EXPECTED_RETAINED_ACTION: &str = "Recover exact history, append valid version: 1 'retained:' successor note(s) for each affected identity (or none when no identities exist; use <records>/tasks/files/<id>/<name> for an existing attached manifest, including on closed tasks without reopening), then append 'retention resolution: {\"version\":1,\"bad\":<source>,\"successors\":[...],\"reason\":\"...\"}' or pass resolutions to tasks retained checkpoint";
+const EXPECTED_ENVELOPE_ACTION: &str =
+    "Publish an explicit source-bound correction after recovering exact history";
+
+#[test]
+fn state_replay_standalone_resolution_scopes_and_rejections() {
+    // 1. Diagnostic.action distinguishes retained: vs operation/checkpoint envelopes,
+    //    and 0-item prose resolves via empty successors in standalone resolution.
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", "retained: accidental prose").unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
+    assert!(!s.complete);
+    assert_eq!(s.diagnostics[0].action, EXPECTED_RETAINED_ACTION);
+    let res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [],
+        "reason": "Accidental prose with zero retained items"
+    });
+    crate::commands::append_note(&mut t, "t", &format!("retention resolution: {res}")).unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
+    assert!(s.complete, "{s:?}");
+    assert_eq!(s.diagnostics[0].resolved_by.as_ref().unwrap().ordinal, 2);
+
+    // 2. Released item diagnostic resolved via valid released successor + retention resolution.
+    let mut t_rel = task();
+    let bad_rel = json!({
+        "version": 1,
+        "host": "h",
+        "kind": "evidence",
+        "path": "/data/a",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Released item",
+        "next_owner": "task:sci-000001",
+        "cleanup_trigger": "none"
+    });
+    crate::commands::append_note(&mut t_rel, "t", &format!("retained: {bad_rel}")).unwrap();
+    let ok_rel = json!({
+        "version": 1,
+        "host": "h",
+        "kind": "evidence",
+        "path": "/data/a",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Released item",
+        "next_owner": "none",
+        "cleanup_trigger": "none"
+    });
+    crate::commands::append_note(&mut t_rel, "t", &format!("retained: {ok_rel}")).unwrap();
+    let res_rel = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [2],
+        "reason": "Fixed released next_owner"
+    });
+    crate::commands::append_note(&mut t_rel, "t", &format!("retention resolution: {res_rel}"))
+        .unwrap();
+    let s = state::replay(&project(), &t_rel, &basis(), None).unwrap();
+    assert!(s.complete, "{s:?}");
+    assert_eq!(s.items[0].record.as_ref().unwrap().state, "released");
+
+    // 3. Other-host diagnostic resolved without false unmatched diagnostic under --host h.
+    let mut t_other = task();
+    crate::commands::append_note(&mut t_other, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(
+        &mut t_other,
+        "t",
+        r#"retained: {"host":"other-host","path":42}"#,
+    )
+    .unwrap();
+    let mut ok_other = record();
+    ok_other["host"] = json!("other-host");
+    ok_other["path"] = json!("/data/other");
+    crate::commands::append_note(&mut t_other, "t", &format!("retained: {ok_other}")).unwrap();
+    let res_other = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 2},
+        "successors": [3],
+        "reason": "Recovered other-host inventory"
+    });
+    crate::commands::append_note(
+        &mut t_other,
+        "t",
+        &format!("retention resolution: {res_other}"),
+    )
+    .unwrap();
+    let full = state::replay(&project(), &t_other, &basis(), None).unwrap();
+    assert!(full.complete, "{full:?}");
+    let local = state::replay(&project(), &t_other, &basis(), Some("h")).unwrap();
+    assert!(local.complete, "{local:?}");
+    assert!(local.diagnostics.is_empty(), "{:?}", local.diagnostics);
+
+    // 4. Rejections in state::replay emit task-scoped diagnostics with envelope action.
+    let mut t_bad_op = task();
+    crate::commands::append_note(&mut t_bad_op, "t", "retention operation: {\"bad\":1}").unwrap();
+    let s_op = state::replay(&project(), &t_bad_op, &basis(), None).unwrap();
+    assert_eq!(s_op.diagnostics[0].action, EXPECTED_ENVELOPE_ACTION);
+    let try_res_op = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [],
+        "reason": "Attempted to suppress operation envelope"
+    });
+    crate::commands::append_note(
+        &mut t_bad_op,
+        "t",
+        &format!("retention resolution: {try_res_op}"),
+    )
+    .unwrap();
+    let s_op = state::replay(&project(), &t_bad_op, &basis(), None).unwrap();
+    assert!(!s_op.complete);
+    assert_eq!(s_op.diagnostics.len(), 2);
+    assert!(s_op.diagnostics[0].resolved_by.is_none());
+    assert_eq!(s_op.diagnostics[1].scope, "task");
+    assert_eq!(s_op.diagnostics[1].code, "malformed_record");
+    assert_eq!(s_op.diagnostics[1].action, EXPECTED_ENVELOPE_ACTION);
+
+    // Unsupported version on retention resolution: emits code == "unsupported_version".
+    let mut t_v2 = task();
+    crate::commands::append_note(&mut t_v2, "t", r#"retention resolution: {"version":2}"#).unwrap();
+    let s_v2 = state::replay(&project(), &t_v2, &basis(), Some("h")).unwrap();
+    assert!(!s_v2.complete);
+    assert_eq!(s_v2.diagnostics[0].code, "unsupported_version");
+    assert_eq!(s_v2.diagnostics[0].scope, "task");
+
+    // Duplicate successor identities [4, 5] on a 2-identity host diagnostic fail coverage.
+    let mut t_dup = task();
+    let mut item_b = record();
+    item_b["path"] = json!("/data/b");
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {item_b}")).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", r#"retained: {"host":"h","path":42}"#).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {}", record())).unwrap();
+    crate::commands::append_note(&mut t_dup, "t", &format!("retained: {}", record())).unwrap();
+    let dup_res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 3},
+        "successors": [4, 5],
+        "reason": "Duplicate item A twice instead of A and B"
+    });
+    crate::commands::append_note(&mut t_dup, "t", &format!("retention resolution: {dup_res}"))
+        .unwrap();
+    let s_dup = state::replay(&project(), &t_dup, &basis(), None).unwrap();
+    assert!(!s_dup.complete);
+    assert!(s_dup.diagnostics[0].resolved_by.is_none());
+    assert_eq!(s_dup.diagnostics[1].source.as_ref().unwrap().ordinal, 6);
+}
+
+#[test]
+fn proof_and_basis_reject_forged_resolution_bad_basis() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::proof_and_basis_reject_forged_resolution_bad_basis",
+    ) {
+        return;
+    }
+    let (dir, project) = crate::retained::read::tests::fixture();
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", "Custody note: initial").unwrap();
+    let write_task = |proj: &crate::repo::Project, task_val: &Task| {
+        let raw = crate::format::serialize_physical(&proj.physical_for_save(task_val).unwrap());
+        std::fs::write(proj.task_path(&task_val.id), raw).unwrap();
+    };
+    write_task(&project, &t);
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "initial task"]);
+    let early = super::basis::read(&project, &id, None).unwrap().basis;
+
+    crate::commands::append_note(&mut t, "t", "retained: accidental prose").unwrap();
+    write_task(&project, &t);
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "bad retained"]);
+
+    // Tamper a resolution note pointing bad.basis at `early` (before ordinal 2 existed).
+    let forged = json!({
+        "version": 1,
+        "bad": {"basis": early, "ordinal": 2},
+        "successors": [],
+        "reason": "Forged earlier basis commit"
+    });
+    crate::commands::append_note(&mut t, "t", &format!("retention resolution: {forged}")).unwrap();
+    write_task(&project, &t);
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "forged resolution"]);
+    let head_commit = crate::retained::read::tests::git(dir.path(), &["rev-parse", "HEAD"]);
+
+    // 1. `basis::read` rejects the forged `retention resolution:` with RetainedHistoryBlocked.
+    let err = super::basis::read(&project, &id, None)
+        .err()
+        .expect("basis::read must reject forged bad.basis");
+    assert!(
+        matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+        "expected RetainedHistoryBlocked from basis::read, got: {err:?}"
+    );
+
+    // 2. `proof::validate_history` independently rejects the forged `retention resolution:`
+    //    even when loaded via `basis::read_exact` (both unfiltered and host-filtered).
+    let mut head_basis = early.clone();
+    head_basis.commit = head_commit;
+    let exact = super::basis::read_exact(&project, &id, &head_basis).unwrap();
+    for filter in [None, Some("h")] {
+        let err = super::proof::validate_history(&project, &exact, filter)
+            .expect_err("proof::validate_history must reject forged bad.basis");
+        assert!(
+            matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+            "expected RetainedHistoryBlocked from proof::validate_history ({filter:?}), got: {err:?}"
+        );
+    }
+
+    // 2b. `proof::validate_history(..., Some("h"))` also rejects a forged `bad.basis` inside
+    //     an other-host `ItemsOutput.resolutions` entry when loaded via `basis::read_exact`.
+    let (op_dir, op_proj) = crate::retained::read::tests::fixture();
+    let mut op_t = task();
+    crate::commands::append_note(&mut op_t, "t", "Custody note: initial").unwrap();
+    write_task(&op_proj, &op_t);
+    crate::retained::read::tests::git(op_dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(op_dir.path(), &["commit", "-qm", "initial op task"]);
+    let op_early = super::basis::read(&op_proj, &id, None).unwrap().basis;
+
+    crate::commands::append_note(&mut op_t, "t", "retained: accidental prose").unwrap();
+    write_task(&op_proj, &op_t);
+    crate::retained::read::tests::git(op_dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(op_dir.path(), &["commit", "-qm", "bad prose"]);
+
+    let mut op_intent = operation("intent", json!({}));
+    op_intent["host"] = json!("other-host");
+    op_intent["input_bases"] = json!([{"task": "sci-000001", "basis": op_early}]);
+    op_intent["request"]["basis"] = json!(op_early);
+    let mut op_items = operation(
+        "items_published",
+        json!({
+            "items": [],
+            "artifacts": [],
+            "resolutions": [{
+                "bad": {"basis": op_early, "ordinal": 2},
+                "successors": [],
+                "reason": "Forged earlier basis commit on other-host ItemsOutput"
+            }]
+        }),
+    );
+    op_items["host"] = json!("other-host");
+    op_items["input_bases"] = json!([{"task": "sci-000001", "basis": op_early}]);
+    op_items["request"]["basis"] = json!(op_early);
+    assert!(decode_operation(&op_items.to_string()).is_ok());
+
+    crate::commands::append_note(&mut op_t, "t", &format!("retention operation: {op_intent}"))
+        .unwrap();
+    crate::commands::append_note(&mut op_t, "t", &format!("retention operation: {op_items}"))
+        .unwrap();
+    write_task(&op_proj, &op_t);
+    crate::retained::read::tests::git(op_dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(
+        op_dir.path(),
+        &["commit", "-qm", "forged other-host items_published"],
+    );
+    let mut op_head_basis = op_early.clone();
+    op_head_basis.commit = crate::retained::read::tests::git(op_dir.path(), &["rev-parse", "HEAD"]);
+    let op_exact = super::basis::read_exact(&op_proj, &id, &op_head_basis).unwrap();
+    let err = super::proof::validate_history(&op_proj, &op_exact, Some("h")).expect_err(
+        "proof::validate_history(..., Some(\"h\")) must reject forged bad.basis on other-host ItemsOutput",
+    );
+    assert!(
+        matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+        "expected RetainedHistoryBlocked for other-host ItemsOutput.resolutions, got: {err:?}"
+    );
+
+    // 3. `basis::read` checkpoint-gap guard rejects intervening `retention resolution: ` and `multipart: ` notes.
+    for gap_note in [
+        r#"retention resolution: {"not_decoded":1}"#,
+        r#"multipart: {"not_decoded":1}"#,
+    ] {
+        let (gap_dir, gap_proj) = crate::retained::read::tests::fixture();
+        let mut gap_t = task();
+        crate::commands::append_note(&mut gap_t, "t", &format!("retained: {}", record())).unwrap();
+        write_task(&gap_proj, &gap_t);
+        crate::retained::read::tests::git(gap_dir.path(), &["add", "."]);
+        crate::retained::read::tests::git(gap_dir.path(), &["commit", "-qm", "seed"]);
+        let cp_basis = super::basis::read(&gap_proj, &id, None).unwrap().basis;
+
+        crate::commands::append_note(&mut gap_t, "t", gap_note).unwrap();
+        let cp_json = json!({
+            "version": 1,
+            "operation": {"coordinator": "sci-000001", "operation_id": "0".repeat(32)},
+            "observed_at": "2026-11-03T00:00:00Z",
+            "host": "h",
+            "observer": null,
+            "basis": cp_basis,
+            "scope": {"mode": "all_known_kept_on_host", "host": "h", "other_hosts": "outside_observation"},
+            "counts": {"kept_verified": 1, "kept_unknown": 0, "released": 0},
+            "changed": 0,
+            "actions": [],
+            "complete": true
+        });
+        crate::commands::append_note(&mut gap_t, "t", &format!("retention checkpoint: {cp_json}"))
+            .unwrap();
+        write_task(&gap_proj, &gap_t);
+        crate::retained::read::tests::git(gap_dir.path(), &["add", "."]);
+        crate::retained::read::tests::git(gap_dir.path(), &["commit", "-qm", "gap cp"]);
+        let err = super::basis::read(&gap_proj, &id, None)
+            .err()
+            .unwrap_or_else(|| panic!("gap note {gap_note} must block checkpoint basis"));
+        assert!(
+            matches!(err, crate::error::Error::RetainedHistoryBlocked(_)),
+            "{gap_note}: got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn check_manifest_admission_matches_manifest_bytes_with_symlinks_and_escapes() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::check_manifest_admission_matches_manifest_bytes_with_symlinks_and_escapes",
+    ) {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("scratch-container");
+    std::fs::create_dir_all(root.join("nested/sub")).unwrap();
+    std::fs::create_dir_all(root.join("nested/empty")).unwrap();
+    std::fs::create_dir_all(root.join("top-empty")).unwrap();
+    std::fs::write(root.join(".hidden"), vec![b'h'; 4096]).unwrap();
+    std::fs::write(root.join("nested/.dotfile"), vec![b'd'; 4096]).unwrap();
+    std::fs::write(
+        root.join("file with \"quotes\" and spaces.txt"),
+        vec![b'q'; 8192],
+    )
+    .unwrap();
+    std::fs::write(root.join("nested/sub/item 'two'.txt"), vec![b't'; 8192]).unwrap();
+    for idx in 0..8 {
+        std::fs::write(
+            root.join(format!("nested/sub/extra-{idx:02}.txt")),
+            vec![b'x'; 1024],
+        )
+        .unwrap();
+    }
+    std::os::unix::fs::symlink("nonexistent/target\nline", root.join("broken")).unwrap();
+
+    let sock_path = tmp.path().join("observer.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    // Single-threaded isolated child process; safe to scope observer socket env var.
+    unsafe {
+        std::env::set_var("TASKS_RETAINED_TEST_SOCKET", &sock_path);
+    }
+
+    let proj = crate::repo::Project::from_config(
+        tmp.path().to_path_buf(),
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 900\nmultipart_validators = []\n",
+    )
+    .unwrap();
+
+    crate::history::begin_metrics();
+    let before_finish = super::verify::Metrics::default().finish();
+    let placeholder_bytes = super::verify::placeholder_manifest_bytes(&root).unwrap();
+    super::verify::check_manifest_admission(&proj, root.to_str().unwrap(), &root).unwrap();
+    let after_finish = super::verify::Metrics::default().finish();
+
+    unsafe {
+        std::env::remove_var("TASKS_RETAINED_TEST_SOCKET");
+    }
+
+    assert_eq!(
+        after_finish.bytes_hashed - before_finish.bytes_hashed,
+        0,
+        "metadata-only admission precheck must hash zero bytes"
+    );
+    assert!(
+        matches!(
+            listener.accept(),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock
+        ),
+        "check_manifest_admission must emit zero observer events (no inspection event)"
+    );
+
+    let mut real_metrics = super::verify::Metrics::default();
+    let real = super::verify::manifest(&root, &mut real_metrics).unwrap();
+    assert!(real_metrics.bytes_hashed >= 24_576);
+    assert_eq!(placeholder_bytes.len(), real.bytes.len());
+
+    let mut real_decoded = decode_manifest(std::str::from_utf8(&real.bytes).unwrap()).unwrap();
+    for entry in &mut real_decoded.entries {
+        if let ManifestEntry::File { sha256, .. } = entry {
+            *sha256 = "0".repeat(64);
+        }
+    }
+    let normalized_real = serde_json::to_vec(&real_decoded).unwrap();
+    assert_eq!(placeholder_bytes, normalized_real);
+
+    for cap in [120, 256, 512] {
+        let placeholder_parts = crate::multipart::cut::cut(&placeholder_bytes, cap).unwrap();
+        let real_parts = crate::multipart::cut::cut(&real.bytes, cap).unwrap();
+        assert_eq!(
+            placeholder_parts, real_parts,
+            "cut part offsets must match at cap {cap}"
+        );
+    }
+}
+
+#[test]
+fn validate_multipart_manifest_limits_enforces_validators_caps_and_catalog() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::validate_multipart_manifest_limits_enforces_validators_caps_and_catalog",
+    ) {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("tasks")).unwrap();
+    let open_with = |toml_body: &str| -> crate::repo::Project {
+        std::fs::write(tmp.path().join("tasks/.config.toml"), toml_body).unwrap();
+        crate::repo::Project::open(tmp.path()).unwrap()
+    };
+
+    let entries: Vec<_> = (0..35)
+        .map(|i| {
+            json!({
+                "type": "file",
+                "path": format!("member-{i:03}.txt"),
+                "sha256": format!("{i:064x}")
+            })
+        })
+        .collect();
+    let bytes = serde_json::to_vec(&json!({"version": 1, "entries": entries})).unwrap();
+    assert!(bytes.len() > 3500 && bytes.len() < 6000);
+    let sha = crate::multipart::content::sha256_hex(&bytes);
+    let name = format!("retained-manifest-{sha}.json");
+
+    // 1. Undeclared validators -> MultipartValidatorsUndeclared.
+    let p_undeclared = open_with("prefix = 'sci'\n[attachments]\nmax_bytes = 2048\n");
+    let err = super::verify::validate_multipart_manifest_limits(&p_undeclared, &name, &bytes)
+        .unwrap_err();
+    assert_eq!(err.kind(), "multipart_validators_undeclared");
+
+    // 2. Over max_bytes (and max_bytes == 0) -> AttachmentTooLarge.
+    for max_b in [0u64, 3000u64] {
+        let p_max = open_with(&format!(
+            "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_max_bytes = {max_b}\nmultipart_validators = []\n"
+        ));
+        let err =
+            super::verify::validate_multipart_manifest_limits(&p_max, &name, &bytes).unwrap_err();
+        assert_eq!(err.kind(), "attachment_too_large", "max_b={max_b}: {err}");
+    }
+
+    // 3. Over max_parts -> AttachmentTooLarge.
+    let p_parts = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_max_parts = 1\nmultipart_validators = []\n",
+    );
+    let err =
+        super::verify::validate_multipart_manifest_limits(&p_parts, &name, &bytes).unwrap_err();
+    assert_eq!(err.kind(), "attachment_too_large");
+
+    // 4. `.catalog.json` exceeds `attachments.max_bytes` -> AttachmentTooLarge naming `.catalog.json`.
+    let p_cat = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 300\nmultipart_max_parts = 64\nmultipart_validators = []\n",
+    );
+    let err = super::verify::validate_multipart_manifest_limits(&p_cat, &name, &bytes).unwrap_err();
+    assert_eq!(err.kind(), "attachment_too_large");
+    assert!(err.to_string().contains(".catalog.json"), "got: {err}");
+
+    // 5. Validator rejects -> MultipartInvalidContent naming validation_failed.
+    let p_reject = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_validators = [{ match = '*.json', command = ['/bin/sh', '-c', 'echo rejected >&2; exit 1'] }]\n",
+    );
+    let err =
+        super::verify::validate_multipart_manifest_limits(&p_reject, &name, &bytes).unwrap_err();
+    assert_eq!(err.kind(), "multipart_invalid_content");
+    assert!(err.to_string().contains("validation_failed"), "got: {err}");
+
+    // 6. Validator passes -> returns exact PartSlice ranges matching `multipart::cut::cut`.
+    let p_pass = open_with(
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 2048\nmultipart_validators = [{ match = '*.json', command = ['/bin/sh', '-c', 'cat >/dev/null'] }]\n",
+    );
+    let parts: Vec<crate::multipart::cut::PartSlice> =
+        super::verify::validate_multipart_manifest_limits(&p_pass, &name, &bytes).unwrap();
+    assert_eq!(parts, crate::multipart::cut::cut(&bytes, 2048).unwrap());
+}
+
+fn seed_committed_multipart_manifest(
+    dir: &std::path::Path,
+    project: &crate::repo::Project,
+    t: &mut Task,
+    whole: &[u8],
+) -> (String, String, crate::multipart::declaration::Declaration) {
+    let sha = crate::multipart::content::sha256_hex(whole);
+    let name = format!("retained-manifest-{sha}.json");
+    let ranges = crate::multipart::cut::cut(whole, project.attachments_max_bytes).unwrap();
+    assert_eq!(ranges.len(), 2, "expected 2-part manifest fixture");
+    let files_dir = crate::attachments::task_dir(project, &t.id);
+    std::fs::create_dir_all(&files_dir).unwrap();
+    let mut catalog_parts = Vec::new();
+    for (idx, range) in ranges.iter().enumerate() {
+        let part_name = crate::multipart::names::part_name(&name, idx + 1);
+        let slice = &whole[range.clone()];
+        std::fs::write(files_dir.join(&part_name), slice).unwrap();
+        crate::commands::append_note(
+            t,
+            "t",
+            &crate::attachments::attached_note(&part_name, slice.len() as u64, None),
+        )
+        .unwrap();
+        catalog_parts.push(crate::multipart::catalog::CatalogPart {
+            name: part_name,
+            bytes: slice.len() as u64,
+            sha256: crate::multipart::content::sha256_hex(slice),
+        });
+    }
+    let catalog = crate::multipart::catalog::Catalog {
+        name: name.clone(),
+        bytes: whole.len() as u64,
+        sha256: sha.clone(),
+        parts: catalog_parts,
+    };
+    let catalog_bytes = catalog.to_bytes();
+    let catalog_member = crate::multipart::names::catalog_name(&name);
+    std::fs::write(files_dir.join(&catalog_member), &catalog_bytes).unwrap();
+    crate::commands::append_note(
+        t,
+        "t",
+        &crate::attachments::attached_note(&catalog_member, catalog_bytes.len() as u64, None),
+    )
+    .unwrap();
+    let decl = crate::multipart::declaration::Declaration {
+        name: name.clone(),
+        bytes: whole.len() as u64,
+        parts: ranges.len(),
+        sha256: sha.clone(),
+        catalog_sha256: crate::multipart::content::sha256_hex(&catalog_bytes),
+        caption: None,
+    };
+    crate::commands::append_note(t, "t", &decl.note()).unwrap();
+    let raw = crate::format::serialize_physical(&project.physical_for_save(t).unwrap());
+    std::fs::write(project.task_path(&t.id), raw).unwrap();
+    crate::retained::read::tests::git(dir, &["add", "."]);
+    crate::retained::read::tests::git(dir, &["commit", "-qm", "commit multipart manifest"]);
+    (name, sha, decl)
+}
+
+#[test]
+fn rebuild_multipart_rejects_extra_git_part_member() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::rebuild_multipart_rejects_extra_git_part_member",
+    ) {
+        return;
+    }
+    let (dir, _) = crate::retained::read::tests::fixture();
+    std::fs::write(
+        dir.path().join("tasks/.config.toml"),
+        "prefix = \"sci\"\n[attachments]\nmax_bytes = 1500\nmultipart_validators = []\n",
+    )
+    .unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "config"]);
+    let project =
+        crate::retained::read::start(&crate::repo::Project::open(dir.path()).unwrap()).unwrap();
+
+    let entries: Vec<_> = (0..18)
+        .map(|i| {
+            json!({
+                "type": "file",
+                "path": format!("entry-{i:02}.txt"),
+                "sha256": format!("{i:064x}")
+            })
+        })
+        .collect();
+    let whole = serde_json::to_vec(&json!({"version": 1, "entries": entries})).unwrap();
+    assert!(whole.len() > 1500 && whole.len() < 3000);
+
+    let mut t = task();
+    let (name, _sha, _decl) =
+        seed_committed_multipart_manifest(dir.path(), &project, &mut t, &whole);
+    let clean_commit = crate::retained::read::tests::git(dir.path(), &["rev-parse", "HEAD"]);
+    let refreshed =
+        crate::retained::read::start(&crate::repo::Project::open(dir.path()).unwrap()).unwrap();
+    let ctx = crate::retained::read::at(&refreshed, &refreshed.records).unwrap();
+    let mut history_bytes = 0;
+    let rebuilt = super::basis::rebuild_multipart(
+        &ctx,
+        &clean_commit,
+        ".",
+        "sci-000001",
+        &t,
+        &name,
+        &mut history_bytes,
+    )
+    .unwrap();
+    assert_eq!(rebuilt, whole);
+    assert!(history_bytes > whole.len() as u64);
+
+    // Commit an extra `.part-0003` blob alongside the valid 2-part declaration in `{commit}:{dir}`.
+    let extra_part = crate::multipart::names::part_name(&name, 3);
+    std::fs::write(
+        crate::attachments::task_dir(&refreshed, &t.id).join(&extra_part),
+        b"extra-untracked-in-decl\n",
+    )
+    .unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "extra part-0003"]);
+    let tampered_commit = crate::retained::read::tests::git(dir.path(), &["rev-parse", "HEAD"]);
+    let refreshed2 =
+        crate::retained::read::start(&crate::repo::Project::open(dir.path()).unwrap()).unwrap();
+    let ctx2 = crate::retained::read::at(&refreshed2, &refreshed2.records).unwrap();
+    let err = super::basis::rebuild_multipart(
+        &ctx2,
+        &tampered_commit,
+        ".",
+        "sci-000001",
+        &t,
+        &name,
+        &mut 0,
+    )
+    .unwrap_err();
+    assert_eq!(err.kind(), "multipart_invalid_content");
+    assert!(err.to_string().contains(&extra_part), "got: {err}");
+}
+
+#[test]
+fn verify_artifact_and_read_record_manifest_handle_multipart_and_tampering() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::verify_artifact_and_read_record_manifest_handle_multipart_and_tampering",
+    ) {
+        return;
+    }
+    let (dir, _) = crate::retained::read::tests::fixture();
+    std::fs::write(
+        dir.path().join("tasks/.config.toml"),
+        "prefix = \"sci\"\n[attachments]\nmax_bytes = 1500\nmultipart_validators = []\n",
+    )
+    .unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "config"]);
+    let project = crate::repo::Project::open(dir.path()).unwrap();
+
+    let entries: Vec<_> = (0..18)
+        .map(|i| {
+            json!({
+                "type": "file",
+                "path": format!("entry-{i:02}.txt"),
+                "sha256": format!("{i:064x}")
+            })
+        })
+        .collect();
+    let whole = serde_json::to_vec(&json!({"version": 1, "entries": entries})).unwrap();
+    let mut t = task();
+    let (name, sha, _decl) =
+        seed_committed_multipart_manifest(dir.path(), &project, &mut t, &whole);
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let good_basis = super::basis::read(&project, &id, None).unwrap().basis;
+
+    let locator = ArtifactLocator::Attachment {
+        task: "sci-000001".into(),
+        name: name.clone(),
+        basis: Some(good_basis.clone()),
+        sha256: sha.clone(),
+    };
+    let mut metrics = super::verify::Metrics::default();
+    assert_eq!(
+        super::verify::artifact(&project, &locator, &mut metrics).unwrap(),
+        whole
+    );
+    assert!(metrics.bytes_hashed >= whole.len() as u64);
+    assert!(metrics.history_bytes_read > whole.len() as u64);
+
+    // Direct `payload_digest` dispatch on `ArtifactLocator::Attachment` via `verify::preserved`.
+    super::verify::preserved(&project, &locator, &mut super::verify::Metrics::default()).unwrap();
+
+    // `read_record_manifest` + `preflight_with_task` rebuild live multipart manifest (including
+    // when `t.id` still carries an older prefix after project rename!).
+    let logical_path = crate::attachments::task_dir(&project, &id).join(&name);
+    assert_eq!(
+        super::verify::read_record_manifest(&project, Some(&t), &logical_path).unwrap(),
+        whole
+    );
+    let mut rec = decode_record(&record().to_string()).unwrap();
+    rec.manifest = FieldString::Text(logical_path.to_str().unwrap().into());
+    super::verify::preflight_with_task(&project, Some(&t), &rec, Some(&logical_path)).unwrap();
+
+    // `verify::preflight` continues to reject pre-Manifest-1 / unsupported versions.
+    let v2_path = dir.path().join("historical-v2-manifest.json");
+    std::fs::write(&v2_path, br#"{"version":2,"entries":[]}"#).unwrap();
+    let v2_err = super::verify::preflight(&project, &rec, Some(&v2_path)).unwrap_err();
+    assert!(
+        v2_err
+            .to_string()
+            .contains("unsupported historical manifest format; preserve and migrate it explicitly"),
+        "got: {v2_err}"
+    );
+
+    // Post-rename `current_id` handling in `read_record_manifest`:
+    let mut old_prefix_task = t.clone();
+    old_prefix_task.id = crate::model::TaskId::parse("old-000001").unwrap();
+    assert_eq!(
+        super::verify::read_record_manifest(&project, Some(&old_prefix_task), &logical_path)
+            .unwrap(),
+        whole
+    );
+
+    // Ambiguous ordinary + multipart attachment must fail with exact message.
+    let mut ambig = t.clone();
+    crate::commands::append_note(
+        &mut ambig,
+        "t",
+        &crate::attachments::attached_note(&name, whole.len() as u64, None),
+    )
+    .unwrap();
+    let raw = crate::format::serialize_physical(&project.physical_for_save(&ambig).unwrap());
+    std::fs::write(project.task_path(&ambig.id), raw).unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(
+        dir.path(),
+        &["commit", "-qm", "ambiguous ordinary+multipart"],
+    );
+    let ambig_basis = super::basis::read(&project, &id, None).unwrap().basis;
+    let ambig_loc = ArtifactLocator::Attachment {
+        task: "sci-000001".into(),
+        name: name.clone(),
+        basis: Some(ambig_basis),
+        sha256: sha,
+    };
+    let err = super::verify::artifact(&project, &ambig_loc, &mut super::verify::Metrics::default())
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("preserved attachment is ambiguously both ordinary and multipart"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn check_manifest_admission_defers_inaccessible_and_special_member_directories() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestorePerms(std::path::PathBuf);
+    impl Drop for RestorePerms {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let proj_undeclared = crate::repo::Project::from_config(
+        tmp.path().to_path_buf(),
+        "prefix = 'sci'\n[attachments]\nmax_bytes = 256\n",
+    )
+    .unwrap();
+
+    // 1. Directory containing a FIFO alongside >256 bytes of entries: `placeholder_manifest_bytes`
+    //    errors, while `check_manifest_admission` defers to post-intent `kept`/`unknown`.
+    let fifo_dir = tmp.path().join("fifo-container");
+    std::fs::create_dir_all(&fifo_dir).unwrap();
+    for i in 0..8 {
+        std::fs::write(fifo_dir.join(format!("item-{i:02}.txt")), "payload").unwrap();
+    }
+    let fifo_path = fifo_dir.join("special-fifo");
+    let c_fifo = std::ffi::CString::new(fifo_path.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_fifo.as_ptr(), 0o600) }, 0);
+    assert!(super::verify::placeholder_manifest_bytes(&fifo_dir).is_err());
+    super::verify::check_manifest_admission(
+        &proj_undeclared,
+        fifo_dir.to_str().unwrap(),
+        &fifo_dir,
+    )
+    .expect("unmanifestable container must defer to post-intent unknown observation");
+
+    // 2. `0000`-mode container directory: `check_manifest_admission` returns `Ok(())`.
+    let locked_dir = tmp.path().join("locked-container");
+    std::fs::create_dir_all(&locked_dir).unwrap();
+    std::fs::write(locked_dir.join("file.txt"), "payload").unwrap();
+    let _guard = RestorePerms(locked_dir.clone());
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if unsafe { libc::geteuid() } != 0 {
+        assert!(super::verify::placeholder_manifest_bytes(&locked_dir).is_err());
+    }
+    super::verify::check_manifest_admission(
+        &proj_undeclared,
+        locked_dir.to_str().unwrap(),
+        &locked_dir,
+    )
+    .expect("0000-mode container must defer to post-intent unknown observation");
+}
+
+#[test]
+fn freshness_current_reports_unpublished_changes_before_unledgered_file() {
+    if crate::retained::read::tests::isolated(
+        "retained::tests::freshness_current_reports_unpublished_changes_before_unledgered_file",
+    ) {
+        return;
+    }
+    let (dir, project) = crate::retained::read::tests::fixture();
+    let id = crate::model::TaskId::parse("sci-000001").unwrap();
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", "Custody note: committed seed").unwrap();
+    let committed_raw = crate::format::serialize_physical(&project.physical_for_save(&t).unwrap());
+    std::fs::write(project.task_path(&id), &committed_raw).unwrap();
+    crate::retained::read::tests::git(dir.path(), &["add", "."]);
+    crate::retained::read::tests::git(dir.path(), &["commit", "-qm", "seed task"]);
+    let pinned = super::basis::read(&project, &id, Some("HEAD")).unwrap();
+
+    // 1. Uncommitted `tasks/sci-000001.md` carrying `attached: ledgered.txt` + untracked
+    //    `tasks/files/sci-000001/ledgered.txt` must report unpublished changes, NOT unledgered file.
+    let files_dir = crate::attachments::task_dir(&project, &id);
+    std::fs::create_dir_all(&files_dir).unwrap();
+    let ledgered = files_dir.join("ledgered.txt");
+    std::fs::write(&ledgered, b"hello").unwrap();
+    let mut uncommitted_task = t.clone();
+    crate::commands::append_note(
+        &mut uncommitted_task,
+        "t",
+        &crate::attachments::attached_note("ledgered.txt", 5, None),
+    )
+    .unwrap();
+    let uncommitted_raw =
+        crate::format::serialize_physical(&project.physical_for_save(&uncommitted_task).unwrap());
+    std::fs::write(project.task_path(&id), &uncommitted_raw).unwrap();
+
+    let err = super::freshness::current(&project, &id, &pinned, true)
+        .expect_err("uncommitted task + attachment must fail freshness::current");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Task or required history has unpublished changes"),
+        "expected unpublished changes message, got: {msg}"
+    );
+    assert!(
+        !msg.contains("unledgered file"),
+        "must not tell caller to delete ledgered uncommitted file: {msg}"
+    );
+
+    // 2. Restore `tasks/sci-000001.md` to committed `HEAD`; now untracked `ledgered.txt` IS an
+    //    unledgered orphan with clean task/index and must emit the specific orphan path diagnostic.
+    std::fs::write(project.task_path(&id), &committed_raw).unwrap();
+    let err_orphan = super::freshness::current(&project, &id, &pinned, true)
+        .expect_err("untracked orphan with clean task/index must fail");
+    assert_eq!(
+        err_orphan.to_string(),
+        "Protected attachment directory tasks/files/sci-000001 contains unledgered file ledgered.txt; preserve and verify a copy outside tasks/files/sci-000001 if needed, remove the unledgered file to restore the committed preimage, and retry or reconcile"
+    );
+
+    // 3. Stage `ledgered.txt` (`git add`) while `tasks/sci-000001.md` stays at `HEAD`: staged index
+    //    change must report unpublished changes rather than unledgered file.
+    crate::retained::read::tests::git(dir.path(), &["add", "tasks/files/sci-000001/ledgered.txt"]);
+    let err_staged = super::freshness::current(&project, &id, &pinned, true)
+        .expect_err("staged attachment must fail");
+    let msg_staged = err_staged.to_string();
+    assert!(
+        msg_staged.contains("Task or required history has unpublished changes"),
+        "expected unpublished changes on staged attachment, got: {msg_staged}"
+    );
+    assert!(!msg_staged.contains("unledgered file"), "got: {msg_staged}");
 }

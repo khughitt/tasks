@@ -408,13 +408,29 @@ pub fn manifest_path(
         super::verify::artifact(project, &loc, &mut super::verify::Metrics::default())?;
         let current = TaskId::parse(&format!("{}-{}", project.prefix, pinned.task.id.hex))?;
         crate::attachments::check_storage(project, &current)?;
-        if crate::attachments::ledger(&pinned.task).get(name)
-            != Some(&crate::attachments::Ledger::Attached)
-        {
-            return Err(invalid("moved manifest lacks a live attachment ledger"));
-        }
         let path = crate::attachments::task_dir(project, &current).join(name);
-        let bytes = super::verify::read_local(&path, project.attachments_max_bytes)?;
+        let ledger = crate::attachments::ledger(&pinned.task);
+        let ordinary = ledger.get(name) == Some(&crate::attachments::Ledger::Attached);
+        let decl = crate::multipart::audit::declarations(&pinned.task).remove(name);
+        let bytes = if ordinary && matches!(decl, Some(crate::multipart::audit::DeclState::Live(_)))
+        {
+            return Err(invalid(
+                "moved manifest is ambiguously both ordinary and multipart",
+            ));
+        } else if ordinary {
+            super::verify::read_local(&path, crate::multipart::RECOVERY_MAX_BYTES)?
+        } else if let Some(crate::multipart::audit::DeclState::Live(declaration)) = decl {
+            if declaration.sha256 != digest {
+                return Err(invalid("moved manifest digest mismatch"));
+            }
+            let mut current_task = pinned.task.clone();
+            current_task.id = current;
+            let rebuilt = crate::multipart::audit::rebuild(project, &current_task, name, None)?;
+            crate::history::record_metadata_read(rebuilt.len());
+            rebuilt
+        } else {
+            return Err(invalid("moved manifest lacks a live attachment ledger"));
+        };
         if super::verify::hash_bytes(&bytes, &mut super::verify::Metrics::default()) != digest {
             return Err(invalid("moved manifest digest mismatch"));
         }
@@ -426,15 +442,32 @@ pub fn manifest_path(
 fn check_protected_storage(project: &Project, task: &Task) -> Result<()> {
     if crate::attachments::check_storage(project, &task.id)? {
         let ledger = crate::attachments::ledger(task);
+        let declarations = crate::multipart::audit::declarations(task);
         for entry in std::fs::read_dir(crate::attachments::task_dir(project, &task.id))? {
             let entry = entry?;
             if let Some(name) = entry.file_name().to_str()
                 && super::publish::protected(name)
-                && ledger.get(name) != Some(&crate::attachments::Ledger::Attached)
             {
-                return Err(invalid(
-                    "physical protected artifact lacks a live attachment ledger binding",
-                ));
+                if ledger.get(name) != Some(&crate::attachments::Ledger::Attached) {
+                    return Err(invalid(
+                        "physical protected artifact lacks a live attachment ledger binding",
+                    ));
+                }
+                if let Some(logical) = super::publish::manifest_member_logical(name) {
+                    let live_member = matches!(
+                        declarations.get(logical),
+                        Some(crate::multipart::audit::DeclState::Live(decl))
+                            if crate::multipart::audit::recovery_bounds(decl).is_ok()
+                                && crate::multipart::names::member_names(logical, decl.parts)
+                                    .iter()
+                                    .any(|m| m == name)
+                    );
+                    if !live_member {
+                        return Err(invalid(
+                            "physical protected multipart member lacks a live declaration binding",
+                        ));
+                    }
+                }
             }
         }
     }
@@ -442,12 +475,20 @@ fn check_protected_storage(project: &Project, task: &Task) -> Result<()> {
 }
 pub(crate) fn relevant(task: &Task) -> bool {
     task.notes.iter().any(|n| {
-        ["retained:", "retention operation:", "retention checkpoint:"]
-            .iter()
-            .any(|p| n.text.starts_with(p))
+        [
+            "retained:",
+            "retention operation:",
+            "retention checkpoint:",
+            "retention resolution:",
+        ]
+        .iter()
+        .any(|p| n.text.starts_with(p))
     }) || crate::attachments::ledger(task)
         .keys()
         .any(|n| super::publish::protected(n))
+        || crate::multipart::audit::declarations(task)
+            .keys()
+            .any(|n| super::publish::protected(n))
 }
 fn source_basis(id: &TaskId, e: &RenameEdge) -> Basis {
     Basis {
@@ -484,10 +525,81 @@ fn protected_bytes(project: &Project, pinned: &basis::PinnedTask) -> Result<()> 
             }
         }
     }
-    for name in crate::attachments::ledger(&pinned.task)
-        .keys()
-        .filter(|n| super::publish::protected(n))
-    {
+    let ledger = crate::attachments::ledger(&pinned.task);
+    let mut accounted_members = BTreeSet::new();
+    for (name, state) in crate::multipart::audit::declarations(&pinned.task) {
+        if !super::publish::protected(&name) {
+            continue;
+        }
+        let crate::multipart::audit::DeclState::Live(decl) = state else {
+            return Err(invalid("protected multipart artifact cannot be detached"));
+        };
+        if !(name.starts_with("retained-manifest-")
+            && name.ends_with(".json")
+            && !name.ends_with(".catalog.json"))
+        {
+            return Err(invalid("unsupported protected multipart artifact"));
+        }
+        let context = basis::context(project, &pinned.task.id, &pinned.basis)?;
+        let bytes = basis::rebuild_multipart(
+            &context,
+            &pinned.basis.commit,
+            &pinned.basis.records_subdir,
+            &pinned.task.id.to_string(),
+            &pinned.task,
+            &name,
+            &mut 0,
+        )?;
+        let digest = super::verify::hash_bytes(&bytes, &mut super::verify::Metrics::default());
+        let declared = expected.get(&name).is_some_and(|v| v == &digest);
+        let manifest = pinned
+            .task
+            .notes
+            .iter()
+            .filter_map(|n| {
+                n.text
+                    .strip_prefix("retained: ")
+                    .and_then(|r| decode_record(r).ok())
+            })
+            .any(|r| {
+                r.sha256.value() == Some(digest.as_str())
+                    && r.manifest.value().is_some_and(|p| {
+                        Path::new(p).file_name().and_then(|n| n.to_str()) == Some(name.as_str())
+                    })
+                    && name == format!("retained-manifest-{digest}.json")
+            });
+        if !(declared || manifest) {
+            return Err(invalid(
+                "protected artifact lacks a verified retention binding",
+            ));
+        }
+        let current = TaskId::parse(&format!("{}-{}", project.prefix, pinned.task.id.hex))?;
+        crate::attachments::check_storage(project, &current)?;
+        let mut current_task = pinned.task.clone();
+        current_task.id = current;
+        let live = crate::multipart::audit::rebuild(project, &current_task, &name, None)?;
+        crate::history::record_metadata_read(live.len());
+        if live != bytes {
+            return Err(invalid(
+                "live protected artifact differs from exact source bytes",
+            ));
+        }
+        for member in crate::multipart::names::member_names(&decl.name, decl.parts) {
+            accounted_members.insert(member);
+        }
+    }
+    for (name, entry) in ledger.iter().filter(|(n, _)| super::publish::protected(n)) {
+        if accounted_members.contains(name) {
+            continue;
+        }
+        if super::publish::manifest_member_logical(name).is_some() {
+            return Err(invalid(
+                "protected multipart manifest member lacks a verified live declaration",
+            ));
+        }
+        if *entry != crate::attachments::Ledger::Attached {
+            return Err(invalid("protected artifact cannot be detached"));
+        }
         let path = format!(
             "{}/tasks/files/{}/{name}",
             pinned.basis.records_subdir, pinned.task.id
@@ -692,15 +804,51 @@ pub fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
 }
 
 pub fn check_staged(project: &Project, edge: &RenameEdge, ids: &[TaskId]) -> Result<()> {
-    use crate::attachments::{DirState, dir_state};
+    use crate::attachments::{DirState, Ledger, dir_state};
     for old in ids {
         let b = source_basis(old, edge);
         let task = basis::task_at(project, old, &b, &mut 0)?;
-        let protected = crate::attachments::ledger(&task)
+        let ledger = crate::attachments::ledger(&task);
+        let protected = ledger
             .keys()
             .filter(|n| super::publish::protected(n))
             .cloned()
             .collect::<Vec<_>>();
+        let protected_set = protected.iter().cloned().collect::<BTreeSet<_>>();
+        let mut declared_members = BTreeSet::new();
+        for (logical, state) in crate::multipart::audit::declarations(&task) {
+            if !super::publish::protected(&logical) {
+                continue;
+            }
+            let crate::multipart::audit::DeclState::Live(decl) = state else {
+                return Err(invalid(
+                    "staged protected multipart declaration is detached",
+                ));
+            };
+            crate::multipart::audit::recovery_bounds(&decl)?;
+            for member in crate::multipart::names::member_names(&logical, decl.parts) {
+                if !protected_set.contains(&member)
+                    || ledger.get(&member) != Some(&Ledger::Attached)
+                {
+                    return Err(invalid(
+                        "staged protected multipart declaration lacks a live member ledger entry",
+                    ));
+                }
+                declared_members.insert(member);
+            }
+        }
+        for name in &protected {
+            if ledger.get(name) != Some(&Ledger::Attached) {
+                return Err(invalid("staged protected evidence is detached in ledger"));
+            }
+            if super::publish::manifest_member_logical(name).is_some()
+                && !declared_members.contains(name)
+            {
+                return Err(invalid(
+                    "staged protected multipart member lacks a live declaration",
+                ));
+            }
+        }
         if protected.is_empty() {
             continue;
         }
@@ -737,4 +885,111 @@ pub fn check_staged(project: &Project, edge: &RenameEdge, ids: &[TaskId]) -> Res
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_task() -> Task {
+        crate::format::parse_physical(
+            "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\ndepends: []\ntags: []\ncreated: 2026-11-03T00:00:00Z\nupdated: 2026-11-03T00:00:00Z\n---\n\n## Notes\n",
+            "fixture",
+        )
+        .unwrap()
+        .assemble(Vec::new())
+    }
+
+    #[test]
+    fn lineage_multipart_guards_reject_missing_declaration_and_unaccounted_members() {
+        if crate::retained::read::tests::isolated(
+            "retained::lineage::tests::lineage_multipart_guards_reject_missing_declaration_and_unaccounted_members",
+        ) {
+            return;
+        }
+        let (dir, project) = crate::retained::read::tests::fixture();
+        let id = TaskId::parse("sci-000001").unwrap();
+        let mut resolution_only = fixture_task();
+        crate::commands::append_note(&mut resolution_only, "t", "retention resolution: broken")
+            .unwrap();
+        assert!(
+            relevant(&resolution_only),
+            "corrupt retention resolution note must mark task as retention-relevant"
+        );
+
+        let logical = format!("retained-manifest-{}.json", "a".repeat(64));
+        let part1 = format!("{logical}.part-0001");
+        let files_dir = crate::attachments::task_dir(&project, &id);
+        std::fs::create_dir_all(&files_dir).unwrap();
+        std::fs::write(files_dir.join(&part1), b"{\"version\":1").unwrap();
+
+        let mut undeclared_member_task = fixture_task();
+        crate::commands::append_note(
+            &mut undeclared_member_task,
+            "t",
+            &crate::attachments::attached_note(&part1, 12, None),
+        )
+        .unwrap();
+        assert!(
+            check_protected_storage(&project, &undeclared_member_task).is_err(),
+            "attached protected multipart member without live declaration must fail check_protected_storage"
+        );
+
+        let raw = crate::format::serialize_physical(
+            &project.physical_for_save(&undeclared_member_task).unwrap(),
+        );
+        std::fs::write(project.task_path(&id), raw).unwrap();
+        crate::retained::read::tests::git(dir.path(), &["add", "."]);
+        crate::retained::read::tests::git(
+            dir.path(),
+            &["commit", "-qm", "unaccounted multipart member"],
+        );
+        let pinned = basis::read(&project, &id, Some("HEAD")).unwrap();
+        assert!(
+            protected_bytes(&project, &pinned).is_err(),
+            "unaccounted multipart manifest member in ledger must fail protected_bytes"
+        );
+
+        let mut incomplete_staged = fixture_task();
+        let decl = crate::multipart::declaration::Declaration {
+            name: logical.clone(),
+            bytes: 24,
+            parts: 1,
+            sha256: "a".repeat(64),
+            catalog_sha256: "b".repeat(64),
+            caption: None,
+        };
+        crate::commands::append_note(
+            &mut incomplete_staged,
+            "t",
+            &crate::attachments::attached_note(&part1, 12, None),
+        )
+        .unwrap();
+        // Missing `.catalog.json` attached note while `multipart:` declaration is live!
+        crate::commands::append_note(&mut incomplete_staged, "t", &decl.note()).unwrap();
+        let raw_incomplete = crate::format::serialize_physical(
+            &project.physical_for_save(&incomplete_staged).unwrap(),
+        );
+        std::fs::write(project.task_path(&id), raw_incomplete).unwrap();
+        crate::retained::read::tests::git(dir.path(), &["add", "."]);
+        crate::retained::read::tests::git(
+            dir.path(),
+            &["commit", "-qm", "incomplete multipart staged"],
+        );
+        let commit = basis::resolve(&project, "HEAD").unwrap();
+        let edge = RenameEdge {
+            version: 1,
+            from_prefix: "sci".into(),
+            to_prefix: "new".into(),
+            layout: "in-tree".into(),
+            from_subdir: ".".into(),
+            to_subdir: ".".into(),
+            commit,
+            retained_ref: "refs/heads/main".into(),
+        };
+        assert!(
+            check_staged(&project, &edge, &[id]).is_err(),
+            "live multipart declaration missing catalog member in protected ledger must fail check_staged"
+        );
+    }
 }
