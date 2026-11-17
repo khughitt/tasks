@@ -149,6 +149,8 @@ No incoming row means none found in that readable scope. After a move, the view
 matches the focal work’s verified move history; old/new ids agree only over the
 same complete scan and history. Incomplete history warns once and keeps direct
 matches. A moved follower appears only through its in-scope live successor.
+After a cross-project move, use `show --all-projects` so followers in the old
+and new projects are both in scope.
 
 Set it explicitly with repeatable `add --follows REF` or `edit --follows REF`.
 Remove one with `edit ID --rm-follows REF`, or all with `edit ID --no-follows`.
