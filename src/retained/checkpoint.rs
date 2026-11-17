@@ -381,9 +381,11 @@ fn observe(
                 .find(|i| i.identity == identity)
                 .and_then(|i| i.record.as_ref());
             if prior != Some(&observation.record)
-                || crate::attachments::ledger(&ctx.tasks.get(id).expect("participant").task)
-                    .get(&name)
-                    != Some(&crate::attachments::Ledger::Attached)
+                || !super::artifacts::is_live_attachment(
+                    &ctx.tasks.get(id).expect("participant").task,
+                    &name,
+                    &manifest.sha256,
+                )
             {
                 artifacts.insert(
                     name.clone(),
@@ -414,11 +416,10 @@ fn observe(
     }
     let artifact_list = artifacts.into_values().collect::<Vec<_>>();
     let task = &ctx.tasks.get(id).expect("participant").task;
-    let ledger = crate::attachments::ledger(task);
-    let ledger_added = artifact_list
-        .iter()
-        .filter(|a| ledger.get(&a.name) != Some(&crate::attachments::Ledger::Attached))
-        .count();
+    let mut ledger_added = 0usize;
+    for a in &artifact_list {
+        ledger_added += super::artifacts::artifact_note_count(&project, task, a)?;
+    }
     let first = task.notes.len() + ledger_added + 1;
     let ordinals = records
         .iter()
@@ -670,7 +671,11 @@ pub fn run(
     match executed {
         Ok(result) => Ok(result),
         Err(error) => {
-            let failure = incomplete(&mut ctx, &id, &binding, &error);
+            let failure = if ctx.cleanup_failed {
+                Ok(())
+            } else {
+                incomplete(&mut ctx, &id, &binding, &error)
+            };
             let phase = ctx
                 .phase(&id)?
                 .map(|p| p.1.phase)

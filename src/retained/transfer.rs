@@ -281,11 +281,10 @@ fn receiver(
         artifacts.insert(name.clone(), NewArtifact { name, bytes });
     }
     let artifacts = artifacts.into_values().collect::<Vec<_>>();
-    let ledger = crate::attachments::ledger(&ctx.tasks[to].task);
-    let added = artifacts
-        .iter()
-        .filter(|a| ledger.get(&a.name) != Some(&crate::attachments::Ledger::Attached))
-        .count();
+    let mut added = 0usize;
+    for a in &artifacts {
+        added += super::artifacts::artifact_note_count(ctx.project(to), &ctx.tasks[to].task, a)?;
+    }
     let first = ctx.tasks[to].task.notes.len() + added + 1;
     let at = crate::time::after(&ctx.tasks[to].task.updated)?;
     let mut notes = receiving
@@ -560,7 +559,11 @@ pub fn run(
     match result {
         Ok(out) => Ok(out),
         Err(error) => {
-            let failure = incomplete(&mut ctx, &from, &binding, &error);
+            let failure = if ctx.cleanup_failed {
+                Ok(())
+            } else {
+                incomplete(&mut ctx, &from, &binding, &error)
+            };
             let suffix = failure
                 .err()
                 .map(|e| format!("; incomplete receipt failed: {e}"))

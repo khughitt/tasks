@@ -709,23 +709,36 @@ fn ready(
                     "an off-container manifest destination is required; preserve raw evidence and repair by a fresh checkpoint",
                 );
             } else {
-                observation.record.manifest = FieldString::Text(
-                    target
-                        .to_str()
-                        .ok_or_else(|| invalid("manifest path UTF-8"))?
-                        .into(),
+                let live = super::artifacts::is_live_attachment(
+                    &ctx.tasks[id].task,
+                    &name,
+                    &manifest.sha256,
                 );
-                if existing.as_ref() != Some(&observation.record)
-                    || crate::attachments::ledger(&ctx.tasks[id].task).get(&name)
-                        != Some(&crate::attachments::Ledger::Attached)
-                {
-                    artifacts.insert(
-                        name.clone(),
-                        NewArtifact {
-                            name,
-                            bytes: manifest.bytes,
-                        },
+                if !live && manifest.bytes.len() as u64 > project.attachments_max_bytes {
+                    observation = verify::unknown(
+                        record.clone(),
+                        format!(
+                            "generated manifest ({} bytes) exceeds {} byte single-file attachment cap during reconciliation; custody retained as unknown — configure [attachments] multipart_validators and run a fresh tasks retained checkpoint, or use the manual off-container manifest route",
+                            manifest.bytes.len(),
+                            project.attachments_max_bytes
+                        ),
                     );
+                } else {
+                    observation.record.manifest = FieldString::Text(
+                        target
+                            .to_str()
+                            .ok_or_else(|| invalid("manifest path UTF-8"))?
+                            .into(),
+                    );
+                    if existing.as_ref() != Some(&observation.record) || !live {
+                        artifacts.insert(
+                            name.clone(),
+                            NewArtifact {
+                                name,
+                                bytes: manifest.bytes,
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -737,11 +750,10 @@ fn ready(
         }
     }
     let artifacts = artifacts.into_values().collect::<Vec<_>>();
-    let ledger = crate::attachments::ledger(&ctx.tasks[id].task);
-    let added = artifacts
-        .iter()
-        .filter(|a| ledger.get(&a.name) != Some(&crate::attachments::Ledger::Attached))
-        .count();
+    let mut added = 0usize;
+    for a in &artifacts {
+        added += super::artifacts::artifact_note_count(&project, &ctx.tasks[id].task, a)?;
+    }
     let first = ctx.tasks[id].task.notes.len() + added + 1;
     let at = crate::time::after(&ctx.tasks[id].task.updated)?;
     let mut notes = records

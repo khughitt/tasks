@@ -1123,3 +1123,621 @@ fn retained_phase_freshness_transfer_restart() {
         }
     }
 }
+
+fn configure_attachments_recovery(records: &std::path::Path, attachments_toml: &str) {
+    let config_path = records.join("tasks/.config.toml");
+    let raw = std::fs::read_to_string(&config_path).unwrap();
+    let mut doc: toml::Value = toml::from_str(&raw).unwrap();
+    let att: toml::Value = toml::from_str(attachments_toml).unwrap();
+    doc.as_table_mut()
+        .unwrap()
+        .insert("attachments".into(), att);
+    std::fs::write(&config_path, toml::to_string(&doc).unwrap()).unwrap();
+    common::git(records, &["add", config_path.to_str().unwrap()]);
+    common::git(records, &["commit", "-qm", "configure attachments"]);
+}
+
+fn build_approx_5k_container_recovery(root: &std::path::Path) -> (Vec<u8>, String) {
+    use sha2::{Digest, Sha256};
+    std::fs::create_dir_all(root).unwrap();
+    let mut entries = Vec::new();
+    for i in 0..42 {
+        let rel = format!("member-{i:03}-payload.txt");
+        let content = format!("payload-{i:03}");
+        std::fs::write(root.join(&rel), content.as_bytes()).unwrap();
+        let file_sha = format!("{:x}", Sha256::digest(content.as_bytes()));
+        entries.push(format!(
+            "{{\"type\":\"file\",\"path\":\"{rel}\",\"sha256\":\"{file_sha}\"}}"
+        ));
+    }
+    let manifest_bytes =
+        format!("{{\"version\":1,\"entries\":[{}]}}", entries.join(",")).into_bytes();
+    assert!(
+        (4800..6000).contains(&manifest_bytes.len()),
+        "unexpected manifest size: {}",
+        manifest_bytes.len()
+    );
+    let manifest_sha = format!("{:x}", Sha256::digest(&manifest_bytes));
+    (manifest_bytes, manifest_sha)
+}
+
+fn build_small_container_recovery(
+    root: &std::path::Path,
+    filename: &str,
+    content: &str,
+) -> (Vec<u8>, String) {
+    use sha2::{Digest, Sha256};
+    std::fs::create_dir_all(root).unwrap();
+    std::fs::write(root.join(filename), content.as_bytes()).unwrap();
+    let file_sha = format!("{:x}", Sha256::digest(content.as_bytes()));
+    let manifest_bytes = format!(
+        "{{\"version\":1,\"entries\":[{{\"type\":\"file\",\"path\":\"{filename}\",\"sha256\":\"{file_sha}\"}}]}}"
+    )
+    .into_bytes();
+    assert!(manifest_bytes.len() < 512);
+    let manifest_sha = format!("{:x}", Sha256::digest(&manifest_bytes));
+    (manifest_bytes, manifest_sha)
+}
+
+#[test]
+fn publish_batch_pass2_fail_after_rolls_back_only_created_files_and_surfaces_cleanup_errors() {
+    // 1. Clean committed-only reuse fixture: reused committed item A (`create_new == false`)
+    //    + new multipart item B + new single-file item C (`create_new == true`).
+    //    On `TASKS_RETAINED_FAIL_AFTER="artifact:items_published"`, rollback removes all newly
+    //    created files, preserves item A's committed file, and lets `incomplete` commit cleanly.
+    let f_clean = checkpoint_fixture();
+    f_clean.check_hook();
+    configure_attachments_recovery(
+        &f_clean.records,
+        "max_bytes = 2048\nmultipart_validators = []\n",
+    );
+
+    let clean_a = f_clean.dir.join("item-a");
+    let (clean_a_bytes, clean_a_sha) = build_small_container_recovery(&clean_a, "a.txt", "item-a");
+    let clean_a_name = format!("retained-manifest-{clean_a_sha}.json");
+    assert_eq!(
+        checkpoint(
+            &f_clean,
+            &checkpoint_request(&f_clean, 701, json!([declaration(&clean_a, "scratch")])),
+        )["outcome"],
+        "verified"
+    );
+    let clean_b = f_clean.dir.join("item-b");
+    let (_, clean_b_sha) = build_approx_5k_container_recovery(&clean_b);
+    let clean_b_name = format!("retained-manifest-{clean_b_sha}.json");
+    let clean_c = f_clean.dir.join("item-c");
+    let (_, clean_c_sha) = build_small_container_recovery(&clean_c, "c.txt", "item-c");
+    let clean_c_name = format!("retained-manifest-{clean_c_sha}.json");
+
+    let mut decl_a_updated = declaration(&clean_a, "scratch");
+    decl_a_updated["purpose"] = json!("Updated review purpose so item A re-enters batch");
+    let clean_req = checkpoint_request(
+        &f_clean,
+        702,
+        json!([
+            decl_a_updated,
+            declaration(&clean_b, "scratch"),
+            declaration(&clean_c, "scratch"),
+        ]),
+    );
+    let clean_req_path = f_clean.request("clean-fail-after.json", &clean_req);
+    let clean_args = [
+        "retained",
+        "checkpoint",
+        &f_clean.id,
+        "--request",
+        clean_req_path.to_str().unwrap(),
+    ];
+    let out_clean = f_clean
+        .cmd()
+        .env("TASKS_RETAINED_FAIL_AFTER", "artifact:items_published")
+        .args(clean_args)
+        .output()
+        .unwrap();
+    assert_eq!(out_clean.status.code(), Some(1), "{out_clean:?}");
+    let err_clean: serde_json::Value = serde_json::from_slice(&out_clean.stderr).unwrap();
+    let detail_clean = err_clean["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail_clean.contains("artifact:items_published"),
+        "got: {detail_clean}"
+    );
+    assert!(
+        !detail_clean.contains("failure receipt could not publish"),
+        "clean committed-reuse rollback must allow incomplete to commit cleanly: {detail_clean}"
+    );
+    let clean_files_dir = f_clean.records.join(format!("tasks/files/{}", f_clean.id));
+    assert_eq!(
+        std::fs::read(clean_files_dir.join(&clean_a_name)).unwrap(),
+        clean_a_bytes,
+        "item A's committed file must be preserved byte-for-byte"
+    );
+    assert!(!clean_files_dir.join(&clean_c_name).exists());
+    assert!(
+        !clean_files_dir
+            .join(format!("{clean_b_name}.part-0001"))
+            .exists()
+    );
+    assert!(
+        !clean_files_dir
+            .join(format!("{clean_b_name}.catalog.json"))
+            .exists()
+    );
+    let clean_state = f_clean.state();
+    assert_eq!(
+        clean_state["operations"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["note"]["phase"],
+        "incomplete"
+    );
+    assert_eq!(f_clean.json(&["check"])["errors"], json!([]));
+
+    // 2. Mixed fixture combining:
+    //    (a) reused already-committed `Ledger::Attached` manifest on item A (`create_new == false`),
+    //    (b) pre-staged byte-identical unledgered `.part-0001` from a prior
+    //        `TASKS_RETAINED_STOP_AFTER="artifact:items_published"` run on item B (`create_new == false`),
+    //    (c) newly created `.part-0002`, `.part-0003`, `.catalog.json`, and item C's single-file
+    //        manifest (`create_new == true`).
+    let f = checkpoint_fixture();
+    f.check_hook();
+    configure_attachments_recovery(&f.records, "max_bytes = 2048\nmultipart_validators = []\n");
+
+    let item_a = f.dir.join("item-a");
+    let (item_a_bytes, item_a_sha) = build_small_container_recovery(&item_a, "a.txt", "item-a");
+    let item_a_name = format!("retained-manifest-{item_a_sha}.json");
+    assert_eq!(
+        checkpoint(
+            &f,
+            &checkpoint_request(&f, 710, json!([declaration(&item_a, "scratch")])),
+        )["outcome"],
+        "verified"
+    );
+
+    let item_b = f.dir.join("item-b");
+    let (_, item_b_sha) = build_approx_5k_container_recovery(&item_b);
+    let item_b_name = format!("retained-manifest-{item_b_sha}.json");
+
+    let item_c = f.dir.join("item-c");
+    let (_, item_c_sha) = build_small_container_recovery(&item_c, "c.txt", "item-c");
+    let item_c_name = format!("retained-manifest-{item_c_sha}.json");
+
+    let mut decl_a = declaration(&item_a, "scratch");
+    decl_a["purpose"] = json!("Updated review purpose on item A");
+    let req = checkpoint_request(
+        &f,
+        711,
+        json!([
+            decl_a,
+            declaration(&item_b, "scratch"),
+            declaration(&item_c, "scratch"),
+        ]),
+    );
+    let req_path = f.request("mixed-fail-after.json", &req);
+    let args = [
+        "retained",
+        "checkpoint",
+        &f.id,
+        "--request",
+        req_path.to_str().unwrap(),
+    ];
+
+    // Pre-stage `.part-0001` on item B via `TASKS_RETAINED_STOP_AFTER="artifact:items_published"`.
+    let stopped = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "artifact:items_published")
+        .args(args)
+        .output()
+        .unwrap();
+    assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
+
+    let files_dir = f.records.join(format!("tasks/files/{}", f.id));
+    let part1_path = files_dir.join(format!("{item_b_name}.part-0001"));
+    let part2_path = files_dir.join(format!("{item_b_name}.part-0002"));
+    let part3_path = files_dir.join(format!("{item_b_name}.part-0003"));
+    let cat_path = files_dir.join(format!("{item_b_name}.catalog.json"));
+    let item_c_path = files_dir.join(&item_c_name);
+    assert!(part1_path.is_file());
+    assert!(part2_path.is_file());
+    assert!(part3_path.is_file());
+    assert!(cat_path.is_file());
+    assert!(item_c_path.is_file());
+
+    let part1_bytes = std::fs::read(&part1_path).unwrap();
+    for p in [&part2_path, &part3_path, &cat_path, &item_c_path] {
+        std::fs::remove_file(p).unwrap();
+    }
+    let task_md_path = f.records.join(format!("tasks/{}.md", f.id));
+    let task_md_before = std::fs::read(&task_md_path).unwrap();
+
+    // Run with `TASKS_RETAINED_FAIL_AFTER="artifact:items_published"`:
+    // Pass 2 creates `.part-0002`, `.part-0003`, `.catalog.json`, and `item_c_name`, hits the
+    // failure injection before save, unlinks all `create_new == true` files, and preserves
+    // item A's committed file and item B's adopted `.part-0001` byte-for-byte.
+    let failed = f
+        .cmd()
+        .env("TASKS_RETAINED_FAIL_AFTER", "artifact:items_published")
+        .args(args)
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1), "{failed:?}");
+    let err_failed: serde_json::Value = serde_json::from_slice(&failed.stderr).unwrap();
+    assert!(
+        err_failed["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("artifact:items_published"),
+        "{err_failed}"
+    );
+    assert_eq!(
+        std::fs::read(files_dir.join(&item_a_name)).unwrap(),
+        item_a_bytes
+    );
+    assert_eq!(std::fs::read(&part1_path).unwrap(), part1_bytes);
+    assert!(!part2_path.exists());
+    assert!(!part3_path.exists());
+    assert!(!cat_path.exists());
+    assert!(!item_c_path.exists());
+    assert_eq!(
+        std::fs::read(&task_md_path).unwrap(),
+        task_md_before,
+        "zero partial ledger or phase notes may be written before save"
+    );
+
+    // Unset `TASKS_RETAINED_FAIL_AFTER` and rerun the original request: retry adopts `.part-0001`
+    // and completes `completed` cleanly.
+    let res = f.json(&args);
+    assert_eq!(res["outcome"], "verified", "{res}");
+    assert_eq!(res["counts"]["kept_verified"], 3, "{res}");
+    let final_state = f.state();
+    assert_eq!(final_state["complete"], true, "{final_state}");
+    assert_eq!(
+        final_state["operations"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["note"]["phase"],
+        "completed"
+    );
+    assert!(part1_path.is_file());
+    assert!(part2_path.is_file());
+    assert!(part3_path.is_file());
+    assert!(cat_path.is_file());
+    assert!(item_c_path.is_file());
+    assert_eq!(f.json(&["check"])["errors"], json!([]));
+}
+
+#[test]
+fn multipart_checkpoint_transfer_noop_reuse_and_stop_after_save_recovery() {
+    let f = checkpoint_fixture();
+    f.check_hook();
+    configure_attachments_recovery(&f.records, "max_bytes = 2048\nmultipart_validators = []\n");
+
+    let container = f.dir.join("multipart-container");
+    let (_, manifest_sha) = build_approx_5k_container_recovery(&container);
+    let manifest_name = format!("retained-manifest-{manifest_sha}.json");
+
+    let cp_req = checkpoint_request(&f, 720, json!([declaration(&container, "scratch")]));
+    let cp_path = f.request("cp-multipart.json", &cp_req);
+    let cp_args = [
+        "retained",
+        "checkpoint",
+        &f.id,
+        "--request",
+        cp_path.to_str().unwrap(),
+    ];
+
+    // 1. Interrupt at `TASKS_RETAINED_STOP_AFTER="save:items_published"` and recover via `recover_saved` + `validate_since`.
+    let stopped_save = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "save:items_published")
+        .args(cp_args)
+        .output()
+        .unwrap();
+    assert_eq!(stopped_save.status.code(), Some(86), "{stopped_save:?}");
+
+    let cp_res = f.json(&cp_args);
+    assert_eq!(cp_res["outcome"], "verified", "{cp_res}");
+    let files_dir = f.records.join(format!("tasks/files/{}", f.id));
+    assert!(!files_dir.join(&manifest_name).exists());
+    assert!(
+        files_dir
+            .join(format!("{manifest_name}.part-0001"))
+            .is_file()
+    );
+    assert!(
+        files_dir
+            .join(format!("{manifest_name}.part-0002"))
+            .is_file()
+    );
+    assert!(
+        files_dir
+            .join(format!("{manifest_name}.part-0003"))
+            .is_file()
+    );
+    assert!(
+        files_dir
+            .join(format!("{manifest_name}.catalog.json"))
+            .is_file()
+    );
+
+    let shown_1 = f.json(&["show", &f.id]);
+    let multipart_notes_1 = shown_1["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| n["text"].as_str().unwrap().starts_with("multipart: "))
+        .count();
+    assert_eq!(multipart_notes_1, 1);
+    assert_eq!(f.state()["complete"], true);
+    assert_eq!(f.json(&["check"])["errors"], json!([]));
+
+    // 2. Second no-op `tasks retained checkpoint` reuses the live multipart manifest without re-attaching.
+    let noop_req = checkpoint_request(&f, 721, json!([]));
+    let noop_res = checkpoint(&f, &noop_req);
+    assert_eq!(noop_res["outcome"], "verified", "{noop_res}");
+    let shown_2 = f.json(&["show", &f.id]);
+    let multipart_notes_2 = shown_2["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| n["text"].as_str().unwrap().starts_with("multipart: "))
+        .count();
+    assert_eq!(
+        multipart_notes_2, 1,
+        "no-op checkpoint must reuse live multipart manifest without re-attaching"
+    );
+    assert_eq!(f.json(&["check"])["errors"], json!([]));
+
+    // 3. Native `tasks retained transfer` interrupted at `save:receiver_published` and `receiver_published`.
+    let to = f.json(&["add", "Multipart receiver"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &to]);
+    let tx_req = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 722u64),
+        "host": host(),
+        "inputs": [
+            {"task": f.id, "basis": f.state()["basis"]},
+            {"task": to, "basis": f.json(&["retained", "state", &to])["basis"]}
+        ],
+        "items": [f.state()["items"][0]["identity"]],
+        "purpose": "Continue multipart custody",
+        "cleanup_trigger": "Disposition complete"
+    });
+    let tx_path = f.request("tx-multipart.json", &tx_req);
+    let tx_args = [
+        "retained",
+        "transfer",
+        &f.id,
+        &to,
+        "--request",
+        tx_path.to_str().unwrap(),
+    ];
+
+    // 3a. Transfer `f -> to` interrupted at `save:receiver_published`: `recover_saved` recovers
+    //     the staged multipart receiver notes/files and completes the transfer cleanly.
+    let stopped_tx_save = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "save:receiver_published")
+        .args(tx_args)
+        .output()
+        .unwrap();
+    assert_eq!(
+        stopped_tx_save.status.code(),
+        Some(86),
+        "{stopped_tx_save:?}"
+    );
+
+    let tx_res = f.json(&tx_args);
+    assert_eq!(tx_res["outcome"], "transferred", "{tx_res}");
+    assert_eq!(f.state()["items"][0]["record"]["state"], "released");
+    let to_state = f.json(&["retained", "state", &to]);
+    assert_eq!(to_state["complete"], true);
+    assert_eq!(to_state["items"][0]["record"]["state"], "kept");
+    assert_eq!(to_state["items"][0]["record"]["verification"], "verified");
+    let to_files = f.records.join(format!("tasks/files/{to}"));
+    assert!(!to_files.join(&manifest_name).exists());
+    assert!(
+        to_files
+            .join(format!("{manifest_name}.part-0001"))
+            .is_file()
+    );
+    assert!(
+        to_files
+            .join(format!("{manifest_name}.catalog.json"))
+            .is_file()
+    );
+
+    // 3b. Transfer `to -> to2` interrupted at `receiver_published`: `validate_since` validates
+    //     the committed multipart `attached:` + `multipart:` notes on `to2` and completes cleanly.
+    let to2 = f.json(&["add", "Second multipart receiver"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.json(&["start", &to2]);
+    let tx2_req = json!({
+        "version": 1,
+        "operation_id": format!("{:032x}", 723u64),
+        "host": host(),
+        "inputs": [
+            {"task": to, "basis": f.json(&["retained", "state", &to])["basis"]},
+            {"task": to2, "basis": f.json(&["retained", "state", &to2])["basis"]}
+        ],
+        "items": [to_state["items"][0]["identity"]],
+        "purpose": "Continue multipart custody on second hop",
+        "cleanup_trigger": "Final disposition"
+    });
+    let tx2_path = f.request("tx2-multipart.json", &tx2_req);
+    let tx2_args = [
+        "retained",
+        "transfer",
+        &to,
+        &to2,
+        "--request",
+        tx2_path.to_str().unwrap(),
+    ];
+    let stopped_tx_recv = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "receiver_published")
+        .args(tx2_args)
+        .output()
+        .unwrap();
+    assert_eq!(
+        stopped_tx_recv.status.code(),
+        Some(86),
+        "{stopped_tx_recv:?}"
+    );
+    let tx2_res = f.json(&tx2_args);
+    assert_eq!(tx2_res["outcome"], "transferred", "{tx2_res}");
+    assert_eq!(
+        f.json(&["retained", "state", &to])["items"][0]["record"]["state"],
+        "released"
+    );
+    let to2_state = f.json(&["retained", "state", &to2]);
+    assert_eq!(to2_state["complete"], true);
+    assert_eq!(to2_state["items"][0]["record"]["state"], "kept");
+    assert_eq!(to2_state["items"][0]["record"]["verification"], "verified");
+    assert_eq!(f.json(&["check"])["errors"], json!([]));
+}
+
+#[test]
+fn multipart_stop_after_artifact_adopts_unchanged_and_flags_changed_member() {
+    let f = checkpoint_fixture();
+    f.check_hook();
+    configure_attachments_recovery(&f.records, "max_bytes = 2048\nmultipart_validators = []\n");
+
+    let container = f.dir.join("mutated-container");
+    let (_, sha_a) = build_approx_5k_container_recovery(&container);
+    let manifest_a = format!("retained-manifest-{sha_a}.json");
+
+    let req = checkpoint_request(&f, 730, json!([declaration(&container, "scratch")]));
+    let req_path = f.request("cp-stop-artifact.json", &req);
+    let args = [
+        "retained",
+        "checkpoint",
+        &f.id,
+        "--request",
+        req_path.to_str().unwrap(),
+    ];
+
+    let stopped = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "artifact:items_published")
+        .args(args)
+        .output()
+        .unwrap();
+    assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
+
+    let files_dir = f.records.join(format!("tasks/files/{}", f.id));
+    let part1_a = files_dir.join(format!("{manifest_a}.part-0001"));
+    assert!(part1_a.is_file());
+    for suffix in ["part-0002", "part-0003", "catalog.json"] {
+        std::fs::remove_file(files_dir.join(format!("{manifest_a}.{suffix}"))).unwrap();
+    }
+
+    // Mutate a member inside the scratch directory so the new manifest digest `sha_b != sha_a`.
+    let member0 = container.join("member-000-payload.txt");
+    let original_member0 = std::fs::read(&member0).unwrap();
+    std::fs::write(&member0, b"mutated-payload-000").unwrap();
+
+    let out = f.cmd().args(args).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "retained_stale_basis", "{err}");
+    let expected_prefix = format!(
+        "Protected attachment directory tasks/files/{} contains unledgered file {manifest_a}.part-0001; preserve and verify a copy outside tasks/files/{} if needed, remove the unledgered file to restore the committed preimage, and retry or reconcile",
+        f.id, f.id
+    );
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with(&expected_prefix),
+        "got: {err}"
+    );
+    assert!(
+        part1_a.is_file(),
+        "leftover unledgered member must never be silently deleted"
+    );
+
+    // Restoring the exact scratch member lets retry adopt `.part-0001` and complete cleanly.
+    std::fs::write(&member0, &original_member0).unwrap();
+    let res = f.json(&args);
+    assert_eq!(res["outcome"], "verified", "{res}");
+    assert_eq!(f.state()["complete"], true);
+    assert_eq!(f.json(&["check"])["errors"], json!([]));
+}
+
+#[test]
+fn reconcile_degrades_over_cap_pending_manifest_to_kept_unknown() {
+    let f = checkpoint_fixture();
+    f.check_hook();
+
+    let container = f.dir.join("over-cap-reconcile");
+    let (manifest_bytes, _) = build_approx_5k_container_recovery(&container);
+
+    let cp_req = checkpoint_request(&f, 740, json!([declaration(&container, "scratch")]));
+    let cp_path = f.request("cp-pending-over-cap.json", &cp_req);
+    let stopped = f
+        .cmd()
+        .env("TASKS_RETAINED_STOP_AFTER", "intent")
+        .args([
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            cp_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
+
+    // Tighten single-file cap to 2048 while keeping `multipart_validators` undeclared.
+    configure_attachments_recovery(&f.records, "max_bytes = 2048\n");
+
+    let rec_req = json!({
+        "version": 1,
+        "operation": {
+            "coordinator": f.id,
+            "operation_id": cp_req["operation_id"],
+        },
+        "reconciliation_id": format!("{:032x}", 741u64),
+        "inputs": [{"task": f.id, "basis": f.state()["basis"]}],
+        "reason": "Reconcile pending over-cap scratch container without multipart configured"
+    });
+    let res = reconcile(&f, &rec_req);
+    assert_eq!(res["outcome"], "reconciled", "{res}");
+    assert_eq!(res["counts"]["kept_unknown"], 1, "{res}");
+    assert_eq!(res["counts"]["kept_verified"], 0, "{res}");
+
+    let expected_detail = format!(
+        "generated manifest ({} bytes) exceeds 2048 byte single-file attachment cap during reconciliation; custody retained as unknown — configure [attachments] multipart_validators and run a fresh tasks retained checkpoint, or use the manual off-container manifest route",
+        manifest_bytes.len()
+    );
+    let expected_action = format!("Restore and inspect exact retained bytes: {expected_detail}");
+
+    let state = f.state();
+    assert_eq!(state["complete"], true, "{state}");
+    assert_eq!(state["items"][0]["record"]["state"], "kept");
+    assert_eq!(state["items"][0]["record"]["verification"], "unknown");
+    assert!(state["items"][0]["record"]["sha256"].is_null());
+    assert_eq!(
+        state["items"][0]["record"]["verification_action"],
+        expected_action
+    );
+    assert_eq!(
+        res["actions"],
+        json!([format!("{}: {expected_action}", f.id)])
+    );
+
+    f.json(&[
+        "edit",
+        &f.id,
+        "--title",
+        "Reservation ended cleanly after cap-safe reconcile",
+    ]);
+    assert_eq!(f.json(&["check"])["errors"], json!([]));
+}

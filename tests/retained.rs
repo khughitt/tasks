@@ -3714,3 +3714,138 @@ fn inaccessible_and_unmanifestable_directories_defer_to_post_intent_unknown() {
         "got: {err_tx}"
     );
 }
+
+#[test]
+fn publish_batch_pass1_rejects_mixed_small_and_over_cap_without_partial_files() {
+    use sha2::{Digest, Sha256};
+
+    for (case_idx, config_toml, expected_kind) in [
+        (
+            1u64,
+            "max_bytes = 2048\n",
+            "multipart_validators_undeclared",
+        ),
+        (
+            2u64,
+            "max_bytes = 2048\nmultipart_max_bytes = 4096\nmultipart_validators = []\n",
+            "attachment_too_large",
+        ),
+    ] {
+        let f = checkpoint_fixture();
+        f.check_hook();
+
+        let big_dir = f.dir.join(format!("big-{case_idx}"));
+        std::fs::create_dir_all(&big_dir).unwrap();
+        let mut big_entries = Vec::new();
+        for i in 0..42 {
+            let rel = format!("member-{i:03}-payload.txt");
+            let content = format!("payload-{i:03}");
+            std::fs::write(big_dir.join(&rel), content.as_bytes()).unwrap();
+            let file_sha = format!("{:x}", Sha256::digest(content.as_bytes()));
+            big_entries.push(format!(
+                "{{\"type\":\"file\",\"path\":\"{rel}\",\"sha256\":\"{file_sha}\"}}"
+            ));
+        }
+        let big_manifest = format!("{{\"version\":1,\"entries\":[{}]}}", big_entries.join(","));
+        let big_sha = format!("{:x}", Sha256::digest(big_manifest.as_bytes()));
+
+        // Pick a 1-file small scratch directory whose exact `Manifest` sha256 sorts
+        // lexicographically BEFORE `big_sha`, so `BTreeMap` ordering in `checkpoint::observe`
+        // guarantees `small` is `artifact_list[0]` and `big` is `artifact_list[1]`.
+        let small_dir = f.dir.join(format!("small-{case_idx}"));
+        std::fs::create_dir_all(&small_dir).unwrap();
+        let mut small_sha = String::new();
+        for nonce in 0..10_000u32 {
+            let content = format!("small-payload-{nonce}");
+            let file_sha = format!("{:x}", Sha256::digest(content.as_bytes()));
+            let candidate_manifest = format!(
+                "{{\"version\":1,\"entries\":[{{\"type\":\"file\",\"path\":\"a.txt\",\"sha256\":\"{file_sha}\"}}]}}"
+            );
+            assert!(candidate_manifest.len() < 512);
+            let candidate_sha = format!("{:x}", Sha256::digest(candidate_manifest.as_bytes()));
+            if candidate_sha < big_sha {
+                std::fs::write(small_dir.join("a.txt"), content.as_bytes()).unwrap();
+                small_sha = candidate_sha;
+                break;
+            }
+        }
+        assert!(!small_sha.is_empty() && small_sha < big_sha);
+
+        let op_n = 600 + case_idx;
+        let req = checkpoint_request(
+            &f,
+            op_n,
+            json!([
+                declaration(&small_dir, "scratch"),
+                declaration(&big_dir, "scratch"),
+            ]),
+        );
+        let req_path = f.request(&format!("cp-pass1-{case_idx}.json"), &req);
+        let args = [
+            "retained",
+            "checkpoint",
+            &f.id,
+            "--request",
+            req_path.to_str().unwrap(),
+        ];
+
+        // Commit `intent` before tightening `[attachments]` so `observe` reaches `publish::batch`
+        // directly with `[small_manifest, big_manifest]`.
+        let stopped = f
+            .cmd()
+            .env("TASKS_RETAINED_STOP_AFTER", "intent")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(stopped.status.code(), Some(86), "{stopped:?}");
+
+        configure_attachments(&f.records, config_toml);
+
+        let out = f.cmd().args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{expected_kind}: {out:?}");
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["error"]["kind"], expected_kind, "{err}");
+        let detail = err["error"]["detail"].as_str().unwrap();
+        assert!(
+            !detail.contains("failure receipt could not publish"),
+            "incomplete must publish cleanly after Pass 1 zero-write rejection: {detail}"
+        );
+        assert!(
+            !detail.contains("unledgered file"),
+            "Pass 1 must write zero partial files: {detail}"
+        );
+
+        let files_dir = f.records.join(format!("tasks/files/{}", f.id));
+        let expected_req_name = format!("retained-op-{op_n:032x}.request.json");
+        let mut present: Vec<String> = std::fs::read_dir(&files_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        present.sort();
+        assert_eq!(
+            present,
+            vec![expected_req_name],
+            "zero unledgered files may exist in tasks/files/{}",
+            f.id
+        );
+
+        let state = f.state();
+        let ops = state["operations"].as_array().unwrap();
+        assert_eq!(
+            ops.last().unwrap()["note"]["phase"],
+            "incomplete",
+            "incomplete receipt must commit cleanly: {state}"
+        );
+
+        let check = f.json(&["check"]);
+        assert_eq!(check["errors"], json!([]), "{check}");
+        assert!(
+            !check["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["kind"] == "attachment_unnoted"),
+            "{check}"
+        );
+    }
+}
