@@ -167,7 +167,11 @@ fn pieces_reader_closeout_waits_for_pieces() {
 
     env.json(&bb, &["done", &x, "done"]);
     let prime = env.json(&aa, &["prime"]);
-    assert_eq!(ids(&prime["closeout"]), [hub.clone()], "{prime}");
+    assert_eq!(
+        ids(&prime["closeout"]),
+        std::slice::from_ref(&hub),
+        "{prime}"
+    );
 
     env.json(&aa, &["dep", &hub, "--on", &y]);
     let prime = env.json(&aa, &["prime"]);
@@ -221,7 +225,11 @@ fn pieces_reader_all_dropped_hub_closes() {
     let hub = hub(&env, &aa, "Hub", &["--origin", "user"], &[&x]);
     env.json(&bb, &["drop", &x, "no longer needed"]);
     let prime = env.json(&aa, &["prime"]);
-    assert_eq!(ids(&prime["closeout"]), [hub.clone()], "{prime}");
+    assert_eq!(
+        ids(&prime["closeout"]),
+        std::slice::from_ref(&hub),
+        "{prime}"
+    );
     let out = env.json(&aa, &["goals"]);
     let row = goal_row(&out, &hub);
     assert_eq!(row["pieces"], json!({"done": 0, "total": 0}), "{row}");
