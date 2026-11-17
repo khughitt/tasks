@@ -671,6 +671,93 @@ fn progress_display_elsewhere_uses_source_scan() {
 }
 
 #[test]
+fn progress_display_elsewhere_shared_root_detached() {
+    let mut env = TestEnv::new();
+    let main_aa = env.init("aa");
+    let shared_code = env.home.path().join("shared-code");
+    std::fs::create_dir_all(&shared_code).unwrap();
+    let shared_code = shared_code.canonicalize().unwrap();
+
+    let det_1 = env.home.path().join("det-rec-1");
+    let det_2 = env.home.path().join("det-rec-2");
+    for d in [&det_1, &det_2] {
+        std::fs::create_dir_all(d.join("tasks")).unwrap();
+        std::fs::write(d.join("tasks/.config.toml"), "prefix = \"aa\"\n").unwrap();
+    }
+
+    // Populate det_1 with claimed goal_1 (1/2) and claimed goal_1b (0/1).
+    let goal_1 = add(&env, &det_1, "Detached 1 goal", &["--origin", "user"]);
+    let g1_done = add(&env, &det_1, "Det 1 done", &["--parent", &goal_1]);
+    env.json(&det_1, &["done", &g1_done]);
+    let _g1_todo = add(&env, &det_1, "Det 1 todo", &["--parent", &goal_1]);
+
+    let goal_1b = add(
+        &env,
+        &det_1,
+        "Detached 1 second goal",
+        &["--origin", "user"],
+    );
+    let _g1b_todo = add(&env, &det_1, "Det 1b todo", &["--parent", &goal_1b]);
+
+    // Populate det_2 with claimed goal_2 (2/3), which does NOT exist in det_1.
+    let goal_2 = add(&env, &det_2, "Detached 2 goal", &["--origin", "user"]);
+    let g2_done_a = add(&env, &det_2, "Det 2 done A", &["--parent", &goal_2]);
+    let g2_done_b = add(&env, &det_2, "Det 2 done B", &["--parent", &goal_2]);
+    env.json(&det_2, &["done", &g2_done_a]);
+    env.json(&det_2, &["done", &g2_done_b]);
+    let _g2_todo = add(&env, &det_2, "Det 2 todo", &["--parent", &goal_2]);
+
+    // Now mark both det_1 and det_2 as Kind::Detached checkouts sharing [checkout] path = shared_code!
+    let detached_cfg = format!(
+        "prefix = \"aa\"\n\n[checkout]\npath = \"{}\"\nkind = \"detached\"\n",
+        shared_code.display()
+    );
+    for d in [&det_1, &det_2] {
+        std::fs::write(d.join("tasks/.config.toml"), &detached_cfg).unwrap();
+    }
+
+    let symlink_det_1 = env.home.path().join("symlink-det-1");
+    std::os::unix::fs::symlink(det_1.canonicalize().unwrap(), &symlink_det_1).unwrap();
+
+    for id in [&goal_1, &goal_1b, &goal_2] {
+        write_claim(&env, "aa", id, "codex:other-session", true);
+    }
+    let store_path = env.claim_store("aa");
+    let mut store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
+    for (id, wt) in [
+        (&goal_1, &symlink_det_1),
+        (&goal_1b, &symlink_det_1),
+        (&goal_2, &det_2),
+    ] {
+        store["claims"][id].as_table_mut().unwrap().insert(
+            "worktree".into(),
+            toml::Value::String(wt.display().to_string()),
+        );
+    }
+    std::fs::write(&store_path, toml::to_string(&store).unwrap()).unwrap();
+
+    let prime_json = env.json(&main_aa, &["prime"]);
+    let doing_ids: BTreeSet<&str> = prime_json["doing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert!(doing_ids.contains(goal_1.as_str()), "{prime_json}");
+    assert!(doing_ids.contains(goal_1b.as_str()), "{prime_json}");
+    assert!(doing_ids.contains(goal_2.as_str()), "{prime_json}");
+
+    let prime_pretty = env.pretty(&main_aa, &["prime"]);
+    let line_1 = prime_pretty.lines().find(|l| l.contains(&goal_1)).unwrap();
+    let line_1b = prime_pretty.lines().find(|l| l.contains(&goal_1b)).unwrap();
+    let line_2 = prime_pretty.lines().find(|l| l.contains(&goal_2)).unwrap();
+    assert!(line_1.contains("1/2"), "{line_1}\n{prime_pretty}");
+    assert!(line_1b.contains("0/1"), "{line_1b}\n{prime_pretty}");
+    assert!(line_2.contains("2/3"), "{line_2}\n{prime_pretty}");
+}
+
+#[test]
 fn progress_display_legends_and_width() {
     let mut env = TestEnv::new();
     let aa = env.init("aa");

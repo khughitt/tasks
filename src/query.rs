@@ -225,17 +225,16 @@ impl SortKey {
     }
 }
 
-pub fn sort_list(tasks: &mut [Task]) {
-    sort_by_key(tasks, SortKey::Priority);
+pub fn list_order(a: &Task, b: &Task) -> std::cmp::Ordering {
+    a.priority
+        .cmp(&b.priority)
+        .then_with(|| b.updated.cmp(&a.updated))
+        .then_with(|| a.id.cmp(&b.id))
 }
 
 pub fn sort_by_key(tasks: &mut [Task], key: SortKey) {
     tasks.sort_by(|a, b| match key {
-        SortKey::Priority => a
-            .priority
-            .cmp(&b.priority)
-            .then_with(|| b.updated.cmp(&a.updated))
-            .then_with(|| a.id.cmp(&b.id)),
+        SortKey::Priority => list_order(a, b),
         SortKey::Updated => b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)),
         SortKey::Created => b.created.cmp(&a.created).then_with(|| a.id.cmp(&b.id)),
     });

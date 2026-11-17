@@ -12,8 +12,8 @@ use crate::output::{
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
-    Picked, Readiness, SortKey, deferred_omission, is_candidate, paused_omissions, readiness,
-    sort_by_key, sort_list, sort_periodic, sort_ready,
+    Picked, Readiness, SortKey, deferred_omission, is_candidate, list_order, paused_omissions,
+    readiness, sort_by_key, sort_periodic, sort_ready,
 };
 use crate::repo::Project;
 use crate::scope::Scope;
@@ -769,7 +769,25 @@ fn claimed_elsewhere(
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
 ) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
-    let mut scans: Vec<(Project, Vec<Task>)> = Vec::new();
+    claimed_elsewhere_with(ctx, all, claims, super::parked::open_recorded)
+}
+
+fn claimed_elsewhere_with(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &crate::claims::ClaimSnapshot,
+    mut open_recorded: impl FnMut(
+        &TaskId,
+        &std::path::Path,
+    ) -> Result<Option<(Project, Task, Vec<Task>)>>,
+) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+    struct CachedCheckout {
+        project: Project,
+        scan: Vec<Task>,
+        seen_worktrees: Vec<std::path::PathBuf>,
+    }
+
+    let mut scans: Vec<CachedCheckout> = Vec::new();
     let mut found: Vec<(usize, Task)> = Vec::new();
     for (key, (claim, liveness)) in claims.iter() {
         if liveness.is_stale() {
@@ -788,13 +806,12 @@ fn claimed_elsewhere(
             continue;
         }
         let worktree = std::path::Path::new(&claim.worktree);
-        if let Some(at) = scans
-            .iter()
-            .position(|(project, _)| project.resume_root() == worktree)
-        {
-            if scans[at].0.prefix == id.prefix
-                && let Some(task) = scans[at].1.iter().find(|task| task.id == id).cloned()
-            {
+        if let Some(at) = scans.iter().position(|entry| {
+            entry.project.prefix == id.prefix
+                && (entry.project.resume_root() == worktree
+                    || entry.seen_worktrees.iter().any(|seen| seen == worktree))
+        }) {
+            if let Some(task) = scans[at].scan.iter().find(|task| task.id == id).cloned() {
                 ctx.warnings.push(format!(
                     "{id} is claimed in {}; resume it from that checkout",
                     claim.worktree
@@ -808,19 +825,31 @@ fn claimed_elsewhere(
             }
             continue;
         }
-        match super::parked::open_recorded(&id, worktree) {
+        match open_recorded(&id, worktree) {
             Ok(Some((project, task, scan))) => {
                 ctx.warnings.push(format!(
                     "{id} is claimed in {}; resume it from that checkout",
                     claim.worktree
                 ));
-                let at = match scans
-                    .iter()
-                    .position(|(existing, _)| existing.root == project.root)
-                {
-                    Some(existing) => existing,
+                let at = match scans.iter().position(|existing| {
+                    existing.project.prefix == project.prefix
+                        && existing.project.records == project.records
+                        && existing.project.resume_root() == project.resume_root()
+                        && existing.project.root == project.root
+                }) {
+                    Some(existing) => {
+                        let wt = worktree.to_path_buf();
+                        if !scans[existing].seen_worktrees.contains(&wt) {
+                            scans[existing].seen_worktrees.push(wt);
+                        }
+                        existing
+                    }
                     None => {
-                        scans.push((project, scan));
+                        scans.push(CachedCheckout {
+                            project,
+                            scan,
+                            seen_worktrees: vec![worktree.to_path_buf()],
+                        });
                         scans.len() - 1
                     }
                 };
@@ -836,7 +865,13 @@ fn claimed_elsewhere(
             )),
         }
     }
-    (scans, found)
+    (
+        scans
+            .into_iter()
+            .map(|entry| (entry.project, entry.scan))
+            .collect(),
+        found,
+    )
 }
 
 pub fn prime(
@@ -930,18 +965,30 @@ pub fn prime(
         let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
         ctx.warnings.extend(without.warning(hidden));
     }
-    let mut doing: Vec<Task> = all
+    let mut doing: Vec<(Option<usize>, Task)> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.held(&task.id).is_some())
-        .cloned()
+        .map(|task| (None, task.clone()))
         .collect();
     let (elsewhere_scans, elsewhere_rows) = claimed_elsewhere(&mut ctx, &all, &claims);
-    doing.extend(elsewhere_rows.iter().map(|(_, task)| task.clone()));
+    doing.extend(
+        elsewhere_rows
+            .into_iter()
+            .map(|(at, task)| (Some(at), task)),
+    );
     // Each distinct checkout read from claims is judged once with its own scan and cache.
     let elsewhere_deps: Vec<_> = elsewhere_scans
         .iter()
         .map(|(project, scan)| recorded_review_deps(&mut ctx, project, scan))
         .collect::<Result<_>>()?;
+    let elsewhere_activities: Vec<_> = elsewhere_scans
+        .iter()
+        .map(|(_, scan)| {
+            let mut activity = crate::activity::ActivityIndex::default();
+            activity.extend_scan(scan, &registry, now);
+            activity
+        })
+        .collect();
     let mut elsewhere_memberships: Vec<Option<crate::membership::Membership<'_>>> = elsewhere_scans
         .iter()
         .map(|(project, scan)| {
@@ -975,7 +1022,7 @@ pub fn prime(
         };
         elsewhere_views.push(view);
     }
-    sort_list(&mut doing);
+    doing.sort_by(|(_, a), (_, b)| list_order(a, b));
     let mut roadmap = crate::hierarchy::forest(
         &all,
         &hierarchy,
@@ -1094,19 +1141,13 @@ pub fn prime(
         .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &registry, now))
         .collect();
     let mut doing_rows: Vec<TaskSummary> = Vec::with_capacity(doing.len());
-    for task in &doing {
-        let source = elsewhere_rows
-            .iter()
-            .find(|(_, found)| found.id == task.id)
-            .map(|(at, _)| *at);
+    for (source, task) in &doing {
         let (view, row_deps) = source.map_or((&hierarchy, &deps), |at| {
             (&elsewhere_views[at], &elsewhere_deps[at])
         });
         let mut row = TaskSummary::of(task, view, row_deps, Some(&claims), &registry, now);
-        if let Some(at) = source {
-            let mut activity = crate::activity::ActivityIndex::default();
-            activity.extend_scan(&elsewhere_scans[at].1, &registry, now);
-            row.activity = activity.get(&task.id);
+        if let Some(at) = *source {
+            row.activity = elsewhere_activities[at].get(&task.id);
             if let Some(em) = elsewhere_memberships[at].as_mut() {
                 row.goal_work = crate::output::GoalWork::of(task, row.child_count, em)?;
             }
@@ -1227,5 +1268,135 @@ mod tests {
             Some(false)
         );
         assert!(satisfied(&ctx, std::slice::from_ref(&done), &alias).unwrap());
+    }
+
+    #[test]
+    fn claimed_elsewhere_separates_shared_roots_and_reuses_symlinked_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared_code = dir.path().join("shared-code");
+        std::fs::create_dir_all(&shared_code).unwrap();
+        let shared_code = shared_code.canonicalize().unwrap();
+
+        let make_detached = |name: &str| -> crate::repo::Project {
+            let rec = dir.path().join(name);
+            let _ = crate::repo::Project::init(&rec, "aa", None).unwrap();
+            std::fs::write(
+                rec.join(crate::repo::CONFIG_REL),
+                format!(
+                    "prefix = \"aa\"\n\n[checkout]\npath = \"{}\"\nkind = \"detached\"\n",
+                    shared_code.display()
+                ),
+            )
+            .unwrap();
+            crate::repo::Project::open(&rec).unwrap()
+        };
+
+        let main_proj = make_detached("main-rec");
+        let det_1 = make_detached("det-rec-1");
+        let det_2 = make_detached("det-rec-2");
+        assert_eq!(det_1.root, det_2.root);
+        assert_ne!(det_1.records, det_2.records);
+
+        let mut registry = crate::registry::Registry::default();
+        registry.register("aa", &shared_code).unwrap();
+
+        let t1 = crate::commands::add::blank(&det_1, "Det 1 task A".into(), Status::Doing, None)
+            .unwrap();
+        let t2 = crate::commands::add::blank(&det_1, "Det 1 task B".into(), Status::Doing, None)
+            .unwrap();
+        let t3 = crate::commands::add::blank(&det_2, "Det 2 task C".into(), Status::Doing, None)
+            .unwrap();
+        det_1.write_task(&registry, &t1).unwrap();
+        det_1.write_task(&registry, &t2).unwrap();
+        det_2.write_task(&registry, &t3).unwrap();
+
+        let symlink_wt_1 = dir.path().join("symlink-det-1");
+        std::os::unix::fs::symlink(&det_1.records, &symlink_wt_1).unwrap();
+
+        let make_claim = |wt: &std::path::Path| {
+            (
+                crate::claims::Claim {
+                    owner: "worker".into(),
+                    session: "s1".into(),
+                    root_session: None,
+                    pid: None,
+                    pid_start: None,
+                    boot_id: None,
+                    pid_view: None,
+                    host: "h".into(),
+                    worktree: wt.display().to_string(),
+                    started: "2026-11-17T00:00:00Z".into(),
+                    seen: "2026-11-17T00:00:00Z".into(),
+                    holds: vec![],
+                },
+                crate::claims::Liveness::Live,
+            )
+        };
+
+        // 1. Two claims via symlink_wt_1 + one claim in det_2 (which shares project.root with det_1):
+        let mut by_id = BTreeMap::new();
+        by_id.insert(t1.id.to_string(), make_claim(&symlink_wt_1));
+        by_id.insert(t2.id.to_string(), make_claim(&symlink_wt_1));
+        by_id.insert(t3.id.to_string(), make_claim(&det_2.records));
+        let claims =
+            crate::claims::ClaimSnapshot::from_parts(by_id, BTreeMap::new(), BTreeMap::new());
+
+        let mut ctx = ReadCtx {
+            host: std::sync::Arc::new(crate::config::HostConfig::default()),
+            scope: Scope::Local(Box::new(main_proj.clone())),
+            registry,
+            warnings: vec![],
+            shorthand: crate::shorthand::Shorthand::new(dir.path().to_path_buf()),
+        };
+
+        let mut open_calls = 0usize;
+        let (scans, found) = claimed_elsewhere_with(&mut ctx, &[], &claims, |id, wt| {
+            open_calls += 1;
+            crate::commands::parked::open_recorded(id, wt)
+        });
+
+        assert_eq!(
+            open_calls, 2,
+            "second claim in symlink_wt_1 must reuse cached scan without re-running open_recorded"
+        );
+        assert_eq!(
+            scans.len(),
+            2,
+            "distinct Kind::Detached records checkouts sharing project.root must keep separate scans"
+        );
+        assert_eq!(found.len(), 3);
+        for (at, task) in &found {
+            assert!(
+                scans[*at].1.iter().any(|s| s.id == task.id),
+                "paired scan must contain task {}",
+                task.id
+            );
+        }
+
+        // 2. Two Kind::Detached code worktrees sharing both project.root and project.records
+        //    while differing in project.worktree (resume_root()):
+        let code_wt_a = dir.path().join("code-wt-a");
+        let code_wt_b = dir.path().join("code-wt-b");
+        std::fs::create_dir_all(&code_wt_a).unwrap();
+        std::fs::create_dir_all(&code_wt_b).unwrap();
+        let mut by_id_wt = BTreeMap::new();
+        by_id_wt.insert(t1.id.to_string(), make_claim(&code_wt_a));
+        by_id_wt.insert(t2.id.to_string(), make_claim(&code_wt_b));
+        let claims_wt =
+            crate::claims::ClaimSnapshot::from_parts(by_id_wt, BTreeMap::new(), BTreeMap::new());
+        let scan_1 = det_1.scan().unwrap();
+        let (wt_scans, wt_found) = claimed_elsewhere_with(&mut ctx, &[], &claims_wt, |id, wt| {
+            let mut proj = det_1.clone();
+            proj.worktree = Some(wt.canonicalize().unwrap());
+            let task = scan_1.iter().find(|t| t.id == *id).cloned().unwrap();
+            Ok(Some((proj, task, scan_1.clone())))
+        });
+        assert_eq!(
+            wt_scans.len(),
+            2,
+            "distinct code worktrees with different resume_root() must stay distinct for Resolver"
+        );
+        assert_ne!(wt_scans[0].0.resume_root(), wt_scans[1].0.resume_root());
+        assert_eq!(wt_found.len(), 2);
     }
 }
