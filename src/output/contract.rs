@@ -412,6 +412,9 @@ pub struct DepInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
     pub resolved: bool,
+    /// Pretty-only: this dependency is one of the task's declared pieces.
+    #[serde(skip)]
+    pub piece: bool,
 }
 
 #[derive(Serialize)]

@@ -160,7 +160,8 @@ pub fn describe(
     resolver.set_fetch(fetch);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
-        let row = resolve_row(registry, all, &resolver, dependency)?;
+        let mut row = resolve_row(registry, all, &resolver, dependency)?;
+        row.piece = crate::pieces::is_piece(registry, &task, dependency);
         if !row.resolved {
             warnings.push(format!("dependency {dependency} is unreachable"));
         }
@@ -439,6 +440,7 @@ fn resolve_row(
             status: Some(task.status),
             updated: Some(task.updated),
             resolved: true,
+            piece: false,
         }),
         None => Ok(DepInfo {
             id: id.to_string(),
@@ -446,6 +448,7 @@ fn resolve_row(
             status: None,
             updated: None,
             resolved: false,
+            piece: false,
         }),
     }
 }

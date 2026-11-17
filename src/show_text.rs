@@ -448,7 +448,8 @@ fn hang(line: &str) -> usize {
 }
 
 /// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <date>  <title>`,
-/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, `child`.
+/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on` (or `piece` for a
+/// declared piece), `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, `child`.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
     let date_of = |updated: Option<&str>| match updated {
         Some(ts) => present::date(ts),
@@ -468,7 +469,11 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
     }
     for dependency in &o.depends_on {
         rows.push((
-            "depends on",
+            if dependency.piece {
+                "piece"
+            } else {
+                "depends on"
+            },
             dependency.id.as_str(),
             present::status_of(dependency.status),
             date_of(dependency.updated.as_deref()),
@@ -994,6 +999,7 @@ mod tests {
             status: None,
             updated: None,
             resolved: false,
+            piece: false,
         }];
         let text = render(&o, &plain(), Some(120));
         let order: Vec<usize> = [
@@ -1038,6 +1044,7 @@ mod tests {
             status: Some(Status::Todo),
             updated: Some("2026-01-02T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         }];
         o.follows_tasks = vec![DepInfo {
             id: "sci-000002".into(),
@@ -1045,6 +1052,7 @@ mod tests {
             status: Some(Status::Todo),
             updated: Some("2026-01-02T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         }];
         o.wake_targets = vec![DepInfo {
             id: "sci-000003".into(),
@@ -1052,6 +1060,7 @@ mod tests {
             status: Some(Status::Todo),
             updated: Some("2026-01-03T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         }];
         o.related_to = vec![DepInfo {
             id: "sci-000004".into(),
@@ -1059,6 +1068,7 @@ mod tests {
             status: Some(Status::Done),
             updated: Some("2026-01-04T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         }];
         o.source_task = Some(DepInfo {
             id: "sci-000005".into(),
@@ -1066,6 +1076,7 @@ mod tests {
             status: Some(Status::Todo),
             updated: Some("2026-01-05T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         });
         o.children = vec![Related {
             id: "sci-000006".into(),
@@ -1120,6 +1131,7 @@ mod tests {
                     status: Some(Status::Done),
                     updated: Some("2020-01-01T00:00:00Z".into()),
                     resolved: true,
+                    piece: false,
                 },
                 DepInfo {
                     id: "fam-000003".into(),
@@ -1127,6 +1139,7 @@ mod tests {
                     status: None,
                     updated: None,
                     resolved: false,
+                    piece: false,
                 },
             ];
 
@@ -1201,6 +1214,7 @@ mod tests {
             status: Some(Status::Todo),
             updated: Some("2026-01-01T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         });
         o.followed_by = vec![Related {
             id: "fam-000002".into(),
@@ -1257,6 +1271,7 @@ mod tests {
             status: Some(Status::Todo),
             updated: Some("2026-01-01T00:00:00Z".into()),
             resolved: true,
+            piece: false,
         });
         o.dependents = vec![row("fam-000004", "Hub")];
         o.followed_by = vec![row("sci-000002", "Later")];

@@ -749,3 +749,219 @@ fn pieces_reader_goals_legend() {
         "{text}"
     );
 }
+
+// ---- show, check, move and migrate (spec §7) ----
+
+#[test]
+fn pieces_reader_show_labels_piece_rows() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    let y = add(&env, &bb, "Prerequisite", &[]);
+    let hub = hub(&env, &aa, "Hub", &[], &[&x]);
+    env.json(&aa, &["dep", &hub, "--on", &y]);
+    let labelled = |env: &TestEnv| {
+        let text = env.pretty(&aa, &["show", &hub, "--color", "never"]);
+        let piece = text
+            .lines()
+            .any(|line| line.starts_with("piece") && line.contains(&x));
+        let dep = text
+            .lines()
+            .any(|line| line.starts_with("depends on") && line.contains(&y));
+        assert!(piece && dep, "{text}");
+    };
+    labelled(&env);
+    let shown = env.json(&aa, &["show", &hub]);
+    for row in shown["depends_on"].as_array().unwrap() {
+        assert!(row.get("piece").is_none(), "{row}");
+    }
+    env.json(&bb, &["rename", "bb", "cc"]);
+    labelled(&env);
+}
+
+fn finding_on(check: &Value, level: &str, kind: &str, id: &str) -> Option<Value> {
+    findings_of(check, level, kind)
+        .into_iter()
+        .find(|f| f["id"] == id)
+        .cloned()
+}
+
+#[test]
+fn pieces_reader_check_findings() {
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    let local = add(&env, &aa, "Local", &[]);
+
+    let not_dep = add(&env, &aa, "Not a dependency", &[]);
+    raw(&env, &aa, &not_dep, "pieces", &[&x]);
+    let own = add(&env, &aa, "Own project piece", &[]);
+    env.json(&aa, &["dep", &own, "--on", &local]);
+    raw(&env, &aa, &own, "pieces", &[&local]);
+    let lane = add(&env, &aa, "Lane", &["--lane"]);
+    env.json(&aa, &["dep", &lane, "--on", &x]);
+    raw(&env, &aa, &lane, "pieces", &[&x]);
+    let selfish = add(&env, &aa, "Self", &[]);
+    raw(&env, &aa, &selfish, "pieces", &[&selfish]);
+    let twice = add(&env, &aa, "Twice", &[]);
+    env.json(&aa, &["dep", &twice, "--on", &x]);
+    raw(&env, &aa, &twice, "pieces", &[&x, &x]);
+    let gone = add(&env, &aa, "Moved away", &[]);
+    env.json(&aa, &["move", &gone, "--to", "bb"]);
+    raw(&env, &aa, &gone, "pieces", &[&x]);
+
+    let (_, check) = common::check_findings(&env, &aa);
+    for (level, kind, id) in [
+        ("errors", "piece_not_dependency", &not_dep),
+        ("errors", "local_piece", &own),
+        ("errors", "lane_pieces", &lane),
+        ("warnings", "self_piece", &selfish),
+        ("warnings", "duplicate_piece", &twice),
+        ("errors", "piece_status", &gone),
+    ] {
+        assert!(
+            finding_on(&check, level, kind, id).is_some(),
+            "{level} {kind} on {id}: {check}"
+        );
+    }
+
+    // A foreign piece that moves into the goal's own project.
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let p = add(&env, &bb, "Piece", &[]);
+    let goal = hub(&env, &aa, "Goal", &[], &[&p]);
+    let done_goal = hub(&env, &aa, "Done goal", &[], &[&p]);
+    let other = add(&env, &bb, "Other", &[]);
+    env.json(&bb, &["done", &other, "done"]);
+    set_field(&aa, &done_goal, "status", "done");
+    let new = id_of(env.json(&bb, &["move", &p, "--to", "aa"]));
+    let (_, check) = common::check_findings(&env, &aa);
+    let found = finding_on(&check, "warnings", "piece_now_local", &goal)
+        .unwrap_or_else(|| panic!("no piece_now_local: {check}"));
+    let detail = found["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!("tasks dep {goal} --rm {p}")),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks edit {new} --parent {goal}")),
+        "{detail}"
+    );
+    assert!(
+        finding_on(&check, "warnings", "moved_dep", &goal).is_none(),
+        "{check}"
+    );
+    for kind in ["piece_now_local", "moved_dep"] {
+        assert!(
+            finding_on(&check, "warnings", kind, &done_goal).is_none(),
+            "{check}"
+        );
+    }
+}
+
+#[test]
+fn pieces_reader_move_carries_and_refuses() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let cc = env.init("cc");
+    let x = add(&env, &bb, "Piece", &[]);
+    let h = hub(&env, &aa, "Hub", &[], &[&x]);
+
+    let before = env.read(&aa, &format!("tasks/{h}.md"));
+    let err = stderr_of(&env, &aa, &["move", &h, "--to", "bb"]);
+    assert!(
+        err.contains(&format!("tasks edit {h} --rm-piece {x}")),
+        "{err}"
+    );
+    assert!(err.contains("--parent"), "{err}");
+    assert_eq!(env.read(&aa, &format!("tasks/{h}.md")), before);
+
+    let new = id_of(env.json(&aa, &["move", &h, "--to", "cc"]));
+    let moved = env.json(&cc, &["show", &new])["task"].clone();
+    assert_eq!(moved["pieces"], json!([x]), "{moved}");
+    assert_eq!(moved["depends"], json!([x]), "{moved}");
+    let tombstone = env.json(&aa, &["show", &h])["task"].clone();
+    assert!(tombstone.get("pieces").is_none(), "{tombstone}");
+}
+
+fn migrate_list(env: &TestEnv, dir: &Path, to: &str, carry: &[&str]) -> PathBuf {
+    let list = env.home.path().join("list.toml");
+    let _ = std::fs::remove_file(&list);
+    env.json(
+        dir,
+        &["migrate", "--to", to, "--draft", list.to_str().unwrap()],
+    );
+    let mut text = std::fs::read_to_string(&list).unwrap();
+    for id in carry {
+        let at = text.find(&format!("id = \"{id}\"")).unwrap();
+        let line = at + text[at..].find("decision = \"\"\n").unwrap();
+        let end = line + "decision = \"\"\n".len();
+        text = format!("{}decision = \"carry\"\n{}", &text[..line], &text[end..]);
+    }
+    // Everything else is dropped so the list is complete.
+    text = text.replace(
+        "decision = \"\"\n",
+        "decision = \"drop\"\nreason = \"out of scope\"\n",
+    );
+    std::fs::write(&list, text).unwrap();
+    list
+}
+
+fn refusal_rules(out: &Value) -> Vec<(String, String)> {
+    out["refusals"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .map(|r| {
+                    (
+                        r["rule"].as_str().unwrap().to_string(),
+                        r["id"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn pieces_reader_migrate_refuses_into_piece_project() {
+    // A carried hub whose destination is its piece's project.
+    let Two { env, aa, bb } = two();
+    let x = add(&env, &bb, "Piece", &[]);
+    let h = hub(&env, &aa, "Hub", &[], &[&x]);
+    let list = migrate_list(&env, &aa, "bb", &[&h]);
+    let out = env.json(&aa, &["migrate", list.to_str().unwrap(), "--explain"]);
+    assert!(
+        refusal_rules(&out).contains(&("local_piece".to_string(), h.clone())),
+        "{out}"
+    );
+
+    // A carried record with a corrupt same-project piece.
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    env.init("cc");
+    let local = add(&env, &aa, "Local", &[]);
+    let h = add(&env, &aa, "Hub", &[]);
+    env.json(&aa, &["dep", &h, "--on", &local]);
+    raw(&env, &aa, &h, "pieces", &[&local]);
+    let list = migrate_list(&env, &aa, "cc", &[&h, &local]);
+    let out = env.json(&aa, &["migrate", list.to_str().unwrap(), "--explain"]);
+    assert!(
+        refusal_rules(&out).contains(&("local_piece".to_string(), h.clone())),
+        "{out}"
+    );
+
+    // A piece migrated into an uncarried goal's project is listed as inbound.
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let x = add(&env, &bb, "Piece", &[]);
+    let g = hub(&env, &aa, "Goal", &[], &[&x]);
+    let list = migrate_list(&env, &bb, "aa", &[&x]);
+    let out = env.json(&bb, &["migrate", list.to_str().unwrap(), "--explain"]);
+    assert_eq!(
+        out["inbound"],
+        json!([{"id": x, "dependents": [g]}]),
+        "{out}"
+    );
+}

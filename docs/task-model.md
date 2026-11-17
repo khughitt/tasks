@@ -284,3 +284,12 @@ targets outside the membership. A piece no record answers, including one in an
 unreachable or unregistered project, is not a member; as a dependency it is counted as
 unresolved, never done or open. Members are read through the registry whatever the
 requested scope.
+
+`check` reports `piece_not_dependency`, `local_piece`, `lane_pieces` and `piece_status`
+(pieces on a tombstone) as errors, and `self_piece` and `duplicate_piece` as warnings.
+On an open record, a piece that moved into the record's own project reports
+`piece_now_local` in place of `moved_dep`, with the remedy `tasks dep <goal> --rm <old>`
+then `tasks edit <new> --parent <goal>`. `show` labels dependency rows that are pieces
+`piece`; its JSON is unchanged. Moving a goal carries its pieces with `depends` and
+clears them from the tombstone; a move or migration into a piece's project is refused,
+since that piece would become same-project work.

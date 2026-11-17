@@ -515,16 +515,43 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 && dependency_task.status == Status::Moved
                 && let Some(to) = dependency_task.moved_to.clone()
             {
-                let detail = match crate::tombstone::follow(Some(dependency_task), &record) {
-                    Ok(Some(end)) => format!(
-                        "depends on {dependency}, which moved to {}; run `tasks dep {} --on {} --rm {dependency}`",
-                        end.id, task.id, end.id
-                    ),
-                    Ok(None) | Err(_) => format!(
-                        "depends on {dependency}, which moved to {to}; its chain cannot be followed to a live record here"
-                    ),
-                };
-                warnings.push(finding(Some(task), file.clone(), "moved_dep", detail));
+                let end = crate::tombstone::follow(Some(dependency_task), &record);
+                match end {
+                    // A piece that moved into this project is now same-project work, which
+                    // belongs under the goal as a child.
+                    Ok(Some(end))
+                        if crate::pieces::is_piece(&ctx.registry, task, dependency)
+                            && ctx.registry.canonical_id(&end.id).prefix
+                                == ctx.registry.canonical_id(&task.id).prefix =>
+                    {
+                        warnings.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "piece_now_local",
+                            format!(
+                                "piece {dependency} moved to {} in this project; run `tasks dep {} --rm {dependency}`, then `tasks edit {} --parent {}`",
+                                end.id, task.id, end.id, task.id
+                            ),
+                        ));
+                    }
+                    Ok(Some(end)) => warnings.push(finding(
+                        Some(task),
+                        file.clone(),
+                        "moved_dep",
+                        format!(
+                            "depends on {dependency}, which moved to {}; run `tasks dep {} --on {} --rm {dependency}`",
+                            end.id, task.id, end.id
+                        ),
+                    )),
+                    Ok(None) | Err(_) => warnings.push(finding(
+                        Some(task),
+                        file.clone(),
+                        "moved_dep",
+                        format!(
+                            "depends on {dependency}, which moved to {to}; its chain cannot be followed to a live record here"
+                        ),
+                    )),
+                }
             }
             if dependency_id.prefix == ctx.project.prefix {
                 if !ctx.project.task_path(&dependency_id).try_exists()? {
@@ -587,6 +614,73 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 file.clone(),
                 "follows_status",
                 "a tombstone cannot carry follows".into(),
+            ));
+        }
+        // Current contract (docs/task-model.md, "Goal pieces"): the writers refuse these, so
+        // only a hand edit lands here.
+        let own = ctx.registry.canonical_id(&task.id);
+        let mut pieces_seen = BTreeSet::new();
+        for piece in &task.pieces {
+            let id = ctx.registry.canonical_id(piece);
+            if id == own {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "self_piece",
+                    "a task cannot be its own piece".into(),
+                ));
+            } else if id.prefix == own.prefix {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "local_piece",
+                    format!(
+                        "piece {piece} is in this project; same-project work is a child: run `tasks dep {} --rm {piece}`, then `tasks edit {piece} --parent {}`",
+                        task.id, task.id
+                    ),
+                ));
+            }
+            if !pieces_seen.insert(id.clone()) {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "duplicate_piece",
+                    format!("duplicate piece {piece}"),
+                ));
+            }
+            if !task
+                .depends
+                .iter()
+                .any(|dependency| ctx.registry.canonical_id(dependency) == id)
+            {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "piece_not_dependency",
+                    format!(
+                        "piece {piece} is not a dependency; a piece must stay one: run `tasks dep {} --on {piece}`",
+                        task.id
+                    ),
+                ));
+            }
+        }
+        if !task.pieces.is_empty() && task.lane {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "lane_pieces",
+                format!(
+                    "is a lane and declares pieces ({}); a lane holds only local children",
+                    crate::pieces::listed(task)
+                ),
+            ));
+        }
+        if !task.pieces.is_empty() && task.status == Status::Moved {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "piece_status",
+                "a tombstone cannot carry pieces".into(),
             ));
         }
         for related in &task.related {
