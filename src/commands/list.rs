@@ -884,13 +884,16 @@ pub fn prime(
     // closeout is an invitation to run `done`, so it holds only what `done` will accept.
     // Children are one gate and dependencies are the other; listing a goal its dependencies
     // still hold would invite a close the tool then refuses with `open_dependencies`. Held
-    // goals are named in a warning instead, so none of them goes silent.
+    // goals are named in a warning instead, so none of them goes silent. A goal still
+    // waiting on one of its own declared pieces is unfinished work, not held, so it stays
+    // out silently (docs/task-model.md). A childless lane is not a candidate.
     let mut closeout: Vec<Task> = Vec::new();
     let mut held: Vec<String> = Vec::new();
-    for task in &all {
+    'goals: for task in &all {
         // Current contract (docs/task-model.md): todo, doing, or blocked; an idea is open but not a candidate
         if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
-            || crate::hierarchy::children(&all, &task.id, &ctx.registry).is_empty()
+            || (task.pieces.is_empty()
+                && crate::hierarchy::children(&all, &task.id, &ctx.registry).is_empty())
             || !crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry).is_empty()
         {
             continue;
@@ -900,6 +903,9 @@ pub fn prime(
             // An unreachable dependency counts as open, exactly as `done` treats it: what
             // we cannot resolve, we cannot call closed.
             if !satisfied(&ctx, &all, dependency)? {
+                if crate::pieces::is_piece(&ctx.registry, task, dependency) {
+                    continue 'goals;
+                }
                 open.push(dependency.to_string());
             }
         }
@@ -907,8 +913,8 @@ pub fn prime(
             closeout.push(task.clone());
         } else {
             held.push(format!(
-                "{} has no open children but is held by open dependencies: {}; it joins \
-                 closeout when they close",
+                "{} has no open children or pieces but is held by open prerequisites: {}; it \
+                 joins closeout when they close",
                 task.id,
                 open.join(", ")
             ));

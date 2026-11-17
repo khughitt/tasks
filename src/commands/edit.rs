@@ -360,6 +360,10 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     }
     let related_before_adds = task.related.len();
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
+    if args.no_depends || args.fields.lane {
+        refuse_stranded_pieces(&ctx.registry, &task, args.no_depends)?;
+        crate::pieces::validate_list(&ctx.registry, &task)?;
+    }
     let related_change = crate::related::RelatedChange {
         added: task.related[related_before_adds..].to_vec(),
         follows_removed,
@@ -556,6 +560,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         }
     }
     crate::follows::validate_edit(&ctx.registry, &resolver, &original, &edited).map_err(keep)?;
+    crate::pieces::validate_edit(&ctx.registry, &resolver, &original, &edited).map_err(keep)?;
     crate::related::validate_editor_related(&ctx.registry, &resolver, &original, &edited)
         .map_err(keep)?;
     let related_change = crate::related::RelatedChange {
@@ -680,6 +685,38 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
 }
 
 /// Only `shelve` collects the wake condition required to enter the shelf.
+/// `--no-depends` without naming the pieces again would leave them outside `depends`.
+fn refuse_stranded_pieces(
+    registry: &crate::registry::Registry,
+    task: &Task,
+    no_depends: bool,
+) -> Result<()> {
+    if !no_depends {
+        return Ok(());
+    }
+    let stranded: Vec<String> = task
+        .pieces
+        .iter()
+        .filter(|piece| {
+            let piece = registry.canonical_id(piece);
+            !task
+                .depends
+                .iter()
+                .any(|dependency| registry.canonical_id(dependency) == piece)
+        })
+        .map(ToString::to_string)
+        .collect();
+    if stranded.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Validation(format!(
+        "{} declares pieces ({}); --no-depends would leave them outside depends; name them \
+         again with --depends",
+        task.id,
+        stranded.join(", ")
+    )))
+}
+
 fn refuse_shelving(id: &crate::model::TaskId) -> Result<()> {
     Err(Error::Validation(format!(
         "use `tasks shelve {id} \"<wake condition>\"` to shelve a task"

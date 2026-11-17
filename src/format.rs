@@ -7,7 +7,7 @@ use crate::model::{
 
 pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 38] = [
+const KEYS: [&str; 39] = [
     "id",
     "title",
     "status",
@@ -35,6 +35,7 @@ const KEYS: [&str; 38] = [
     "depends",
     "related",
     "follows",
+    "pieces",
     "parent",
     "tags",
     "source",
@@ -197,6 +198,11 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
             .collect::<Result<Vec<_>>>()
             .map_err(|error| perr(file, error.to_string()))?,
         follows: optional_list("follows")?
+            .iter()
+            .map(|value| TaskId::parse(value))
+            .collect::<Result<Vec<_>>>()
+            .map_err(|error| perr(file, error.to_string()))?,
+        pieces: optional_list("pieces")?
             .iter()
             .map(|value| TaskId::parse(value))
             .collect::<Result<Vec<_>>>()
@@ -625,6 +631,7 @@ pub fn validate_task(t: &Task) -> Result<()> {
         .chain(&t.wake_on)
         .chain(&t.related)
         .chain(&t.follows)
+        .chain(&t.pieces)
     {
         TaskId::parse(&dependency.to_string())?;
     }
@@ -798,6 +805,12 @@ pub fn serialize_physical(record: &PhysicalTask) -> String {
         pairs.push((
             "follows".into(),
             Value::List(t.follows.iter().map(ToString::to_string).collect()),
+        ));
+    }
+    if !t.pieces.is_empty() {
+        pairs.push((
+            "pieces".into(),
+            Value::List(t.pieces.iter().map(ToString::to_string).collect()),
         ));
     }
     if let Some(parent) = &t.parent {
@@ -1379,6 +1392,23 @@ mod tests {
             .is_err()
         );
     }
+    #[test]
+    fn pieces_reader_roundtrips() {
+        let with_pieces =
+            MINIMAL.replace("depends: []", "depends: [bb-000002]\npieces: [bb-000002]");
+        let t = crate::history::fixture(&with_pieces, "x").unwrap();
+        assert_eq!(t.pieces.len(), 1);
+        assert_eq!(t.pieces[0].to_string(), "bb-000002");
+        assert_eq!(crate::history::fixture_text(&t), with_pieces);
+        assert!(
+            crate::history::fixture(
+                &MINIMAL.replace("depends: []", "depends: []\npieces: [bad-id]"),
+                "x"
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn follows_reader_roundtrips() {
         let with_follows = MINIMAL.replace("depends: []", "depends: []\nfollows: [sci-000002]");

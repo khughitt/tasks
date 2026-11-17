@@ -277,9 +277,10 @@ pub fn is_active(task: &Task) -> bool {
 }
 
 /// The one test for "this task is a goal", used wherever a goal is treated specially. A
-/// lane is a goal even before its first child exists.
+/// lane is a goal even before its first child exists, and so is a record that declares
+/// pieces (docs/task-model.md).
 pub fn is_goal(task: &Task, has_children: bool) -> bool {
-    has_children || task.lane
+    has_children || task.lane || !task.pieces.is_empty()
 }
 
 /// The nearest lane strictly above `task` in `all`, walking `parent` links. A visited set
@@ -352,32 +353,40 @@ pub fn validate_defer(project: &Project, registry: &Registry, task: &Task) -> Re
     refuse_goal(project, registry, task, "be deferred")
 }
 
-/// Refuses `task` when it is a goal. A lane is refused without a scan, and a record not yet
-/// on disk has no children, so the project is scanned only when the field is set on an
-/// existing record that is not a lane, which is rare.
+/// Refuses `task` when it is a goal. A lane or a record with pieces is refused without a
+/// scan, and a record not yet on disk has no children, so the project is scanned only when
+/// the field is set on an existing record that is neither, which is rare.
 fn refuse_goal(project: &Project, registry: &Registry, task: &Task, what: &str) -> Result<()> {
-    let kids: Vec<String> = if task.lane || !project.task_path(&task.id).is_file() {
-        Vec::new()
-    } else {
-        children(&project.scan()?, &task.id, registry)
-            .iter()
-            .map(|kid| kid.id.to_string())
-            .collect()
-    };
+    let kids: Vec<String> =
+        if task.lane || !task.pieces.is_empty() || !project.task_path(&task.id).is_file() {
+            Vec::new()
+        } else {
+            children(&project.scan()?, &task.id, registry)
+                .iter()
+                .map(|kid| kid.id.to_string())
+                .collect()
+        };
     if !is_goal(task, !kids.is_empty()) {
         return Ok(());
     }
-    Err(Error::Validation(if kids.is_empty() {
-        format!(
-            "{} is a lane and cannot {what}; a lane is a goal, and a goal is never ready",
-            task.id
-        )
-    } else {
+    Err(Error::Validation(if !kids.is_empty() {
         format!(
             "{} has children ({}) and cannot {what}; a task with children is a goal, and a \
              goal is never ready",
             task.id,
             kids.join(", ")
+        )
+    } else if !task.pieces.is_empty() {
+        format!(
+            "{} declares pieces ({}) and cannot {what}; a task with pieces is a goal, and a \
+             goal is never ready",
+            task.id,
+            crate::pieces::listed(task)
+        )
+    } else {
+        format!(
+            "{} is a lane and cannot {what}; a lane is a goal, and a goal is never ready",
+            task.id
         )
     }))
 }
@@ -516,6 +525,7 @@ pub(crate) mod tests {
             depends: vec![],
             related: vec![],
             follows: vec![],
+            pieces: vec![],
             parent: parent.map(|p| TaskId::parse(p).unwrap()),
             tags: vec![],
             source: None,
@@ -531,6 +541,19 @@ pub(crate) mod tests {
             refs: vec![],
             notes: vec![],
         }
+    }
+
+    #[test]
+    fn is_goal_counts_children_lanes_and_declared_pieces() {
+        let plain = task("aa-000001", None, Status::Todo);
+        assert!(!is_goal(&plain, false));
+        assert!(is_goal(&plain, true));
+        let mut lane = plain.clone();
+        lane.lane = true;
+        assert!(is_goal(&lane, false));
+        let mut hub = plain.clone();
+        hub.pieces = vec![TaskId::parse("bb-000001").unwrap()];
+        assert!(is_goal(&hub, false));
     }
 
     #[test]

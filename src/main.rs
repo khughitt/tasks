@@ -41,6 +41,7 @@ mod output;
 mod palette;
 mod periodic;
 mod pidview;
+mod pieces;
 mod present;
 mod prime_summary;
 mod proposal;

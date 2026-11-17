@@ -2063,6 +2063,7 @@ mod tests {
             depends: vec![],
             related: vec![],
             follows: vec![],
+            pieces: vec![],
             parent: None,
             tags: vec![],
             source: None,

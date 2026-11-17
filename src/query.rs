@@ -321,6 +321,7 @@ mod tests {
             depends: deps.iter().map(|d| TaskId::parse(d).unwrap()).collect(),
             related: vec![],
             follows: vec![],
+            pieces: vec![],
             parent: None,
             tags: vec![],
             source: None,

@@ -714,11 +714,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         if task.every.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
             if crate::hierarchy::is_goal(task, !kids.is_empty()) {
-                let detail = if kids.is_empty() {
-                    "is a lane and has a cadence; a goal is never ready, so the cadence can \
-                     never fire"
-                        .to_string()
-                } else {
+                let detail = if !kids.is_empty() {
                     format!(
                         "has a cadence and children ({}); a goal is never ready, so the cadence can never fire",
                         kids.iter()
@@ -726,6 +722,15 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
+                } else if !task.pieces.is_empty() {
+                    format!(
+                        "has a cadence and pieces ({}); a goal is never ready, so the cadence can never fire",
+                        crate::pieces::listed(task)
+                    )
+                } else {
+                    "is a lane and has a cadence; a goal is never ready, so the cadence can \
+                     never fire"
+                        .to_string()
                 };
                 errors.push(finding(Some(task), file.clone(), "periodic_goal", detail));
             }
@@ -757,11 +762,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             }
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
             if task.status != Status::Shelved && crate::hierarchy::is_goal(task, !kids.is_empty()) {
-                let detail = if kids.is_empty() {
-                    "is a lane and is deferred; a goal is never ready, so the deferral hides \
-                     nothing"
-                        .to_string()
-                } else {
+                let detail = if !kids.is_empty() {
                     format!(
                         "is deferred and has children ({}); a goal is never ready, so the deferral hides nothing",
                         kids.iter()
@@ -769,6 +770,15 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
+                } else if !task.pieces.is_empty() {
+                    format!(
+                        "is deferred and has pieces ({}); a goal is never ready, so the deferral hides nothing",
+                        crate::pieces::listed(task)
+                    )
+                } else {
+                    "is a lane and is deferred; a goal is never ready, so the deferral hides \
+                     nothing"
+                        .to_string()
                 };
                 errors.push(finding(Some(task), file.clone(), "deferred_goal", detail));
             }
