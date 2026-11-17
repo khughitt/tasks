@@ -239,9 +239,19 @@ Scope of a worker's writes:
   the report.
 - A suspicion that a task's twin sits in another cluster is not acted on.
 
-The worker returns its ledger rows and any suspicion that a task's twin sits in another
-cluster, and nothing else. It does not act across clusters and does not write the
-ledger. The controller writes the rows, appends `cross-cluster twin: <id>` to the
+The worker does not act across clusters and does not write the ledger. It returns, in a
+file the controller names (or its final message where it has no file):
+
+1. one line per cluster row, tab-separated: `id`, `verdict`, `action`, `evidence`,
+   `decided` (values as the verdict table says; `evidence` is one line with no tab);
+2. its cross-cluster twin suspicions, one per line:
+   `<id in this cluster> <-> <other id>: <why>`;
+3. every write it made, as the exact command, in order;
+4. for each closure, the guard checks it ran and their results;
+5. CLI friction met, one line each, for the controller to file.
+
+Items 3 and 4 are the record the controller checks closures against, not ledger writes.
+The controller writes the rows, appends `cross-cluster twin: <id>` to the
 `evidence` of each row a suspicion names, and at each cluster boundary commits the
 ledger and the task records the cluster wrote:
 

@@ -215,8 +215,15 @@ dependents, the absorb note, and the drop last:
   item kept in one note may be released in a later one, and a task can owe custody
   with no `kept` note at all. The guard holds when the query shows an effective kept
   item or an unfinished retention operation, reports its history incomplete or
-  blocked, or refuses. This holds for a duplicate too: moving custody to the survivor
-  is a retained transfer, which a curation pass does not do;
+  blocked, or refuses. The query lists only items recorded on the queried task, so it
+  misses a kept item recorded on another task whose `next_owner` is `task:<id>`: before
+  a closure, also search the task records of every registered project (read-only; the
+  records directories come from `tasks projects`, each row's `records`, task files under
+  `<records>/tasks/*.md`) for `"next_owner":"task:<id>"`. The guard holds when any match
+  is found, unless that item's later notes on its own task release it or re-home it
+  elsewhere. This search stands until tasks-1abe9f gives the CLI a read for it. The
+  guard holds for a duplicate too: moving custody to the survivor is a retained
+  transfer, which a curation pass does not do;
 - closing a duplicate would need a write to a survivor or open dependent that is
   `doing`, live-claimed or parked, or to an open dependent in another project, or to a
   survivor that is itself held: its latest note is a pending proposal, or it is an
