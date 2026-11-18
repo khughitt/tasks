@@ -160,6 +160,10 @@ empty trees stay empty and leaves-only views omit the legend. Work metadata is
 computed only for resolved pretty output (`--pretty` or `TASKS_FORMAT=pretty`);
 JSON shapes and `prime --summary` are unchanged.
 
+Pretty task tables (`list`, `ready`, `tree`, `prime`'s rows) mark each row's type
+in one column: `≡` a lane, `◆` any other goal (a record with children or declared
+pieces), `p` a recurring record. The column appears only when some row needs it.
+
 
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty

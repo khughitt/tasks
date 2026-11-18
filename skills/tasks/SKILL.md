@@ -28,7 +28,8 @@ mean those documents were verified.
    every origin (`done/total` local descendants and declared pieces, `-` when committed
    work is zero, `+N` ideas, and `?N` unresolved declared pieces; leaves are blank), a
    conditional wrapping legend when goals are shown, local-only tree connectors (`├─ `,
-   `└─ `, `│  `), and bold goal IDs; JSON shapes and `prime --summary` are unchanged.
+   `└─ `, `│  `), and bold goal IDs. Pretty task tables mark goals `◆` (lanes `≡`,
+   recurring records `p`) in their type column; JSON shapes and `prime --summary` are unchanged.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    Read picker warnings for omitted work; see `tasks ready --help` and the
