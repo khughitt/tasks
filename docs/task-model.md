@@ -315,7 +315,10 @@ the next completion check and preserves previously recorded closures.
 
 `prime` applies this rule to otherwise eligible closeout candidates. It omits
 open work silently, warns with the declaring member and target for a missing
-piece or move hop, and warns with the path for a membership cycle. An otherwise
+piece or move hop (`G has unresolved goal members: H -> B`), and warns with
+the directed path for a cycle (`G has a membership cycle: X -> Y -> X`).
+A closeout row's `open_descendant_count` still counts all open local descendants.
+It can be positive when they lie entirely beneath dropped subgoals. An otherwise
 finished goal held only by a direct prerequisite retains its prerequisite
 warning. A failed read or parse fails the command. Each writer (`done`,
 `edit --status done` and an editor save to Done) checks fresh evidence, write

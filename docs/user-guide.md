@@ -52,7 +52,10 @@ redirect to its successor, not editable work.
 For a goal, `prime` offers closeout when its direct dependencies and effective
 members are closed. Both the offer and `done` follow children and foreign pieces
 through done subgoals and stop at dropped ones. If a foreign piece is offline,
-restore access or deliberately waive it with `done --force`. The result names
+the warning `G has unresolved goal members: H -> B` names the goal G and
+the declaration to check. Restore access or deliberately waive it with
+`done --force`. A membership cycle warning gives its path, for example
+`G has a membership cycle: X -> Y -> X`. The result names
 the waived work. Cycles and read failures still require repair. The writer
 rechecks even after an offer. See [goal completion](task-model.md#goal-completion).
 `drop` refuses open descendants and has no force override. A `halt` tag on open
