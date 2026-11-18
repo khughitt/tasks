@@ -267,6 +267,7 @@ fn validate_appended_resolutions(project: &Project, old: &Task, new: &Task) -> R
             .diagnostics
             .iter()
             .any(|d| d.source.as_ref().is_some_and(|s| s.ordinal == res_ordinal));
+        let bad_is_spaceless = !new.notes[bad_ordinal - 1].text.starts_with("retained: ");
         let bad_resolved = replayed.diagnostics.iter().any(|d| {
             d.source
                 .as_ref()
@@ -275,7 +276,7 @@ fn validate_appended_resolutions(project: &Project, old: &Task, new: &Task) -> R
                     .as_ref()
                     .is_some_and(|s| s.ordinal == res_ordinal)
         });
-        if res_had_diagnostic || !bad_resolved {
+        if res_had_diagnostic || (!bad_is_spaceless && !bad_resolved) {
             return Err(invalid(
                 "retention resolution did not cleanly resolve a diagnostic at bad.ordinal",
             ));
@@ -2750,9 +2751,15 @@ mod tests {
                 let crate::output::Output::RetainedState(out) = result.unwrap() else {
                     panic!("state output")
                 };
-                let historical =
+                let mut historical =
                     super::super::state::replay(&project, &original.task, &original.basis, None)
                         .unwrap();
+                historical.incoming = super::super::incoming::IncomingCustody {
+                    scope: super::super::incoming::IncomingScope::Project,
+                    complete: Some(true),
+                    items: Vec::new(),
+                    diagnostics: Vec::new(),
+                };
                 assert_eq!(
                     serde_json::to_value(out).unwrap(),
                     serde_json::to_value(historical).unwrap()

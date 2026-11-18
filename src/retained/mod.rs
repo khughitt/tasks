@@ -1,5 +1,8 @@
+//! Git-pinned retention state, proof verification, incoming custody queries, and lifecycle operations.
+
 pub(crate) mod artifacts;
 pub mod basis;
+pub mod incoming;
 pub mod model;
 pub mod state;
 #[cfg(test)]

@@ -12,7 +12,13 @@ thread_local! {
     pub(crate) static BEFORE_STATE_RETURN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
-pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> Result<Output> {
+pub fn state(
+    ctx: Ctx,
+    id: String,
+    at: Option<String>,
+    host: Option<String>,
+    all_projects: bool,
+) -> Result<Output> {
     if host.as_deref().is_some_and(|h| !line(h)) {
         return Err(invalid("host must be a nonempty line"));
     }
@@ -28,17 +34,27 @@ pub fn state(ctx: Ctx, id: String, at: Option<String>, host: Option<String>) -> 
     crate::retained::proof::validate_history(&ctx.project, &pinned, host.as_deref())?;
     crate::retained::reconcile::validate_terminal_history(&ctx.project, &pinned)?;
     let mut out = history::replay(&ctx.project, &pinned.task, &pinned.basis, host.as_deref())?;
+    let mut incoming_warnings = Vec::new();
+    let prepared = if at.is_none() {
+        let (prepared, warnings) =
+            crate::retained::incoming::collect(&ctx, &id, &pinned, host.as_deref(), all_projects)?;
+        incoming_warnings = warnings;
+        Some(prepared)
+    } else {
+        None
+    };
     #[cfg(test)]
     BEFORE_STATE_RETURN.with(|hook| {
         if let Some(action) = hook.borrow_mut().take() {
             action();
         }
     });
-    if at.is_none() {
-        crate::retained::freshness::current(&ctx.project, &id, &pinned, false)?;
+    if let Some(prepared) = prepared {
+        out.incoming = crate::retained::incoming::recheck_freshness(&ctx, &id, &pinned, prepared)?;
     }
     out.warnings.extend(ctx.warnings);
     out.warnings.extend(pinned.warnings);
+    out.warnings.extend(incoming_warnings);
     Ok(Output::RetainedState(out))
 }
 pub fn request_bytes(ctx: &Ctx, path: &Path) -> Result<Vec<u8>> {
@@ -54,9 +70,18 @@ pub fn dispatch(
     config: Arc<HostConfig>,
 ) -> Result<Output> {
     match action {
-        RetainedAction::State { id, at, host } => {
-            state(open_id_ctx(dir, &id, config.clone())?, id, at, host)
-        }
+        RetainedAction::State {
+            id,
+            at,
+            host,
+            all_projects,
+        } => state(
+            open_id_ctx(dir, &id, config.clone())?,
+            id,
+            at,
+            host,
+            all_projects,
+        ),
         RetainedAction::Checkpoint { id, request } => checkpoint(dir, id, request, config.clone()),
         RetainedAction::Transfer { from, to, request } => {
             transfer(dir, from, to, request, config.clone())
