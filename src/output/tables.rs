@@ -1083,14 +1083,17 @@ fn any_parallel_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| node.summary.parallel || any_parallel_tree(&node.children))
 }
 
-/// The one-letter type marker for a summary row: `≡` for a lane, `p` for a record
-/// carrying a cadence, and nothing otherwise. A lane is a goal and never recurs, so the
-/// two never compete for the slot. A future type is another arm here, another letter in
+/// The one-letter type marker for a summary row: `≡` for a lane, `◆` for any other goal,
+/// `p` for a record carrying a cadence, and nothing otherwise. Goals never recur, so the
+/// marks never compete for the slot. A future type is another arm here, another letter in
 /// the same slot; the column is reserved once per output (see `any_type`), so it is never
 /// a layout change.
 fn type_letter(row: &TaskSummary) -> Option<char> {
     if row.lane {
         return Some('≡');
+    }
+    if row.goal {
+        return Some('◆');
     }
     row.periodic.as_ref().map(|_| 'p')
 }
@@ -1424,6 +1427,7 @@ mod tests {
             project_color: None,
             activity: None,
             goal_work: None,
+            goal: false,
             status: Status::Todo,
             priority: 2,
             size: None,

@@ -303,6 +303,7 @@ impl TaskSummary {
             project_color: None,
             activity: None,
             goal_work: None,
+            goal: crate::hierarchy::is_goal(task, child_count > 0),
             status: task.status,
             priority: task.priority,
             size: task.size,

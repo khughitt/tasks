@@ -617,6 +617,10 @@ pub struct TaskSummary {
     pub activity: Option<crate::style::Activity>,
     #[serde(skip)]
     pub goal_work: Option<GoalWork>,
+    /// `hierarchy::is_goal` against the scan the row came from; drives the pretty type
+    /// mark only, so JSON is unchanged.
+    #[serde(skip)]
+    pub goal: bool,
     pub status: Status,
     pub priority: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
