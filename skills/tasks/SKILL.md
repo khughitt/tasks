@@ -293,9 +293,12 @@ mean those documents were verified.
    Complete [retention accounting](#artifact-placement-and-retention) before closing (`done` or
    `drop`): run `tasks retained state <id> --all-projects` and require exit 0, `complete: true`,
    `incoming.scope == "all_projects"`, `incoming.complete: true`, no unsettled `kept` items in
-   `items` (any surviving `kept` item needs an open follow-up task owner other than `<id>` or an
-   agreed `"user"` handoff; a `kept` item still naming `<id>` or lacking an open owner / agreed
-   handoff blocks closure), empty `incoming.items` (transfer or re-home incoming custody first),
+   `items` (any surviving `kept` item needs an open follow-up task owner other than `<id>`, an
+   agreed `"user"` handoff, or — for `done` only — `session:<stamped-identity>` within `done`'s
+   immediate same-turn integration window for items this session will merge and dispose of before
+   its turn ends, released or re-homed before `park` or the final report; a `kept` item still
+   naming `<id>`, a closed task, or an expired/other session, or using `session:...` on `drop`,
+   blocks closure), empty `incoming.items` (transfer or re-home incoming custody first),
    and no unfinished `operations`. Bare `tasks retained state <id>` (`incoming.scope == "project"`)
    is for local inspection and basis lookup only and never clears cross-project custody for
    closure; if `tasks retained state <id> --all-projects` refuses (including an unrecognized
@@ -678,9 +681,12 @@ conflicting evidence fails explicitly. This query does not verify current retain
 Whenever clearing a task closure (`done` or `drop`), require `tasks retained state <id>
 --all-projects` to exit 0 with `complete: true`, `incoming.scope == "all_projects"`,
 `incoming.complete: true`, no unsettled `kept` items in `items` (an effective `kept` item already
-naming an open follow-up task other than `<id>` or an agreed `"user"` handoff permits ordinary
-closure, while a `kept` item still naming `<id>` or lacking an open owner / agreed handoff blocks
-closure), empty `incoming.items`, and no unfinished `operations`; bare `tasks retained state <id>`
+naming an open follow-up task other than `<id>`, an agreed `"user"` handoff, or — for `done` only
+— `session:<stamped-identity>` within `done`'s immediate same-turn integration window for items
+this session will merge and dispose of before its turn ends, released or re-homed before `park`
+or the final report, permits ordinary closure, while a `kept` item still naming `<id>`, a closed
+task, or an expired/other session, or using `session:...` on `drop`, blocks closure), empty
+`incoming.items`, and no unfinished `operations`; bare `tasks retained state <id>`
 (`incoming.scope == "project"`) is for local inspection and basis lookup only and never clears
 cross-project custody for closure. If `tasks retained state <id> --all-projects` refuses (including
 an unrecognized `--all-projects` option on a secondary host that synced `tasks` `main` before
@@ -773,7 +779,7 @@ running whole-host enumeration, append a source-bound resolution via `tasks note
 `retention resolution: {"version":1,"bad":<Source>,"successors":[...],"reason":"..."}`
 (targeting `retained:` item notes only, never `retention operation:` or machine
 `retention checkpoint:` envelopes, with `bad.basis` verified against pinned Git
-history). This works directly on closed (`done`) tasks without reopening
+history). This works directly on closed (`done` or `dropped`) tasks without reopening
 implementation (`edit --status todo`) or `tasks start` (preserving existing
 attached manifests at `<records>/tasks/files/<id>/<name>` when appending valid
 `version: 1` `retained:` successor notes), on `released` items, on other-host items
