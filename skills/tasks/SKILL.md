@@ -290,8 +290,18 @@ mean those documents were verified.
    --name <file> --caption "<what it shows>"`) and name the attachment in the message. If
    dependencies are still open, do not `--force` unless the dependency is genuinely irrelevant;
    say why in the message.
-   Complete [retention accounting](#artifact-placement-and-retention) before closing;
-   any surviving item needs an open owner or an agreed handoff.
+   Complete [retention accounting](#artifact-placement-and-retention) before closing (`done` or
+   `drop`): run `tasks retained state <id> --all-projects` and require exit 0, `complete: true`,
+   `incoming.scope == "all_projects"`, `incoming.complete: true`, no unsettled `kept` items in
+   `items` (any surviving `kept` item needs an open follow-up task owner other than `<id>` or an
+   agreed `"user"` handoff; a `kept` item still naming `<id>` or lacking an open owner / agreed
+   handoff blocks closure), empty `incoming.items` (transfer or re-home incoming custody first),
+   and no unfinished `operations`. Bare `tasks retained state <id>` (`incoming.scope == "project"`)
+   is for local inspection and basis lookup only and never clears cross-project custody for
+   closure; if `tasks retained state <id> --all-projects` refuses (including an unrecognized
+   `--all-projects` option on a secondary host that synced `tasks` `main` before rebuilding),
+   treat custody as unresolved and rebuild the host's binary with `just install` in the `tasks`
+   main checkout before retrying.
    To reopen a done or dropped task (a correction handed back after close), run
    `tasks edit <id> --status todo`, then `tasks start <id>`; `start` alone refuses and names
    that edit.
@@ -647,16 +657,35 @@ unchanged. A recorded observation is not proof of current filesystem state.
 
 ### Retained-state queries
 
-Use `tasks retained state <id> [--at <revision>] [--host <host>]` to inspect
-Git-pinned logical retention history. JSON reports the immutable basis, effective
-items and their source ordinals, checkpoint coverage, operation phases and scoped
-diagnostics. `complete: false` or a null item record means unresolved uncertainty;
-never substitute its predecessor. Default reads refuse dirty task/archive working
-or index inputs and freshly recheck branch/pairing before return. Unrelated committed records changes can succeed while
+Use `tasks retained state <id> [--at <revision>] [--host <host>] [--all-projects]` to inspect
+Git-pinned logical retention history (`--all-projects` conflicts with `--at`). JSON reports the
+immutable basis, effective items and their source ordinals, checkpoint coverage, operation phases,
+scoped diagnostics, and `incoming` (`scope`, `complete`, `items`, `diagnostics`) covering external
+`next_owner: "task:<id>"` custody across same-project (`"project"`) or all registered and retired
+projects (`"all_projects"`, `"none"` under `--at`). `complete: false`, `incoming.complete: false`,
+or a null item record means unresolved uncertainty; never substitute its predecessor. Default reads
+bind incoming candidate discovery to each project's pinned `B_P` tree (verifying required `.notes`
+archives via `history::load_logical`), refuse dirty task/archive working or index inputs, and run a
+joint stabilizing `(symbolic-ref, HEAD)` freshness recheck across `<id>`, move-chain hops,
+candidate holders, newly observed commit edges, staged `:0:` index entries, and working-tree
+task/archive files before return. Unrelated committed records changes can succeed while
 preserving the original basis and ordinals; intervening participant-tree edits,
-including a revert, refuse. Ordinary attachment/payload bytes stay historical query
-inputs. Explicit historical reads use only pinned task/archive blobs. Missing or
+including a revert, refuse on `<id>` and isolate to `incoming.diagnostics` (`incoming.complete:
+false`) on external holders. Ordinary attachment/payload bytes stay historical query
+inputs. Explicit `--at` historical reads use only pinned task/archive blobs and skip incoming
+discovery (`incoming.scope == "none"`, `incoming.complete: null`). Missing or
 conflicting evidence fails explicitly. This query does not verify current retained payload bytes.
+Whenever clearing a task closure (`done` or `drop`), require `tasks retained state <id>
+--all-projects` to exit 0 with `complete: true`, `incoming.scope == "all_projects"`,
+`incoming.complete: true`, no unsettled `kept` items in `items` (an effective `kept` item already
+naming an open follow-up task other than `<id>` or an agreed `"user"` handoff permits ordinary
+closure, while a `kept` item still naming `<id>` or lacking an open owner / agreed handoff blocks
+closure), empty `incoming.items`, and no unfinished `operations`; bare `tasks retained state <id>`
+(`incoming.scope == "project"`) is for local inspection and basis lookup only and never clears
+cross-project custody for closure. If `tasks retained state <id> --all-projects` refuses (including
+an unrecognized `--all-projects` option on a secondary host that synced `tasks` `main` before
+rebuilding), custody remains unresolved until `just install` is run in the `tasks` main checkout
+and the retry succeeds.
 For an existing `[retention_recovery]` declaration, preserve its source repository,
 retaining branch, frozen endpoints and exact historical notes. The declaration
 selects independent source read contexts for old in-tree Bases; new operations
@@ -748,7 +777,12 @@ history). This works directly on closed (`done`) tasks without reopening
 implementation (`edit --status todo`) or `tasks start` (preserving existing
 attached manifests at `<records>/tasks/files/<id>/<name>` when appending valid
 `version: 1` `retained:` successor notes), on `released` items, on other-host items
-(replayed unfiltered before `--host`), and on 0-item accidental `retained:` prose
+(replayed unfiltered before `--host`), on historical spaceless `retained:` notes
+(`retained:{...}` without a space after `retained:`, keeping unresolved spaceless notes
+out of `state::replay` so `checkpoint`/`transfer` admission is preserved while clearing
+`incoming`'s source-bound `malformed_record` diagnostic and replaying any spaced
+`version: 1` `retained: ` successor normally; `CheckpointRequest.resolutions` targets
+spaced `retained: ` notes only), and on 0-item accidental `retained:` prose
 (`"successors": []`, or `CheckpointRequest.resolutions` with `"declarations": []`).
 `verify::preflight` strictly requires integer `version: 1` on existing manifests
 and refuses pre-`Manifest 1` historical formats (`unsupported historical manifest
