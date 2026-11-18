@@ -470,7 +470,14 @@ pub fn project_carried(ctx: &mut MigrateCtx, list: &LoadedList, now: &str) -> Re
         // pieces. A valid piece is foreign, so it never links two carried records and is
         // never in the destination; either would make it same-project work.
         for piece in &work.carried.pair.target.pieces {
-            if map.contains_key(&canonical(piece)) || canonical(piece).prefix == succ {
+            let c = canonical(piece);
+            if map.contains_key(&c) || c.prefix == source_prefix {
+                refusals.push(refuse(
+                    &id,
+                    "local_piece",
+                    crate::pieces::local_piece_remedy(&id, piece),
+                ));
+            } else if c.prefix == succ {
                 refusals.push(refuse(
                     &id,
                     "local_piece",

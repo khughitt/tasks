@@ -3,9 +3,33 @@
 //! lookup, so which copy of a record answers stays the caller's policy. See
 //! docs/task-model.md (existing contracts).
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
+
+/// `Error::UnresolvableId` with the registration, availability or worktree-publication
+/// suffix for foreign targets; shared by `dep` and `pieces` writers.
+pub(crate) fn unresolvable(registry: &Registry, own_prefix: &str, id: &TaskId) -> Result<Error> {
+    let error = Error::UnresolvableId(id.to_string());
+    if id.prefix == registry.canonical_prefix(own_prefix) {
+        return Ok(error);
+    }
+    let next = match crate::scope::config_dir(registry, &id.prefix) {
+        None => format!(
+            "; project {} is not registered on this host; check tasks projects --paths and register its authoritative records before linking",
+            id.prefix
+        ),
+        Some(dir) if !crate::scope::has_config(&dir)? => format!(
+            "; registered records at {} are unavailable; restore or repair that project's registration before linking",
+            dir.display()
+        ),
+        Some(dir) => format!(
+            "; foreign dependencies read registered records at {}, even when invoked from the upstream worktree; this record is absent there. Check the ID; if it exists only in a worktree, coordinate with its owner to publish the record and needed artifacts there before linking, and publish completion before expecting downstream readiness. A tasks show location hint does not publish records; see docs/project-operations.md#publish-records-for-cross-project-dependencies",
+            dir.display()
+        ),
+    };
+    Ok(error.with_suffix(&next))
+}
 
 /// What one resolved dependency says. Callers keep their own handling of `Unresolved`;
 /// none of them may treat it as satisfied.

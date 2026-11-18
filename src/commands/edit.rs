@@ -390,7 +390,7 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     }
     let related_before_adds = task.related.len();
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
-    if args.no_depends || args.fields.lane {
+    if args.no_depends || args.fields.lane || !args.fields.pieces.is_empty() {
         refuse_stranded_pieces(&ctx.registry, &task, args.no_depends)?;
         crate::pieces::validate_list(&ctx.registry, &task)?;
     }
@@ -714,7 +714,6 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     Ok(id_out(ctx, &edited))
 }
 
-/// Only `shelve` collects the wake condition required to enter the shelf.
 /// `--no-depends` without naming the pieces again would leave them outside `depends`.
 fn refuse_stranded_pieces(
     registry: &crate::registry::Registry,
@@ -747,6 +746,7 @@ fn refuse_stranded_pieces(
     )))
 }
 
+/// Only `shelve` collects the wake condition required to enter the shelf.
 fn refuse_shelving(id: &crate::model::TaskId) -> Result<()> {
     Err(Error::Validation(format!(
         "use `tasks shelve {id} \"<wake condition>\"` to shelve a task"

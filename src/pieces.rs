@@ -24,6 +24,13 @@ pub(crate) fn listed(task: &Task) -> String {
         .join(", ")
 }
 
+/// The remedy when `piece` is in `goal`'s own project (`check` and `migrate`).
+pub(crate) fn local_piece_remedy(goal: &TaskId, piece: &TaskId) -> String {
+    format!(
+        "piece {piece} is in this project; same-project work is a child: run `tasks dep {goal} --rm {piece}`, then `tasks edit {piece} --parent {goal}`"
+    )
+}
+
 /// The refusal for a lane that carries pieces.
 pub(crate) fn lane_refusal(task: &Task) -> Error {
     Error::Validation(format!(
@@ -31,6 +38,48 @@ pub(crate) fn lane_refusal(task: &Task) -> Error {
         task.id,
         listed(task)
     ))
+}
+
+fn refuse_moved_piece(
+    registry: &Registry,
+    resolver: &Resolver<'_>,
+    own: &TaskId,
+    existing_goal: bool,
+    found: &Task,
+) -> Result<()> {
+    if found.status != crate::model::Status::Moved {
+        return Ok(());
+    }
+    if let Some(end) = crate::tombstone::follow(Some(found.clone()), |next| {
+        resolver.resolve_canonical_task(&registry.canonical_id(next))
+    })? {
+        let end_id = registry.canonical_id(&end.id);
+        if end_id == *own {
+            return Err(Error::Moved(format!(
+                "piece {} moved to {}; {} cannot be its own piece",
+                found.id, end.id, own
+            )));
+        }
+        if end_id.prefix == own.prefix {
+            let remedy = if existing_goal {
+                format!("run `tasks edit {} --parent {own}` instead", end.id)
+            } else {
+                format!(
+                    "create the goal first, then run `tasks edit {} --parent <goal>`",
+                    end.id
+                )
+            };
+            return Err(Error::Moved(format!(
+                "piece {} moved to {} in this project; same-project work is a child: {remedy}",
+                found.id, end.id
+            )));
+        }
+        return Err(Error::Moved(format!(
+            "piece {} moved to {}; name {} instead",
+            found.id, end.id, end.id
+        )));
+    }
+    crate::tombstone::refuse_reference(found, "piece")
 }
 
 /// The subset, foreign, self, duplicate and lane rules of spec §5.1/§5.2 over `task`.
@@ -75,13 +124,16 @@ pub(crate) fn validate_list(registry: &Registry, task: &Task) -> Result<()> {
 }
 
 /// Marks each value as a piece, adding it to `depends` through
-/// `dep::add_dependencies` when absent (silently reusing a canonical match), in one save.
+/// `dep::add_dependencies` when absent (silently reusing a canonical match under its
+/// stored spelling), in one save. Callers run `validate_list` after any whole-record
+/// checks (such as `edit`'s `--no-depends` stranded-piece diagnostic).
 /// Returns "{task} already has piece {id}; unchanged" warnings for existing pieces.
 pub(crate) fn append(
     ctx: &Ctx,
     resolver: &Resolver<'_>,
     task: &mut Task,
     values: &[String],
+    existing_goal: bool,
 ) -> Result<Vec<String>> {
     if values.is_empty() {
         return Ok(Vec::new());
@@ -112,10 +164,10 @@ pub(crate) fn append(
                 task.id
             )));
         }
-        let found = resolver
-            .resolve_canonical_task(&id)?
-            .ok_or_else(|| Error::UnresolvableId(id.to_string()))?;
-        crate::tombstone::refuse_reference(&found, "piece")?;
+        let Some(found) = resolver.resolve_canonical_task(&id)? else {
+            return Err(crate::dependency::unresolvable(registry, &own.prefix, &id)?);
+        };
+        refuse_moved_piece(registry, resolver, &own, existing_goal, &found)?;
         match task
             .pieces
             .iter()
@@ -129,18 +181,21 @@ pub(crate) fn append(
                 continue;
             }
             Some(_) => continue,
-            None => task.pieces.push(id.clone()),
-        }
-        if !task
-            .depends
-            .iter()
-            .any(|dependency| registry.canonical_id(dependency) == id)
-        {
-            new_dependencies.push(id.to_string());
+            None => match task
+                .depends
+                .iter()
+                .find(|dependency| registry.canonical_id(dependency) == id)
+                .cloned()
+            {
+                Some(stored) => task.pieces.push(stored),
+                None => {
+                    task.pieces.push(id.clone());
+                    new_dependencies.push(id.to_string());
+                }
+            },
         }
     }
     crate::commands::dep::add_dependencies(ctx, resolver, task, &new_dependencies)?;
-    validate_list(registry, task)?;
     Ok(warnings)
 }
 
@@ -173,6 +228,7 @@ pub(crate) fn validate_edit(
     if !changed {
         return Ok(());
     }
+    let own = registry.canonical_id(&edited.id);
     for piece in &edited.pieces {
         let id = registry.canonical_id(piece);
         if !original
@@ -180,10 +236,10 @@ pub(crate) fn validate_edit(
             .iter()
             .any(|stored| registry.canonical_id(stored) == id)
         {
-            let found = resolver
-                .resolve_canonical_task(&id)?
-                .ok_or_else(|| Error::UnresolvableId(id.to_string()))?;
-            crate::tombstone::refuse_reference(&found, "piece")?;
+            let Some(found) = resolver.resolve_canonical_task(&id)? else {
+                return Err(crate::dependency::unresolvable(registry, &own.prefix, &id)?);
+            };
+            refuse_moved_piece(registry, resolver, &own, true, &found)?;
         }
     }
     Ok(())

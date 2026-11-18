@@ -653,9 +653,13 @@ fn pieces_reader_foreign_scan_error_names_project() {
 fn pieces_reader_alias_spelling_counts_once() {
     let Two { env, aa, bb } = two();
     let x = add(&env, &bb, "Piece", &[]);
+    assert!(x.starts_with("bb-"), "{x}");
     let g = hub(&env, &aa, "Goal", &["--origin", "user"], &[&x]);
     env.json(&bb, &["done", &x, "done"]);
     env.json(&bb, &["rename", "bb", "cc"]);
+    let stored = env.read(&aa, &format!("tasks/{g}.md"));
+    assert!(stored.contains(&format!("depends: [{x}]\n")), "{stored}");
+    assert!(stored.contains(&format!("pieces: [{x}]\n")), "{stored}");
     let out = env.json(&aa, &["goals"]);
     let row = goal_row(&out, &g);
     assert_eq!(row["pieces"], json!({"done": 1, "total": 1}), "{row}");
@@ -743,6 +747,37 @@ fn pieces_reader_goals_local_unregistered_and_empty_projects() {
         );
         assert_eq!(goal_row(&out, &g)["dependencies"]["unresolved"], 1, "{out}");
     }
+
+    // Running prime/tree --pretty inside unregistered xx walks a goal in xx through
+    // Membership::new's local-seed path without treating xx as an unregistered foreign prefix.
+    let foreign_done = add(&env, &aa, "Foreign done piece", &[]);
+    env.json(&aa, &["done", &foreign_done, "done"]);
+    let local_goal = hub(
+        &env,
+        &xx,
+        "Local goal",
+        &["--origin", "user"],
+        &[&foreign_done],
+    );
+    let _local_child = add(&env, &xx, "Local open child", &["--parent", &local_goal]);
+    for cmd in ["prime", "tree"] {
+        let out = env
+            .cmd(&xx)
+            .args([cmd, "--pretty", "--color", "never"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{cmd}: {out:?}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("is not registered on this host"),
+            "{cmd} emitted unregistered warning for local seed:\n{stderr}"
+        );
+        assert!(
+            line_of(&stdout, &local_goal).contains("1/2"),
+            "{cmd} missing 1/2 work cell:\n{stdout}"
+        );
+    }
 }
 
 #[test]
@@ -782,6 +817,9 @@ fn pieces_reader_show_labels_piece_rows() {
         assert!(row.get("piece").is_none(), "{row}");
     }
     env.json(&bb, &["rename", "bb", "cc"]);
+    let stored = env.read(&aa, &format!("tasks/{hub}.md"));
+    assert!(x.starts_with("bb-"), "{x}");
+    assert!(stored.contains(&format!("pieces: [{x}]\n")), "{stored}");
     labelled(&env);
 }
 
@@ -943,20 +981,40 @@ fn pieces_reader_migrate_refuses_into_piece_project() {
         "{out}"
     );
 
-    // A carried record with a corrupt same-project piece.
+    // A carried record with a corrupt same-project piece (carried or already closed).
     let mut env = TestEnv::new();
     let aa = env.init("aa");
     env.init("cc");
     let local = add(&env, &aa, "Local", &[]);
+    let closed_local = add(&env, &aa, "Closed local", &[]);
+    env.json(&aa, &["done", &closed_local, "done"]);
     let h = add(&env, &aa, "Hub", &[]);
     env.json(&aa, &["dep", &h, "--on", &local]);
     raw(&env, &aa, &h, "pieces", &[&local]);
-    let list = migrate_list(&env, &aa, "cc", &[&h, &local]);
+    let h_closed_piece = add(&env, &aa, "Hub with closed local piece", &[]);
+    env.json(&aa, &["dep", &h_closed_piece, "--on", &closed_local]);
+    raw(&env, &aa, &h_closed_piece, "pieces", &[&closed_local]);
+    let list = migrate_list(&env, &aa, "cc", &[&h, &local, &h_closed_piece]);
     let out = env.json(&aa, &["migrate", list.to_str().unwrap(), "--explain"]);
-    assert!(
-        refusal_rules(&out).contains(&("local_piece".to_string(), h.clone())),
-        "{out}"
-    );
+    for (goal_id, piece_id) in [(&h, &local), (&h_closed_piece, &closed_local)] {
+        let refusal = out["refusals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["rule"] == "local_piece" && r["id"] == *goal_id)
+            .unwrap_or_else(|| panic!("missing local_piece on {goal_id}: {out}"));
+        let settle = refusal["settle"].as_str().unwrap();
+        assert!(
+            settle.contains(&format!("tasks dep {goal_id} --rm {piece_id}")),
+            "{settle}"
+        );
+        assert!(
+            settle.contains(&format!("tasks edit {piece_id} --parent {goal_id}")),
+            "{settle}"
+        );
+        assert!(!settle.contains("in cc"), "{settle}");
+        assert!(!settle.contains("move it"), "{settle}");
+    }
 
     // A piece migrated into an uncarried goal's project is listed as inbound.
     let mut env = TestEnv::new();

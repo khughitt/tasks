@@ -100,7 +100,7 @@ mean those documents were verified.
    `--sort priority` gives P0 first, then newest activity. `--reverse` reverses all
    keys within each section; open goals stay before closed ones. Progress counts
    descendants and declared pieces: `work` is done/total, `+N` counts ideas, `deps` is
-   satisfied/total prerequisites outside the goal and its pieces, and `?N` counts unresolved targets (never
+   satisfied/total prerequisites outside the goal's members (descendants and declared pieces), and `?N` counts unresolved targets (never
    satisfied). Fully satisfied dependency sets remain visible as N/N. These pretty
    fractions do not change JSON's open/total/unresolved fields; only array order
    follows the selected sort. A leading legend describes the selected order and

@@ -449,4 +449,37 @@ mod tests {
         assert_eq!(membership.unresolved_pieces(&goal).unwrap(), 0);
         assert!(membership.take_warnings().is_empty());
     }
+
+    #[test]
+    fn membership_unregistered_local_seed_walks_without_warning() {
+        let dir_bb = tempfile::tempdir().unwrap();
+        let proj_bb = crate::repo::Project::init(dir_bb.path(), "bb", None).unwrap();
+        let mut registry = Registry::default();
+        // Only "bb" is registered; local "xx" is absent from the registry.
+        registry.register("bb", &proj_bb.root).unwrap();
+
+        let mut bb_piece =
+            crate::commands::add::blank(&proj_bb, "Foreign piece".into(), Status::Done, None)
+                .unwrap();
+        // Link back to xx-000000 to exercise `project("xx")` and `lookup("xx-000000")` on the
+        // seeded unregistered local prefix as well as `children_of_id` on the root.
+        bb_piece.depends = vec![id("xx-000000")];
+        bb_piece.pieces = vec![id("xx-000000")];
+        proj_bb.write_task(&registry, &bb_piece).unwrap();
+
+        let mut goal = task("xx-000000", None, Status::Todo);
+        goal.depends = vec![bb_piece.id.clone()];
+        goal.pieces = vec![bb_piece.id.clone()];
+        let local_child = task("xx-000001", Some("xx-000000"), Status::Todo);
+        let scanned = vec![goal.clone(), local_child];
+
+        let mut membership = Membership::new(&registry, &["xx".to_string()], &scanned);
+        let members = membership.members(&goal).unwrap();
+        assert_eq!(ids(&members), set(&["xx-000001", &bb_piece.id.to_string()]));
+        assert_eq!(membership.unresolved_pieces(&goal).unwrap(), 0);
+        assert!(
+            membership.take_warnings().is_empty(),
+            "local unregistered seed must not warn"
+        );
+    }
 }

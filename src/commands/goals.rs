@@ -25,7 +25,7 @@ pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Re
     }
     let hierarchy = crate::hierarchy::HierarchyView::new(records, indexes, &ctx.registry);
     // Only active goals carry attention, so only their members widen the claim stores.
-    let (active, _) = crate::goals::shown(&all, &hierarchy, &ctx.registry, now, closed);
+    let (active, _) = crate::goals::shown(&all, &hierarchy, &ctx.registry, now, closed)?;
     for goal in active {
         membership.members(goal)?;
     }

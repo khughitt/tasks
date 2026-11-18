@@ -90,7 +90,8 @@ fn pieces_writer_promotion_is_silent() {
         (&t["pieces"], &t["depends"])
     );
 
-    // Under an alias spelling after the piece's project is renamed.
+    // Under an alias spelling after the piece's project is renamed: reuses the stored
+    // depends spelling so `pieces` stays a byte-wise subset of `depends`.
     env.json(&bb, &["rename", "bb", "cc"]);
     let renamed = y.replacen("bb-", "cc-", 1);
     let out = env.json(&aa, &["edit", &hub, "--piece", &renamed]);
@@ -100,7 +101,7 @@ fn pieces_writer_promotion_is_silent() {
     );
     let t = task(&env, &aa, &hub);
     assert_eq!(t["depends"], json!([x, y]), "{t}");
-    assert_eq!(t["pieces"].as_array().unwrap().len(), 2, "{t}");
+    assert_eq!(t["pieces"], json!([x, y]), "{t}");
 }
 
 #[test]
@@ -144,15 +145,34 @@ fn pieces_writer_no_pieces_and_conflicts() {
 fn pieces_writer_no_depends_with_clear() {
     let Two { env, aa, bb } = two();
     let x = add(&env, &bb, "Piece", &[]);
+    let y = add(&env, &bb, "Replacement piece", &[]);
     let hub = add(&env, &aa, "Hub", &["--piece", &x]);
-    let err = refused(&env, &aa, &hub, &["edit", &hub, "--no-depends"]);
-    assert!(
-        err.contains(&format!(
-            "{hub} declares pieces ({x}); --no-depends would leave them outside depends; name \
-             them again with --depends, or clear them with --no-pieces or --rm-piece"
-        )),
-        "{err}"
+    let expected = format!(
+        "{hub} declares pieces ({x}); --no-depends would leave them outside depends; name \
+         them again with --depends, or clear them with --no-pieces or --rm-piece"
     );
+    let err = refused(&env, &aa, &hub, &["edit", &hub, "--no-depends"]);
+    assert!(err.contains(&expected), "{err}");
+    // `--no-depends --piece <y>` without clearing or re-naming `<x>` must give the same
+    // stranded-pieces remedy rather than validate_list's generic subset error.
+    let err = refused(
+        &env,
+        &aa,
+        &hub,
+        &["edit", &hub, "--no-depends", "--piece", &y],
+    );
+    assert!(err.contains(&expected), "{err}");
+    assert!(
+        !err.contains("is not a dependency of"),
+        "stranded remedy must take precedence: {err}"
+    );
+    env.json(
+        &aa,
+        &["edit", &hub, "--no-depends", "--depends", &x, "--piece", &y],
+    );
+    let t = task(&env, &aa, &hub);
+    assert_eq!(t["pieces"], json!([x, y]), "{t}");
+    assert_eq!(t["depends"], json!([x, y]), "{t}");
     env.json(&aa, &["edit", &hub, "--no-depends", "--no-pieces"]);
     let t = task(&env, &aa, &hub);
     assert!(
@@ -163,7 +183,7 @@ fn pieces_writer_no_depends_with_clear() {
 
 #[test]
 fn pieces_writer_refusals() {
-    let Two { env, aa, bb } = two();
+    let Two { mut env, aa, bb } = two();
     let local = add(&env, &aa, "Local", &[]);
     let hub = add(&env, &aa, "Hub", &[]);
     let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", &local]);
@@ -177,12 +197,34 @@ fn pieces_writer_refusals() {
         "{err}"
     );
     let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", "bb-fffff0"]);
-    assert!(err.contains("bb-fffff0"), "{err}");
+    assert!(
+        err.contains("cannot resolve bb-fffff0; foreign dependencies read registered records at"),
+        "{err}"
+    );
+    let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", "zz-000001"]);
+    assert!(
+        err.contains("cannot resolve zz-000001; project zz is not registered on this host"),
+        "{err}"
+    );
+    let nn = env.init("nn");
+    std::fs::remove_dir_all(&nn).unwrap();
+    let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", "nn-000001"]);
+    assert!(
+        err.contains("cannot resolve nn-000001; registered records at")
+            && err.contains("are unavailable"),
+        "{err}"
+    );
 
-    let gone = add(&env, &bb, "Gone", &[]);
-    let successor = id_of(env.json(&bb, &["move", &gone, "--to", "aa"]));
-    let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", &gone]);
-    assert!(err.contains(&successor), "{err}");
+    let _cc = env.init("cc");
+    let gone_foreign = add(&env, &bb, "Gone foreign", &[]);
+    let foreign_succ = id_of(env.json(&bb, &["move", &gone_foreign, "--to", "cc"]));
+    let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", &gone_foreign]);
+    assert!(
+        err.contains(&format!(
+            "piece {gone_foreign} moved to {foreign_succ}; name {foreign_succ} instead"
+        )),
+        "{err}"
+    );
 
     let x = add(&env, &bb, "Piece", &[]);
     let lane_message = "is a lane; a lane holds only local children, so it cannot carry pieces";
@@ -204,6 +246,53 @@ fn pieces_writer_refusals() {
 }
 
 #[test]
+fn pieces_writer_moved_into_own_project_names_parent() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let cc = env.init("cc");
+    let hub = add(&env, &aa, "Hub", &[]);
+
+    // Single-hop move (bb -> aa) and multi-hop move (bb -> cc -> aa) into the goal's own
+    // project both name --parent directly rather than suggesting `--piece <successor>`.
+    let direct_gone = add(&env, &bb, "Direct gone", &[]);
+    let direct_succ = id_of(env.json(&bb, &["move", &direct_gone, "--to", "aa"]));
+    let gone = add(&env, &bb, "Gone", &[]);
+    let mid = id_of(env.json(&bb, &["move", &gone, "--to", "cc"]));
+    let successor = id_of(env.json(&cc, &["move", &mid, "--to", "aa"]));
+
+    for (old, end) in [(&direct_gone, &direct_succ), (&gone, &successor)] {
+        let err = refused(&env, &aa, &hub, &["edit", &hub, "--piece", old]);
+        assert!(
+            err.contains(&format!("piece {old} moved to {end}")),
+            "{err}"
+        );
+        assert!(
+            err.contains(&format!("tasks edit {end} --parent {hub}")),
+            "{err}"
+        );
+        assert!(!err.contains(&format!("name {end} instead")), "{err}");
+    }
+
+    let add_out = env
+        .cmd(&aa)
+        .args(["add", "New hub", "--piece", &gone])
+        .output()
+        .unwrap();
+    assert_eq!(add_out.status.code(), Some(1), "{add_out:?}");
+    let add_err = String::from_utf8_lossy(&add_out.stderr);
+    assert!(
+        add_err.contains(&format!("piece {gone} moved to {successor}")),
+        "{add_err}"
+    );
+    assert!(add_err.contains("--parent"), "{add_err}");
+    assert!(
+        !add_err.contains(&format!("name {successor} instead")),
+        "{add_err}"
+    );
+}
+
+#[test]
 fn pieces_writer_allows_closed_targets() {
     let Two { env, aa, bb } = two();
     let done = add(&env, &bb, "Done", &[]);
@@ -218,19 +307,25 @@ fn pieces_writer_allows_closed_targets() {
 fn pieces_writer_editor_parity() {
     let Two { env, aa, bb } = two();
     let x = add(&env, &bb, "Piece", &[]);
+    let y = add(&env, &bb, "Second piece", &[]);
     let local = add(&env, &aa, "Local", &[]);
-    let hub = add(&env, &aa, "Hub", &["--depends", &x, "--depends", &local]);
+    let hub = add(
+        &env,
+        &aa,
+        "Hub",
+        &["--depends", &x, "--depends", &y, "--depends", &local],
+    );
 
     let script = editor_script(
         &aa,
-        &format!("sed -i 's/^tags:/pieces: [{x}]\\ntags:/' \"$1\""),
+        &format!("sed -i 's/^tags:/pieces: [{x}, {y}]\\ntags:/' \"$1\""),
     );
     env.cmd(&aa)
         .env("EDITOR", script)
         .args(["edit", &hub, "--editor"])
         .assert()
         .success();
-    assert_eq!(task(&env, &aa, &hub)["pieces"], json!([x]));
+    assert_eq!(task(&env, &aa, &hub)["pieces"], json!([x, y]));
 
     let script = editor_script(
         &aa,
@@ -247,7 +342,32 @@ fn pieces_writer_editor_parity() {
         String::from_utf8_lossy(&out.stderr).contains("make it a child with --parent instead"),
         "{out:?}"
     );
-    assert_eq!(task(&env, &aa, &hub)["pieces"], json!([x]));
+    assert_eq!(task(&env, &aa, &hub)["pieces"], json!([x, y]));
+
+    // Removing one piece in the editor saves and leaves `depends` untouched.
+    let script = editor_script(
+        &aa,
+        &format!("sed -i 's/^pieces: .*/pieces: [{x}]/' \"$1\""),
+    );
+    env.cmd(&aa)
+        .env("EDITOR", script)
+        .args(["edit", &hub, "--editor"])
+        .assert()
+        .success();
+    let t = task(&env, &aa, &hub);
+    assert_eq!(t["pieces"], json!([x]), "{t}");
+    assert_eq!(t["depends"], json!([x, y, local]), "{t}");
+
+    // Removing the entire `pieces:` line in the editor saves and leaves `depends` untouched.
+    let script = editor_script(&aa, "sed -i '/^pieces:/d' \"$1\"");
+    env.cmd(&aa)
+        .env("EDITOR", script)
+        .args(["edit", &hub, "--editor"])
+        .assert()
+        .success();
+    let t = task(&env, &aa, &hub);
+    assert!(t.get("pieces").is_none(), "{t}");
+    assert_eq!(t["depends"], json!([x, y, local]), "{t}");
 }
 
 #[test]

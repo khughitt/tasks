@@ -1,6 +1,6 @@
 //! `tasks goals`: which goals the user asked for, their progress, recent activity and the
-//! work in them that needs attention (records spec docs/user-guide.md). Pure
-//! over one registry scan and this host's claim snapshot.
+//! work in them that needs attention (records spec docs/user-guide.md). Reads members
+//! across projects through `Membership` and uses this host's claim snapshot.
 
 use crate::claims::{ClaimSnapshot, Reason, WaitingOn};
 use crate::dependency::Verdict;
@@ -61,7 +61,7 @@ pub struct GoalOrder {
     pub reverse: bool,
 }
 
-/// A goal's progress over its descendants.
+/// A goal's progress over its members (descendants and declared pieces).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Pieces {
     pub done: usize,
@@ -70,8 +70,8 @@ pub struct Pieces {
     pub ideas: usize,
 }
 
-/// A goal's dependencies outside its own subtree : prerequisites, reported apart
-/// from progress so a goal whose pieces are all done but whose prerequisites are not never
+/// A goal's dependencies outside its own members: prerequisites, reported apart
+/// from progress so a goal whose members are all done but whose prerequisites are not never
 /// reads as finished. `total` counts distinct targets, `open` those not yet satisfied, and
 /// `unresolved` those no record answers (never satisfied, never open).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -136,10 +136,10 @@ pub struct GoalRow {
 }
 
 /// `done` over `done|todo|doing|blocked`, with ideas counted apart. Shelved, dropped and
-/// moved pieces are not counted.
-pub fn pieces(descendants: &[&Task]) -> Pieces {
+/// moved members are not counted.
+pub fn pieces(members: &[&Task]) -> Pieces {
     let mut out = Pieces::default();
-    for task in descendants {
+    for task in members {
         match task.status {
             Status::Done => {
                 out.done += 1;
@@ -153,21 +153,21 @@ pub fn pieces(descendants: &[&Task]) -> Pieces {
     out
 }
 
-/// The distinct dependency targets of the goal record and of its counted pieces ('s
-/// `total`), followed through moves, that lie outside the goal's subtree; None when there
+/// The distinct dependency targets of the goal record and of its counted members (`Pieces`'s
+/// `total`), followed through moves, that lie outside the goal's membership; None when there
 /// are none. `lookup` reads one record by canonical id, so a target in a project outside
 /// the scanned scope is judged the same as one inside it.
 pub fn dependencies(
     goal: &Task,
-    descendants: &[&Task],
+    members: &[&Task],
     registry: &Registry,
     mut lookup: impl FnMut(&TaskId) -> Result<Option<Task>>,
 ) -> Result<Option<Dependencies>> {
-    let subtree: BTreeSet<TaskId> = std::iter::once(goal)
-        .chain(descendants.iter().copied())
+    let member_ids: BTreeSet<TaskId> = std::iter::once(goal)
+        .chain(members.iter().copied())
         .map(|task| registry.canonical_id(&task.id))
         .collect();
-    let sources = std::iter::once(goal).chain(descendants.iter().copied().filter(|task| {
+    let sources = std::iter::once(goal).chain(members.iter().copied().filter(|task| {
         matches!(
             task.status,
             Status::Done | Status::Todo | Status::Doing | Status::Blocked
@@ -178,13 +178,13 @@ pub fn dependencies(
     for source in sources {
         for stored in &source.depends {
             let found = crate::dependency::resolve(registry, stored, &mut lookup)?;
-            // Only a record that answers can be inside the subtree: an unresolved target is
+            // Only a record that answers can be inside the membership: an unresolved target is
             // never ordinary sequencing, so it is keyed by its stored id and always counted.
             let target = match &found {
                 Some(task) => registry.canonical_id(&task.id),
                 None => registry.canonical_id(stored),
             };
-            if (found.is_some() && subtree.contains(&target)) || !seen.insert(target) {
+            if (found.is_some() && member_ids.contains(&target)) || !seen.insert(target) {
                 continue;
             }
             out.total += 1;
@@ -198,11 +198,11 @@ pub fn dependencies(
     Ok((out.total > 0).then_some(out))
 }
 
-/// The newest `updated` stamp among the goal and all its descendants, whatever their
-/// status , compared as parsed instants.
-pub fn last_activity(goal: &Task, descendants: &[&Task]) -> Result<String> {
+/// The newest `updated` stamp among the goal and all its members, whatever their
+/// status, compared as parsed instants.
+pub fn last_activity(goal: &Task, members: &[&Task]) -> Result<String> {
     let mut newest = (crate::time::parse(&goal.updated)?, goal.updated.as_str());
-    for task in descendants {
+    for task in members {
         let at = crate::time::parse(&task.updated)?;
         if at > newest.0 {
             newest = (at, task.updated.as_str());
@@ -388,7 +388,7 @@ pub fn shown<'a>(
     registry: &Registry,
     now: OffsetDateTime,
     include_closed: bool,
-) -> (Vec<&'a Task>, Vec<&'a Task>) {
+) -> Result<(Vec<&'a Task>, Vec<&'a Task>)> {
     let (mut active, mut closed) = (Vec::new(), Vec::new());
     for task in all {
         let canonical = registry.canonical_id(&task.id);
@@ -400,8 +400,7 @@ pub fn shown<'a>(
         match task.status {
             Status::Idea | Status::Todo | Status::Doing | Status::Blocked => active.push(task),
             Status::Done if include_closed => {
-                let at = crate::time::parse(closed_at(task))
-                    .expect("closed, completed and updated are validated at parse");
+                let at = crate::time::parse(closed_at(task))?;
                 if now - at < CLOSED_WINDOW {
                     closed.push(task);
                 }
@@ -409,7 +408,7 @@ pub fn shown<'a>(
             Status::Done | Status::Shelved | Status::Dropped | Status::Moved => {}
         }
     }
-    (active, closed)
+    Ok((active, closed))
 }
 
 /// The selected rows, ordered within separate open and recently closed sections.
@@ -429,7 +428,7 @@ pub fn goal_rows<'a>(
 ) -> Result<Vec<GoalRow>> {
     let mut open: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
     let mut closed: Vec<(OffsetDateTime, String, GoalRow)> = Vec::new();
-    let (active, recent) = shown(all, hierarchy, registry, now, include_closed);
+    let (active, recent) = shown(all, hierarchy, registry, now, include_closed)?;
     for task in active.into_iter().chain(recent) {
         let members = membership.members(task)?;
         let refs: Vec<&Task> = members.iter().collect();
@@ -610,5 +609,18 @@ mod tests {
                 ideas: 0
             }
         );
+    }
+
+    #[test]
+    fn shown_rejects_malformed_closed_stamp() {
+        let mut goal = task("aa-000000", None, Status::Done);
+        goal.origin = Some(Origin::User);
+        goal.lane = true;
+        goal.updated = "not-a-timestamp".into();
+        let all = vec![goal];
+        let registry = Registry::default();
+        let hierarchy = hierarchy::view_of(&all, &["aa".to_string()], &registry);
+        let now = crate::time::parse("2026-11-01T00:00:00Z").unwrap();
+        assert!(shown(&all, &hierarchy, &registry, now, true).is_err());
     }
 }

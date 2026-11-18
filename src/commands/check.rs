@@ -647,10 +647,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                     Some(task),
                     file.clone(),
                     "local_piece",
-                    format!(
-                        "piece {piece} is in this project; same-project work is a child: run `tasks dep {} --rm {piece}`, then `tasks edit {piece} --parent {}`",
-                        task.id, task.id
-                    ),
+                    crate::pieces::local_piece_remedy(&task.id, piece),
                 ));
             }
             if !pieces_seen.insert(id.clone()) {
