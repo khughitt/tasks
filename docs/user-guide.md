@@ -224,6 +224,10 @@ with no supported wait or wake evidence is stranded. Unassessed `todo`/`blocked`
 leaves need review when process is absent, except lanes. Use the scope skill for
 the review workflow rather than treating the mark as an execution decision.
 
+Plain notes preserve the review marker and its timestamp. `note` reminds you
+when the idea explicitly awaits the user. Use `note --no-reviewed` to record
+new evidence or an answer and return the idea to the review queue.
+
 `shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` sets aside open
 work with a required future review checkpoint and optional wake targets. Shelves
 remain open and visible in ordinary list/search, while execution pickers and roadmap omit

@@ -256,8 +256,7 @@ impl Awaiting {
 }
 
 /// Applies `review`, then `awaiting`, before anything is written, so a refusal leaves the
-/// file untouched. A write that changes neither (a plain note) on a reviewed idea warns:
-/// it does not readmit the idea.
+/// file untouched. Reminds the caller when a plain note leaves an explicit user wait in place.
 pub fn apply(
     task: &mut Task,
     review: Review,
@@ -300,18 +299,11 @@ pub fn apply(
             }
         }
     }
-    if review == Review::Keep && awaiting == Awaiting::Keep && task.reviewed {
-        warnings.push(if task.awaiting_user {
-            format!(
-                "{} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope",
-                task.id
-            )
-        } else {
-            format!(
-                "{} stays reviewed; add --no-reviewed to readmit it for scope",
-                task.id
-            )
-        });
+    if review == Review::Keep && awaiting == Awaiting::Keep && task.reviewed && task.awaiting_user {
+        warnings.push(format!(
+            "{} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope",
+            task.id
+        ));
     }
     Ok(())
 }
