@@ -2,7 +2,6 @@
 
 use super::discovery::{BatchReader, notes_mention_suffixes};
 use super::{IncomingCustody, IncomingDiagnostic, IncomingItem, PreparedIncoming, TrackedProject};
-use crate::commands::Ctx;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::registry::Registry;
@@ -319,12 +318,12 @@ fn check_task_at_commit(
 
 #[allow(clippy::too_many_arguments)]
 fn scan_commit_edges(
-    ctx: &Ctx,
+    registry: &Registry,
     focal_id: &TaskId,
     tp: &TrackedProject,
     live_p: &Project,
     head_1: &str,
-    checked_edges: &mut BTreeSet<(String, String)>,
+    state: &mut ProjectRecheckState,
     suffixes: &BTreeSet<String>,
     items: &mut Vec<IncomingItem>,
     diagnostics: &mut Vec<IncomingDiagnostic>,
@@ -347,6 +346,7 @@ fn scan_commit_edges(
                 detail: err.to_string(),
                 action: STALE_ACTION.into(),
             });
+            state.active = false;
             return Ok(());
         }
     };
@@ -360,6 +360,7 @@ fn scan_commit_edges(
             None,
             "non-UTF-8 rev-list output",
         ));
+        state.active = false;
         return Ok(());
     };
     let mut edges: Vec<(&str, Vec<&str>)> = Vec::new();
@@ -385,7 +386,10 @@ fn scan_commit_edges(
             {
                 continue;
             }
-            if !checked_edges.insert(((*parent).to_string(), (*commit).to_string())) {
+            if !state
+                .checked_edges
+                .insert(((*parent).to_string(), (*commit).to_string()))
+            {
                 continue;
             }
             let diff_bytes = match basis::git(
@@ -418,6 +422,7 @@ fn scan_commit_edges(
                         detail: err.to_string(),
                         action: STALE_ACTION.into(),
                     });
+                    state.active = false;
                     return Ok(());
                 }
             };
@@ -451,6 +456,9 @@ fn scan_commit_edges(
                         "Queried task {focal_id} changed on commit edge {parent}..{commit} since its pinned basis"
                     )));
                 }
+                if tp.failed_candidates.contains(&tid) {
+                    continue;
+                }
                 if let Some(entry) = tp.participants.get(&tid) {
                     drop_holder_items(items, &entry.canonical_id);
                     diagnostics.push(stale_diag(
@@ -477,12 +485,13 @@ fn scan_commit_edges(
                                 None,
                                 err.to_string(),
                             ));
+                            state.active = false;
                             return Ok(());
                         }
                     }
                 }
                 let batch = reader.as_mut().expect("batch reader spawned");
-                let tid_canon = ctx.registry.canonical_id(&tid).to_string();
+                let tid_canon = registry.canonical_id(&tid).to_string();
                 let bad_parent = check_task_at_commit(
                     &tp.project,
                     live_p,
@@ -803,7 +812,7 @@ fn scan_project_status_paths(
     focal_pinned: &PinnedTask,
     tp: &TrackedProject,
     live_p: &Project,
-    checked_head: &str,
+    state: &mut ProjectRecheckState,
     raw_paths: &[&str],
     reader: &mut Option<BatchReader>,
     suffixes: &BTreeSet<String>,
@@ -847,6 +856,9 @@ fn scan_project_status_paths(
             }
             continue;
         }
+        if tp.failed_candidates.contains(&tid) {
+            continue;
+        }
         if let Some(entry) = tp.participants.get(&tid) {
             if touches_required_task_inputs(&tid, &entry.pinned, &subpaths) {
                 drop_holder_items(items, &entry.canonical_id);
@@ -871,6 +883,7 @@ fn scan_project_status_paths(
                     }
                     drop_project_items(items, tp);
                     diagnostics.push(scan_failed_diag(&tp.project.prefix, None, err.to_string()));
+                    state.active = false;
                     return Ok(());
                 }
             }
@@ -881,7 +894,7 @@ fn scan_project_status_paths(
             &tp.project,
             live_p,
             batch,
-            checked_head,
+            &state.checked_head,
             &tp.tasks_rel,
             &tid,
             suffixes,
@@ -906,7 +919,7 @@ fn scan_grouped_live_statuses(
     focal_id: &TaskId,
     focal_pinned: &PinnedTask,
     tracked_projects: &[TrackedProject],
-    states: &[ProjectRecheckState],
+    states: &mut [ProjectRecheckState],
     suffixes: &BTreeSet<String>,
     items: &mut Vec<IncomingItem>,
     diagnostics: &mut Vec<IncomingDiagnostic>,
@@ -954,6 +967,7 @@ fn scan_grouped_live_statuses(
                         detail: err.to_string(),
                         action: STALE_ACTION.into(),
                     });
+                    states[idx].active = false;
                 }
                 continue;
             }
@@ -984,6 +998,9 @@ fn scan_grouped_live_statuses(
 
         let mut reader: Option<BatchReader> = None;
         for &idx in &indices {
+            if !states[idx].active {
+                continue;
+            }
             let Some(proj_paths) = routed.get(&idx) else {
                 continue;
             };
@@ -995,7 +1012,7 @@ fn scan_grouped_live_statuses(
                 focal_pinned,
                 tp,
                 &live_p,
-                &states[idx].checked_head,
+                &mut states[idx],
                 proj_paths,
                 &mut reader,
                 suffixes,
@@ -1009,7 +1026,8 @@ fn scan_grouped_live_statuses(
 }
 
 pub(crate) fn recheck_freshness(
-    ctx: &Ctx,
+    focal_project: &Project,
+    registry: &Registry,
     focal_id: &TaskId,
     focal_pinned: &PinnedTask,
     mut prepared: PreparedIncoming,
@@ -1025,6 +1043,7 @@ pub(crate) fn recheck_freshness(
         .collect();
 
     let mut converged = false;
+    let mut last_non_stationary: Vec<usize> = Vec::new();
 
     for _iter in 0..4 {
         // 1. Pre-scan `(ref_1, head_1)`, participant range checks, and `diff-tree` edge scan.
@@ -1063,7 +1082,7 @@ pub(crate) fn recheck_freshness(
 
             if head_1 != states[idx].checked_head {
                 if tp.is_focal_project {
-                    freshness::current(&ctx.project, focal_id, focal_pinned, false)?;
+                    freshness::current(focal_project, focal_id, focal_pinned, false)?;
                 }
                 for (raw_id, entry) in &tp.participants {
                     if let Err(err) = freshness::current(&tp.project, raw_id, &entry.pinned, false)
@@ -1083,33 +1102,50 @@ pub(crate) fn recheck_freshness(
                 }
                 if tp.in_scan_scope {
                     scan_commit_edges(
-                        ctx,
+                        registry,
                         focal_id,
                         tp,
                         &live_p,
                         &head_1,
-                        &mut states[idx].checked_edges,
+                        &mut states[idx],
                         &prepared.suffixes,
                         &mut prepared.custody.items,
                         &mut prepared.custody.diagnostics,
                     )?;
                 }
-                states[idx].checked_head = head_1;
+                if states[idx].active {
+                    states[idx].checked_head = head_1;
+                }
             }
         }
 
-        // 2. Test hook, live participant freshness, and live Git index/working-tree scan.
+        // 2. Test hook, live participant & peer-project context freshness, and live Git status scan.
         #[cfg(test)]
-        DURING_INCOMING_RECHECK.with(|hook| {
-            if let Some(action) = hook.borrow_mut().take() {
-                action();
-            }
-        });
+        if let Some(action) = DURING_INCOMING_RECHECK.with(|hook| hook.borrow_mut().take()) {
+            action();
+        }
 
-        freshness::current(&ctx.project, focal_id, focal_pinned, false)?;
+        freshness::current(focal_project, focal_id, focal_pinned, false)?;
 
         for (idx, tp) in prepared.tracked_projects.iter().enumerate() {
             if !states[idx].active {
+                continue;
+            }
+            if !tp.is_focal_project
+                && let Err(err) = freshness::context(&tp.project)
+            {
+                drop_project_items(&mut prepared.custody.items, tp);
+                prepared.custody.diagnostics.push(IncomingDiagnostic {
+                    code: err.kind().into(),
+                    project: tp.project.prefix.clone(),
+                    holder: None,
+                    host: None,
+                    identity: None,
+                    source: None,
+                    detail: err.to_string(),
+                    action: STALE_ACTION.into(),
+                });
+                states[idx].active = false;
                 continue;
             }
             for (raw_id, entry) in &tp.participants {
@@ -1130,18 +1166,18 @@ pub(crate) fn recheck_freshness(
         }
 
         scan_grouped_live_statuses(
-            &ctx.registry,
+            registry,
             focal_id,
             focal_pinned,
             &prepared.tracked_projects,
-            &states,
+            &mut states,
             &prepared.suffixes,
             &mut prepared.custody.items,
             &mut prepared.custody.diagnostics,
         )?;
 
         // 3 & 4. Post-scan `(ref_2, head_2)` verification and joint convergence check.
-        let mut all_stationary = true;
+        let mut non_stationary = Vec::new();
         let mut post_heads: BTreeMap<PathBuf, (Option<String>, String)> = BTreeMap::new();
         for (idx, tp) in prepared.tracked_projects.iter().enumerate() {
             if !states[idx].active {
@@ -1156,7 +1192,7 @@ pub(crate) fn recheck_freshness(
             ) {
                 Ok(head_2) => {
                     if head_2 != states[idx].checked_head {
-                        all_stationary = false;
+                        non_stationary.push(idx);
                     }
                 }
                 Err(err) => {
@@ -1179,37 +1215,32 @@ pub(crate) fn recheck_freshness(
             }
         }
 
-        if all_stationary {
+        if non_stationary.is_empty() {
             converged = true;
             break;
         }
+        last_non_stationary = non_stationary;
     }
 
     if !converged {
-        let mut final_heads: BTreeMap<PathBuf, (Option<String>, String)> = BTreeMap::new();
-        for (idx, tp) in prepared.tracked_projects.iter().enumerate() {
-            if !states[idx].active {
-                continue;
-            }
-            let live_p = read::live(&tp.project);
-            let head_2 = verify_ref_and_ancestry_cached(
-                tp,
-                &live_p,
-                &states[idx].checked_head,
-                &mut final_heads,
-            )?;
-            if head_2 != states[idx].checked_head {
-                if tp.is_focal_project {
-                    return Err(stale_focal_error(
-                        "Task project HEAD advanced repeatedly during live freshness recheck; retry tasks retained state",
-                    ));
-                }
+        if last_non_stationary
+            .iter()
+            .any(|&idx| prepared.tracked_projects[idx].is_focal_project)
+        {
+            return Err(stale_focal_error(
+                "Task project HEAD advanced repeatedly during live freshness recheck; retry tasks retained state",
+            ));
+        }
+        for &idx in &last_non_stationary {
+            if states[idx].active {
+                let tp = &prepared.tracked_projects[idx];
                 drop_project_items(&mut prepared.custody.items, tp);
                 prepared.custody.diagnostics.push(stale_diag(
                     &tp.project.prefix,
                     None,
                     "Project records HEAD advanced repeatedly during live freshness recheck; retry tasks retained state",
                 ));
+                states[idx].active = false;
             }
         }
     }

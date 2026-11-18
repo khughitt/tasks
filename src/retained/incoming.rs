@@ -10,7 +10,6 @@ pub(crate) use recheck::DURING_INCOMING_RECHECK;
 
 use super::basis::PinnedTask;
 use super::model::{Identity, RetentionRecord, Source, decode_record, decode_resolution};
-use crate::commands::Ctx;
 use crate::error::Result;
 use crate::model::{Status, TaskId};
 use crate::registry::Registry;
@@ -150,6 +149,7 @@ pub(crate) struct TrackedProject {
     pub is_focal_project: bool,
     pub in_scan_scope: bool,
     pub participants: BTreeMap<TaskId, ParticipantEntry>,
+    pub failed_candidates: BTreeSet<TaskId>,
 }
 
 pub(crate) struct PreparedIncoming {
@@ -188,8 +188,18 @@ fn upsert_tracked_project(
         is_focal_project,
         in_scan_scope,
         participants: BTreeMap::new(),
+        failed_candidates: BTreeSet::new(),
     });
     tracked.len() - 1
+}
+
+fn record_failed_candidate(tracked: &mut [TrackedProject], project: &Project, raw_id: &TaskId) {
+    if let Some(tp) = tracked
+        .iter_mut()
+        .find(|t| t.project.prefix == project.prefix && t.project.records == project.records)
+    {
+        tp.failed_candidates.insert(raw_id.clone());
+    }
 }
 
 fn record_participant(
@@ -290,7 +300,8 @@ fn owner_matches_focal(
 }
 
 pub(crate) fn collect(
-    ctx: &Ctx,
+    focal_project: &Project,
+    registry: &Registry,
     focal_id: &TaskId,
     focal_pinned: &PinnedTask,
     host: Option<&str>,
@@ -305,27 +316,24 @@ pub(crate) fn collect(
     let mut diagnostics = Vec::new();
     let mut warnings = Vec::new();
 
-    let focal_meta = discovery::snapshot_meta(&ctx.project)?;
+    let focal_meta = discovery::snapshot_meta(focal_project)?;
     let mut tracked_projects = Vec::new();
     let mut known_git_roots = BTreeSet::new();
     upsert_tracked_project(
         &mut tracked_projects,
         &mut known_git_roots,
-        ctx.project.clone(),
+        focal_project.clone(),
         focal_meta,
         true,
         true,
     );
 
     // §3.1 Focal task move-identity set (`focal_ids`, `suffixes`, `focal_hops`).
-    let focal_canon = ctx.registry.canonical_id(&focal_pinned.task.id);
+    let focal_canon = registry.canonical_id(&focal_pinned.task.id);
     let mut focal_ids = BTreeSet::from([focal_canon.clone()]);
     let mut suffixes = BTreeSet::from([focal_canon.hex.clone()]);
-    let mut focal_hops = vec![(ctx.project.clone(), focal_canon.clone())];
-    let own_canon_prefix = ctx
-        .registry
-        .canonical_prefix(&ctx.project.prefix)
-        .to_string();
+    let mut focal_hops = vec![(focal_project.clone(), focal_canon.clone())];
+    let own_canon_prefix = registry.canonical_prefix(&focal_project.prefix).to_string();
 
     for forward in [true, false] {
         let mut current_task = focal_pinned.task.clone();
@@ -337,7 +345,7 @@ pub(crate) fn collect(
                 &current_task.moved_from
             };
             let Some(pointer) = pointer else { break };
-            let hop_id = ctx.registry.canonical_id(pointer);
+            let hop_id = registry.canonical_id(pointer);
             if focal_ids.contains(&hop_id) {
                 diagnostics.push(move_incomplete_diag(
                     hop_id.prefix.clone(),
@@ -347,24 +355,21 @@ pub(crate) fn collect(
                 break;
             }
             let hop_project = if hop_id.prefix == own_canon_prefix {
-                ctx.project.clone()
+                focal_project.clone()
             } else {
-                let opened = match scope::open_registered(
-                    &ctx.registry,
-                    &hop_id.prefix,
-                    Origin::Id(&hop_id),
-                ) {
-                    Ok(p) => p,
-                    Err(err) => {
-                        diagnostics.push(move_incomplete_diag(
-                            hop_id.prefix.clone(),
-                            Some(hop_id.to_string()),
-                            err.to_string(),
-                        ));
-                        break;
-                    }
-                };
-                match super::read::inherit(&ctx.project, opened) {
+                let opened =
+                    match scope::open_registered(registry, &hop_id.prefix, Origin::Id(&hop_id)) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            diagnostics.push(move_incomplete_diag(
+                                hop_id.prefix.clone(),
+                                Some(hop_id.to_string()),
+                                err.to_string(),
+                            ));
+                            break;
+                        }
+                    };
+                match super::read::inherit(focal_project, opened) {
                     Ok(p) => p,
                     Err(err) => {
                         diagnostics.push(move_incomplete_diag(
@@ -377,8 +382,8 @@ pub(crate) fn collect(
                 }
             };
 
-            if !(hop_project.prefix == ctx.project.prefix
-                && hop_project.records == ctx.project.records)
+            if !(hop_project.prefix == focal_project.prefix
+                && hop_project.records == focal_project.records)
             {
                 match discovery::snapshot_meta(&hop_project) {
                     Ok(hop_meta) => {
@@ -424,10 +429,10 @@ pub(crate) fn collect(
             } else {
                 &hop_pinned.task.moved_to
             };
-            let reciprocal = ctx.registry.canonical_id(&hop_pinned.task.id) == hop_id
+            let reciprocal = registry.canonical_id(&hop_pinned.task.id) == hop_id
                 && reverse
                     .as_ref()
-                    .is_some_and(|r| ctx.registry.canonical_id(r) == prev_canon);
+                    .is_some_and(|r| registry.canonical_id(r) == prev_canon);
             if !reciprocal {
                 diagnostics.push(move_incomplete_diag(
                     hop_id.prefix.clone(),
@@ -441,7 +446,7 @@ pub(crate) fn collect(
             }
             record_participant(
                 &mut tracked_projects,
-                &ctx.project,
+                focal_project,
                 focal_id,
                 &hop_project,
                 &read_hop_id,
@@ -457,15 +462,15 @@ pub(crate) fn collect(
     }
 
     // §3.3 Project scope selection.
-    let mut scan_projects = vec![ctx.project.clone()];
+    let mut scan_projects = vec![focal_project.clone()];
     if all_projects {
         let (opened_scope, scope_warnings) =
-            Scope::open_all_with_retired(&ctx.registry, &ctx.project.records)?;
+            Scope::open_all_with_retired(registry, &focal_project.records)?;
         warnings.extend(scope_warnings);
-        if ctx.registry.projects.is_empty() {
+        if registry.projects.is_empty() {
             diagnostics.push(IncomingDiagnostic {
                 code: "registry_empty".into(),
-                project: ctx.project.prefix.clone(),
+                project: focal_project.prefix.clone(),
                 holder: None,
                 host: None,
                 identity: None,
@@ -474,8 +479,8 @@ pub(crate) fn collect(
                 action: "Register projects in projects.toml via `tasks init` before relying on --all-projects".into(),
             });
         }
-        for prefix in ctx.registry.projects.keys() {
-            if !scope::is_reachable(&ctx.registry, prefix)? {
+        for prefix in registry.projects.keys() {
+            if !scope::is_reachable(registry, prefix)? {
                 diagnostics.push(IncomingDiagnostic {
                     code: "project_unreachable".into(),
                     project: prefix.clone(),
@@ -493,8 +498,8 @@ pub(crate) fn collect(
             }
         }
         for other in opened_scope.projects() {
-            if ctx.registry.canonical_prefix(&other.prefix) != own_canon_prefix
-                && other.records != ctx.project.records
+            if registry.canonical_prefix(&other.prefix) != own_canon_prefix
+                && other.records != focal_project.records
             {
                 scan_projects.push(other.clone());
             }
@@ -506,8 +511,8 @@ pub(crate) fn collect(
     let mut pinned_scans: Vec<PinnedProjectScan> = Vec::new();
     for proj in &scan_projects {
         if let Some(scan) = discovery::discover_project(
-            &ctx.project,
-            &ctx.registry,
+            focal_project,
+            registry,
             proj,
             &known_git_roots,
             &mut batch_readers,
@@ -515,8 +520,8 @@ pub(crate) fn collect(
             &suffixes,
             &mut diagnostics,
         ) {
-            let is_focal = scan.project.prefix == ctx.project.prefix
-                && scan.project.records == ctx.project.records;
+            let is_focal = scan.project.prefix == focal_project.prefix
+                && scan.project.records == focal_project.records;
             upsert_tracked_project(
                 &mut tracked_projects,
                 &mut known_git_roots,
@@ -538,10 +543,7 @@ pub(crate) fn collect(
     // Map canonical prefix -> pinned in-scope project for §3.5 Step 3 (`Moved` candidate holders).
     let mut in_scope_by_prefix: BTreeMap<String, Project> = BTreeMap::new();
     for scan in &pinned_scans {
-        let canon_prefix = ctx
-            .registry
-            .canonical_prefix(&scan.project.prefix)
-            .to_string();
+        let canon_prefix = registry.canonical_prefix(&scan.project.prefix).to_string();
         in_scope_by_prefix
             .entry(canon_prefix)
             .or_insert_with(|| scan.project.clone());
@@ -551,11 +553,12 @@ pub(crate) fn collect(
     for scan in &pinned_scans {
         let p_pinned = &scan.project;
         for cand_id in &scan.candidates {
-            let holder_canon = ctx.registry.canonical_id(cand_id).to_string();
+            let holder_canon = registry.canonical_id(cand_id).to_string();
 
             let cand_pinned = match super::basis::read(p_pinned, cand_id, None) {
                 Ok(p) => p,
                 Err(err) => {
+                    record_failed_candidate(&mut tracked_projects, p_pinned, cand_id);
                     diagnostics.push(IncomingDiagnostic {
                         code: err.kind().into(),
                         project: p_pinned.prefix.clone(),
@@ -570,6 +573,7 @@ pub(crate) fn collect(
                 }
             };
             if let Err(err) = super::proof::validate_history(p_pinned, &cand_pinned, host) {
+                record_failed_candidate(&mut tracked_projects, p_pinned, cand_id);
                 diagnostics.push(IncomingDiagnostic {
                     code: err.kind().into(),
                     project: p_pinned.prefix.clone(),
@@ -583,6 +587,7 @@ pub(crate) fn collect(
                 continue;
             }
             if let Err(err) = super::reconcile::validate_terminal_history(p_pinned, &cand_pinned) {
+                record_failed_candidate(&mut tracked_projects, p_pinned, cand_id);
                 diagnostics.push(IncomingDiagnostic {
                     code: err.kind().into(),
                     project: p_pinned.prefix.clone(),
@@ -603,6 +608,7 @@ pub(crate) fn collect(
             ) {
                 Ok(st) => st,
                 Err(err) => {
+                    record_failed_candidate(&mut tracked_projects, p_pinned, cand_id);
                     diagnostics.push(IncomingDiagnostic {
                         code: err.kind().into(),
                         project: p_pinned.prefix.clone(),
@@ -619,7 +625,7 @@ pub(crate) fn collect(
 
             record_participant(
                 &mut tracked_projects,
-                &ctx.project,
+                focal_project,
                 focal_id,
                 p_pinned,
                 cand_id,
@@ -630,7 +636,8 @@ pub(crate) fn collect(
             // Step 3: `Moved` candidate holders (`cand_pinned.task.status == Status::Moved`).
             if cand_pinned.task.status == Status::Moved {
                 verify_moved_holder_chain(
-                    ctx,
+                    focal_project,
+                    registry,
                     focal_id,
                     p_pinned,
                     &holder_canon,
@@ -646,7 +653,7 @@ pub(crate) fn collect(
 
             // Step 4: Live/closed non-`Moved` candidate holders.
             evaluate_live_or_closed_holder(
-                &ctx.registry,
+                registry,
                 p_pinned,
                 &holder_canon,
                 &cand_pinned,
@@ -678,7 +685,8 @@ pub(crate) fn collect(
 
 #[allow(clippy::too_many_arguments)]
 fn verify_moved_holder_chain(
-    ctx: &Ctx,
+    focal_project: &Project,
+    registry: &Registry,
     focal_id: &TaskId,
     origin_project: &Project,
     origin_holder_canon: &str,
@@ -689,9 +697,9 @@ fn verify_moved_holder_chain(
     tracked_projects: &mut [TrackedProject],
     diagnostics: &mut Vec<IncomingDiagnostic>,
 ) {
-    let mut visited = BTreeSet::from([ctx.registry.canonical_id(&origin_pinned.task.id)]);
+    let mut visited = BTreeSet::from([registry.canonical_id(&origin_pinned.task.id)]);
     let mut curr_pinned = origin_pinned.clone();
-    let mut curr_canon = ctx.registry.canonical_id(&origin_pinned.task.id);
+    let mut curr_canon = registry.canonical_id(&origin_pinned.task.id);
 
     while curr_pinned.task.status == Status::Moved {
         let Some(next_ptr) = &curr_pinned.task.moved_to else {
@@ -702,7 +710,7 @@ fn verify_moved_holder_chain(
             ));
             return;
         };
-        let next_canon = ctx.registry.canonical_id(next_ptr);
+        let next_canon = registry.canonical_id(next_ptr);
         if !visited.insert(next_canon.clone()) {
             diagnostics.push(move_incomplete_diag(
                 origin_project.prefix.clone(),
@@ -746,6 +754,7 @@ fn verify_moved_holder_chain(
         let next_pinned = match super::basis::read(next_project, &read_next_id, None) {
             Ok(p) => p,
             Err(err) => {
+                record_failed_candidate(tracked_projects, next_project, &read_next_id);
                 diagnostics.push(IncomingDiagnostic {
                     code: err.kind().into(),
                     project: next_project.prefix.clone(),
@@ -761,19 +770,19 @@ fn verify_moved_holder_chain(
         };
         record_participant(
             tracked_projects,
-            &ctx.project,
+            focal_project,
             focal_id,
             next_project,
             &read_next_id,
             next_canon.to_string(),
             next_pinned.clone(),
         );
-        let reciprocal = ctx.registry.canonical_id(&next_pinned.task.id) == next_canon
+        let reciprocal = registry.canonical_id(&next_pinned.task.id) == next_canon
             && next_pinned
                 .task
                 .moved_from
                 .as_ref()
-                .is_some_and(|m| ctx.registry.canonical_id(m) == curr_canon);
+                .is_some_and(|m| registry.canonical_id(m) == curr_canon);
         if !reciprocal {
             diagnostics.push(move_incomplete_diag(
                 next_project.prefix.clone(),
@@ -794,7 +803,7 @@ fn verify_moved_holder_chain(
                 .strip_prefix("moved from ")
                 .and_then(|s| s.split_whitespace().next())
                 .and_then(|tok| TaskId::parse(tok).ok())
-                .is_some_and(|tid| ctx.registry.canonical_id(&tid) == curr_canon)
+                .is_some_and(|tid| registry.canonical_id(&tid) == curr_canon)
         });
         let Some(move_idx) = move_note_idx else {
             diagnostics.push(move_incomplete_diag(
@@ -978,7 +987,7 @@ fn evaluate_live_or_closed_holder(
                                     focal_ids,
                                     suffixes,
                                     focal_hops,
-                                    &mut Vec::new(),
+                                    diagnostics,
                                 )
                             })
                     });
@@ -1076,10 +1085,11 @@ fn evaluate_live_or_closed_holder(
 }
 
 pub(crate) fn recheck_freshness(
-    ctx: &Ctx,
+    focal_project: &Project,
+    registry: &Registry,
     focal_id: &TaskId,
     focal_pinned: &PinnedTask,
     prepared: PreparedIncoming,
 ) -> Result<IncomingCustody> {
-    recheck::recheck_freshness(ctx, focal_id, focal_pinned, prepared)
+    recheck::recheck_freshness(focal_project, registry, focal_id, focal_pinned, prepared)
 }

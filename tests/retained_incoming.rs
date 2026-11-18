@@ -1280,6 +1280,44 @@ fn staged_only_index_handoff_and_working_tree_dirty_holder_fail_closed() {
             .any(|d| d["code"] == "retained_stale_basis" && d["holder"] == arc_holder),
         "{st_wt_arc}"
     );
+
+    // 5. Existing Phase-A candidate holder with dirty working-tree edit emits exactly one `retained_stale_basis` diagnostic (no duplicate recheck diagnostic).
+    git(&sci, &["reset", "--hard", &clean_commit]);
+    env.json(
+        &sci,
+        &[
+            "note",
+            &holder,
+            &format!(
+                "retained: {}",
+                kept_worktree(
+                    "host-a",
+                    ".worktrees/phase-a-cand",
+                    &format!("task:{focal}")
+                )
+            ),
+        ],
+    );
+    let mut dirty_cand = std::fs::read_to_string(&holder_path).unwrap();
+    dirty_cand
+        .push_str("- 2026-11-18T00:00:09Z (fixture): dirty unstaged edit on Phase-A candidate\n");
+    std::fs::write(&holder_path, dirty_cand).unwrap();
+    let st_dirty_cand = env.json(&sci, &["retained", "state", &focal]);
+    assert_eq!(
+        st_dirty_cand["incoming"]["complete"], false,
+        "{st_dirty_cand}"
+    );
+    let cand_diags: Vec<_> = st_dirty_cand["incoming"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["holder"] == holder && d["code"] == "retained_stale_basis")
+        .collect();
+    assert_eq!(
+        cand_diags.len(),
+        1,
+        "dirty Phase-A candidate should emit a single retained_stale_basis diagnostic: {st_dirty_cand}"
+    );
 }
 
 #[test]

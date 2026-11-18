@@ -3093,6 +3093,149 @@ mod tests {
                 "unrelated {window}: {out:?}"
             );
         }
+
+        let run_state_all_projects = |target_id: &str| {
+            let cli = <crate::cli::Cli as clap::Parser>::try_parse_from([
+                "tasks",
+                "-C",
+                dir.to_str().unwrap(),
+                "retained",
+                "state",
+                target_id,
+                "--all-projects",
+            ])
+            .unwrap();
+            crate::commands::run(
+                cli,
+                Some(Arc::new(HostConfig::default())),
+                crate::output::Format::Json,
+            )
+        };
+
+        // 6. Zero-participant peer project config/rename change during query under `--all-projects` fails closed via freshness::context.
+        reset_all();
+        {
+            let ext_c = ext_dir.clone();
+            super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move || {
+                    let cfg = ext_c.join("tasks/.config.toml");
+                    let mut raw = std::fs::read_to_string(&cfg).unwrap();
+                    raw.push_str("\n[attachments]\nmax_bytes = 1024\n");
+                    std::fs::write(&cfg, raw).unwrap();
+                }));
+            });
+            let crate::output::Output::RetainedState(out) =
+                run_state_all_projects(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "focal state stays complete: {out:?}");
+            assert_eq!(
+                out.incoming.complete,
+                Some(false),
+                "peer config drift must fail closed: {out:?}"
+            );
+            assert!(
+                out.incoming
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.project == "ext" && d.holder.is_none()),
+                "expected project-level ext diagnostic: {out:?}"
+            );
+        }
+
+        // 7a. 4-iteration non-convergence exhaustion on `ctx.project` returns hard Err(Error::RetainedStaleBasis).
+        reset_all();
+        {
+            fn install_focal_churn(home: PathBuf, repo: PathBuf, step: usize) {
+                super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        std::fs::write(repo.join("README.md"), format!("churn {step}\n")).unwrap();
+                        git(&home, &repo, &["add", "README.md"]);
+                        git(&home, &repo, &["commit", "-qm", &format!("churn {step}")]);
+                        if step + 1 < 4 {
+                            install_focal_churn(home, repo, step + 1);
+                        }
+                    }));
+                });
+            }
+            install_focal_churn(home.clone(), dir.clone(), 0);
+            let res = run_state(&id.to_string());
+            assert!(
+                matches!(res, Err(Error::RetainedStaleBasis(_))),
+                "4-iteration non-convergence on focal project must return Err(RetainedStaleBasis)"
+            );
+        }
+
+        // 7b. 4-iteration non-convergence exhaustion on peer `ext` under `--all-projects` isolates to IncomingDiagnostic (never top-level Err).
+        reset_all();
+        {
+            fn install_peer_churn(home: PathBuf, repo: PathBuf, step: usize) {
+                super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        std::fs::write(repo.join("README.md"), format!("peer churn {step}\n"))
+                            .unwrap();
+                        git(&home, &repo, &["add", "README.md"]);
+                        git(
+                            &home,
+                            &repo,
+                            &["commit", "-qm", &format!("peer churn {step}")],
+                        );
+                        if step + 1 < 4 {
+                            install_peer_churn(home, repo, step + 1);
+                        }
+                    }));
+                });
+            }
+            install_peer_churn(home.clone(), ext_dir.clone(), 0);
+            let crate::output::Output::RetainedState(out) =
+                run_state_all_projects(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "focal state stays complete: {out:?}");
+            assert_eq!(out.incoming.complete, Some(false), "{out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.project == "ext" && d.holder.is_none() && d.code == "retained_stale_basis"
+                }),
+                "expected peer non-convergence diagnostic on ext: {out:?}"
+            );
+        }
+
+        // 7c. Peer branch switch on the 4th iteration isolates to IncomingDiagnostic (never top-level Err).
+        reset_all();
+        {
+            fn install_peer_branch_flip(home: PathBuf, repo: PathBuf, step: usize) {
+                super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        if step < 3 {
+                            std::fs::write(repo.join("README.md"), format!("flip {step}\n"))
+                                .unwrap();
+                            git(&home, &repo, &["add", "README.md"]);
+                            git(&home, &repo, &["commit", "-qm", &format!("flip {step}")]);
+                            install_peer_branch_flip(home, repo, step + 1);
+                        } else {
+                            git(&home, &repo, &["checkout", "-B", "other-branch"]);
+                        }
+                    }));
+                });
+            }
+            install_peer_branch_flip(home.clone(), ext_dir.clone(), 0);
+            let crate::output::Output::RetainedState(out) =
+                run_state_all_projects(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "focal state stays complete: {out:?}");
+            assert_eq!(out.incoming.complete, Some(false), "{out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.project == "ext" && d.holder.is_none() && d.code == "retained_stale_basis"
+                }),
+                "expected peer branch-flip diagnostic on ext: {out:?}"
+            );
+        }
     }
 
     #[test]

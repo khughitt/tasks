@@ -36,8 +36,14 @@ pub fn state(
     let mut out = history::replay(&ctx.project, &pinned.task, &pinned.basis, host.as_deref())?;
     let mut incoming_warnings = Vec::new();
     let prepared = if at.is_none() {
-        let (prepared, warnings) =
-            crate::retained::incoming::collect(&ctx, &id, &pinned, host.as_deref(), all_projects)?;
+        let (prepared, warnings) = crate::retained::incoming::collect(
+            &ctx.project,
+            &ctx.registry,
+            &id,
+            &pinned,
+            host.as_deref(),
+            all_projects,
+        )?;
         incoming_warnings = warnings;
         Some(prepared)
     } else {
@@ -50,7 +56,13 @@ pub fn state(
         }
     });
     if let Some(prepared) = prepared {
-        out.incoming = crate::retained::incoming::recheck_freshness(&ctx, &id, &pinned, prepared)?;
+        out.incoming = crate::retained::incoming::recheck_freshness(
+            &ctx.project,
+            &ctx.registry,
+            &id,
+            &pinned,
+            prepared,
+        )?;
     }
     out.warnings.extend(ctx.warnings);
     out.warnings.extend(pinned.warnings);
