@@ -1742,6 +1742,13 @@ fn retained_state_working_input_scope() {
             .success(),
         "staged changes must refuse even with original working bytes"
     );
+    let mut expected_at = before.clone();
+    expected_at["incoming"] = json!({
+        "scope": "none",
+        "complete": null,
+        "items": [],
+        "diagnostics": []
+    });
     assert_eq!(
         f.json(&[
             "retained",
@@ -1750,7 +1757,7 @@ fn retained_state_working_input_scope() {
             "--at",
             before["basis"]["commit"].as_str().unwrap()
         ]),
-        before
+        expected_at
     );
 }
 
@@ -3923,4 +3930,136 @@ fn detach_refuses_logical_and_member_multipart_retained_manifests() {
 
     assert!(files_dir.join(&catalog).is_file());
     assert!(files_dir.join(&part1).is_file());
+}
+
+#[test]
+fn retained_state_at_and_all_projects_conflict_and_at_scope_none() {
+    let f = RetainedEnv::new("in-tree");
+    f.note(f.record());
+
+    let conflict = f
+        .cmd()
+        .args(["retained", "state", &f.id, "--at", "HEAD", "--all-projects"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        conflict.status.code(),
+        Some(2),
+        "expected clap exit 2 on --at + --all-projects: {}",
+        String::from_utf8_lossy(&conflict.stderr)
+    );
+
+    let at_state = f.json(&["retained", "state", &f.id, "--at", "HEAD"]);
+    assert_eq!(
+        at_state["incoming"],
+        json!({
+            "scope": "none",
+            "complete": null,
+            "items": [],
+            "diagnostics": []
+        })
+    );
+}
+
+#[test]
+fn spaceless_resolution_validates_scope_and_preserves_transfer_admission() {
+    // 1. Unresolved historical spaceless note on sender leaves state::replay and transfer admission unchanged.
+    let (f, to, _file) = transfer_fixture();
+    let spaceless = r#"retained:{"version":1,"host":"host-a","kind":"worktree","path":".worktrees/old","state":"kept","verification":"verified","purpose":"p","next_owner":"task:sci-999999","cleanup_trigger":"c"}"#;
+    f.seed_note(spaceless);
+
+    let sender_state = f.state();
+    assert_eq!(sender_state["complete"], true, "{sender_state}");
+    assert_eq!(sender_state["diagnostics"], json!([]), "{sender_state}");
+
+    let req = transfer_request(&f, &to);
+    let tr = transfer(&f, &to, &req);
+    assert_eq!(tr["outcome"], "transferred", "{tr}");
+
+    // 2. Closed (`done`) holder carrying a historical spaceless note can append standalone
+    //    `retention resolution:` via `tasks note`, enforcing bad.basis and scope coverage.
+    let h = RetainedEnv::new("detached");
+    h.json(&["start", &h.id]);
+    h.json(&["done", &h.id, "Closed holder"]);
+    let early_basis = h.state()["basis"].clone();
+
+    h.seed_note(spaceless);
+    let bad_state = h.state();
+    let bad_basis = bad_state["basis"].clone();
+    let show = h.json(&["show", &h.id]);
+    let notes = show["task"]["notes"].as_array().unwrap();
+    let bad_ordinal = notes.iter().position(|n| n["text"] == spaceless).unwrap() as u64 + 1;
+
+    // 2a. Forged bad.basis is rejected on `tasks note`.
+    let forged = json!({
+        "version": 1,
+        "bad": {"basis": early_basis, "ordinal": bad_ordinal},
+        "successors": [],
+        "reason": "Forged basis commit"
+    });
+    let out_forged = h
+        .cmd()
+        .args(["note", &h.id, &format!("retention resolution: {forged}")])
+        .output()
+        .unwrap();
+    assert_eq!(out_forged.status.code(), Some(1), "{out_forged:?}");
+    let err_forged: serde_json::Value = serde_json::from_slice(&out_forged.stderr).unwrap();
+    assert!(
+        matches!(
+            err_forged["error"]["kind"].as_str(),
+            Some("retained_input" | "retained_history_blocked")
+        ),
+        "{err_forged}"
+    );
+
+    // 2b. Empty successors on identity-scoped spaceless note is rejected on `tasks note`.
+    let uncovered = json!({
+        "version": 1,
+        "bad": {"basis": bad_basis, "ordinal": bad_ordinal},
+        "successors": [],
+        "reason": "Missing successor"
+    });
+    let out_uncovered = h
+        .cmd()
+        .args(["note", &h.id, &format!("retention resolution: {uncovered}")])
+        .output()
+        .unwrap();
+    assert_eq!(out_uncovered.status.code(), Some(1), "{out_uncovered:?}");
+    let err_uncovered: serde_json::Value = serde_json::from_slice(&out_uncovered.stderr).unwrap();
+    assert_eq!(
+        err_uncovered["error"]["kind"], "retained_input",
+        "{err_uncovered}"
+    );
+
+    // 2c. Valid released v1 successor + standalone resolution via `tasks note` on closed holder succeeds.
+    let released = json!({
+        "version": 1,
+        "host": "host-a",
+        "kind": "worktree",
+        "path": ".worktrees/old",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Removed old worktree",
+        "next_owner": "none",
+        "cleanup_trigger": "none"
+    });
+    h.json(&["note", &h.id, &format!("retained: {released}")]);
+    let succ_ordinal = bad_ordinal + 1;
+    let valid_res = json!({
+        "version": 1,
+        "bad": {"basis": bad_basis, "ordinal": bad_ordinal},
+        "successors": [succ_ordinal],
+        "reason": "Repaired historical spaceless retained note"
+    });
+    h.json(&["note", &h.id, &format!("retention resolution: {valid_res}")]);
+
+    for args in [
+        vec!["retained", "state", h.id.as_str()],
+        vec!["retained", "state", h.id.as_str(), "--host", "other"],
+        vec!["retained", "state", h.id.as_str(), "--host", "host-a"],
+    ] {
+        let st = h.json(&args);
+        assert_eq!(st["complete"], true, "{args:?}: {st}");
+        assert_eq!(st["diagnostics"], json!([]), "{args:?}: {st}");
+    }
 }

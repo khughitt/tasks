@@ -359,7 +359,7 @@ fn validate_range(
 /// Commits in the range that descend from a seed: parents outside the range count
 /// only when they are seeds. Iterative, since range order is not topological
 /// (imported histories carry arbitrary dates).
-fn lineage<'a>(
+pub(super) fn lineage<'a>(
     graph: &std::collections::BTreeMap<&'a str, &[&'a str]>,
     seeds: &std::collections::BTreeSet<&str>,
 ) -> std::collections::BTreeSet<&'a str> {
