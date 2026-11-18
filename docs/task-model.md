@@ -31,7 +31,8 @@ handles in reading order, and ordered logical `notes`. Explicit `lane: true` or
 non-empty `pieces` proves from one record alone that it is a goal. Absence of
 both does not prove a record is a leaf: adding a first same-project child turns
 an unmarked record into a goal without modifying the parent's file, so an
-out-of-scope unmarked target in `blockers` omits `goal` as unknown.
+out-of-scope unmarked target in `blockers` serializes `"goal": null` as unknown
+(its children were not scanned).
 
 Questions about containment, readiness, membership, inverse links, blockers or
 attention are observations over a collection, parameterized by four inputs:
@@ -58,10 +59,14 @@ attention are observations over a collection, parameterized by four inputs:
 - **Time and host:** evaluation instant `now` decides `defer` dueness
   (`now.date() >= defer`, `00:00:00Z`), recurring `every` dueness (`done` with
   `last_done` absent or `last_done + every <= now`), and 3-day `stalled`
-  attention on `goals`. Host-local `ClaimSnapshot` state supplies active or
-  `unverifiable` session claims, cross-project exclusive `needs` holds,
-  busy-lane serialization, `park` continuations and capability `complexity`
-  escalations without mutating `tasks/<id>.md`.
+  attention on `goals`. Host-local in-scope `ClaimSnapshot` state supplies active
+  or `unverifiable` session claims, `park` continuations and capability
+  `complexity` escalations (failing if an in-scope claim store cannot be read),
+  while host-wide `HoldSnapshot` reads every registered project's claim store
+  regardless of scope for exclusive `needs` holds (degrading unreadable stores
+  to warnings), without mutating `tasks/<id>.md`. `lanes` also serializes
+  exclusive `needs` across earlier lane picks (`HeldBy::Pick`), whereas pausing
+  an entire lane subtree comes from `status: blocked` on the lane record.
 
 Collection queries keep **value**, **coverage** and **failure** distinct.
 Dependency evaluation yields three values: `Satisfied` (`done` — including a due
@@ -81,9 +86,9 @@ Widening an inverse scan from scope $U$ to $V \supseteq U$ (`show` to
 when overlapping projects supply the same checkout scans, the same `Registry`
 alias/predecessor mapping and move chain, and the same focal key; row positions
 can shift as newly discovered matches interleave under `ready_order`. Aggregate
-impact counts and ranks (`blockers`), `now`-dependent dueness and host-claim
-filtering depend on the wider graph, clock or `ClaimSnapshot` and lie outside
-set monotonicity.
+impact counts and ranks (`blockers`), `now`-dependent dueness and host-claim or
+exclusive-need filtering depend on the wider graph, clock or
+`ClaimSnapshot` / `HoldSnapshot` and lie outside set monotonicity.
 
 Rollups and orders follow the structure of each relation:
 
@@ -130,7 +135,7 @@ Consider projects `app` (with retired registry alias `legacy -> app`), `lib` and
 | Containment vs prerequisite `Q` (`goals`) | `legacy-000003` normalizes via `[aliases]` to `app-000003` (`Q`), which lies outside `M(G)` and has `status: done` (`Verdict::Satisfied`): `goals` reports `dependencies: {open: 0, total: 1}` (`1/1` in pretty `deps`). |
 | Due recurrence + picker ranking (`ready`, `ready --all-projects`) | At `now`, `Q` is due (`last_done + 7d <= now`) so it enters `ready` with stored `status: done` while still satisfying `G`'s dependency. Goals `G` and `C` and closed `F` are excluded. `ready_order` ranks `[app-000004, app-000003]` locally (`P1` size `s` before `P1` size `m`), and `[app-000004, app-000003, ops-000020]` under `--all-projects`. |
 | Host-local foreign claim on `L` (`ClaimSnapshot`) | A live foreign session claim on `app-000004` hides `app-000004` from `ready` (returning `[app-000003]` with an omission warning) while `tasks/app-000004.md` remains `status: todo`. |
-| Outgoing vs inverse move handling (`show`, `check`) | `show app-000001` lists single-hop `depends_on` rows `legacy-000003` (`done`) and `lib-000010` (`moved`), and `check` in `app` warns `retired_prefix` and `moved_dep`. `show app-000003` lists `dependents: [app-000001]` via alias normalization. Literal `dependents` under `--all-projects` gives `[app-000001]` on `lib-000010` (`[]` without `--all-projects`) and `[app-000002]` on `ops-000020`, whereas reciprocal-chain `followed_by` under `--all-projects` returns `[app-000005]` on both `lib-000010` and `ops-000020`. |
+| Outgoing vs inverse move handling (`show`, `check`) | `show app-000001` lists single-hop `depends_on` rows `legacy-000003` (`done`) and `lib-000010` (`moved`), and `check` in `app` warns `retired_prefix` and `moved_dep`. `show app-000003` lists `dependents: [app-000001]` via alias normalization. Literal `dependents` under `--all-projects` gives `[app-000001]` on `lib-000010` (omitted without `--all-projects`) and `[app-000002]` on `ops-000020`, whereas reciprocal-chain `followed_by` under `--all-projects` returns `[app-000005]` on both `lib-000010` and `ops-000020`. |
 | Divergent worktree vs offline `ops` vs missing `moved_to` | Closing `L` in a feature worktree of `app` gives `open_descendant_count: 1` and `tree` `work` `1/3` there while `main` still reads `2` and `0/3`. If `ops` is unreachable instead, `lib-000010` and `ops-000020` both evaluate to `Unresolved`: `goals` warns that `ops` is unreachable and reports `pieces: {done: 0, total: 2}` and `dependencies: {open: 0, total: 3, unresolved: 2}` (keyed by stored canonical IDs since `ops-000020` cannot be read to merge them), `prime` suppresses closeout with an `unresolved goal members` warning once local children close, and ordinary `done app-000001` exits 1 (`open_dependencies`). If `tasks/lib-000010.md` is hand-edited to `status: moved` without `moved_to`, both `ready` and `done` exit 1 with `kind: "parse"` naming `tasks/lib-000010.md`, and `tasks -C lib check` reports a `parse` error. |
 
 ## Identity and physical format
@@ -204,10 +209,13 @@ as valid state while hand-edited semantic drift remains diagnosable:
   normal read exits 1 with `kind: "parse"`; `tasks check` collects these as
   `parse` error findings.
 - **Write and `tasks check` boundary:** status-indexed field combinations, goal
-  role restrictions, vocabulary checks, reciprocal move counterparts, document
-  existence/step drift on open work, and `parent`/`depends` cycles are accepted
-  by `parse_physical` so `$EDITOR` saves can repair them and `tasks check` can
-  report typed findings, while CLI writers refuse to create them.
+  role restrictions, `[needs]` vocabulary checks (`unknown_need`), reciprocal
+  move counterparts, document existence/step drift on open work, and
+  `parent`/`depends` cycles are accepted by `parse_physical` so `$EDITOR` saves
+  can repair them and `tasks check` can report typed findings; CLI writers
+  refuse to create these violations, whereas optional `[tags]` dictionary checks
+  are advisory (`check` warns `undefined_tag` on open work without refusing
+  writes).
 
 ## Lifecycle
 
@@ -219,12 +227,12 @@ are not completion.
 | Status | Kind | Variant-specific fields and writer/`check` invariants |
 | --- | --- | --- |
 | `idea` | Open work item | Only status allowing `reviewed`, `awaiting_user` and `reviewed_at` (`review_status`); `awaiting_user` and `reviewed_at` require `reviewed: true`. Optional `defer` is a picker/review snooze; `every` allowed without `defer`. Never offered by `ready` (only `next` on an agent-waiting park, to resume scoping). |
-| `todo`, `blocked` | Open work item | Optional `defer` snooze on non-goals (`deferred_goal`), mutually exclusive with `every` (`defer_periodic`). Unassessed leaves (`process` absent, not a goal) surface as `needs_review: unassessed`. |
+| `todo`, `blocked` | Open work item | Optional `defer` snooze on non-goals (`deferred_goal`), mutually exclusive with `every` (`defer_periodic`). Unassessed leaves (`process` absent, not a goal) set `needs_review: true` (`review_reason: "unassessed"`). |
 | `doing` | Open work item | Active or parked work (`started` set on first entry and kept across resume/reopen); forbids `defer` (`defer_status`), `reviewed` (`review_status`) and `wake_on` (`wake_status`); `check` warns `process_missing` when `process` is absent. |
 | `shelved` | Open work item | Entered only via `shelve`; `unshelve` returns to unreviewed `idea`. Only status allowing `wake_on` (`wake_status`) and the only status where `every` and `defer` may coexist (`defer_periodic`); here `defer` is a required review checkpoint, including on goals. Retained by ordinary `list`/`search` while omitted by pickers; remains open and holds dependents (`shelved_dep` warning). |
 | `done` | Closed work item | Sets `completed` and `closed` (`closed_status` elsewhere; `completed_stamp_on_open_task` warning if left on open work). With `every`, sets `last_done` and stays `done` on disk; once due (`last_done` absent or `last_done + every <= now`), `ready`/`next` offer the same ID again while `depends` stays `Satisfied` until `start` reopens it to `doing`. |
 | `dropped` | Closed work item | Sets `closed` (`completed` stays unset); satisfies `depends`; never becomes due under `every`. Requires closed local descendants at every depth, with no `--force` override. |
-| `moved` | Redirect tombstone | Entered only via `move`; immutable (`Moved` refusal naming successor). Requires cross-project `moved_to` at parse time; forbids `closed` (`closed_status`), `pieces` (`piece_status`), `follows` (`follows_status`) and `related` (`related_status`). Retained `depends` and `plan` links are historical only. |
+| `moved` | Redirect tombstone | Entered only via `move`; immutable (`moved` refusal naming successor). Requires cross-project `moved_to` at parse time; forbids `closed` (`closed_status`), `pieces` (`piece_status`), `follows` (`follows_status`) and `related` (`related_status`). Retained `depends` and `plan` links are historical only. |
 
 Across open and closed work items, structural role and vocabulary add four
 cross-field rules: a **goal** (`child_count > 0`, `lane: true`, or non-empty
@@ -233,7 +241,8 @@ cross-field rules: a **goal** (`child_count > 0`, `lane: true`, or non-empty
 a **lane** (`lane: true`) cannot nest inside an ancestor lane (`nested_lane`)
 and cannot carry `pieces` (`lane_pieces`); every entry in `pieces` must be
 foreign (`local_piece`) and also present in `depends` (`piece_not_dependency`);
-and every `needs` entry must be declared in `[needs]` (`unknown_need`). `every`
+and every `needs` entry must be declared in `[needs]` (`unknown_need`, whereas
+optional `[tags]` dictionary entries warn `undefined_tag` on open work). `every`
 accepts positive canonical `Nd`/`Nw` intervals through 36,500 days; `defer` is
 strict `YYYY-MM-DD`, due from `00:00:00Z` on that day, and setting it requires a
 future UTC date.
@@ -245,9 +254,10 @@ recurrence directly to `doing` for a new occurrence, including an early run.
 (`ref_output_missing`, not waivable by `--force`), and, for goals,
 [effective membership](#goal-completion). Status transitions clear `defer`;
 `shelve` then writes its required checkpoint and optional `wake_on` targets, and
-targets leaving `wake_on` (on renewal, `unshelve`, `done` or `drop`) move into
-`related`. Pickers and derived `needs_review` states (`unreviewed`, `woken`,
-`stranded`, `unassessed`) are detailed in the [user guide](user-guide.md).
+targets leaving `wake_on` (on renewal or any status transition out of `shelved`)
+move into `related`. Pickers and derived `needs_review` / `review_reason` values
+(`unreviewed`, `woken`, `stranded`, `unassessed`) are detailed in the
+[user guide](user-guide.md).
 
 Task timestamps are whole-second UTC stamps, not unique event ordinals. Writers
 keep `updated` monotonic across saved versions. Do not infer event order from a
@@ -263,9 +273,9 @@ scope coverage differ by relation:
 
 | Relation | Stored on and arity | Shape | Move policy | Forward and inverse coverage | Validation and hold semantics |
 | --- | --- | --- | --- | --- | --- |
-| `parent` / `children` | Child stores `0..1` same-project `parent` | Local forest per project | Never crosses projects; `move` refuses or detaches per move rules | Scanned within the single canonical project (`HierarchyIndex`); `children` ordered by `ready_order` | Writers and `check` reject `foreign_parent`, `dangling_parent` and `parent_cycle`; `open_child_of_closed_parent` warns on non-recurring open children. |
-| `depends` / `dependents` | Consumer stores `0..*` targets (local or foreign) | Cross-project DAG | Forward `depends` follows `moved_to` chains (`tombstone::follow`); `show` `depends_on` inspects the stored single hop; inverse `dependents` matches canonical spellings literally without following moves | Forward resolves across registered projects; `blockers` stops at out-of-scope boundary targets (`coverage.complete: false` if they have `depends`); `show` scans local by default or all reachable registered projects with `--all-projects` (excluding `moved` tombstones, `ready_order` deduped) | Self-link fails parse; writers/`check` reject `dangling_dep` and `cycle` (`tombstone::edges` uses `[moved_to]` on tombstones); `Open` and `Unresolved` hold `ready` and ordinary `done`. |
-| `pieces` | Goal stores `0..*` foreign targets, each also in `depends` | Cross-project membership DAG (`M(g)`) | `Membership` follows `moved_to` chains (`piece_now_local` warns if a piece moved into the goal's own project) | `Membership` opens reached registered projects regardless of `--project`/`--group` narrowing so goal counts stay invariant | Writers/`check` error on `local_piece`, `piece_not_dependency`, `lane_pieces`, `piece_status`, and warn `self_piece`, `duplicate_piece`; holds `done` and `prime` closeout via [goal completion](#goal-completion). |
+| `parent` / `children` | Child stores `0..1` same-project `parent` | Local forest per project | Never crosses projects; `move` refuses tasks with `parent` or `children` (`migrate` remaps carried parents or clears uncarried ones) | Scanned within the single canonical project (`HierarchyIndex`); `children` ordered by `ready_order` | Writers and `check` reject `foreign_parent`, `dangling_parent` and `parent_cycle`; `open_child_of_closed_parent` warns on non-recurring open children. |
+| `depends` / `dependents` | Consumer stores `0..*` targets (local or foreign) | Cross-project DAG | Forward `depends` follows `moved_to` chains (`tombstone::follow`); `show` `depends_on` inspects the stored single hop; inverse `dependents` matches canonical spellings literally without following moves | Forward resolves across registered projects; `blockers` stops at out-of-scope boundary targets (`coverage.complete: false` if they have `depends`); `show` scans local by default or all reachable registered projects with `--all-projects` (excluding `moved` tombstones, `ready_order` deduped) | Self-link fails parse; writers reject unresolvable targets (`unresolvable_id`) and cycles; `check` errors on local `dangling_dep` and `cycle` (`tombstone::edges` uses `[moved_to]` on tombstones) and warns `unreachable_dep` or `foreign_unparsable` on foreign targets; `Open` and `Unresolved` hold `ready` and ordinary `done`. |
+| `pieces` | Goal stores `0..*` foreign targets, each also in `depends` | Cross-project membership DAG (`M(g)`) | `Membership` follows `moved_to` chains (`piece_now_local` warns if a piece moved into the goal's own project) | `Membership` opens reached registered projects regardless of `--project`/`--group` narrowing so goal counts stay invariant | Writers reject self, duplicate, local, non-dependency or lane pieces (`validation`, warning only on idempotent `--piece` re-add); `check` errors on `local_piece`, `piece_not_dependency`, `lane_pieces`, `piece_status`, and warns `self_piece`, `duplicate_piece`; holds `done` and `prime` closeout via [goal completion](#goal-completion). |
 | `wake_on` | `shelved` task stores `0..*` targets | Arbitrary cross-project edges (independent of `depends`) | Review evaluation (`review::Deps`) follows `moved_to` chains; `show` `wake_targets` inspects the stored single hop | Forward lookup via scan + registry; no inverse view | Allowed only on `shelved` (`wake_status`); any `Satisfied` target or due `defer` wakes review (`woken`); `Unresolved` warns and marks `stranded` unless already woken. |
 | `follows` / `followed_by` | Continuation stores `0..*` earlier task IDs | Arbitrary cross-project history links (never gates execution/review) | Outgoing `show` `follows_tasks` inspects the stored single hop (preserving order/duplicates); inverse `followed_by` matches against the focal task's verified reciprocal `moved_from`/`moved_to` chain | Outgoing resolves via scan + registry; `followed_by` uses `show` (`--all-projects` widens) or `next` scope, excluding `moved` followers and focal-chain self-matches, `ready_order` deduped | Writers reject new self, duplicate, missing or `moved` targets; `check` errors on `follows_status` and warns `self_follows`, `duplicate_follows`, `dangling_follows`. |
 | `related` | Citing task stores `0..*` informational IDs | Arbitrary cross-project citations | Auto-linking on write follows `moved_to` to live destinations; stored `show` `related_to` inspects the single hop | Outgoing single-hop lookup via scan + registry; no inverse view | Forbidden on `moved` (`related_status`); `check` warns `dangling_related` locally; never gates readiness, review or closure. |
