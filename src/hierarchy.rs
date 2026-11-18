@@ -50,6 +50,7 @@ pub struct HierarchyIndex {
     children: Vec<Vec<usize>>,
     orphan_children: HashMap<TaskId, Vec<usize>>,
     open_counts: Vec<usize>,
+    effective_open: Vec<bool>,
     active_counts: Vec<usize>,
     lane_slots: Vec<Option<usize>>,
     enclosing_lanes: Vec<Option<usize>>,
@@ -91,6 +92,7 @@ impl HierarchyIndex {
 
         let mut acyclic = vec![false; n];
         let mut open_counts = vec![0; n];
+        let mut effective_open = vec![false; n];
         let mut active_counts = vec![0; n];
         let mut lane_slots = vec![None; n];
         let mut enclosing_lanes = vec![None; n];
@@ -124,6 +126,9 @@ impl HierarchyIndex {
             let mut open = 0;
             let mut active = 0;
             for &child in &children[u] {
+                if all[child].status != Status::Dropped {
+                    effective_open[u] |= all[child].status.is_open() || effective_open[child];
+                }
                 open += open_counts[child] + usize::from(all[child].status.is_open());
                 active += active_counts[child] + usize::from(is_active(all[child]));
             }
@@ -175,6 +180,7 @@ impl HierarchyIndex {
             children,
             orphan_children,
             open_counts,
+            effective_open,
             active_counts,
             lane_slots,
             enclosing_lanes,
@@ -356,6 +362,13 @@ impl<'a> HierarchyView<'a> {
     pub fn open_descendant_count(&self, canonical_id: &TaskId) -> usize {
         let (_, index, slot) = self.entry_and_slot(canonical_id);
         index.open_descendant_count(slot)
+    }
+
+    /// A conservative local exclusion. Nodes in corrupt cyclic components
+    /// pass through to the completion evaluator for a path diagnostic.
+    pub fn has_effective_open_descendant(&self, canonical_id: &TaskId) -> bool {
+        let (_, index, slot) = self.entry_and_slot(canonical_id);
+        index.effective_open[slot]
     }
 
     pub fn active_descendant_count(&self, canonical_id: &TaskId) -> usize {

@@ -49,7 +49,12 @@ nonrecurring task with `edit --status todo` before starting it again; a recurrin
 done task can be started directly for its next occurrence. A moved record is a
 redirect to its successor, not editable work.
 
-`done` refuses open dependencies or descendants unless explicitly forced.
+For a goal, `prime` offers closeout when its direct dependencies and effective
+members are closed. Both the offer and `done` follow children and foreign pieces
+through done subgoals and stop at dropped ones. If a foreign piece is offline,
+restore access or deliberately waive it with `done --force`. The result names
+the waived work. Cycles and read failures still require repair. The writer
+rechecks even after an offer. See [goal completion](task-model.md#goal-completion).
 `drop` refuses open descendants and has no force override. A `halt` tag on open
 work prevents lower-priority starts in that project without an explicit override;
 `prime` reports halts. See the [task model](task-model.md#lifecycle).

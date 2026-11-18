@@ -509,18 +509,33 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             &ctx.project,
             task,
         )?;
-    }
-    if completing && !force {
-        let open = open_deps(ctx, task)?;
-        if !open.is_empty() {
-            return Err(Error::OpenDependencies(
-                task.id.to_string(),
-                open.join(", "),
-            ));
+        let scan = ctx.project.scan()?;
+        let children = crate::hierarchy::children(&scan, &task.id, &ctx.registry);
+        if crate::hierarchy::is_goal(task, !children.is_empty()) {
+            let mut membership = crate::membership::Membership::new(
+                &ctx.registry,
+                std::slice::from_ref(&ctx.project.prefix),
+                &scan,
+            );
+            let evidence = membership.closeout(task)?;
+            if force {
+                ctx.warnings
+                    .extend(evidence.waived(&ctx.registry.canonical_id(&task.id), &ctx.registry));
+            } else if let Some(error) = evidence.refusal(&ctx.registry.canonical_id(&task.id)) {
+                return Err(error);
+            }
+        } else if !force {
+            let open = open_deps(ctx, task)?;
+            if !open.is_empty() {
+                return Err(Error::OpenDependencies(
+                    task.id.to_string(),
+                    open.join(", "),
+                ));
+            }
         }
     }
     let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
-    if closing && !(force && to == Status::Done) {
+    if closing && to == Status::Dropped {
         let all = ctx.project.scan()?;
         let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
             .iter()
