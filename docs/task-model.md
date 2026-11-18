@@ -75,8 +75,8 @@ successor, possibly through a chain; unresolved/cyclic chains are not completion
 Open states can transition to other open states or close subject to command
 guards. Closed nonrecurring tasks reopen only to todo. Start can take a done recurrence
 directly to doing for a new occurrence, including an early run. Moved records are immutable. `done`
-requires closed dependencies and descendants unless forced; `drop` requires
-closed descendants with no force override. Shelved entry requires `shelve`,
+checks direct dependencies and, for goals, [effective membership](#goal-completion).
+`drop` requires closed local descendants at every depth and has no force override. Shelved entry requires `shelve`,
 and move entry requires `move`; generic editing cannot manufacture them.
 
 The write paths validate parent/dependency cycles, same-project parents,
@@ -282,9 +282,8 @@ rules and resolves newly added pieces. When a piece moves to a still-foreign suc
 Because a piece stays a dependency, readiness, `done`'s `open_dependencies` refusal and
 blocker traversal treat it as before. A record that declares pieces is never offered by
 `ready` or `next` and is not unassessed review work; it reaches closeout once it has no
-open children and every dependency is satisfied. A goal still waiting on one of its own
-pieces stays out of closeout silently; one held only by other prerequisites is named in
-a warning. `dep --rm` of a piece also unmarks it; `edit --no-depends` that would strand
+open effective members, all membership paths resolve and every direct dependency is
+satisfied. See [goal completion](#goal-completion) for closeout diagnostics. `dep --rm` of a piece also unmarks it; `edit --no-depends` that would strand
 a piece and `edit --lane` on a record with pieces are refused.
 
 A goal's members are every record reachable from it by repeatedly following `parent`
@@ -304,3 +303,38 @@ then `tasks edit <new> --parent <goal>`. `show` labels dependency rows that are 
 `piece`; its JSON is unchanged. Moving a goal carries its pieces with `depends` and
 clears them from the tombstone; a move or migration into a piece's project is refused,
 since that piece would become same-project work.
+
+## Goal completion
+
+For a fresh transition to Done, follow same-project children and declared pieces
+through Done subgoals. Stop each path at a Dropped subgoal. An item reached by
+another active path still counts. A shared member counts once. Every open state
+holds completion, including ideas, shelves and open child goals. A recurring
+member satisfies the guard between runs, even when due. Restarting it affects
+the next completion check and preserves previously recorded closures.
+
+`prime` applies this rule to otherwise eligible closeout candidates. It omits
+open work silently, warns with the declaring member and target for a missing
+piece or move hop (`G has unresolved goal members: H -> B`), and warns with
+the directed path for a cycle (`G has a membership cycle: X -> Y -> X`).
+A closeout row's `open_descendant_count` still counts all open local descendants.
+It can be positive when they lie entirely beneath dropped subgoals. An otherwise
+finished goal held only by a direct prerequisite retains its prerequisite
+warning. A failed read or parse fails the command. Each writer (`done`,
+`edit --status done` and an editor save to Done) checks fresh evidence, write
+authority and required outputs before saving. Foreign projects can change
+between reads.
+
+A reachable membership cycle returns `goal_membership_cycle` with its directed
+path. After fatal checks, `open_dependencies` takes precedence for a direct
+hold. Next, `unresolved_goal_members` lists each declaring member and
+unresolved piece as `source -> target`, followed by any known open members. An
+open-only hold returns `open_descendants` when every holding member has an
+effective local path, or `open_goal_members` when a holding member needs a
+foreign path.
+
+Explicit force can waive direct, unresolved and open obligations for this
+transition. A successful forced goal completion names each applicable family
+in that order in `warnings`. Cycles, parse or read failures, write authority
+and required outputs still prevent completion. Editor saves use ordinary
+completion. A previous force grants no waiver on a later transition.

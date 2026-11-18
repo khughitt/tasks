@@ -2,6 +2,8 @@
 //! reachable from a goal by repeatedly following its `parent` children (same project) and
 //! its declared pieces (resolved through moves), excluding the goal itself.
 
+pub(crate) mod closeout;
+
 use crate::error::Result;
 use crate::hierarchy::HierarchyIndex;
 use crate::model::{Task, TaskId};
@@ -20,6 +22,12 @@ impl ProjectScan {
         let index = Arc::new(HierarchyIndex::new(&refs, registry));
         ProjectScan { tasks, index }
     }
+}
+
+#[derive(Clone, Copy)]
+enum Walk {
+    Display,
+    Completion,
 }
 
 struct MemoEntry {
@@ -65,6 +73,46 @@ impl<'r> Membership<'r> {
         }
     }
 
+    /// Ordered local children followed by resolved declared pieces. Missing pieces
+    /// retain the declaring record's target spelling after prefix normalization.
+    fn neighbors(&mut self, record: &Task, walk: Walk) -> Result<(Vec<Task>, Vec<TaskId>)> {
+        let registry = self.registry;
+        let id = registry.canonical_id(&record.id);
+        self.project(&id.prefix)?;
+        let mut reached: Vec<Task> = self.projects[&id.prefix]
+            .as_ref()
+            .map(|scan| {
+                scan.index
+                    .children_of_id(&id)
+                    .iter()
+                    .map(|&slot| scan.tasks[slot].clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut missing = Vec::new();
+        for piece in &record.pieces {
+            let key = registry.canonical_id(piece);
+            self.project(&key.prefix)?;
+            let target = crate::dependency::resolve_canonical(registry, &key, |hop| {
+                if matches!(walk, Walk::Completion) {
+                    self.project(&hop.prefix)?;
+                }
+                self.lookup(hop)
+            })?;
+            match target {
+                Some(t)
+                    if matches!(walk, Walk::Completion)
+                        && t.status == crate::model::Status::Moved =>
+                {
+                    missing.push(key)
+                }
+                Some(found) => reached.push(found),
+                None => missing.push(key),
+            }
+        }
+        Ok((reached, missing))
+    }
+
     fn walk_if_needed(&mut self, goal: &Task) -> Result<&MemoEntry> {
         let root = self.registry.canonical_id(&goal.id);
         if !self.memo.contains_key(&root) {
@@ -72,33 +120,9 @@ impl<'r> Membership<'r> {
             let mut queue = std::collections::VecDeque::from([goal.clone()]);
             let mut members = Vec::new();
             let mut unresolved_pieces = BTreeSet::new();
-            let registry = self.registry;
             while let Some(record) = queue.pop_front() {
-                let canonical_record = registry.canonical_id(&record.id);
-                let prefix = canonical_record.prefix.clone();
-                let _ = self.project(&prefix)?;
-                let kids: Vec<Task> = match self.projects[&prefix].as_ref() {
-                    Some(entry) => entry
-                        .index
-                        .children_of_id(&canonical_record)
-                        .iter()
-                        .map(|&slot| entry.tasks[slot].clone())
-                        .collect(),
-                    None => Vec::new(),
-                };
-                let mut reached = kids;
-                for piece in &record.pieces {
-                    // Opening the piece's project first records why an unreachable one is
-                    // missing, and loads the scan its children are read from.
-                    let canonical_piece = registry.canonical_id(piece);
-                    self.project(&canonical_piece.prefix)?;
-                    match crate::dependency::resolve(registry, piece, |id| self.lookup(id))? {
-                        Some(found) => reached.push(found),
-                        None => {
-                            unresolved_pieces.insert(canonical_piece);
-                        }
-                    }
-                }
+                let (reached, missing) = self.neighbors(&record, Walk::Display)?;
+                unresolved_pieces.extend(missing);
                 for task in reached {
                     if visited.insert(self.registry.canonical_id(&task.id)) {
                         members.push(task.clone());
@@ -386,6 +410,71 @@ mod tests {
         let members = membership.members(&goal).unwrap();
         assert_eq!(ids(&members), set(&["aa-000001", "bb-000001"]));
         assert_eq!(membership.unresolved_pieces(&goal).unwrap(), 1);
+    }
+
+    #[test]
+    fn goal_completion_counts_membership_scans_separately_from_display() {
+        let dir = tempfile::tempdir().unwrap();
+        let foreign = crate::repo::Project::init(dir.path(), "bb", None).unwrap();
+        let mut registry = Registry::default();
+        registry.register("bb", &foreign.root).unwrap();
+        let piece =
+            crate::commands::add::blank(&foreign, "Finished".into(), Status::Done, None).unwrap();
+        foreign.write_task(&registry, &piece).unwrap();
+        let local = task("aa-000001", None, Status::Todo);
+        let child = task("aa-000002", Some("aa-000001"), Status::Done);
+        let mut first = task("aa-000003", None, Status::Todo);
+        first.pieces = vec![piece.id.clone()];
+        first.depends = first.pieces.clone();
+        let mut second = first.clone();
+        second.id = id("aa-000004");
+        let scan = vec![local.clone(), child, first.clone(), second.clone()];
+        let mut membership = Membership::new(&registry, &["aa".into()], &scan);
+        crate::hierarchy::reset_test_index_counts();
+        assert!(
+            membership
+                .closeout(&local)
+                .unwrap()
+                .refusal(&local.id)
+                .is_none()
+        );
+        assert_eq!(crate::hierarchy::test_index_counts().0, 0);
+        for g in [&first, &second] {
+            assert!(membership.closeout(g).unwrap().refusal(&g.id).is_none());
+            assert_eq!(crate::hierarchy::test_index_counts().0, 1);
+        }
+        membership.members(&second).unwrap();
+        assert_eq!(crate::hierarchy::test_index_counts().0, 1);
+    }
+
+    #[test]
+    fn goal_completion_direct_spelling_and_waiver_order() {
+        let mut registry = Registry::default();
+        registry.aliases.insert("old".into(), "bb".into());
+        let mut goal = task("aa-000001", None, Status::Todo);
+        goal.depends = vec![id("old-000003"), id("bb-000002")];
+        let mut missing_hop = task("bb-000003", None, Status::Moved);
+        missing_hop.moved_to = None;
+        goal.pieces = vec![missing_hop.id.clone()];
+        let mut membership = Membership::preloaded(
+            &registry,
+            vec![
+                ("aa", Some(vec![goal.clone()])),
+                ("bb", Some(vec![missing_hop])),
+            ],
+        );
+        let verdict = membership.closeout(&goal).unwrap();
+        assert_eq!(
+            verdict.refusal(&goal.id).unwrap().to_string(),
+            "aa-000001 has open dependencies: old-000003, bb-000002"
+        );
+        assert_eq!(
+            verdict.waived(&goal.id, &registry),
+            [
+                "aa-000001 forced completion: direct dependencies: bb-000002, bb-000003",
+                "aa-000001 forced completion: unresolved goal members: aa-000001 -> bb-000003",
+            ]
+        );
     }
 
     #[test]

@@ -49,7 +49,15 @@ nonrecurring task with `edit --status todo` before starting it again; a recurrin
 done task can be started directly for its next occurrence. A moved record is a
 redirect to its successor, not editable work.
 
-`done` refuses open dependencies or descendants unless explicitly forced.
+For a goal, `prime` offers closeout when its direct dependencies and effective
+members are closed. Both the offer and `done` follow children and foreign pieces
+through done subgoals and stop at dropped ones. If a foreign piece is offline,
+the warning `G has unresolved goal members: H -> B` names the goal G and
+the declaration to check. Restore access or deliberately waive it with
+`done --force`. A membership cycle warning gives its path, for example
+`G has a membership cycle: X -> Y -> X`. The result names
+the waived work. Cycles and read failures still require repair. The writer
+rechecks even after an offer. See [goal completion](task-model.md#goal-completion).
 `drop` refuses open descendants and has no force override. A `halt` tag on open
 work prevents lower-priority starts in that project without an explicit override;
 `prime` reports halts. See the [task model](task-model.md#lifecycle).
@@ -223,6 +231,10 @@ is given again. Once waits clear, new closure/deferral evidence can wake them; a
 with no supported wait or wake evidence is stranded. Unassessed `todo`/`blocked`
 leaves need review when process is absent, except lanes. Use the scope skill for
 the review workflow rather than treating the mark as an execution decision.
+
+Plain notes preserve the review marker and its timestamp. `note` reminds you
+when the idea explicitly awaits the user. Use `note --no-reviewed` to record
+new evidence or an answer and return the idea to the review queue.
 
 `shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` sets aside open
 work with a required future review checkpoint and optional wake targets. Shelves

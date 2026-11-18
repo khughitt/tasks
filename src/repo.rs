@@ -1163,6 +1163,20 @@ impl Project {
         Ok(ids)
     }
 
+    /// A forced leaf needs only proof that no local record names it as parent.
+    /// Keep logical history, other fields and foreign prerequisites out of that read.
+    pub(crate) fn has_declared_child(&self, id: &TaskId, registry: &Registry) -> Result<bool> {
+        let canonical = registry.canonical_id(id);
+        for key in self.task_files()? {
+            let raw = self.read_raw(&key)?;
+            let parent = crate::format::declared_parent(&raw, &format!("tasks/{key}.md"))?;
+            if parent.is_some_and(|p| registry.canonical_id(&p) == canonical) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn scan(&self) -> Result<Vec<Task>> {
         self.task_files()?
             .into_iter()

@@ -73,7 +73,7 @@ mean those documents were verified.
    A parent must be in the same project, so a goal whose pieces live in other projects
    declares them with `tasks edit <goal> --piece <id>`: each piece is also a dependency,
    and declaring one makes the record a goal, so it leaves `ready` and reaches `prime`'s
-   closeout once its children and pieces close. A cross-project hub that only holds
+   closeout when its effective members and direct dependencies close. A cross-project hub that only holds
    foreign work as `depends`, without declared pieces, is still a leaf: `ready` offers it
    once those close, for the closeout; rate it as that closeout (usually `--process
    direct`), which also takes it out of the `needs_review` queue.
@@ -295,7 +295,11 @@ mean those documents were verified.
    To reopen a done or dropped task (a correction handed back after close), run
    `tasks edit <id> --status todo`, then `tasks start <id>`; `start` alone refuses and names
    that edit.
-   `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
+   A closeout offer and a fresh goal completion both follow children and foreign pieces
+   through Done subgoals and stop at Dropped ones. The writer rechecks. Restore missing
+   evidence or say why a forced completion is justified. Force reports the obligations
+   waived on this write. Cycles, read failures, claims and required outputs still bind.
+   `drop` refuses while any local
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
    For creation and completion stamps, see the [stamp contract](../../docs/task-model.md#origin-and-provenance)
@@ -998,8 +1002,8 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. `tasks dep <id> --on <new> --rm <old>` swaps a
   dependency in one save; any failure in the batch changes nothing. A goal that is committed work is a `todo` with a
-  body, however large; `idea` is for uncommitted thoughts. `done` refuses while any
-  descendant is open (`--force` overrides); `drop` refuses while any descendant is
+  body, however large; `idea` is for uncommitted thoughts. Goal completion follows
+  [effective membership](../../docs/task-model.md#goal-completion). `drop` refuses while any local descendant is
   open and has no override — drop or reparent the subtree first
   (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
 - An effort meant to run beside the project's other efforts:
@@ -1043,7 +1047,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `tasks add "<piece>" --project <prefix>` per affected project and one
   `tasks edit <goal> --piece <piece>` each, which marks it a piece and adds the
   dependency. `goals` counts declared pieces as the goal's work; the goal reaches
-  `prime`'s closeout when the last piece closes; verify and `tasks done` it then.
+  `prime`'s closeout when all effective members and direct prerequisites close. Verify the outcome then.
   `tasks edit <goal> --rm-piece <piece>` unmarks one and keeps the dependency;
   `tasks dep <goal> --rm <piece>` removes both. `tasks root <id>` prints where a piece
   lives.

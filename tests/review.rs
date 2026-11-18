@@ -451,21 +451,35 @@ fn note_sets_and_clears_reviewed_in_the_same_write() {
 }
 
 #[test]
-fn a_plain_note_keeps_reviewed_and_warns_once() {
+fn a_plain_note_keeps_reviewed_without_warning() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
     let quiet = env.json(&dir, &["note", &id, "before review"]);
     assert!(warnings(&quiet).is_empty(), "{quiet}");
     env.json(&dir, &["note", &id, "--reviewed", "scope: briefed"]);
-    let out = env.json(&dir, &["note", &id, "curate: tidy"]);
+    let before = task(&env, &dir, &id);
+    let out = env.json(&dir, &["note", &id, "curate: absorbed duplicate context"]);
+    assert!(warnings(&out).is_empty(), "{out}");
+
+    let batch = env
+        .cmd(&dir)
+        .args(["note", &id, "--stdin"])
+        .write_stdin("first addition\nsecond addition\n")
+        .assert()
+        .success();
+    let out = serde_json::from_slice(&batch.get_output().stdout).unwrap();
+    assert!(warnings(&out).is_empty(), "{out}");
+
+    let after = task(&env, &dir, &id);
+    assert_eq!(after["reviewed"], true);
+    assert_eq!(after["reviewed_at"], before["reviewed_at"]);
     assert_eq!(
-        warnings(&out),
-        [format!(
-            "{id} stays reviewed; add --no-reviewed to readmit it for scope"
-        )]
+        after["notes"][3]["text"],
+        "curate: absorbed duplicate context"
     );
-    assert!(reviewed(&env, &dir, &id));
+    assert_eq!(after["notes"][4]["text"], "first addition");
+    assert_eq!(after["notes"][5]["text"], "second addition");
 }
 
 #[test]
