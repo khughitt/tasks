@@ -52,7 +52,8 @@ optional booleans false, and other optional values absent.
 | `depends`, `parent` | Execution dependency ids (foreign allowed); optional same-project containment parent. |
 | `related` | Non-blocking ids of tasks the record cites; foreign allowed; never an execution, review or containment edge. Written by add/edit --related, edit --rm-related and edit --no-related. |
 | `tags` | Grouping labels; optional vocabulary documents their meanings. |
-| `follows` | Optional ordered task-id list for additional work continuing earlier work; foreign ids allowed. Reader release preserves and displays stored lists, including duplicates; no writer flags, inference or historical conversion. Editor changes (including removal/reorder) refuse until writer activation. Never gates execution or review. |
+| `follows` | Optional ordered task-id list for additional work continuing earlier work; foreign ids allowed. Explicit add/edit writers append; edit removes or clears, and editor changes validate. No inference or historical conversion. Never gates execution or review. |
+| `pieces` | Foreign tasks that are part of this goal; each is also in `depends`. |
 | `source` | Opaque single-line origin reference; never interpreted for routing, filtering or rewriting. `show` and `next` display a source that is exactly one task id with a registered prefix as a related task with its live status and `updated` timestamp; that display reads the record and changes nothing. |
 | `model`, `agent` | Opaque single-line latest completion model and filing harness/model stamps. |
 | `origin` | Current judgment `user`, `agent`, `mixed`; absent means unknown. |
@@ -179,10 +180,19 @@ false booleans, zero numbers and empty body remain. Response containers such as
 `tasks` and `warnings` remain arrays, and an empty `next` result is explicit null.
 Summary/park/goal rows are projections, not interchangeable full Task objects.
 Resolved relationship entries on `show` and `next` (`parent`, `children`,
-`depends_on`, `related_to`, `follows_tasks`, `wake_targets` and `source_task`) carry `id`,
+`depends_on`, `dependents`, `related_to`, `follows_tasks`, `followed_by`, `wake_targets` and
+`source_task`) carry `id`,
 `title`, `status` and `updated` (plus `resolved` on `depends_on`, `related_to`, `follows_tasks`,
 `wake_targets` and `source_task`, where unresolved entries omit `title`,
 `status` and `updated`).
+`dependents` lists every task whose `depends` names this one under any spelling of
+its id (a retired prefix counts), open and closed, in ready order, deduplicated by
+canonical id and excluding moved tombstones. Matching is literal: it follows no move
+chain. Plain `show` reads its own project's scan; `show --all-projects` adds every
+other reachable registered project (its own records stay the copy already read) and
+carries unreachable-project warnings; `next` uses its requested scope. The same
+widened scan feeds `followed_by`; no other field changes. A missing field means none
+found in that readable scope, not none elsewhere.
 Additive output fields are allowed; clients should ignore unknown output fields.
 
 JSON success goes to stdout; a clean `tasks check` is silent with exit 0.
@@ -199,7 +209,7 @@ Install the updated binary on every host that reads synced records before record
 carrying new keys sync; verify one host end to end, and the other hosts updated
 by the same install path are covered.
 
-## Follows reader release
+## Follows links
 
 `follows` means this task contains additional work arising from named earlier tasks,
 without asserting closure, prerequisites or replacement. Existing `source` (filing
@@ -209,15 +219,88 @@ JSON; summary rows do not gain the field. Parsing checks id syntax only.
 
 Show and next preserve stored outgoing order and duplicates in `follows_tasks`.
 Missing targets remain unresolved with warnings; moved targets display the stored
-tombstone. Inverse follow-up discovery is not available in this release.
+tombstone. The optional `followed_by` rows (id/title/status/updated) discover direct
+follow-ups, including open, done and dropped work, excluding moved citing records.
+They deduplicate by canonical citing id and use ready ordering, as children do.
+Plain show scans locally; `show --all-projects` widens the scan to every reachable
+registered project; next uses its existing requested local/group/all-project scope. A missing field means none found in that readable scope, not none elsewhere.
+
+For an ordinary focal task, inverse matching compares canonical ids without
+looking up follows targets. For moved focal work, the view builds its identity
+from its own reciprocal move chain, preferring captured records and visiting each
+history id at most once. Missing, inconsistent or looping history gives one
+incomplete-coverage warning; direct and verified-history matches remain visible.
+No task in the focal identity set becomes its own follower. Unrelated broken
+follows never produces inverse warnings or per-edge lookups. Queries for old and
+new identities agree over the same complete scan/history; local results can differ
+after a cross-project move, so use `show --all-projects` there. Source and stored
+inbound follows remain unchanged.
 
 Check warns `self_follows`, `duplicate_follows` (canonical aliases included), and
 `dangling_follows` for missing local targets. Foreign targets are resolved on show,
 not globally scanned by check. Tombstone follows produces the `follows_status`
 error. Unchanged lists, including semantic errors, survive unrelated editor saves
-and non-editor writes. Reader-stage editor changes refuse atomically.
+and non-editor writes. Explicit flags validate the resulting list, rejecting
+canonical duplicates and self-links. Changed editor lists validate their entire
+shape and resolve only new targets; unchanged unreachable ids remain preserved.
+New missing or moved targets refuse. Add/edit `--follows REF` appends, edit
+`--rm-follows REF` removes an existing canonical id, and `--no-follows` clears.
+Clear conflicts with add/remove; the same id in add and remove refuses atomically.
+Repeated additions deduplicate; stored additions warn unchanged.
+
+Apply follows changes before citation linking: both held and same-write removed
+follows ids suppress automatic related links by cited and resolved spelling.
+Explicit related overlap remains allowed; existing related values are never pruned.
+A later separate citation after removal may add related. Source/title idempotent
+add reuse writes nothing, including supplied follows flags.
 
 Prefix rename rewrites local follows ids. Move preserves the list on the successor
 and clears the tombstone; inbound stored links remain unchanged. Migration remaps
 carried targets and records `follows OLD carried as NEW`; uncarried targets retain
 their references. Follows never acts as a migration prerequisite.
+
+## Goal pieces
+
+A goal is a record with children, a lane, or a record that declares `pieces`. `pieces`
+lists foreign tasks that are part of the goal: every id is in another project (a
+same-project piece is a child), every piece is also one of the record's `depends`, and
+there are no self-links or canonical duplicates. A lane cannot carry pieces. Parsing
+checks id syntax only; `check` diagnoses the rest. Empty lists are omitted from
+frontmatter and full Task JSON. No command infers or backfills pieces.
+
+`add --piece REF` and `edit --piece REF` (repeatable) mark REF as a piece and add it to
+`depends` when absent, in one save; a piece already held as a dependency, under any
+spelling, is marked silently, and one already marked warns and changes nothing. The
+target must resolve and must not be a tombstone; done and dropped targets are accepted.
+`edit --rm-piece REF` unmarks a piece and keeps the dependency, `--no-pieces` unmarks
+every piece, and naming one id in both `--piece` and `--rm-piece` is refused. A lane
+cannot take `--piece`. An editor save that changes the list is validated by the same
+rules and resolves newly added pieces. When a piece moves to a still-foreign successor,
+`check`'s `moved_dep` names `tasks edit <goal> --piece <new>` then
+`tasks dep <goal> --rm <old>`.
+
+Because a piece stays a dependency, readiness, `done`'s `open_dependencies` refusal and
+blocker traversal treat it as before. A record that declares pieces is never offered by
+`ready` or `next` and is not unassessed review work; it reaches closeout once it has no
+open children and every dependency is satisfied. A goal still waiting on one of its own
+pieces stays out of closeout silently; one held only by other prerequisites is named in
+a warning. `dep --rm` of a piece also unmarks it; `edit --no-depends` that would strand
+a piece and `edit --lane` on a record with pieces are refused.
+
+A goal's members are every record reachable from it by repeatedly following `parent`
+children (same project) and declared pieces (resolved through moves), excluding the goal
+itself, so a foreign piece that is itself a goal contributes its own members. `goals`
+counts progress, activity and attention over members, and counts as dependencies only
+targets outside the membership. A piece no record answers, including one in an
+unreachable or unregistered project, is not a member; as a dependency it is counted as
+unresolved, never done or open. Members are read through the registry whatever the
+requested scope.
+
+`check` reports `piece_not_dependency`, `local_piece`, `lane_pieces` and `piece_status`
+(pieces on a tombstone) as errors, and `self_piece` and `duplicate_piece` as warnings.
+On an open record, a piece that moved into the record's own project reports
+`piece_now_local` in place of `moved_dep`, with the remedy `tasks dep <goal> --rm <old>`
+then `tasks edit <new> --parent <goal>`. `show` labels dependency rows that are pieces
+`piece`; its JSON is unchanged. Moving a goal carries its pieces with `depends` and
+clears them from the tombstone; a move or migration into a piece's project is refused,
+since that piece would become same-project work.

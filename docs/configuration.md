@@ -20,7 +20,7 @@ The supported top-level keys/tables are listed below.
 | `[retention_recovery]` | Optional explicit migration boundary for detached retained history; exact fields below. |
 | `[[retention_lineage]]` | Rename-managed, ordered Git-anchored edges; omitted when empty. Fields and validation below. |
 | `prefix` | Required `[a-z][a-z0-9]{1,7}` project id; agrees with registration and records. |
-| `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON. `check` warns with `color_missing` when unset; it never assigns a color. |
+| `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON (`projects`, `where`, `resolve` and `goals` rows). `check` warns with `color_missing` when unset; it never assigns a color. |
 | `profile` | Optional single profile name using lowercase letters, digits and hyphens, with no leading hyphen. Absent means unassigned; tasks validates the grammar, not whether the profile exists. |
 | `shorthand` | Optional list of private aliases, each nonempty single-line text; defaults to empty. Uniqueness across projects is checked by consumers when routing, not by `tasks check`. |
 | `[identity]` | Optional snapshot of public identity, written only by tasks; fields described below. |
@@ -223,7 +223,7 @@ then off. Flags and TASKS_COLOR are validated before precedence; an invalid
 environment setting is not hidden by a valid flag. Auto needs a terminal and
 only styles pretty output. JSON never contains ANSI escapes. Project color is
 used for prefixes and `show`; task ids use its fixed lighter variant. In multi-task
-views, activity-aware titles use a shared OKLab lightness range while keeping the
+views (including `goals`), activity-aware titles use a shared OKLab lightness range while keeping the
 project hue; chroma decreases where necessary to fit sRGB. On the builtin dark
 palette, title lightness is `0.60 + 0.30a`, where `a` is activity from 0 to 1.
 Activity combines meaningful lifecycle and work events with bounded attention from
@@ -235,7 +235,14 @@ titles on dark backgrounds and darker titles on light backgrounds. Its cold end
 is adjusted when needed to preserve 3.5:1 contrast after RGB quantization; the hot
 end extends 0.30 lightness toward that ink, bounded by black/white. Unusual
 backgrounds may narrow the available range. IDs retain their fixed project shade;
-titles can be lighter than IDs and need not equal the original project color.
+titles can be lighter than IDs and need not equal the original project color. In
+`prime` and `tree` pretty output, goal IDs add bold emphasis (keeping the fixed
+project shade when assigned, or bold alone without a project color), and tree
+connectors step in OKLab across depths 1 through 6 from a muted project shade (or
+muted `fg`/`bg` mix when unassigned) toward `fg` (or the higher-contrast black/white
+endpoint when `fg` misses 3:1), repaired toward that endpoint whenever needed to
+maintain at least 3:1 quantized contrast against `bg` (dim chrome without a
+resolved palette; plain connectors with color off).
 Unassigned project
 titles stay plain, and activity is absent from JSON. Date recency fades over two
 years; priorities use bold/color scales where available. Missing terminal colors

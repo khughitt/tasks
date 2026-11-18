@@ -176,7 +176,13 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
         || !args.rm_tags.is_empty()
         || !fields.related.is_empty()
         || !args.rm_related.is_empty()
-        || args.no_related;
+        || args.no_related
+        || !fields.follows.is_empty()
+        || !args.rm_follows.is_empty()
+        || args.no_follows
+        || !fields.pieces.is_empty()
+        || !args.rm_pieces.is_empty()
+        || args.no_pieces;
     if !has_flags {
         if !args.editor && !std::io::stdin().is_terminal() {
             return Err(Error::Editor(
@@ -264,6 +270,33 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     if args.no_tags {
         task.tags.clear();
     }
+    // Pieces are unmarked before `--no-depends` clears the list they must stay inside,
+    // so `--no-depends --no-pieces` clears both.
+    let piece_additions = args
+        .fields
+        .pieces
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    let piece_removals = args
+        .rm_pieces
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(both) = piece_additions
+        .iter()
+        .find(|id| piece_removals.contains(id))
+    {
+        return Err(Error::Validation(format!(
+            "{both} is named by both --piece and --rm-piece"
+        )));
+    }
+    if args.no_pieces {
+        task.pieces.clear();
+    }
+    if !piece_removals.is_empty() {
+        crate::pieces::remove(&ctx.registry, &mut task, &piece_removals)?;
+    }
     if args.no_depends {
         task.depends.clear();
     }
@@ -304,6 +337,32 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
             )));
         }
     }
+    let follows_additions = args
+        .fields
+        .follows
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    let mut follows_removed = args
+        .rm_follows
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(both) = follows_additions
+        .iter()
+        .find(|id| follows_removed.contains(id))
+    {
+        return Err(Error::Validation(format!(
+            "{both} is named by both --follows and --rm-follows"
+        )));
+    }
+    if args.no_follows {
+        follows_removed = task.follows.clone();
+        task.follows.clear();
+    }
+    if !args.rm_follows.is_empty() {
+        crate::follows::remove(&ctx.registry, &mut task, &follows_removed)?;
+    }
     let related_additions = args
         .fields
         .related
@@ -331,8 +390,13 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     }
     let related_before_adds = task.related.len();
     apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
+    if args.no_depends || args.fields.lane || !args.fields.pieces.is_empty() {
+        refuse_stranded_pieces(&ctx.registry, &task, args.no_depends)?;
+        crate::pieces::validate_list(&ctx.registry, &task)?;
+    }
     let related_change = crate::related::RelatedChange {
         added: task.related[related_before_adds..].to_vec(),
+        follows_removed,
         removed: related_removals,
         cleared: args.no_related,
         editor_changed: false,
@@ -480,11 +544,6 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ctx.project.read_archive(&original.id, archive)
     })
     .map_err(keep)?;
-    if edited.follows != original.follows {
-        return Err(keep(Error::Validation(
-            "follows changes are disabled until reader rollout is complete".into(),
-        )));
-    }
     check_invariants(&original, &edited).map_err(keep)?;
     crate::review::stamp_edited(&original, &mut edited);
     // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it
@@ -530,10 +589,23 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             crate::tombstone::refuse_reference(&found, "dependency").map_err(keep)?;
         }
     }
+    crate::follows::validate_edit(&ctx.registry, &resolver, &original, &edited).map_err(keep)?;
+    crate::pieces::validate_edit(&ctx.registry, &resolver, &original, &edited).map_err(keep)?;
     crate::related::validate_editor_related(&ctx.registry, &resolver, &original, &edited)
         .map_err(keep)?;
     let related_change = crate::related::RelatedChange {
         added: Vec::new(),
+        follows_removed: original
+            .follows
+            .iter()
+            .filter(|id| {
+                !edited
+                    .follows
+                    .iter()
+                    .any(|kept| ctx.registry.canonical_id(kept) == ctx.registry.canonical_id(id))
+            })
+            .cloned()
+            .collect(),
         removed: Vec::new(),
         cleared: false,
         editor_changed: edited.related != original.related,
@@ -640,6 +712,38 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ));
     }
     Ok(id_out(ctx, &edited))
+}
+
+/// `--no-depends` without naming the pieces again would leave them outside `depends`.
+fn refuse_stranded_pieces(
+    registry: &crate::registry::Registry,
+    task: &Task,
+    no_depends: bool,
+) -> Result<()> {
+    if !no_depends {
+        return Ok(());
+    }
+    let stranded: Vec<String> = task
+        .pieces
+        .iter()
+        .filter(|piece| {
+            let piece = registry.canonical_id(piece);
+            !task
+                .depends
+                .iter()
+                .any(|dependency| registry.canonical_id(dependency) == piece)
+        })
+        .map(ToString::to_string)
+        .collect();
+    if stranded.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Validation(format!(
+        "{} declares pieces ({}); --no-depends would leave them outside depends; name them \
+         again with --depends, or clear them with --no-pieces or --rm-piece",
+        task.id,
+        stranded.join(", ")
+    )))
 }
 
 /// Only `shelve` collects the wake condition required to enter the shelf.

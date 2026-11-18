@@ -75,6 +75,7 @@ tasks add "Emit rows" -p 1 --size s --complexity low --process direct
 tasks prime                      # session context and available work
 tasks ready                      # actionable todo leaves
 tasks tree                       # containment hierarchy
+tasks goals                      # user/mixed goals across projects, counting declared pieces (--project/--group narrow)
 tasks start <id>                 # claim before work
 tasks note <id> "<evidence>"
 tasks park <id> "<next action>"   # releases claim, keeps status
@@ -91,7 +92,7 @@ recurrence, filters, blockers and bounded summaries. The
 
 The shipped [tasks](skills/tasks/SKILL.md), [curate](skills/curate/SKILL.md) and
 [scope](skills/scope/SKILL.md) skills cover session work, bounded maintenance and
-idea review. Report tool observations with
+whole-project sweeps (`/curate --all`), and idea review. Report tool observations with
 `tasks feedback --project <prefix> "<title>" --category friction|gap|idea|positive`.
 
 ## Configuration
@@ -100,7 +101,7 @@ Project settings live in the records directory's tasks/.config.toml. Host
 registry and settings are under `$XDG_CONFIG_HOME/tasks` or `~/.config/tasks`;
 claims and parks are host-local state. See [configuration](docs/configuration.md)
 for every accepted key, default, environment override and validation rule.
-Color is opt-in for pretty output; JSON remains unstyled.
+Color is opt-in for pretty output (prefixes, `show`/`next`, and multi-task views including `goals`); JSON remains unstyled.
 
 ## Layout
 

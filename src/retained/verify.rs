@@ -152,16 +152,19 @@ fn hash_file(path: &Path, metrics: &mut Metrics) -> Result<String> {
     stable(path, &f, &before)?;
     Ok(digest)
 }
-fn walk(
+fn walk_entries(
     dir: &Path,
     prefix: &str,
     entries: &mut Vec<ManifestEntry>,
-    snapshots: &mut std::collections::BTreeMap<String, Metadata>,
+    mut snapshots: Option<&mut std::collections::BTreeMap<String, Metadata>>,
     metrics: &mut Metrics,
+    file_digest: &mut dyn FnMut(&Path, &mut Metrics) -> Result<String>,
 ) -> Result<()> {
     let handle = open(dir, true)?;
     let before = handle.metadata()?;
-    snapshots.insert(prefix.to_string(), before.clone());
+    if let Some(snapshots) = snapshots.as_deref_mut() {
+        snapshots.insert(prefix.to_string(), before.clone());
+    }
     // Held directory descriptors prevent a replaced ancestor from redirecting enumeration.
     let held = PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()));
     let mut names = Vec::new();
@@ -184,7 +187,9 @@ fn walk(
         }
         let physical = held.join(&name);
         let meta = std::fs::symlink_metadata(&physical)?;
-        snapshots.insert(path.clone(), meta.clone());
+        if let Some(snapshots) = snapshots.as_deref_mut() {
+            snapshots.insert(path.clone(), meta.clone());
+        }
         if meta.is_symlink() {
             let target = std::fs::read_link(&physical)?
                 .into_os_string()
@@ -196,11 +201,18 @@ fn walk(
             entries.push(ManifestEntry::Symlink { path, target });
         } else if meta.is_dir() {
             entries.push(ManifestEntry::Directory { path: path.clone() });
-            walk(&physical, &path, entries, snapshots, metrics)?;
+            walk_entries(
+                &physical,
+                &path,
+                entries,
+                snapshots.as_deref_mut(),
+                metrics,
+                file_digest,
+            )?;
         } else if meta.is_file() {
             entries.push(ManifestEntry::File {
                 path,
-                sha256: hash_file(&physical, metrics)?,
+                sha256: file_digest(&physical, metrics)?,
             });
         } else {
             return Err(invalid("unsupported special retained member"));
@@ -262,7 +274,14 @@ fn manifest_observed(
 ) -> Result<ManifestBytes> {
     let mut entries = Vec::new();
     let mut snapshots = std::collections::BTreeMap::new();
-    walk(root, "", &mut entries, &mut snapshots, metrics)?;
+    walk_entries(
+        root,
+        "",
+        &mut entries,
+        Some(&mut snapshots),
+        metrics,
+        &mut hash_file,
+    )?;
     after();
     recheck(root, "", &snapshots, metrics)?;
     entries.sort_by(|a, b| a.path().cmp(b.path()));
@@ -273,6 +292,153 @@ fn manifest_observed(
     .map_err(invalid)?;
     let sha256 = hash_bytes(&bytes, metrics);
     Ok(ManifestBytes { bytes, sha256 })
+}
+pub(super) fn placeholder_manifest_bytes(root: &Path) -> Result<Vec<u8>> {
+    let mut entries = Vec::new();
+    let mut metrics = Metrics::default();
+    let placeholder = "0".repeat(64);
+    walk_entries(root, "", &mut entries, None, &mut metrics, &mut |_, _| {
+        Ok(placeholder.clone())
+    })?;
+    entries.sort_by(|a, b| a.path().cmp(b.path()));
+    serde_json::to_vec(&Manifest {
+        version: 1,
+        entries,
+    })
+    .map_err(invalid)
+}
+fn placeholder_catalog_bytes(
+    logical_name: &str,
+    whole_len: u64,
+    parts: &[crate::multipart::cut::PartSlice],
+) -> Vec<u8> {
+    let placeholder_digest = "0".repeat(64);
+    crate::multipart::catalog::Catalog {
+        name: logical_name.to_string(),
+        bytes: whole_len,
+        sha256: placeholder_digest.clone(),
+        parts: parts
+            .iter()
+            .enumerate()
+            .map(|(index, range)| crate::multipart::catalog::CatalogPart {
+                name: crate::multipart::names::part_name(logical_name, index + 1),
+                bytes: range.len() as u64,
+                sha256: placeholder_digest.clone(),
+            })
+            .collect(),
+    }
+    .to_bytes()
+}
+pub fn check_manifest_admission(
+    target_project: &Project,
+    identity_path: &str,
+    root: &Path,
+) -> Result<()> {
+    let Ok(bytes) = placeholder_manifest_bytes(root) else {
+        return Ok(());
+    };
+    let bytes_len = bytes.len() as u64;
+    if bytes_len <= target_project.attachments_max_bytes {
+        return Ok(());
+    }
+    if target_project.multipart.validators.is_none() {
+        return Err(crate::error::Error::MultipartValidatorsUndeclared(format!(
+            "Container {identity_path} manifest is {bytes_len} bytes (exceeds {} byte attachment cap) and [attachments] multipart_validators is undeclared in {}/tasks/.config.toml; payloads remain untouched at {identity_path} — declare multipart_validators (e.g. []) and rerun, or retain an off-container $WORK_ROOT manifest via the manual checkpoint route",
+            target_project.attachments_max_bytes, target_project.prefix
+        )));
+    }
+    let max_bytes = target_project
+        .multipart
+        .max_bytes
+        .min(crate::multipart::RECOVERY_MAX_BYTES);
+    if max_bytes == 0 || bytes_len > max_bytes {
+        return Err(crate::error::Error::AttachmentTooLarge(format!(
+            "Container {identity_path} manifest is {bytes_len} bytes (exceeds configured multipart_max_bytes = {max_bytes} in {}/tasks/.config.toml); payloads remain untouched at {identity_path} — use the manual off-container $WORK_ROOT checkpoint route or raise multipart_max_bytes within the 256 MiB ceiling",
+            target_project.prefix
+        )));
+    }
+    let parts = crate::multipart::cut::cut(&bytes, target_project.attachments_max_bytes)?;
+    let max_parts = target_project
+        .multipart
+        .max_parts
+        .min(crate::multipart::RECOVERY_MAX_PARTS);
+    if parts.len() > max_parts {
+        return Err(crate::error::Error::AttachmentTooLarge(format!(
+            "Container {identity_path} manifest ({bytes_len} bytes, {} parts) exceeds configured multipart_max_parts = {max_parts} in {}/tasks/.config.toml; payloads remain untouched at {identity_path}",
+            parts.len(),
+            target_project.prefix
+        )));
+    }
+    let logical_name = format!("retained-manifest-{}.json", "0".repeat(64));
+    let catalog_bytes = placeholder_catalog_bytes(&logical_name, bytes_len, &parts);
+    if catalog_bytes.len() as u64 > target_project.attachments_max_bytes {
+        return Err(crate::error::Error::AttachmentTooLarge(format!(
+            "Container {identity_path} manifest .catalog.json is {} bytes (exceeds {} byte attachment cap in {}/tasks/.config.toml); payloads remain untouched at {identity_path}",
+            catalog_bytes.len(),
+            target_project.attachments_max_bytes,
+            target_project.prefix
+        )));
+    }
+    Ok(())
+}
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn validate_multipart_manifest_limits(
+    project: &Project,
+    name: &str,
+    bytes: &[u8],
+) -> Result<Vec<crate::multipart::cut::PartSlice>> {
+    crate::multipart::names::validate_logical_name(name)?;
+    crate::multipart::content::builtin(name, bytes)?;
+    if project.multipart.validators.is_none() {
+        return Err(crate::error::Error::MultipartValidatorsUndeclared(format!(
+            "Manifest {name} is {} bytes (exceeds {} byte attachment cap) and [attachments] multipart_validators is undeclared in {}/tasks/.config.toml",
+            bytes.len(),
+            project.attachments_max_bytes,
+            project.prefix
+        )));
+    }
+    let max_bytes = project
+        .multipart
+        .max_bytes
+        .min(crate::multipart::RECOVERY_MAX_BYTES);
+    if max_bytes == 0 || bytes.len() as u64 > max_bytes {
+        return Err(crate::error::Error::AttachmentTooLarge(format!(
+            "Manifest {name} is {} bytes (exceeds configured multipart_max_bytes = {max_bytes} in {}/tasks/.config.toml)",
+            bytes.len(),
+            project.prefix
+        )));
+    }
+    let parts = crate::multipart::cut::cut(bytes, project.attachments_max_bytes)?;
+    let max_parts = project
+        .multipart
+        .max_parts
+        .min(crate::multipart::RECOVERY_MAX_PARTS);
+    if parts.len() > max_parts {
+        return Err(crate::error::Error::AttachmentTooLarge(format!(
+            "Manifest {name} ({} bytes, {} parts) exceeds configured multipart_max_parts = {max_parts} in {}/tasks/.config.toml",
+            bytes.len(),
+            parts.len(),
+            project.prefix
+        )));
+    }
+    let catalog_bytes = placeholder_catalog_bytes(name, bytes.len() as u64, &parts);
+    if catalog_bytes.len() as u64 > project.attachments_max_bytes {
+        return Err(crate::error::Error::AttachmentTooLarge(format!(
+            "Manifest {name}.catalog.json is {} bytes (exceeds {} byte per-file attachment cap in {}/tasks/.config.toml)",
+            catalog_bytes.len(),
+            project.attachments_max_bytes,
+            project.prefix
+        )));
+    }
+    let validation = crate::multipart::publication::validate(project, name, bytes)?;
+    if !validation.passed {
+        return Err(crate::error::Error::MultipartInvalidContent(format!(
+            "multipart whole-document validation {}: {}",
+            crate::multipart::publication::validation_cause(&validation),
+            serde_json::to_string(&validation).expect("validation serializes")
+        )));
+    }
+    Ok(parts)
 }
 pub fn current_path(project: &Project, path: &str) -> Result<PathBuf> {
     if let Some(s) = path.strip_prefix("$WORK_ROOT/") {
@@ -307,12 +473,59 @@ pub fn read_local(path: &Path, cap: u64) -> Result<Vec<u8>> {
     stable(path, &file, &before)?;
     Ok(bytes)
 }
+pub(crate) fn read_record_manifest(
+    project: &Project,
+    task: Option<&crate::model::Task>,
+    path: &Path,
+) -> Result<Vec<u8>> {
+    if let Some(t) = task {
+        let current_id = crate::model::TaskId::parse(&format!("{}-{}", project.prefix, t.id.hex))?;
+        let dir = crate::attachments::task_dir(project, &current_id);
+        let normalized = !path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        });
+        if normalized
+            && let Some(name) = path.file_name().and_then(|s| s.to_str())
+            && (dir.join(name) == path
+                || path
+                    .parent()
+                    .and_then(|p| p.canonicalize().ok())
+                    .zip(dir.canonicalize().ok())
+                    .is_some_and(|(a, b)| a == b))
+            && matches!(
+                crate::multipart::audit::declarations(t).get(name),
+                Some(crate::multipart::audit::DeclState::Live(_))
+            )
+        {
+            let mut task_with_current_id = t.clone();
+            task_with_current_id.id = current_id;
+            let bytes =
+                crate::multipart::audit::rebuild(project, &task_with_current_id, name, None)?;
+            crate::history::record_metadata_read(bytes.len());
+            return Ok(bytes);
+        }
+    }
+    read_local(path, crate::multipart::RECOVERY_MAX_BYTES)
+}
+pub(super) enum ResolvedArtifact {
+    SingleBlob {
+        path: String,
+    },
+    LogicalMultipart {
+        task_id: String,
+        pinned_task: Box<crate::model::Task>,
+        name: String,
+    },
+}
 fn artifact_location(
     resolver: &super::proof::Resolver<'_>,
     project: &Project,
     locator: &ArtifactLocator,
     metrics: &mut Metrics,
-) -> Result<(Project, Basis, String, String)> {
+) -> Result<(Project, Basis, ResolvedArtifact, String)> {
     let declared = match locator {
         ArtifactLocator::Git { basis, .. }
         | ArtifactLocator::Attachment {
@@ -322,12 +535,16 @@ fn artifact_location(
     };
     let resolved = resolver.task(project, &declared.to_string())?;
     let project = &resolved;
-    let (b, path, expected) = match locator {
+    let (b, target, expected) = match locator {
         ArtifactLocator::Git {
             basis,
             path,
             sha256,
-        } => (basis, path.clone(), sha256),
+        } => (
+            basis,
+            ResolvedArtifact::SingleBlob { path: path.clone() },
+            sha256,
+        ),
         ArtifactLocator::Attachment {
             task,
             name,
@@ -338,18 +555,41 @@ fn artifact_location(
             basis::validate_locator(project, &id, basis)?;
             let pinned = basis::read_exact(project, &id, basis)?;
             metrics.history_bytes_read += pinned.history_bytes_read;
-            if crate::attachments::ledger(&pinned.task).get(name)
-                != Some(&crate::attachments::Ledger::Attached)
-            {
-                return Err(invalid("preserved attachment lacks a live ledger entry"));
-            }
-            (
-                basis,
-                format!("{}/tasks/files/{task}/{name}", basis.records_subdir)
-                    .trim_start_matches("./")
-                    .to_string(),
-                sha256,
-            )
+            let ledger = crate::attachments::ledger(&pinned.task);
+            let ordinary = ledger.get(name) == Some(&crate::attachments::Ledger::Attached);
+            let decl = crate::multipart::audit::declarations(&pinned.task).remove(name);
+            let target =
+                if ordinary && matches!(decl, Some(crate::multipart::audit::DeclState::Live(_))) {
+                    return Err(invalid(
+                        "preserved attachment is ambiguously both ordinary and multipart",
+                    ));
+                } else if ordinary {
+                    ResolvedArtifact::SingleBlob {
+                        path: format!("{}/tasks/files/{task}/{name}", basis.records_subdir)
+                            .trim_start_matches("./")
+                            .to_string(),
+                    }
+                } else if let Some(crate::multipart::audit::DeclState::Live(declaration)) = decl {
+                    if declaration.sha256 != *sha256 {
+                        return Err(invalid("preserved multipart declaration digest mismatch"));
+                    }
+                    crate::multipart::audit::recovery_bounds(&declaration)?;
+                    for member in crate::multipart::names::member_names(name, declaration.parts) {
+                        if ledger.get(&member) != Some(&crate::attachments::Ledger::Attached) {
+                            return Err(invalid(
+                                "preserved multipart attachment lacks a live member ledger entry",
+                            ));
+                        }
+                    }
+                    ResolvedArtifact::LogicalMultipart {
+                        task_id: task.clone(),
+                        pinned_task: Box::new(pinned.task),
+                        name: name.clone(),
+                    }
+                } else {
+                    return Err(invalid("preserved attachment lacks a live ledger entry"));
+                };
+            (basis, target, sha256)
         }
         ArtifactLocator::Directory { .. } | ArtifactLocator::Attachment { basis: None, .. } => {
             return Err(invalid("artifact needs an explicit pinned file locator"));
@@ -366,7 +606,7 @@ fn artifact_location(
             .ok_or_else(|| invalid("artifact task path"))?,
     )?;
     basis::validate_locator(project, &id, b)?;
-    Ok((resolved, b.clone(), path, expected.clone()))
+    Ok((resolved, b.clone(), target, expected.clone()))
 }
 pub fn artifact(
     project: &Project,
@@ -386,14 +626,30 @@ pub(super) fn artifact_with(
     locator: &ArtifactLocator,
     metrics: &mut Metrics,
 ) -> Result<Vec<u8>> {
-    let (p, b, path, expected) = artifact_location(resolver, project, locator, metrics)?;
-    let bytes = basis::blob(
-        &basis::context(&p, &super::lineage::historical_id(&b)?, &b)?,
-        &b.commit,
-        &path,
-        Some(p.attachments_max_bytes),
-        &mut metrics.history_bytes_read,
-    )?;
+    let (p, b, target, expected) = artifact_location(resolver, project, locator, metrics)?;
+    let context = basis::context(&p, &super::lineage::historical_id(&b)?, &b)?;
+    let bytes = match target {
+        ResolvedArtifact::SingleBlob { path } => basis::blob(
+            &context,
+            &b.commit,
+            &path,
+            Some(p.attachments_max_bytes),
+            &mut metrics.history_bytes_read,
+        )?,
+        ResolvedArtifact::LogicalMultipart {
+            task_id,
+            pinned_task,
+            name,
+        } => basis::rebuild_multipart(
+            &context,
+            &b.commit,
+            &b.records_subdir,
+            &task_id,
+            &pinned_task,
+            &name,
+            &mut metrics.history_bytes_read,
+        )?,
+    };
     if hash_bytes(&bytes, metrics) != expected {
         return Err(invalid("preserved artifact digest mismatch"));
     }
@@ -404,35 +660,59 @@ fn payload_digest(
     locator: &ArtifactLocator,
     metrics: &mut Metrics,
 ) -> Result<String> {
-    let (p, b, path, expected) = artifact_location(
+    let (p, b, target, expected) = artifact_location(
         &super::proof::Resolver::new(project),
         project,
         locator,
         metrics,
     )?;
     let context = basis::context(&p, &super::lineage::historical_id(&b)?, &b)?;
-    let mode = basis::git_context(&context, &["ls-tree", "-z", &b.commit, "--", &path])?;
-    if !(mode.starts_with(b"100644 blob ") || mode.starts_with(b"100755 blob ")) {
-        return Err(invalid("preserved payload is not a regular Git blob"));
+    match target {
+        ResolvedArtifact::SingleBlob { path } => {
+            let mode = basis::git_context(&context, &["ls-tree", "-z", &b.commit, "--", &path])?;
+            if !(mode.starts_with(b"100644 blob ") || mode.starts_with(b"100755 blob ")) {
+                return Err(invalid("preserved payload is not a regular Git blob"));
+            }
+            let object = format!("{}:{path}", b.commit);
+            let mut child = context
+                .command(&["cat-file", "blob", &object])?
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?;
+            let before = metrics.bytes_hashed;
+            let result = hash_stream(&mut child.stdout.take().expect("piped stdout"), metrics);
+            crate::history::record_metadata_read((metrics.bytes_hashed - before) as usize);
+            if result.is_err() {
+                let _ = child.kill();
+            }
+            let output = child.wait_with_output()?;
+            let observed = result?;
+            if !output.status.success() || observed != expected {
+                return Err(invalid("preserved payload unavailable or digest mismatch"));
+            }
+            Ok(observed)
+        }
+        ResolvedArtifact::LogicalMultipart {
+            task_id,
+            pinned_task,
+            name,
+        } => {
+            let bytes = basis::rebuild_multipart(
+                &context,
+                &b.commit,
+                &b.records_subdir,
+                &task_id,
+                &pinned_task,
+                &name,
+                &mut metrics.history_bytes_read,
+            )?;
+            let observed = hash_bytes(&bytes, metrics);
+            if observed != expected {
+                return Err(invalid("preserved payload unavailable or digest mismatch"));
+            }
+            Ok(observed)
+        }
     }
-    let object = format!("{}:{path}", b.commit);
-    let mut child = context
-        .command(&["cat-file", "blob", &object])?
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
-    let before = metrics.bytes_hashed;
-    let result = hash_stream(&mut child.stdout.take().expect("piped stdout"), metrics);
-    crate::history::record_metadata_read((metrics.bytes_hashed - before) as usize);
-    if result.is_err() {
-        let _ = child.kill();
-    }
-    let output = child.wait_with_output()?;
-    let observed = result?;
-    if !output.status.success() || observed != expected {
-        return Err(invalid("preserved payload unavailable or digest mismatch"));
-    }
-    Ok(observed)
 }
 fn parsed(bytes: &[u8]) -> Result<Manifest> {
     let manifest = decode_manifest(std::str::from_utf8(bytes).map_err(invalid)?)?;
@@ -523,13 +803,22 @@ pub fn unknown(mut r: RetentionRecord, detail: impl std::fmt::Display) -> Observ
         preservations: Vec::new(),
     }
 }
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn preflight(
     project: &Project,
+    record: &RetentionRecord,
+    manifest: Option<&Path>,
+) -> Result<()> {
+    preflight_with_task(project, None, record, manifest)
+}
+pub fn preflight_with_task(
+    project: &Project,
+    task: Option<&crate::model::Task>,
     _record: &RetentionRecord,
     manifest: Option<&Path>,
 ) -> Result<()> {
     if let Some(path) = manifest
-        && let Ok(bytes) = read_local(path, project.attachments_max_bytes)
+        && let Ok(bytes) = read_record_manifest(project, task, path)
         && let Ok(v) = strict(&bytes)
         && v.get("version").and_then(|v| v.as_u64()) != Some(1)
     {
@@ -539,8 +828,19 @@ pub fn preflight(
     }
     Ok(())
 }
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn inspect(
     project: &Project,
+    record: &RetentionRecord,
+    preserved: Option<&ArtifactLocator>,
+    manifest: Option<&Path>,
+    metrics: &mut Metrics,
+) -> Result<Observation> {
+    inspect_with_task(project, None, record, preserved, manifest, metrics)
+}
+pub fn inspect_with_task(
+    project: &Project,
+    task: Option<&crate::model::Task>,
     record: &RetentionRecord,
     preserved: Option<&ArtifactLocator>,
     manifest: Option<&Path>,
@@ -554,7 +854,7 @@ pub fn inspect(
     if record.state != "kept" {
         return Err(invalid("only kept identities can be inspected"));
     }
-    preflight(project, record, manifest)?;
+    preflight_with_task(project, task, record, manifest)?;
     let attempt = (|| -> Result<Observation> {
         let path = current_path(project, &record.path)?;
         let mut r = record.clone();
@@ -597,7 +897,7 @@ pub fn inspect(
             let m = self::manifest(&path, metrics)?;
             let mut candidate = m;
             if let Some(oldpath) = manifest {
-                let old = read_local(oldpath, project.attachments_max_bytes)?;
+                let old = read_record_manifest(project, task, oldpath)?;
                 let oldparsed = parsed(&old)?;
                 let old_hash = hash_bytes(&old, metrics);
                 if record.sha256.value() != Some(old_hash.as_str()) {
@@ -857,7 +1157,14 @@ pub fn inspect_history(
         .value()
         .map(|_| manifest_path(project, pinned, &required))
         .transpose()?;
-    let mut observation = inspect(project, &required, provided, manifest.as_deref(), metrics)?;
+    let mut observation = inspect_with_task(
+        project,
+        Some(&pinned.task),
+        &required,
+        provided,
+        manifest.as_deref(),
+        metrics,
+    )?;
     let mut proved = std::collections::BTreeSet::new();
     let mut used = Vec::new();
     if let Some(locator) = provided {

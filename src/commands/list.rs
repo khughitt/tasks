@@ -12,8 +12,8 @@ use crate::output::{
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
-    Picked, Readiness, SortKey, deferred_omission, is_candidate, paused_omissions, readiness,
-    sort_by_key, sort_list, sort_periodic, sort_ready,
+    Picked, Readiness, SortKey, deferred_omission, is_candidate, list_order, paused_omissions,
+    readiness, sort_by_key, sort_periodic, sort_ready,
 };
 use crate::repo::Project;
 use crate::scope::Scope;
@@ -111,8 +111,10 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     check_parent(&filter, &all, |_| false)?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let deps = review_deps(&mut ctx, &all)?;
     let mut tasks = all.clone();
     tasks.retain(|task| {
@@ -132,7 +134,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
                 .is_none_or(|r| task.refs.iter().any(|e| e.reference == r))
             && filter.matches(&Fields::of_task(
                 task,
-                &all,
+                &hierarchy,
                 &deps,
                 &claims,
                 &ctx.registry,
@@ -165,7 +167,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,
@@ -191,7 +193,10 @@ fn list_parked(
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let rows = super::parked::rows_with_records(&mut ctx, &all, &claims, now, waiting_on)?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    let rows =
+        super::parked::rows_with_records(&mut ctx, &all, &hierarchy, &claims, now, waiting_on)?;
     let warnings = std::mem::take(&mut ctx.warnings);
     check_parent(&filter, &all, |parent| {
         rows.iter().any(|(row, _)| {
@@ -199,7 +204,7 @@ fn list_parked(
                 .is_some_and(|fields| fields.parent.as_ref() == Some(parent))
         })
     })?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let tasks = rows
         .into_iter()
         .filter(|(_, task)| {
@@ -292,9 +297,11 @@ fn closing_hint(id: &str, status: Status) -> String {
 
 /// Ready tasks in ready order; pushes a warning per unreachable dependency. `deps` is
 /// `all`'s dependency view (docs/user-guide.md).
+#[allow(clippy::too_many_arguments)]
 pub fn ready_tasks(
     ctx: &mut ReadCtx,
     all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     deps: &crate::review::Deps,
     claims: &crate::claims::ClaimSnapshot,
     snapshots: &HashMap<String, HaltSnapshot>,
@@ -309,7 +316,7 @@ pub fn ready_tasks(
             is_candidate(task, now)
                 && filter.matches(&Fields::of_task(
                     task,
-                    all,
+                    hierarchy,
                     deps,
                     claims,
                     &ctx.registry,
@@ -338,10 +345,8 @@ pub fn ready_tasks(
             }
         }
         // A lane is a goal even before its first child exists.
-        let goal = crate::hierarchy::is_goal(
-            task,
-            !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty(),
-        );
+        let canonical = ctx.registry.canonical_id(&task.id);
+        let goal = crate::hierarchy::is_goal(task, hierarchy.child_count(&canonical) > 0);
         match readiness(task, goal, &lookup, now) {
             Readiness::Ready => ready.push(task.clone()),
             Readiness::Deferred => deferred.push(task.clone()),
@@ -353,16 +358,22 @@ pub fn ready_tasks(
     // leaves here, before the claim and park checks that warn about what they drop, and
     // passes those same checks silently, so the paused count holds only work that would
     // otherwise be offered. A deferred task in a paused lane is in neither count.
-    let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready
-        .into_iter()
-        .partition(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some());
+    let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready.into_iter().partition(|task| {
+        hierarchy
+            .paused_lane(&ctx.registry.canonical_id(&task.id))
+            .is_some()
+    });
     paused.retain(|task| {
         claims.held(&task.id).is_none()
             && !claims
                 .park(&task.id)
                 .is_some_and(|park| park.waiting_on == WaitingOn::User)
     });
-    deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
+    deferred.retain(|task| {
+        hierarchy
+            .paused_lane(&ctx.registry.canonical_id(&task.id))
+            .is_none()
+    });
     let mut me = None;
     ready.retain(|task| match claims.get(&task.id) {
         Some((claim, live)) if !live.is_stale() => {
@@ -479,9 +490,9 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
 /// claim, and park checks to `paused`; this applies the halt, `--without`, and cutoff
 /// gates the caller applies to its own list, without their warnings, then counts each
 /// task once under its lane.
-fn warn_paused(
+pub(crate) fn warn_paused(
     ctx: &mut ReadCtx,
-    all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     mut paused: Vec<Task>,
     snapshots: &HashMap<String, HaltSnapshot>,
     without: &Without,
@@ -496,7 +507,8 @@ fn warn_paused(
     }
     let mut by_lane: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
     for task in &paused {
-        if let Some(lane) = crate::hierarchy::paused_lane(all, task, &ctx.registry) {
+        let canonical = ctx.registry.canonical_id(&task.id);
+        if let Some(lane) = hierarchy.paused_lane(&canonical) {
             by_lane
                 .entry(lane.id.clone())
                 .or_default()
@@ -584,11 +596,15 @@ pub fn ready(
     let mut filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     check_parent(&filter, &all, |_| false)?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let deps = review_deps(&mut ctx, &all)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let mut picked = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
+    let mut picked = ready_tasks(
+        &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, &filter, now,
+    )?;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -610,7 +626,7 @@ pub fn ready(
     }
     warn_paused(
         &mut ctx,
-        &all,
+        &hierarchy,
         picked.paused,
         &snapshots,
         &without,
@@ -625,7 +641,7 @@ pub fn ready(
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts,
         warnings: ctx.warnings,
@@ -659,12 +675,17 @@ pub fn next(
     )?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    filter.resolve_under(&all, &ctx.registry)?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
     let deps = review_deps(&mut ctx, &all)?;
-    let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let candidates = super::parked::candidates(&mut ctx, &all, &deps, &claims, &filter, now)?;
+    let _ = super::parked::rows(&mut ctx, &all, &hierarchy, &claims, now)?;
+    let candidates =
+        super::parked::candidates(&mut ctx, &all, &hierarchy, &deps, &claims, &filter, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let ready = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
+    let ready = ready_tasks(
+        &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, &filter, now,
+    )?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;
@@ -704,7 +725,7 @@ pub fn next(
     let mut paused = candidates.paused;
     paused.extend(ready.paused);
     warn_paused(
-        &mut ctx, &all, paused, &snapshots, &without, cutoff, &claims,
+        &mut ctx, &hierarchy, paused, &snapshots, &without, cutoff, &claims,
     );
     let next = match pool.into_iter().next() {
         None => None,
@@ -747,8 +768,27 @@ fn claimed_elsewhere(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
-) -> Vec<(Project, Task, Vec<Task>)> {
-    let mut found = Vec::new();
+) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+    claimed_elsewhere_with(ctx, all, claims, super::parked::open_recorded)
+}
+
+fn claimed_elsewhere_with(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &crate::claims::ClaimSnapshot,
+    mut open_recorded: impl FnMut(
+        &TaskId,
+        &std::path::Path,
+    ) -> Result<Option<(Project, Task, Vec<Task>)>>,
+) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+    struct CachedCheckout {
+        project: Project,
+        scan: Vec<Task>,
+        seen_worktrees: Vec<std::path::PathBuf>,
+    }
+
+    let mut scans: Vec<CachedCheckout> = Vec::new();
+    let mut found: Vec<(usize, Task)> = Vec::new();
     for (key, (claim, liveness)) in claims.iter() {
         if liveness.is_stale() {
             continue;
@@ -766,13 +806,64 @@ fn claimed_elsewhere(
             continue;
         }
         let worktree = std::path::Path::new(&claim.worktree);
-        match super::parked::open_recorded(&id, worktree) {
-            Ok(Some(resolved)) => {
+        if let Some(at) = scans.iter().position(|entry| {
+            entry.project.prefix == id.prefix
+                && entry.seen_worktrees.iter().any(|seen| seen == worktree)
+        }) {
+            if let Some(task) = scans[at].scan.iter().find(|task| task.id == id).cloned() {
                 ctx.warnings.push(format!(
                     "{id} is claimed in {}; resume it from that checkout",
                     claim.worktree
                 ));
-                found.push(resolved);
+                found.push((at, task));
+            } else {
+                ctx.warnings.push(format!(
+                    "{id} is claimed in {}, which is unavailable",
+                    claim.worktree
+                ));
+            }
+            continue;
+        }
+        match open_recorded(&id, worktree) {
+            Ok(Some((project, task, scan))) => {
+                ctx.warnings.push(format!(
+                    "{id} is claimed in {}; resume it from that checkout",
+                    claim.worktree
+                ));
+                let record_seen = |seen: &mut Vec<std::path::PathBuf>| {
+                    let wt = worktree.to_path_buf();
+                    if !seen.contains(&wt) {
+                        seen.push(wt);
+                    }
+                    if let Ok(canon) = worktree.canonicalize()
+                        && !seen.contains(&canon)
+                    {
+                        seen.push(canon);
+                    }
+                };
+                let at = match scans.iter().position(|existing| {
+                    existing.project.prefix == project.prefix
+                        && existing.project.records == project.records
+                        && existing.project.resume_root() == project.resume_root()
+                        && existing.project.root == project.root
+                        && existing.scan.iter().any(|t| t.id == task.id)
+                }) {
+                    Some(existing) => {
+                        record_seen(&mut scans[existing].seen_worktrees);
+                        existing
+                    }
+                    None => {
+                        let mut seen_worktrees = Vec::new();
+                        record_seen(&mut seen_worktrees);
+                        scans.push(CachedCheckout {
+                            project,
+                            scan,
+                            seen_worktrees,
+                        });
+                        scans.len() - 1
+                    }
+                };
+                found.push((at, task));
             }
             Ok(None) => ctx.warnings.push(format!(
                 "{id} is claimed in {}, which is unavailable",
@@ -784,7 +875,13 @@ fn claimed_elsewhere(
             )),
         }
     }
-    found
+    (
+        scans
+            .into_iter()
+            .map(|entry| (entry.project, entry.scan))
+            .collect(),
+        found,
+    )
 }
 
 pub fn prime(
@@ -792,11 +889,30 @@ pub fn prime(
     closed: bool,
     without: Vec<String>,
     full: Option<Vec<String>>,
+    format: crate::output::Format,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(None)?;
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let prefixes = ctx.scope.prefixes();
+    let registry = ctx.registry.clone();
+    let mut membership = (format == crate::output::Format::Pretty)
+        .then(|| crate::membership::Membership::new(&registry, &prefixes, &all));
+    let hierarchy = match &mut membership {
+        Some(membership) => {
+            let records = crate::hierarchy::project_records(&all, &prefixes, &registry);
+            let mut indexes = crate::hierarchy::ProjectIndexes::new();
+            for prefix in records.keys() {
+                let index = membership
+                    .hierarchy(prefix)?
+                    .expect("preseeded project in Membership has an index");
+                indexes.insert(prefix.clone(), index);
+            }
+            crate::hierarchy::HierarchyView::new(records, indexes, &registry)
+        }
+        None => crate::hierarchy::view_of(&all, &prefixes, &registry),
+    };
     let deps = review_deps(&mut ctx, &all)?;
     let upcoming: Vec<OffsetDateTime> = all
         .iter()
@@ -826,7 +942,7 @@ pub fn prime(
     };
     let counts = Counts::of(&all);
     let (left, parked): (Vec<ParkedRow>, Vec<ParkedRow>) =
-        super::parked::rows(&mut ctx, &all, &claims, now)?
+        super::parked::rows(&mut ctx, &all, &hierarchy, &claims, now)?
             .into_iter()
             .partition(closed_after_park);
     for row in &left {
@@ -844,6 +960,7 @@ pub fn prime(
     let mut ready = ready_tasks(
         &mut ctx,
         &all,
+        &hierarchy,
         &deps,
         &claims,
         &snapshots,
@@ -858,21 +975,67 @@ pub fn prime(
         let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
         ctx.warnings.extend(without.warning(hidden));
     }
-    let mut doing: Vec<Task> = all
+    let mut doing: Vec<(Option<usize>, Task)> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.held(&task.id).is_some())
-        .cloned()
+        .map(|task| (None, task.clone()))
         .collect();
-    let elsewhere = claimed_elsewhere(&mut ctx, &all, &claims);
-    doing.extend(elsewhere.iter().map(|(_, task, _)| task.clone()));
-    // Each row read from another checkout is judged with that checkout's own scan.
-    let elsewhere_deps: Vec<_> = elsewhere
+    let (elsewhere_scans, elsewhere_rows) = claimed_elsewhere(&mut ctx, &all, &claims);
+    doing.extend(
+        elsewhere_rows
+            .into_iter()
+            .map(|(at, task)| (Some(at), task)),
+    );
+    // Each distinct checkout read from claims is judged once with its own scan and cache.
+    let elsewhere_deps: Vec<_> = elsewhere_scans
         .iter()
-        .map(|(project, _, scan)| recorded_review_deps(&mut ctx, project, scan))
+        .map(|(project, scan)| recorded_review_deps(&mut ctx, project, scan))
         .collect::<Result<_>>()?;
-    sort_list(&mut doing);
-    let roadmap = crate::hierarchy::forest(
+    let elsewhere_activities: Vec<_> = elsewhere_scans
+        .iter()
+        .map(|(_, scan)| {
+            let mut activity = crate::activity::ActivityIndex::default();
+            activity.extend_scan(scan, &registry, now);
+            activity
+        })
+        .collect();
+    let mut elsewhere_memberships: Vec<Option<crate::membership::Membership<'_>>> = elsewhere_scans
+        .iter()
+        .map(|(project, scan)| {
+            (format == crate::output::Format::Pretty).then(|| {
+                crate::membership::Membership::new(
+                    &registry,
+                    std::slice::from_ref(&project.prefix),
+                    scan,
+                )
+            })
+        })
+        .collect();
+    let mut elsewhere_views = Vec::with_capacity(elsewhere_scans.len());
+    for ((project, scan), membership_opt) in
+        elsewhere_scans.iter().zip(elsewhere_memberships.iter_mut())
+    {
+        let opened = std::slice::from_ref(&project.prefix);
+        let view = match membership_opt {
+            Some(em) => {
+                let records = crate::hierarchy::project_records(scan, opened, &registry);
+                let mut indexes = crate::hierarchy::ProjectIndexes::new();
+                for prefix in records.keys() {
+                    let index = em
+                        .hierarchy(prefix)?
+                        .expect("preseeded project in Membership has an index");
+                    indexes.insert(prefix.clone(), index);
+                }
+                crate::hierarchy::HierarchyView::new(records, indexes, &registry)
+            }
+            None => crate::hierarchy::view_of(scan, opened, &registry),
+        };
+        elsewhere_views.push(view);
+    }
+    doing.sort_by(|(_, a), (_, b)| list_order(a, b));
+    let mut roadmap = crate::hierarchy::forest(
         &all,
+        &hierarchy,
         &deps,
         None,
         false,
@@ -884,14 +1047,17 @@ pub fn prime(
     // closeout is an invitation to run `done`, so it holds only what `done` will accept.
     // Children are one gate and dependencies are the other; listing a goal its dependencies
     // still hold would invite a close the tool then refuses with `open_dependencies`. Held
-    // goals are named in a warning instead, so none of them goes silent.
+    // goals are named in a warning instead, so none of them goes silent. A goal still
+    // waiting on one of its own declared pieces is unfinished work, not held, so it stays
+    // out silently (docs/task-model.md). A childless lane is not a candidate.
     let mut closeout: Vec<Task> = Vec::new();
     let mut held: Vec<String> = Vec::new();
-    for task in &all {
+    'goals: for task in &all {
+        let canonical = ctx.registry.canonical_id(&task.id);
         // Current contract (docs/task-model.md): todo, doing, or blocked; an idea is open but not a candidate
         if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
-            || crate::hierarchy::children(&all, &task.id, &ctx.registry).is_empty()
-            || !crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry).is_empty()
+            || (task.pieces.is_empty() && hierarchy.child_count(&canonical) == 0)
+            || hierarchy.open_descendant_count(&canonical) > 0
         {
             continue;
         }
@@ -900,6 +1066,9 @@ pub fn prime(
             // An unreachable dependency counts as open, exactly as `done` treats it: what
             // we cannot resolve, we cannot call closed.
             if !satisfied(&ctx, &all, dependency)? {
+                if crate::pieces::is_piece(&ctx.registry, task, dependency) {
+                    continue 'goals;
+                }
                 open.push(dependency.to_string());
             }
         }
@@ -907,8 +1076,8 @@ pub fn prime(
             closeout.push(task.clone());
         } else {
             held.push(format!(
-                "{} has no open children but is held by open dependencies: {}; it joins \
-                 closeout when they close",
+                "{} has no open children or pieces but is held by open prerequisites: {}; it \
+                 joins closeout when they close",
                 task.id,
                 open.join(", ")
             ));
@@ -926,8 +1095,8 @@ pub fn prime(
     retain_unheld(&mut ctx, &mut ready, now)?;
     ctx.warnings.extend(held);
     // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
-    let lanes = super::lanes::rows(
-        &mut ctx, &all, &deps, &claims, &snapshots, cutoff, &without, now,
+    let mut lanes = super::lanes::rows(
+        &mut ctx, &all, &hierarchy, &deps, &claims, &snapshots, cutoff, &without, now,
     )?;
     let wide = matches!(ctx.scope, Scope::All { .. });
     for project in ctx.scope.projects() {
@@ -977,6 +1146,62 @@ pub fn prime(
             ),
         });
     }
+    let mut ready_rows: Vec<TaskSummary> = ready
+        .iter()
+        .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &registry, now))
+        .collect();
+    let mut doing_rows: Vec<TaskSummary> = Vec::with_capacity(doing.len());
+    for (source, task) in &doing {
+        let (view, row_deps) = source.map_or((&hierarchy, &deps), |at| {
+            (&elsewhere_views[at], &elsewhere_deps[at])
+        });
+        let mut row = TaskSummary::of(task, view, row_deps, Some(&claims), &registry, now);
+        if let Some(at) = *source {
+            row.activity = elsewhere_activities[at].get(&task.id);
+            if let Some(em) = elsewhere_memberships[at].as_mut() {
+                row.goal_work = crate::output::GoalWork::of(task, row.child_count, em)?;
+            }
+        } else if let Some(membership) = membership.as_mut() {
+            row.goal_work = crate::output::GoalWork::of(task, row.child_count, membership)?;
+        }
+        doing_rows.push(row);
+    }
+    let mut closeout_rows: Vec<TaskSummary> = closeout
+        .iter()
+        .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &registry, now))
+        .collect();
+
+    if let Some(membership) = membership.as_mut() {
+        for (task, row) in ready.iter().zip(ready_rows.iter_mut()) {
+            row.goal_work = crate::output::GoalWork::of(task, row.child_count, membership)?;
+        }
+        for lane_row in &mut lanes {
+            let parsed = TaskId::parse(&lane_row.lane.id).expect("lane summary id is valid");
+            let canonical = registry.canonical_id(&parsed);
+            let lane_task = hierarchy
+                .get(&canonical)
+                .expect("lane came from captured hierarchy");
+            lane_row.lane.goal_work =
+                crate::output::GoalWork::of(lane_task, lane_row.lane.child_count, membership)?;
+        }
+        super::tree::populate_tree_goal_work(&mut roadmap, &hierarchy, &registry, membership)?;
+        for (task, row) in closeout.iter().zip(closeout_rows.iter_mut()) {
+            row.goal_work = crate::output::GoalWork::of(task, row.child_count, membership)?;
+        }
+        for warning in membership.take_warnings() {
+            if !ctx.warnings.contains(&warning) {
+                ctx.warnings.push(warning);
+            }
+        }
+    }
+    for em in elsewhere_memberships.iter_mut().flatten() {
+        for warning in em.take_warnings() {
+            if !ctx.warnings.contains(&warning) {
+                ctx.warnings.push(warning);
+            }
+        }
+    }
+
     let colors = ctx.project_colors();
     let mut out = Output::Prime(Box::new(PrimeOut {
         summary: None,
@@ -990,35 +1215,12 @@ pub fn prime(
         periodic,
         deferred,
         closed,
-        ready: ready
-            .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
-            .collect(),
+        ready: ready_rows,
         parked,
         lanes,
-        doing: doing
-            .iter()
-            .map(|task| {
-                let source = elsewhere
-                    .iter()
-                    .position(|(_, found, _)| found.id == task.id);
-                let (scan, deps) = source.map_or((all.as_slice(), &deps), |at| {
-                    (elsewhere[at].2.as_slice(), &elsewhere_deps[at])
-                });
-                let mut row = TaskSummary::of(task, scan, deps, Some(&claims), &ctx.registry, now);
-                if source.is_some() {
-                    let mut activity = crate::activity::ActivityIndex::default();
-                    activity.extend_scan(scan, &ctx.registry, now);
-                    row.activity = activity.get(&task.id);
-                }
-                row
-            })
-            .collect(),
+        doing: doing_rows,
         roadmap,
-        closeout: closeout
-            .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
-            .collect(),
+        closeout: closeout_rows,
         halts,
         warnings: ctx.warnings,
     }));
@@ -1076,5 +1278,218 @@ mod tests {
             Some(false)
         );
         assert!(satisfied(&ctx, std::slice::from_ref(&done), &alias).unwrap());
+    }
+
+    #[test]
+    fn claimed_elsewhere_separates_shared_roots_and_reuses_symlinked_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared_code = dir.path().join("shared-code");
+        std::fs::create_dir_all(&shared_code).unwrap();
+        let shared_code = shared_code.canonicalize().unwrap();
+
+        let make_detached = |name: &str| -> crate::repo::Project {
+            let rec = dir.path().join(name);
+            let _ = crate::repo::Project::init(&rec, "aa", None).unwrap();
+            std::fs::write(
+                rec.join(crate::repo::CONFIG_REL),
+                format!(
+                    "prefix = \"aa\"\n\n[checkout]\npath = \"{}\"\nkind = \"detached\"\n",
+                    shared_code.display()
+                ),
+            )
+            .unwrap();
+            crate::repo::Project::open(&rec).unwrap()
+        };
+
+        let main_proj = make_detached("main-rec");
+        let det_1 = make_detached("det-rec-1");
+        let det_2 = make_detached("det-rec-2");
+        assert_eq!(det_1.root, det_2.root);
+        assert_ne!(det_1.records, det_2.records);
+
+        let mut registry = crate::registry::Registry::default();
+        registry.register("aa", &shared_code).unwrap();
+
+        let t1 = crate::commands::add::blank(&det_1, "Det 1 task A".into(), Status::Doing, None)
+            .unwrap();
+        let t2 = crate::commands::add::blank(&det_1, "Det 1 task B".into(), Status::Doing, None)
+            .unwrap();
+        let t3 = crate::commands::add::blank(&det_2, "Det 2 task C".into(), Status::Doing, None)
+            .unwrap();
+        det_1.write_task(&registry, &t1).unwrap();
+        det_1.write_task(&registry, &t2).unwrap();
+        det_2.write_task(&registry, &t3).unwrap();
+
+        let symlink_wt_1 = dir.path().join("symlink-det-1");
+        std::os::unix::fs::symlink(&det_1.records, &symlink_wt_1).unwrap();
+
+        let make_claim = |wt: &std::path::Path| {
+            (
+                crate::claims::Claim {
+                    owner: "worker".into(),
+                    session: "s1".into(),
+                    root_session: None,
+                    pid: None,
+                    pid_start: None,
+                    boot_id: None,
+                    pid_view: None,
+                    host: "h".into(),
+                    worktree: wt.display().to_string(),
+                    started: "2026-11-17T00:00:00Z".into(),
+                    seen: "2026-11-17T00:00:00Z".into(),
+                    holds: vec![],
+                },
+                crate::claims::Liveness::Live,
+            )
+        };
+
+        // 1. Two claims via symlink_wt_1 + one claim in det_2 (which shares project.root with det_1):
+        let mut by_id = BTreeMap::new();
+        by_id.insert(t1.id.to_string(), make_claim(&symlink_wt_1));
+        by_id.insert(t2.id.to_string(), make_claim(&symlink_wt_1));
+        by_id.insert(t3.id.to_string(), make_claim(&det_2.records));
+        let claims =
+            crate::claims::ClaimSnapshot::from_parts(by_id, BTreeMap::new(), BTreeMap::new());
+
+        let mut ctx = ReadCtx {
+            host: std::sync::Arc::new(crate::config::HostConfig::default()),
+            scope: Scope::Local(Box::new(main_proj.clone())),
+            registry,
+            warnings: vec![],
+            shorthand: crate::shorthand::Shorthand::new(dir.path().to_path_buf()),
+        };
+
+        let mut open_calls = 0usize;
+        let (scans, found) = claimed_elsewhere_with(&mut ctx, &[], &claims, |id, wt| {
+            open_calls += 1;
+            crate::commands::parked::open_recorded(id, wt)
+        });
+
+        assert_eq!(
+            open_calls, 2,
+            "second claim in symlink_wt_1 must reuse cached scan without re-running open_recorded"
+        );
+        assert_eq!(
+            scans.len(),
+            2,
+            "distinct Kind::Detached records checkouts sharing project.root must keep separate scans"
+        );
+        assert_eq!(found.len(), 3);
+        for (at, task) in &found {
+            assert!(
+                scans[*at].1.iter().any(|s| s.id == task.id),
+                "paired scan must contain task {}",
+                task.id
+            );
+        }
+
+        // 2. Two Kind::Detached code worktrees sharing both project.root and project.records
+        //    while differing in project.worktree (resume_root()):
+        let code_wt_a = dir.path().join("code-wt-a");
+        let code_wt_b = dir.path().join("code-wt-b");
+        std::fs::create_dir_all(&code_wt_a).unwrap();
+        std::fs::create_dir_all(&code_wt_b).unwrap();
+        let mut by_id_wt = BTreeMap::new();
+        by_id_wt.insert(t1.id.to_string(), make_claim(&code_wt_a));
+        by_id_wt.insert(t2.id.to_string(), make_claim(&code_wt_b));
+        let claims_wt =
+            crate::claims::ClaimSnapshot::from_parts(by_id_wt, BTreeMap::new(), BTreeMap::new());
+        let scan_1 = det_1.scan().unwrap();
+        let (wt_scans, wt_found) = claimed_elsewhere_with(&mut ctx, &[], &claims_wt, |id, wt| {
+            let mut proj = det_1.clone();
+            proj.worktree = Some(wt.canonicalize().unwrap());
+            let task = scan_1.iter().find(|t| t.id == *id).cloned().unwrap();
+            Ok(Some((proj, task, scan_1.clone())))
+        });
+        assert_eq!(
+            wt_scans.len(),
+            2,
+            "distinct code worktrees with different resume_root() must stay distinct for Resolver"
+        );
+        assert_ne!(wt_scans[0].0.resume_root(), wt_scans[1].0.resume_root());
+        assert_eq!(wt_found.len(), 2);
+
+        // 3. Deterministic ID order (early_id < mid_id < late_id):
+        //    - early_id claimed via symlink_wt_1 (det_1, whose resume_root() == shared_code!)
+        //    - mid_id claimed via canonical det_1.records (reuses det_1 without rescan)
+        //    - late_id claimed at shared_code (resolves via git/registry to det_2, NOT det_1!)
+        let mut t_early =
+            crate::commands::add::blank(&det_1, "Early det_1".into(), Status::Doing, None).unwrap();
+        t_early.id = TaskId::parse("aa-000001").unwrap();
+        let mut t_mid =
+            crate::commands::add::blank(&det_1, "Mid det_1".into(), Status::Doing, None).unwrap();
+        t_mid.id = TaskId::parse("aa-000002").unwrap();
+        let mut t_late =
+            crate::commands::add::blank(&det_2, "Late det_2".into(), Status::Doing, None).unwrap();
+        t_late.id = TaskId::parse("aa-fffffe").unwrap();
+        det_1.write_task(&ctx.registry, &t_early).unwrap();
+        det_1.write_task(&ctx.registry, &t_mid).unwrap();
+        det_2.write_task(&ctx.registry, &t_late).unwrap();
+
+        let det_2_scan = det_2.scan().unwrap();
+        let mut by_id_order = BTreeMap::new();
+        by_id_order.insert(t_early.id.to_string(), make_claim(&symlink_wt_1));
+        by_id_order.insert(t_mid.id.to_string(), make_claim(&det_1.records));
+        by_id_order.insert(t_late.id.to_string(), make_claim(&shared_code));
+        let claims_order =
+            crate::claims::ClaimSnapshot::from_parts(by_id_order, BTreeMap::new(), BTreeMap::new());
+        ctx.warnings.clear();
+        let mut order_opens = 0usize;
+        let (ord_scans, ord_found) =
+            claimed_elsewhere_with(&mut ctx, &[], &claims_order, |id, wt| {
+                order_opens += 1;
+                if wt == shared_code {
+                    let task = det_2_scan.iter().find(|t| t.id == *id).cloned().unwrap();
+                    Ok(Some((det_2.clone(), task, det_2_scan.clone())))
+                } else {
+                    crate::commands::parked::open_recorded(id, wt)
+                }
+            });
+        assert_eq!(
+            order_opens, 2,
+            "canonical det_1.records must reuse symlink_wt_1 scan while shared_code opens det_2"
+        );
+        assert_eq!(
+            ord_scans.len(),
+            2,
+            "shared_code claim must not falsely match det_1's resume_root()"
+        );
+        assert_eq!(
+            ord_found.len(),
+            3,
+            "late_id at shared_code must not be dropped as unavailable; warnings: {:?}",
+            ctx.warnings
+        );
+
+        // 4. Post-open structural guard: if a second symlink opens the same checkout after a
+        //    concurrent write added a new task absent from the first captured scan, it keeps a
+        //    scan containing that task rather than pairing it with the stale scan.
+        let symlink_wt_1b = dir.path().join("symlink-det-1b");
+        std::os::unix::fs::symlink(&det_1.records, &symlink_wt_1b).unwrap();
+        let mut t_added =
+            crate::commands::add::blank(&det_1, "Concurrent task".into(), Status::Doing, None)
+                .unwrap();
+        t_added.id = TaskId::parse("aa-ffffff").unwrap();
+        let stale_scan = det_1.scan().unwrap();
+        let mut fresh_scan = stale_scan.clone();
+        fresh_scan.push(t_added.clone());
+        let mut by_id_race = BTreeMap::new();
+        by_id_race.insert(t_early.id.to_string(), make_claim(&symlink_wt_1));
+        by_id_race.insert(t_added.id.to_string(), make_claim(&symlink_wt_1b));
+        let claims_race =
+            crate::claims::ClaimSnapshot::from_parts(by_id_race, BTreeMap::new(), BTreeMap::new());
+        let (race_scans, race_found) =
+            claimed_elsewhere_with(&mut ctx, &[], &claims_race, |id, wt| {
+                if wt == symlink_wt_1 {
+                    Ok(Some((det_1.clone(), t_early.clone(), stale_scan.clone())))
+                } else {
+                    assert_eq!(*id, t_added.id);
+                    Ok(Some((det_1.clone(), t_added.clone(), fresh_scan.clone())))
+                }
+            });
+        assert_eq!(race_scans.len(), 2);
+        for (at, task) in &race_found {
+            assert!(race_scans[*at].1.iter().any(|s| s.id == task.id));
+        }
     }
 }

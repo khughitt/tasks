@@ -1,3 +1,4 @@
+pub(crate) mod artifacts;
 pub mod basis;
 pub mod model;
 pub mod state;

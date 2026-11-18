@@ -412,6 +412,9 @@ pub struct DepInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
     pub resolved: bool,
+    /// Pretty-only: this dependency is one of the task's declared pieces.
+    #[serde(skip)]
+    pub piece: bool,
 }
 
 #[derive(Serialize)]
@@ -536,6 +539,11 @@ pub struct ShowFields {
     pub related_to: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub follows_tasks: Vec<DepInfo>,
+    /// Tasks whose `depends` names this one, open and closed; moved tombstones omitted.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependents: Vec<Related>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub followed_by: Vec<Related>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub wake_targets: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -593,6 +601,12 @@ pub struct HaltRow {
 /// Each in-scope prefix's configured colour (docs/user-guide.md).
 pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalWork {
+    pub pieces: crate::goals::Pieces,
+    pub unresolved_pieces: usize,
+}
+
 #[derive(Serialize, Clone)]
 pub struct TaskSummary {
     pub id: String,
@@ -601,6 +615,12 @@ pub struct TaskSummary {
     pub project_color: Option<crate::palette::Rgb>,
     #[serde(skip)]
     pub activity: Option<crate::style::Activity>,
+    #[serde(skip)]
+    pub goal_work: Option<GoalWork>,
+    /// `hierarchy::is_goal` against the scan the row came from; drives the pretty type
+    /// mark only, so JSON is unchanged.
+    #[serde(skip)]
+    pub goal: bool,
     pub status: Status,
     pub priority: u8,
     #[serde(skip_serializing_if = "Option::is_none")]

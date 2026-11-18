@@ -57,25 +57,11 @@ pub fn add_dependencies(
         }
         match resolver.resolve_canonical_task(&dependency)? {
             None => {
-                let error = Error::UnresolvableId(dependency.to_string());
-                if dependency.prefix == ctx.project.prefix {
-                    return Err(error);
-                }
-                let next = match crate::scope::config_dir(&ctx.registry, &dependency.prefix) {
-                    None => format!(
-                        "; project {} is not registered on this host; check tasks projects --paths and register its authoritative records before linking",
-                        dependency.prefix
-                    ),
-                    Some(dir) if !crate::scope::has_config(&dir)? => format!(
-                        "; registered records at {} are unavailable; restore or repair that project's registration before linking",
-                        dir.display()
-                    ),
-                    Some(dir) => format!(
-                        "; foreign dependencies read registered records at {}, even when invoked from the upstream worktree; this record is absent there. Check the ID; if it exists only in a worktree, coordinate with its owner to publish the record and needed artifacts there before linking, and publish completion before expecting downstream readiness. A tasks show location hint does not publish records; see docs/project-operations.md#publish-records-for-cross-project-dependencies",
-                        dir.display()
-                    ),
-                };
-                return Err(error.with_suffix(&next));
+                return Err(crate::dependency::unresolvable(
+                    &ctx.registry,
+                    &ctx.project.prefix,
+                    &dependency,
+                )?);
             }
             Some(found) => crate::tombstone::refuse_reference(&found, "dependency")?,
         }
@@ -150,6 +136,15 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
                 "{} does not depend on {dependency}",
                 task.id
             )));
+        }
+        // A piece must stay a dependency, so removing the dependency unmarks the piece.
+        if crate::pieces::is_piece(&ctx.registry, &task, dependency) {
+            task.pieces
+                .retain(|piece| ctx.registry.canonical_id(piece) != *dependency);
+            ctx.warnings.push(format!(
+                "{dependency} was a piece of {}; removing the dependency unmarked it as a piece",
+                task.id
+            ));
         }
     }
     let resolver = Resolver::new(&ctx.project, &ctx.registry, &ctx.host);

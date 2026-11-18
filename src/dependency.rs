@@ -3,9 +3,33 @@
 //! lookup, so which copy of a record answers stays the caller's policy. See
 //! docs/task-model.md (existing contracts).
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
+
+/// `Error::UnresolvableId` with the registration, availability or worktree-publication
+/// suffix for foreign targets; shared by `dep` and `pieces` writers.
+pub(crate) fn unresolvable(registry: &Registry, own_prefix: &str, id: &TaskId) -> Result<Error> {
+    let error = Error::UnresolvableId(id.to_string());
+    if id.prefix == registry.canonical_prefix(own_prefix) {
+        return Ok(error);
+    }
+    let next = match crate::scope::config_dir(registry, &id.prefix) {
+        None => format!(
+            "; project {} is not registered on this host; check tasks projects --paths and register its authoritative records before linking",
+            id.prefix
+        ),
+        Some(dir) if !crate::scope::has_config(&dir)? => format!(
+            "; registered records at {} are unavailable; restore or repair that project's registration before linking",
+            dir.display()
+        ),
+        Some(dir) => format!(
+            "; foreign dependencies read registered records at {}, even when invoked from the upstream worktree; this record is absent there. Check the ID; if it exists only in a worktree, coordinate with its owner to publish the record and needed artifacts there before linking, and publish completion before expecting downstream readiness. A tasks show location hint does not publish records; see docs/project-operations.md#publish-records-for-cross-project-dependencies",
+            dir.display()
+        ),
+    };
+    Ok(error.with_suffix(&next))
+}
 
 /// What one resolved dependency says. Callers keep their own handling of `Unresolved`;
 /// none of them may treat it as satisfied.
@@ -45,6 +69,22 @@ pub fn verdict(task: Option<&Task>) -> Verdict {
         Some(_) => Verdict::Open,
         None => Verdict::Unresolved,
     }
+}
+
+/// Every task in `scan` whose `depends` names `target` under any spelling (a retired
+/// prefix counts). The match is literal: it does not follow move chains. `target` must
+/// already be canonical; it is not canonicalized again (see `Registry::canonical_id`).
+/// Shared by `show`'s dependents and `move`'s inbound inventory.
+pub fn dependents<'a>(
+    registry: &'a Registry,
+    scan: &'a [Task],
+    target: &'a TaskId,
+) -> impl Iterator<Item = &'a Task> + 'a {
+    scan.iter().filter(move |task| {
+        task.depends
+            .iter()
+            .any(|dep| registry.canonical_id(dep) == *target)
+    })
 }
 
 #[cfg(test)]

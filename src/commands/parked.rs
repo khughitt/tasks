@@ -20,10 +20,23 @@ pub enum Prefer {
 pub fn rows(
     ctx: &mut ReadCtx,
     all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
 ) -> Result<Vec<ParkedRow>> {
-    rows_preferring(ctx, all, claims, now, Prefer::Registered, None)
+    Ok(sourced_rows(
+        ctx,
+        all,
+        hierarchy,
+        claims,
+        now,
+        Prefer::Registered,
+        None,
+        None,
+    )?
+    .into_iter()
+    .map(|(row, _)| row)
+    .collect())
 }
 
 pub fn rows_preferring(
@@ -34,10 +47,14 @@ pub fn rows_preferring(
     prefer: Prefer,
     reason: Option<Reason>,
 ) -> Result<Vec<ParkedRow>> {
-    Ok(sourced_rows(ctx, all, claims, now, prefer, reason, None)?
-        .into_iter()
-        .map(|(row, _)| row)
-        .collect())
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(all, &prefixes, &ctx.registry);
+    Ok(
+        sourced_rows(ctx, all, &hierarchy, claims, now, prefer, reason, None)?
+            .into_iter()
+            .map(|(row, _)| row)
+            .collect(),
+    )
 }
 
 /// `rows`, each with the record its row was built from: the registered copy or the one in
@@ -46,16 +63,28 @@ pub fn rows_preferring(
 pub fn rows_with_records(
     ctx: &mut ReadCtx,
     all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
     waiting_on: Option<WaitingOn>,
 ) -> Result<Vec<(ParkedRow, Option<Task>)>> {
-    sourced_rows(ctx, all, claims, now, Prefer::Registered, None, waiting_on)
+    sourced_rows(
+        ctx,
+        all,
+        hierarchy,
+        claims,
+        now,
+        Prefer::Registered,
+        None,
+        waiting_on,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sourced_rows(
     ctx: &mut ReadCtx,
     all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
     prefer: Prefer,
@@ -85,9 +114,9 @@ fn sourced_rows(
                 continue;
             }
         };
-        let registered = all.iter().find(|task| task.id == id).map(|task| {
+        let registered = hierarchy.get(&id).map(|task| {
             (
-                resolved_row(task, all, &deps, claims, &ctx.registry, now),
+                resolved_row(task, hierarchy, &deps, claims, &ctx.registry, now),
                 task.clone(),
             )
         });
@@ -114,14 +143,14 @@ fn sourced_rows(
 
 fn resolved_row(
     task: &Task,
-    all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     deps: &crate::review::Deps,
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
 ) -> ParkedRow {
     ParkedRow::resolved(
-        TaskSummary::of(task, all, deps, Some(claims), registry, now),
+        TaskSummary::of(task, hierarchy, deps, Some(claims), registry, now),
         Phase::of(task),
     )
 }
@@ -186,7 +215,16 @@ fn resolve_recorded(
         return Ok(None);
     };
     let deps = super::list::recorded_review_deps(ctx, &project, &scan)?;
-    let mut summary = TaskSummary::of(&task, &scan, &deps, Some(claims), &ctx.registry, now);
+    let scan_hierarchy =
+        crate::hierarchy::view_of(&scan, std::slice::from_ref(&project.prefix), &ctx.registry);
+    let mut summary = TaskSummary::of(
+        &task,
+        &scan_hierarchy,
+        &deps,
+        Some(claims),
+        &ctx.registry,
+        now,
+    );
     summary.activity =
         crate::activity::ActivityIndex::of_scan(&scan, &ctx.registry, now).get(&task.id);
     let row = ParkedRow::resolved(summary, Phase::of(&task));
@@ -230,6 +268,7 @@ pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Ta
 pub fn candidates(
     ctx: &mut ReadCtx,
     all: &[Task],
+    hierarchy: &crate::hierarchy::HierarchyView<'_>,
     deps: &crate::review::Deps,
     claims: &ClaimSnapshot,
     filter: &TaskFilter,
@@ -241,7 +280,7 @@ pub fn candidates(
     for task in all {
         if !filter.matches(&Fields::of_task(
             task,
-            all,
+            hierarchy,
             deps,
             claims,
             &ctx.registry,
@@ -252,13 +291,11 @@ pub fn candidates(
         let Some(park) = claims.park(&task.id) else {
             continue;
         };
+        let canonical = ctx.registry.canonical_id(&task.id);
         if park.waiting_on != WaitingOn::Agent
             || !task.status.is_open()
             || matches!(task.status, Status::Blocked | Status::Shelved)
-            || crate::hierarchy::is_goal(
-                task,
-                !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty(),
-            )
+            || crate::hierarchy::is_goal(task, hierarchy.child_count(&canonical) > 0)
         {
             continue;
         }
@@ -275,7 +312,7 @@ pub fn candidates(
         // Current contract (docs/user-guide.md): a candidate in a paused lane is set aside once it has passed
         // the dependency check; a deferred one is in neither the deferred nor the paused
         // count.
-        let in_paused_lane = crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some();
+        let in_paused_lane = hierarchy.paused_lane(&canonical).is_some();
         match (crate::defer::is_deferred(task, now), in_paused_lane) {
             (true, true) => {}
             (true, false) => deferred.push(task.clone()),

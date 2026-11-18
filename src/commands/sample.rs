@@ -80,11 +80,13 @@ pub fn sample(
     let drawn = &pool[..take];
 
     let deps = super::list::review_deps(&mut ctx, &all)?;
+    let prefixes = ctx.scope.prefixes();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     let colors = ctx.project_colors();
     let mut out = Output::List(ListOut {
         tasks: drawn
             .iter()
-            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,

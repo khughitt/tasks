@@ -515,16 +515,56 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 && dependency_task.status == Status::Moved
                 && let Some(to) = dependency_task.moved_to.clone()
             {
-                let detail = match crate::tombstone::follow(Some(dependency_task), &record) {
-                    Ok(Some(end)) => format!(
-                        "depends on {dependency}, which moved to {}; run `tasks dep {} --on {} --rm {dependency}`",
-                        end.id, task.id, end.id
-                    ),
-                    Ok(None) | Err(_) => format!(
-                        "depends on {dependency}, which moved to {to}; its chain cannot be followed to a live record here"
-                    ),
-                };
-                warnings.push(finding(Some(task), file.clone(), "moved_dep", detail));
+                let end = crate::tombstone::follow(Some(dependency_task), &record);
+                match end {
+                    // A piece that moved into this project is now same-project work, which
+                    // belongs under the goal as a child.
+                    Ok(Some(end))
+                        if crate::pieces::is_piece(&ctx.registry, task, dependency)
+                            && ctx.registry.canonical_id(&end.id).prefix
+                                == ctx.registry.canonical_id(&task.id).prefix =>
+                    {
+                        warnings.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "piece_now_local",
+                            format!(
+                                "piece {dependency} moved to {} in this project; run `tasks dep {} --rm {dependency}`, then `tasks edit {} --parent {}`",
+                                end.id, task.id, end.id, task.id
+                            ),
+                        ));
+                    }
+                    // A piece keeps its mark on the successor: declare it first, then drop
+                    // the tombstone edge, which unmarks the old spelling.
+                    Ok(Some(end)) if crate::pieces::is_piece(&ctx.registry, task, dependency) => {
+                        warnings.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "moved_dep",
+                            format!(
+                                "piece {dependency} moved to {}; run `tasks edit {} --piece {}`, then `tasks dep {} --rm {dependency}`",
+                                end.id, task.id, end.id, task.id
+                            ),
+                        ));
+                    }
+                    Ok(Some(end)) => warnings.push(finding(
+                        Some(task),
+                        file.clone(),
+                        "moved_dep",
+                        format!(
+                            "depends on {dependency}, which moved to {}; run `tasks dep {} --on {} --rm {dependency}`",
+                            end.id, task.id, end.id
+                        ),
+                    )),
+                    Ok(None) | Err(_) => warnings.push(finding(
+                        Some(task),
+                        file.clone(),
+                        "moved_dep",
+                        format!(
+                            "depends on {dependency}, which moved to {to}; its chain cannot be followed to a live record here"
+                        ),
+                    )),
+                }
             }
             if dependency_id.prefix == ctx.project.prefix {
                 if !ctx.project.task_path(&dependency_id).try_exists()? {
@@ -587,6 +627,70 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 file.clone(),
                 "follows_status",
                 "a tombstone cannot carry follows".into(),
+            ));
+        }
+        // Current contract (docs/task-model.md, "Goal pieces"): the writers refuse these, so
+        // only a hand edit lands here.
+        let own = ctx.registry.canonical_id(&task.id);
+        let mut pieces_seen = BTreeSet::new();
+        for piece in &task.pieces {
+            let id = ctx.registry.canonical_id(piece);
+            if id == own {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "self_piece",
+                    "a task cannot be its own piece".into(),
+                ));
+            } else if id.prefix == own.prefix {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "local_piece",
+                    crate::pieces::local_piece_remedy(&task.id, piece),
+                ));
+            }
+            if !pieces_seen.insert(id.clone()) {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "duplicate_piece",
+                    format!("duplicate piece {piece}"),
+                ));
+            }
+            if !task
+                .depends
+                .iter()
+                .any(|dependency| ctx.registry.canonical_id(dependency) == id)
+            {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "piece_not_dependency",
+                    format!(
+                        "piece {piece} is not a dependency; a piece must stay one: run `tasks dep {} --on {piece}`",
+                        task.id
+                    ),
+                ));
+            }
+        }
+        if !task.pieces.is_empty() && task.lane {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "lane_pieces",
+                format!(
+                    "is a lane and declares pieces ({}); a lane holds only local children",
+                    crate::pieces::listed(task)
+                ),
+            ));
+        }
+        if !task.pieces.is_empty() && task.status == Status::Moved {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "piece_status",
+                "a tombstone cannot carry pieces".into(),
             ));
         }
         for related in &task.related {
@@ -714,11 +818,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         if task.every.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
             if crate::hierarchy::is_goal(task, !kids.is_empty()) {
-                let detail = if kids.is_empty() {
-                    "is a lane and has a cadence; a goal is never ready, so the cadence can \
-                     never fire"
-                        .to_string()
-                } else {
+                let detail = if !kids.is_empty() {
                     format!(
                         "has a cadence and children ({}); a goal is never ready, so the cadence can never fire",
                         kids.iter()
@@ -726,6 +826,15 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
+                } else if !task.pieces.is_empty() {
+                    format!(
+                        "has a cadence and pieces ({}); a goal is never ready, so the cadence can never fire",
+                        crate::pieces::listed(task)
+                    )
+                } else {
+                    "is a lane and has a cadence; a goal is never ready, so the cadence can \
+                     never fire"
+                        .to_string()
                 };
                 errors.push(finding(Some(task), file.clone(), "periodic_goal", detail));
             }
@@ -757,11 +866,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             }
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
             if task.status != Status::Shelved && crate::hierarchy::is_goal(task, !kids.is_empty()) {
-                let detail = if kids.is_empty() {
-                    "is a lane and is deferred; a goal is never ready, so the deferral hides \
-                     nothing"
-                        .to_string()
-                } else {
+                let detail = if !kids.is_empty() {
                     format!(
                         "is deferred and has children ({}); a goal is never ready, so the deferral hides nothing",
                         kids.iter()
@@ -769,6 +874,15 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
+                } else if !task.pieces.is_empty() {
+                    format!(
+                        "is deferred and has pieces ({}); a goal is never ready, so the deferral hides nothing",
+                        crate::pieces::listed(task)
+                    )
+                } else {
+                    "is a lane and is deferred; a goal is never ready, so the deferral hides \
+                     nothing"
+                        .to_string()
                 };
                 errors.push(finding(Some(task), file.clone(), "deferred_goal", detail));
             }

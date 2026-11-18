@@ -200,6 +200,8 @@ pub fn read_notes(reader: impl std::io::BufRead) -> Result<Vec<String>> {
         })?;
         let text = crate::format::normalize_note_text(&line)
             .map_err(|error| Error::Validation(format!("stdin line {}: {error}", index + 1)))?;
+        crate::retained::publish::validate_appended_note_syntax(text)
+            .map_err(|error| Error::RetainedInput(format!("stdin line {}: {error}", index + 1)))?;
         texts.push(text.to_string());
     }
     if texts.is_empty() {

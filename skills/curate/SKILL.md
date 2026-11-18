@@ -1,16 +1,24 @@
 ---
 name: curate
-description: Use when asked to curate, review, tidy, or audit the task corpus (`/curate`). Samples random open tasks and runs one bounded maintenance pass over them; never part of the session protocol.
+description: Use when asked to curate, review, tidy, or audit the task corpus (`/curate`), or to sweep a whole project's open tasks (`/curate --all`, `/curate --resume`). Samples random open tasks and runs one bounded maintenance pass over them, or reviews every open task of one project in clusters; never part of the session protocol.
 ---
 
 # curate
 
-One pass improves the tasks it draws. It creates no tasks, drops none, and changes no
-priority; those are proposals for the human at the end. Invoke deliberately:
+One pass improves the tasks it draws. It creates no tasks and changes no priority. It
+refines wording, links and metadata in place, closes a stale or duplicate task itself
+under the guards in
+[Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks), and proposes
+new tasks, priority changes, open questions, missing children and guarded closures to
+the human at the end. Invoke deliberately:
 
     /curate [n] [--project <prefix> | --group <name> | --all-projects]
+    /curate --all [--project <prefix>]
+    /curate --resume <sweep-task>
 
-Default: three tasks from the current project.
+Default: three tasks from the current project. The last two forms are the whole-project
+sweep: for either, read [sweep.md](sweep.md) beside this file and follow it; a sampled
+pass does not read it.
 
 ## 1. Sample
 
@@ -58,9 +66,20 @@ retained reference document may resolve in the code tree instead.
 3. **Verdict**, exactly one:
    - `keep`: clear, current, correctly linked; nothing to change.
    - `refined`: prose or links improved; meaning unchanged.
-   - `stale`: the described thing landed, or its premise no longer holds. Proposal: drop,
-     with the commit.
-   - `duplicate`: another open task covers it. Proposal: drop or merge, naming the other id.
+   - `stale`: *Delivered* (the described thing is in the tree; evidence: the commit) or
+     *Premise gone* (what the task assumed is no longer true, such as a removed command or
+     a replaced design; evidence: the commit, closed task or document that removed the
+     premise). Closed, not proposed, unless a guard in
+     [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks) holds. A
+     task delivered only in part is not stale: rewrite it to the remainder, with the
+     delivered part and its commit stated, as a `refined` edit. An ask that another task or a design explicitly declined, or placed out of
+     scope, is neither delivered nor covered: on that ground the task is not `stale` and
+     not a `duplicate`.
+   - `duplicate`: another open task in the same project covers every ask of this one.
+     Closed after the fold-in, unless a guard in that section holds. Two tasks that
+     only overlap are not duplicates: say so in both bodies and keep both (the other
+     body only when the pass may write that task; otherwise name the overlap in the
+     summary). A design task and the task that implements it are not duplicates.
    - `decision`: not actionable without a choice the human owns. Write the questions into
      the record (step 5); the summary asks.
    - `decompose`: a goal is missing children it needs. Proposal: the children, one line
@@ -71,8 +90,11 @@ retained reference document may resolve in the code tree instead.
    - `claim` is present with `live: true` (claimed; a stale claim does not count);
    - `task.updated` differs from the stamp taken in step 1 (changed).
    This is a check, not a lock. A session that starts the task in the seconds between
-   the recheck and your write gets a prose edit and a `curate:` note on a task it holds;
-   the note says what happened. Accepted.
+   the recheck and your write gets an edit or a closure on a task it holds. Accepted.
+   A duplicate closure revalidates more than the sampled task: immediately before its
+   first write it re-reads the closing task, the survivor and each open dependent, and
+   if any fails, nothing is written and the closure is skipped with the reason (see
+   [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks)).
 5. **Edit**, only through the CLI, only these:
    - `--title`, `--body`: rewrite for clarity and brevity. Keep every fact. State the
      assumptions the text implies. Collect questions you cannot answer under one
@@ -95,20 +117,167 @@ retained reference document may resolve in the code tree instead.
    - `--process`: fill a missing choice with evidence. Use direct when the task or
      reviewed plan settles outcome, approach, and verification; planned when written
      design and plan reviews are needed. Never infer it from size, complexity,
-     parentage, or document presence; a link is not evidence of approval. Include
-     the reason in the pass's audit note. This does not change status or expand
-     the sample, and an unassessed todo does not require a backfill sweep.
+     parentage, or document presence; a link is not evidence of approval. Record the
+     reason in the `curate: refined` process note (step 6). This does not change
+     status or expand the sample, and an unassessed todo does not require a backfill
+     sweep.
    - `--tag`: add a tag the project already uses (`tasks -C <root> tags`) when it
      clearly applies. Never invent one.
-   Never: status, priority, `--parallel`, `--source`, `add`, `drop`, or `tasks/*.md`
-   by hand.
-6. **Note.** Exactly one:
+   Never: status, priority, `--parallel`, `--source`, `add`, or `tasks/*.md` by hand.
+   `drop` only as [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks)
+   says, and `--origin` only on a duplicate's survivor, as that section says.
+6. **Note.** Only what a later reader of the task needs. `<pass>` is the sweep task's id
+   in a sweep and the words `sampled pass` otherwise. Run each form as
+   `tasks -C <root> ...` (§2).
+   - `keep` writes nothing.
+   - `refined` makes its edit and writes no note. The exception is a filled `--process`,
+     whose reason the tasks skill requires on the record:
 
-       tasks -C <root> note <id> "curate: <verdict>; <what changed>[; proposal: <text>]"
+         tasks note <id> "curate: refined; <pass>; process <direct|planned>: <reason>"
 
-   The `proposal:` segment is present only for `stale`, `duplicate`, `decision`, and
-   `decompose`. The note is the audit trail and moves the task out of the pool for the
-   age window.
+   - A closed `stale` or `duplicate` task's evidence is its drop message; a survivor gets
+     one absorb note (see [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks)).
+   - `decision`, `decompose`, and a `stale` or `duplicate` task a guard keeps open get
+     the proposal note, which is how a pending decision is found:
+
+         tasks note <id> "curate: <verdict>; <pass>; <what changed, or guard: <which>>; proposal: <text>"
+
+   No other note or drop message contains the text `proposal:`.
+
+## Closing stale and duplicate tasks
+
+Closing is `tasks drop <id> "<message>"`, never an edit of status. The message starts
+`curate: stale;` or `curate: duplicate;`, names the pass, and carries the evidence, so
+the reason is in the record. Run each form as `tasks -C <root> ...` (§2):
+
+    tasks drop <id> "curate: stale; <pass>; delivered: <commit> <one line>"
+    tasks drop <id> "curate: stale; <pass>; premise gone: <commit, task id or document> <one line>"
+    tasks drop <id> "curate: duplicate; <pass>; of <survivor-id>; folded in: <what, or nothing>"
+
+A pass closes only a task it drew: in a sampled pass, a sampled task.
+
+Before a *premise gone* or *duplicate* closure, read
+`tasks show <id> --all-projects` for the closing task. Its `dependents` field and any
+warning that a registered project is unreachable decide the guards below and the
+re-point step.
+
+Before the drop, record the task's status, review marks (`reviewed`, `awaiting_user`)
+and deferral date for the undo: the drop clears them.
+
+**A duplicate.** Before the drop:
+
+- Pick the survivor: the task with more settled structure (scoped, linked to a spec or
+  plan, parented, depended on) stays; on a tie, the older. A task that carries
+  attachments is the survivor regardless: attachments and `files:` references resolve
+  only on their own task, and curate does not attach. When the survivor is the task
+  the pass drew and the other was not drawn, the pass closes nothing: the drawn
+  task's verdict is `keep` or `refined`, and the other task is named in the summary's
+  **proposed closures** with `not sampled` in place of a guard.
+- Fold in anything only the closing task says: facts, a reproduction, the original
+  report text, as a `--body` edit of the survivor. A duplicate feedback report folds in
+  as a recurrence: its `from:` tag (`--tag`) and a one-line note on the survivor, which
+  is the absorb note below.
+- Re-point every open task that depends on the closing one to the survivor:
+  `tasks dep <dependent> --on <survivor-id> --rm <closed-id>`. Dependents are the
+  `dependents` field of `tasks show <id> --all-projects` read above; `search` does not
+  read dependencies. That field lists closed dependents too. They are history and are left
+  as they are: re-pointing one would rewrite a finished record and leave it depending
+  on open work.
+- Keep the user's ask visible. When the closing task carries the user's words (read as
+  the last guard below reads them) and the survivor's origin is `agent` or unset, set
+  the survivor's origin to what the merged record now is by the tasks skill's
+  definition: `user` when every ask in it is the user's (a survivor whose origin is
+  unset only because it predates the field, and which holds no ask an agent added),
+  `mixed` otherwise. Write `tasks edit <survivor-id> --origin <user|mixed>` with the
+  stamped evidence note the tasks skill requires for an origin correction (below).
+  Without this the ask leaves the goals report, and a later pass could close the
+  survivor on a "premise gone" judgment the guard was meant to stop. This is one more
+  permitted edit, for this case only.
+- Revalidate everything the closure writes. Take each one's `task.updated` when you
+  first read it. Immediately before its first write the pass re-reads the closing task,
+  the survivor and each open dependent, and applies §3 step 4 to each (status — `shelved`
+  is also allowed on the survivor and open dependents — live claim, unchanged since read;
+  a claim that cannot be verified reads as live). If any fails, nothing is written and
+  the closure is skipped with the reason; a sweep retries it at its close.
+
+Then write, in this order: the fold-in, the origin edit and its note, the re-pointed
+dependents, the absorb note, and the drop last:
+
+    tasks note <survivor-id> "origin: <user|mixed> after absorbing <closed-id>; <pass>; <evidence>" --stamp
+    tasks note <survivor-id> "curate: absorbed <closed-id>; <pass>; <what was folded in>; dependents re-pointed: <ids, or none>"
+
+**Guards.** The pass does not close, and records a proposal instead, when:
+
+- the task is `doing`, has a live claim or a park, has open children, is a lane, is
+  tagged `halt`, or recurs (`every`);
+- the task has unsettled retained custody: off-tree evidence, a plan workspace or a
+  worktree it still owns. `drop` does not refuse such a task and `check` stays clean,
+  so the closure would leave the item without an open owner. Read the state with
+  `tasks retained state <id>` before a closure, not by searching notes for `kept`: an
+  item kept in one note may be released in a later one, and a task can owe custody
+  with no `kept` note at all. The guard holds when the query shows an effective kept
+  item or an unfinished retention operation, reports its history incomplete or
+  blocked, or refuses. The query lists only items recorded on the queried task, so it
+  misses a kept item recorded on another task whose `next_owner` names this task (by
+  `<id>`, a retired-prefix alias, or an earlier `moved_from` id): before a closure, walk
+  `task.moved_from` backwards with `tasks show` to build the canonical id set containing
+  `<id>` and each hop's `task.id` (the guard holds if any `moved_from` hop cannot be
+  read), take each id's six-hex suffix, and search every registered project's task
+  records and note archives (read-only; records directories from `tasks projects`, each
+  row's `records`) with
+  `grep -rlE --include='*.md' --include='*.notes' '"next_owner"[[:space:]]*:[[:space:]]*"task:[a-z][a-z0-9]{0,7}-(<hex6>|...)"' <records>/tasks`.
+  Matching by six-hex suffix catches retired prefixes without parsing `projects.toml`,
+  and the pattern tolerates whitespace around the colon (`"next_owner":"task:…"` and
+  `"next_owner": "task:…"`). `grep` exit `1` means no match; the guard holds when any
+  registered project is unreachable, `<records>/tasks` is missing, or `grep` exits `>= 2`.
+  Keep matches at `<records>/tasks/<other-id>.md` and
+  `<records>/tasks/files/<other-id>/notes-*.notes` (ignoring attached `.md` files under
+  `tasks/files/`), and for each distinct `<other-id>` read
+  `tasks retained state <other-id>`: the guard holds when it is incomplete, blocked or
+  refuses, or shows an effective kept item whose `next_owner` is `task:<owner>` unless
+  `tasks resolve <owner>` returns `results[0].status == "resolved"` with `results[0].id`
+  outside the canonical id set above (released items and items re-homed elsewhere clear
+  that match). This search stands until tasks-1abe9f gives the CLI a read for it. The
+  guard holds for a duplicate too: moving custody to the survivor is a retained transfer,
+  which a curation pass does not do;
+- closing a duplicate would need a write to a survivor or open dependent that is
+  `doing`, live-claimed or parked, or to an open dependent in another project, or to a
+  survivor that is itself held: its latest note is a pending proposal, or it is an
+  idea waiting on the user. The absorb note would silently answer that proposal;
+- both tasks of a duplicate pair carry attachments;
+- the verdict is *premise gone* and the task has open dependents. A dropped dependency
+  counts as satisfied, so the drop would offer agents work whose prerequisite will
+  never exist. *Delivered* with dependents is closed: releasing them is correct;
+- the verdict is *duplicate* or *premise gone* and `show --all-projects` warned that a
+  registered project is unreachable. It still exits 0, and the dependents it lists may
+  then be incomplete;
+- the verdict is *premise gone* and the task carries the user's words: origin `user`
+  or `mixed`, or, where origin is unset, an occurrence note labelled `user` or `mixed`,
+  which is the tasks skill's reading rule. Whether the user still wants something they
+  asked for is theirs to say. Delivered work and exact duplicates of such tasks are
+  still closed.
+
+Where the proposal is recorded: for a task that is `doing`, claimed or parked, in the
+sweep's ledger or the pass's summary only, and nothing is written to the task. For
+every other guard, in the proposal note on the task (§3 step 6), with `guard: <which>`.
+
+**Undo.** A closed task reopens only to `todo`, and any status change clears its review
+and deferral fields. The summary, or a sweep's report, prints for each closed task the
+lines that apply, in this order, from what the pass recorded before the drop:
+
+- `tasks edit <id> --status todo`;
+- for a task that was an idea or blocked, then `tasks edit <id> --status idea` or
+  `--status blocked` (a closed task cannot go to either directly);
+- for an idea that was reviewed, then `tasks note <id> "<why it was reopened>"
+  --reviewed`, with `--awaiting-user` if it had that mark;
+- for a task that was deferred, then `tasks edit <id> --defer <date>`.
+
+For a duplicate it also lists the dependents re-pointed to the survivor and what the
+survivor absorbed: undoing the closure does not move those back. The original review
+date cannot be restored.
+
+Nothing is closed for being low value, unclear, old or unlikely. Those are not verdicts
+the user granted.
 
 ## 4. Commit per touched project
 
@@ -130,8 +299,10 @@ For each project whose records the pass edited:
 `proposal:` segment; it reports the task as `pending` with the proposal text instead.
 Relay those lines in the summary and move on. Any later note clears it: the human records
 the decision with `tasks note <id> "<decision>"` whether they acted on the proposal or
-declined it; on an idea, a declined proposal is answered with `--no-reviewed` so scope looks again. A `keep` or `refined` task simply re-enters the pool after the age window;
-reviewing it again is the maintenance.
+declined it; on an idea, a declined proposal is answered with `--no-reviewed` so scope looks again.
+A `refined` edit moves the task out of the pool for the age window, as any write does. A
+kept task is unwritten and can be drawn again before the age window passes; reviewing it
+again is the maintenance.
 
 A curate note does not readmit an idea for scope: only `tasks note <id> --no-reviewed`
 does, so write that form only when the note is new evidence that warrants another
@@ -141,18 +312,25 @@ scope pass.
 
 - Zero new tasks per pass. Curation improves what exists; adding is a proposal.
 - Prefer shorter. A rewrite that grows the body without adding a fact is wrong.
-- Touch only the sampled tasks. A duplicate found in passing is named in the proposal,
-  not edited.
+- Touch only the sampled tasks, with one exception: closing a sampled duplicate writes
+  to the survivor and to open dependents, which may lie outside the sample, and only as
+  [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks) says. It never
+  closes an unsampled task: a duplicate found in passing, including one whose survivor
+  is the sampled task, is named in the summary, not edited.
 
 ## Summary to the human
 
 One line per sampled task: id, verdict (or `skipped: <reason>`), one phrase of what
-changed; then one `pending: <proposal>` line per pending warning `sample` printed; then
-each touched project's commit or why none was made (listing any uncommitted paths left by
-the project's profile or instructions). Then the decisions that are the human's, grouped, omitting
-empty groups:
+changed. It is the only trace of `keep` and of a `refined` edit that wrote no note. Then
+one `pending: <proposal>` line per pending warning `sample` printed; then each touched
+project's commit or why none was made (listing any uncommitted paths left by
+the project's profile or instructions). Then what the pass closed and the decisions that
+are the human's, grouped, omitting empty groups:
 
-- **drops**: id, and the commit or the duplicate id;
+- **closed**: id, stale or duplicate, the evidence, the survivor of a duplicate, and
+  the undo lines (see [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks));
+- **proposed closures**: id, stale or duplicate, the evidence, and the guard that kept
+  it open (or `not sampled`);
 - **priority changes**: id, from, to, why;
 - **children to add**: the goal, then one line per child;
 - **questions**: id, then the open questions a `decision` verdict wrote into the record.
@@ -199,3 +377,8 @@ A research task filed by a scope pass already has its shape: keep the five field
 [the scope skill's §5](../scope/SKILL.md#5-make-follow-ups-answerable) intact. Goals and
 plan steps are left out: no pass has drawn one yet, and plan headings already template a
 step.
+
+When recommending a new continuation follow-up for scope, name its explicit follows
+target and actual filing source separately, using the tasks skill's relation table.
+A citation alone remains related. This adds no maintenance write permission: do not
+backfill/retype links, and leave filing or relation changes to the scoped owner.

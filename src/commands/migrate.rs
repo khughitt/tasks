@@ -234,7 +234,7 @@ fn apply_list(
         prefixes.sort();
         let _first = MutationLock::acquire_project(
             &prefixes[0],
-            Some(if &prefixes[0] == &requested.source.project.prefix {
+            Some(if prefixes[0] == requested.source.project.prefix {
                 &requested.source.project.records
             } else {
                 &requested.target.records
@@ -242,7 +242,7 @@ fn apply_list(
         )?;
         let _second = MutationLock::acquire_project(
             &prefixes[1],
-            Some(if &prefixes[1] == &requested.source.project.prefix {
+            Some(if prefixes[1] == requested.source.project.prefix {
                 &requested.source.project.records
             } else {
                 &requested.target.records

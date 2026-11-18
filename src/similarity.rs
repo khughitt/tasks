@@ -116,6 +116,7 @@ mod tests {
             depends: vec![],
             related: vec![],
             follows: vec![],
+            pieces: vec![],
             parent: None,
             tags: vec!["feedback".into()],
             source: None,

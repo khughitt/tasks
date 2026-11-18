@@ -40,6 +40,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
         )));
     }
     validate_childless(ctx)?;
+    refuse_local_pieces(ctx, &source)?;
     let claims = ClaimSnapshot::load(std::iter::once(ctx.source.project.prefix.as_str()))?;
     if let Some((claim, live)) = claims.get(id)
         && !live.is_stale()
@@ -141,6 +142,7 @@ pub(crate) fn build_pair(
     let mut tombstone = source.clone();
     tombstone.related.clear();
     tombstone.follows.clear();
+    tombstone.pieces.clear();
     if source.status == Status::Shelved {
         tombstone.wake_on.clear();
         tombstone.defer = None;
@@ -331,6 +333,31 @@ pub(crate) fn validate_destination_docs(
         }
     }
     Ok(())
+}
+
+/// A piece stored in the destination project would become same-project work
+/// (`local_piece`), so the move is refused before any write. A piece that only resolves
+/// into the destination through a later move is left to `check` (`piece_now_local`).
+fn refuse_local_pieces(ctx: &MoveCtx, source: &Task) -> Result<()> {
+    let dest = &ctx.target.prefix;
+    match source
+        .pieces
+        .iter()
+        .find(|piece| ctx.registry.canonical_id(piece).prefix == *dest)
+    {
+        Some(piece) => Err(Error::Validation(local_piece_refusal(
+            &source.id, piece, dest,
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// The remedy for a goal whose move or migration would make `piece` same-project work.
+pub(crate) fn local_piece_refusal(id: &TaskId, piece: &TaskId, dest: &str) -> String {
+    format!(
+        "{id} declares {piece} in {dest} as a piece; run `tasks edit {id} --rm-piece {piece}`, \
+         move it, then `tasks edit {piece} --parent <new id>`"
+    )
 }
 
 pub(super) fn validate_childless(ctx: &MoveCtx) -> Result<()> {

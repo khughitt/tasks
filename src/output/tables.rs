@@ -3,10 +3,50 @@ use crate::present;
 use crate::style::{Painter, Style};
 
 use super::contract::{
-    CarriedOut, Counts, DateColumn, DroppedOut, HaltRow, MigrateOut, Output, ParkedRow,
+    CarriedOut, Counts, DateColumn, DroppedOut, GoalWork, HaltRow, MigrateOut, Output, ParkedRow,
     TaskSummary, TreeNode,
 };
 use super::project::count_columns;
+
+fn collect_tree_goal_work<'a>(nodes: &'a [TreeNode], out: &mut Vec<&'a GoalWork>) {
+    for node in nodes {
+        if let Some(work) = &node.summary.goal_work {
+            out.push(work);
+        }
+        collect_tree_goal_work(&node.children, out);
+    }
+}
+
+fn render_goal_legend(
+    works: &[&GoalWork],
+    painter: &Painter,
+    layout: &crate::table::Layout,
+) -> Option<String> {
+    if works.is_empty() {
+        return None;
+    }
+    let mut text = String::from(
+        "work: done/total local descendants and declared pieces; tree: local containment",
+    );
+    if works.iter().any(|work| work.pieces.ideas > 0) {
+        text.push_str("; +N: ideas");
+    }
+    if works.iter().any(|work| work.unresolved_pieces > 0) {
+        text.push_str("; ?N: unresolved declared pieces");
+    }
+    Some(crate::table::render(
+        &[crate::table::Column::wrap("", 1, None)],
+        &[crate::table::Row::new(vec![
+            painter.paint(Style::Chrome, &text),
+        ])],
+        &crate::table::Layout {
+            headers: false,
+            ..*layout
+        },
+        None,
+        painter,
+    ))
+}
 
 fn halt_line(halts: &[HaltRow]) -> String {
     if halts.is_empty() {
@@ -515,10 +555,10 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                 .or(Marks::of(&o.ready))
                 .or(Marks::of(&o.doing));
             marks.review |= o.parked.iter().any(|row| row.needs_review == Some(true));
-            let columns = task_columns(marks);
+            let columns = task_columns(marks, true);
             let rows_of = |rows: &[TaskSummary]| -> Vec<crate::table::Row> {
                 rows.iter()
-                    .map(|row| task_row(row, DateColumn::Updated, painter, marks, 0))
+                    .map(|row| task_row(row, DateColumn::Updated, painter, marks, true, ""))
                     .collect()
             };
             let closeout = rows_of(&o.closeout);
@@ -526,21 +566,39 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                 o.ready.iter().map(|row| row.id.as_str()).collect();
             let mut roadmap = Vec::new();
             let mut listed_under_ready = 0;
+            let mut displayed_works: Vec<&GoalWork> = Vec::new();
+            displayed_works.extend(o.closeout.iter().filter_map(|r| r.goal_work.as_ref()));
+            displayed_works.extend(o.lanes.iter().filter_map(|r| r.lane.goal_work.as_ref()));
             for node in &o.roadmap {
-                if node.summary.child_count > 0 {
-                    tree_rows(std::slice::from_ref(node), 0, painter, marks, &mut roadmap);
+                if node.summary.goal_work.is_some() {
+                    collect_tree_goal_work(std::slice::from_ref(node), &mut displayed_works);
+                    let mut rails = Vec::new();
+                    tree_rows(
+                        std::slice::from_ref(node),
+                        0,
+                        &mut rails,
+                        painter,
+                        marks,
+                        &mut roadmap,
+                    );
                 } else if ready_ids.contains(node.summary.id.as_str()) {
                     listed_under_ready += 1;
                 } else {
+                    if let Some(work) = &node.summary.goal_work {
+                        displayed_works.push(work);
+                    }
                     roadmap.push(task_row(
                         &node.summary,
                         DateColumn::Updated,
                         painter,
                         marks,
-                        0,
+                        true,
+                        "",
                     ));
                 }
             }
+            displayed_works.extend(o.ready.iter().filter_map(|r| r.goal_work.as_ref()));
+            displayed_works.extend(o.doing.iter().filter_map(|r| r.goal_work.as_ref()));
             let ready = rows_of(&o.ready);
             let doing = rows_of(&o.doing);
             let mut shared = crate::table::shared_widths(
@@ -621,6 +679,9 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                 rendered.push_str(&line);
                 rendered.push('\n');
             }
+            if let Some(legend) = render_goal_legend(&displayed_works, painter, layout) {
+                rendered.push_str(&legend);
+            }
 
             rendered.push_str(&format!(
                 "\n{}\n",
@@ -633,9 +694,10 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                     &o.lanes,
                     painter,
                     layout,
-                    Some(&crate::table::Widths::id_only(id, 4)),
+                    Some(&crate::table::Widths::id_only(id, 5)),
                     false,
                     marks.review,
+                    true,
                 ));
             }
             rendered.push_str(&format!(
@@ -663,7 +725,7 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             rendered.push_str(&section(&doing));
             rendered
         }
-        Output::Lanes(o) => lane_table(&o.lanes, painter, layout, None, true, false),
+        Output::Lanes(o) => lane_table(&o.lanes, painter, layout, None, true, false, false),
         Output::Blockers(o) => crate::blockers_text::render(o, painter, layout),
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
@@ -718,10 +780,25 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             rendered
         }
         Output::Tree(o) => {
+            if o.nodes.is_empty() {
+                return String::new();
+            }
             let marks = Marks::of_tree(&o.nodes);
             let mut rows = Vec::new();
-            tree_rows(&o.nodes, 0, painter, marks, &mut rows);
-            crate::table::render(&task_columns(marks), &rows, layout, None, painter)
+            let mut rails = Vec::new();
+            tree_rows(&o.nodes, 0, &mut rails, painter, marks, &mut rows);
+            let mut displayed_works = Vec::new();
+            collect_tree_goal_work(&o.nodes, &mut displayed_works);
+            let mut rendered =
+                render_goal_legend(&displayed_works, painter, layout).unwrap_or_default();
+            rendered.push_str(&crate::table::render(
+                &task_columns(marks, true),
+                &rows,
+                layout,
+                None,
+                painter,
+            ));
+            rendered
         }
         Output::Tags(o) => {
             let mut rendered = String::new();
@@ -844,14 +921,15 @@ fn lane_table(
     widths: Option<&crate::table::Widths>,
     detail: bool,
     pad: bool,
+    show_work: bool,
 ) -> String {
     use crate::table::{Column, Detail, Row};
-    let columns = [
-        Column::fixed("id"),
-        Column::fixed("P"),
-        Column::wrap("title", 20, None),
-        Column::wrap("state", 20, None),
-    ];
+    let mut columns = vec![Column::fixed("id"), Column::fixed("P")];
+    if show_work {
+        columns.push(Column::fixed("work"));
+    }
+    columns.push(Column::wrap("title", 20, None));
+    columns.push(Column::wrap("state", 20, None));
     let task = |row: &TaskSummary| {
         format!(
             "{} {}",
@@ -885,17 +963,30 @@ fn lane_table(
                 LaneState::Paused => painter.paint(Style::Emphasis, "paused"),
                 LaneState::Empty => painter.paint(Style::Emphasis, "empty"),
             };
-            let mut built = Row::new(vec![
-                format!(
-                    "{}{}",
-                    if pad { "  " } else { "" },
-                    present::id(&row.lane.id, row.lane.project_color).paint(painter)
-                ),
+            let lane_id = if row.lane.goal_work.is_some() {
+                present::goal_id(&row.lane.id, row.lane.project_color)
+            } else {
+                present::id(&row.lane.id, row.lane.project_color)
+            };
+            let mut cells = vec![
+                format!("{}{}", if pad { "  " } else { "" }, lane_id.paint(painter)),
                 present::priority(row.lane.priority).paint(painter),
+            ];
+            if show_work {
+                cells.push(
+                    row.lane
+                        .goal_work
+                        .as_ref()
+                        .map(|work| present::goal_work(work).paint(painter))
+                        .unwrap_or_default(),
+                );
+            }
+            cells.push(
                 present::title(&row.lane.title, row.lane.project_color, row.lane.activity)
                     .paint(painter),
-                state,
-            ]);
+            );
+            cells.push(state);
+            let mut built = Row::new(cells);
             if detail {
                 if let Some(guidance) = &row.guidance {
                     built
@@ -992,14 +1083,17 @@ fn any_parallel_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| node.summary.parallel || any_parallel_tree(&node.children))
 }
 
-/// The one-letter type marker for a summary row: `≡` for a lane, `p` for a record
-/// carrying a cadence, and nothing otherwise. A lane is a goal and never recurs, so the
-/// two never compete for the slot. A future type is another arm here, another letter in
+/// The one-letter type marker for a summary row: `≡` for a lane, `◆` for any other goal,
+/// `p` for a record carrying a cadence, and nothing otherwise. Goals never recur, so the
+/// marks never compete for the slot. A future type is another arm here, another letter in
 /// the same slot; the column is reserved once per output (see `any_type`), so it is never
 /// a layout change.
 fn type_letter(row: &TaskSummary) -> Option<char> {
     if row.lane {
         return Some('≡');
+    }
+    if row.goal {
+        return Some('◆');
     }
     row.periodic.as_ref().map(|_| 'p')
 }
@@ -1016,7 +1110,7 @@ fn any_type_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| type_letter(&node.summary).is_some() || any_type_tree(&node.children))
 }
 
-fn task_columns(marks: Marks) -> Vec<crate::table::Column> {
+fn task_columns(marks: Marks, show_work: bool) -> Vec<crate::table::Column> {
     use crate::table::Column;
     let mut columns = vec![
         Column::fixed("id"),
@@ -1026,6 +1120,9 @@ fn task_columns(marks: Marks) -> Vec<crate::table::Column> {
         Column::fixed("process"),
         Column::fixed("status"),
     ];
+    if show_work {
+        columns.push(Column::fixed("work"));
+    }
     if marks.parallel {
         columns.push(Column::fixed("||"));
     }
@@ -1042,7 +1139,8 @@ fn task_row(
     date: DateColumn,
     painter: &Painter,
     marks: Marks,
-    indent: usize,
+    show_work: bool,
+    prefix: &str,
 ) -> crate::table::Row {
     let date = match date {
         DateColumn::Updated => Some(present::date(&row.updated)),
@@ -1059,12 +1157,16 @@ fn task_row(
     }
     .map(|span| span.paint(painter))
     .unwrap_or_else(|| "-".into());
+    let id_span = if row.goal_work.is_some() {
+        present::goal_id(&row.id, row.project_color)
+    } else {
+        present::id(&row.id, row.project_color)
+    };
     let mut cells = vec![
         format!(
-            "{}{}{}",
+            "{}{prefix}{}",
             present::review_mark(row.needs_review, marks.review).paint(painter),
-            "  ".repeat(indent),
-            present::id(&row.id, row.project_color).paint(painter)
+            id_span.paint(painter)
         ),
         present::priority(row.priority).paint(painter),
         present::size(row.size).paint(painter),
@@ -1072,6 +1174,14 @@ fn task_row(
         present::process(row.process, "-").paint(painter),
         present::status(row.status).paint(painter),
     ];
+    if show_work {
+        cells.push(
+            row.goal_work
+                .as_ref()
+                .map(|work| present::goal_work(work).paint(painter))
+                .unwrap_or_default(),
+        );
+    }
     if marks.parallel {
         cells.push(if row.parallel {
             "||".into()
@@ -1159,19 +1269,45 @@ fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
 fn tree_rows(
     nodes: &[TreeNode],
     depth: usize,
+    rails: &mut Vec<bool>,
     painter: &Painter,
     marks: Marks,
     rows: &mut Vec<crate::table::Row>,
 ) {
-    for node in nodes {
+    for (index, node) in nodes.iter().enumerate() {
+        let has_more = index + 1 < nodes.len();
+        let prefix = if depth == 0 {
+            String::new()
+        } else {
+            let mut buf = String::new();
+            for (col_idx, &ancestor_has_more) in rails.iter().enumerate() {
+                let seg = if ancestor_has_more { "│  " } else { "   " };
+                buf.push_str(
+                    &present::tree_guide(seg, node.summary.project_color, col_idx + 1)
+                        .paint(painter),
+                );
+            }
+            let branch = if has_more { "├─ " } else { "└─ " };
+            buf.push_str(
+                &present::tree_guide(branch, node.summary.project_color, depth).paint(painter),
+            );
+            buf
+        };
         rows.push(task_row(
             &node.summary,
             DateColumn::Updated,
             painter,
             marks,
-            depth,
+            true,
+            &prefix,
         ));
-        tree_rows(&node.children, depth + 1, painter, marks, rows);
+        if depth > 0 {
+            rails.push(has_more);
+        }
+        tree_rows(&node.children, depth + 1, rails, painter, marks, rows);
+        if depth > 0 {
+            rails.pop();
+        }
     }
 }
 
@@ -1184,9 +1320,9 @@ fn task_table(
     let marks = Marks::of(rows);
     let built: Vec<crate::table::Row> = rows
         .iter()
-        .map(|row| task_row(row, date, painter, marks, 0))
+        .map(|row| task_row(row, date, painter, marks, false, ""))
         .collect();
-    crate::table::render(&task_columns(marks), &built, layout, None, painter)
+    crate::table::render(&task_columns(marks, false), &built, layout, None, painter)
 }
 
 fn parked_columns() -> Vec<crate::table::Column> {
@@ -1290,6 +1426,8 @@ mod tests {
             title: format!("title {id}"),
             project_color: None,
             activity: None,
+            goal_work: None,
+            goal: false,
             status: Status::Todo,
             priority: 2,
             size: None,
@@ -1362,9 +1500,9 @@ mod tests {
         };
         let built: Vec<_> = rows
             .iter()
-            .map(|row| task_row(row, date, painter, marks, 0))
+            .map(|row| task_row(row, date, painter, marks, false, ""))
             .collect();
-        crate::table::render(&task_columns(marks), &built, &layout, None, painter)
+        crate::table::render(&task_columns(marks, false), &built, &layout, None, painter)
     }
 
     fn render_tree(
@@ -1380,8 +1518,9 @@ mod tests {
             ..Marks::of_tree(nodes)
         };
         let mut built = Vec::new();
-        tree_rows(nodes, 0, painter, marks, &mut built);
-        crate::table::render(&task_columns(marks), &built, &layout, None, painter)
+        let mut rails = Vec::new();
+        tree_rows(nodes, 0, &mut rails, painter, marks, &mut built);
+        crate::table::render(&task_columns(marks, true), &built, &layout, None, painter)
     }
 
     fn plain() -> Painter {
@@ -1514,8 +1653,8 @@ mod tests {
         );
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
-        assert!(lines[0].contains("todo  ||  2026-09-06"), "{}", lines[0]);
-        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
+        assert!(lines[0].contains("todo     ||  2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo         2026-09-06"), "{}", lines[1]);
         assert_eq!(
             lines[0].find("2026-09-06"),
             lines[1].find("2026-09-06"),
@@ -1652,10 +1791,19 @@ mod tests {
         };
         let built: Vec<crate::table::Row> = [long_row()]
             .iter()
-            .map(|row| task_row(row, DateColumn::Updated, &plain(), Marks::default(), 0))
+            .map(|row| {
+                task_row(
+                    row,
+                    DateColumn::Updated,
+                    &plain(),
+                    Marks::default(),
+                    false,
+                    "",
+                )
+            })
             .collect();
         let text = crate::table::render(
-            &task_columns(Marks::default()),
+            &task_columns(Marks::default(), false),
             &built,
             &layout,
             None,
@@ -1689,9 +1837,17 @@ mod tests {
             children: vec![child],
         };
         let mut built = Vec::new();
-        tree_rows(&[root], 0, &plain(), Marks::default(), &mut built);
+        let mut rails = Vec::new();
+        tree_rows(
+            &[root],
+            0,
+            &mut rails,
+            &plain(),
+            Marks::default(),
+            &mut built,
+        );
         let text = crate::table::render(
-            &task_columns(Marks::default()),
+            &task_columns(Marks::default(), true),
             &built,
             &crate::table::Layout::default(),
             None,
@@ -1699,7 +1855,7 @@ mod tests {
         );
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].starts_with("xx-000001"), "{text}");
-        assert!(lines[1].starts_with("  xx-000002"), "{text}");
+        assert!(lines[1].starts_with("└─ xx-000002"), "{text}");
     }
 
     #[test]
@@ -1844,10 +2000,12 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         let child_line = lines
             .iter()
-            .position(|line| line.starts_with("  xx-000002"))
+            .position(|line| line.starts_with("└─ xx-000002"))
             .expect("child row: {text:?}");
-        let title_start = lines[child_line].find("alpha").expect("child title");
+        let title_byte = lines[child_line].find("alpha").expect("child title");
+        let title_start = crate::table::visible_width(&lines[child_line][..title_byte]);
         let continuation = lines[child_line + 1];
+        assert!(continuation[..title_start].trim().is_empty(), "{text:?}");
         assert_eq!(
             continuation.len() - continuation.trim_start().len(),
             title_start,
@@ -1993,5 +2151,461 @@ mod tests {
             text.contains(&format!("        in:     {worktree}\n")),
             "{text}"
         );
+    }
+
+    fn empty_prime() -> crate::output::PrimeOut {
+        crate::output::PrimeOut {
+            summary: None,
+            prefix: Some("xx".into()),
+            group: None,
+            projects: vec!["xx".into()],
+            counts: Counts::default(),
+            periodic: crate::output::PeriodicSummary::default(),
+            deferred: crate::output::DeferredSummary::default(),
+            closed: false,
+            ready: vec![],
+            parked: vec![],
+            doing: vec![],
+            lanes: vec![],
+            roadmap: vec![],
+            closeout: vec![],
+            halts: vec![],
+            warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn progress_render_columns_are_view_specific() {
+        let headed = crate::table::Layout {
+            width: Some(160),
+            headers: true,
+        };
+        let mut leaf = row("xx-000001", true);
+        leaf.lane = true;
+
+        // Output::List keeps existing columns without `work`.
+        let list_out = Output::List(ListOut {
+            tasks: vec![leaf.clone()],
+            halts: vec![],
+            warnings: vec![],
+            date: DateColumn::Updated,
+        });
+        let list_text = pretty(&list_out, &plain(), &headed);
+        let list_hdr: Vec<&str> = list_text
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(
+            list_hdr,
+            [
+                "id", "P", "size", "cx", "process", "status", "||", "type", "date", "title"
+            ]
+        );
+
+        // Output::Tree is byte-empty on empty nodes, and has `work` at index 6 before `||`/`type`.
+        assert_eq!(
+            pretty(
+                &Output::Tree(crate::output::TreeOut {
+                    nodes: vec![],
+                    warnings: vec![],
+                }),
+                &plain(),
+                &headed
+            ),
+            ""
+        );
+        let tree_out = Output::Tree(crate::output::TreeOut {
+            nodes: vec![TreeNode {
+                summary: leaf.clone(),
+                children: vec![],
+            }],
+            warnings: vec![],
+        });
+        let tree_text = pretty(&tree_out, &plain(), &headed);
+        let tree_hdr: Vec<&str> = tree_text
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(
+            tree_hdr,
+            [
+                "id", "P", "size", "cx", "process", "status", "work", "||", "type", "date", "title"
+            ]
+        );
+
+        // Prime lanes has 5 columns (`id, P, work, title, state`); Output::Lanes stays 4 columns.
+        let mut prime_lane = leaf.clone();
+        prime_lane.goal_work = Some(crate::output::GoalWork {
+            pieces: crate::goals::Pieces {
+                done: 1,
+                total: 2,
+                ideas: 0,
+            },
+            unresolved_pieces: 0,
+        });
+        let lane_row = crate::lanes::LaneRow {
+            lane: prime_lane,
+            guidance: None,
+            state: crate::lanes::LaneState::Empty,
+            pick: None,
+            steps: 0,
+            active: vec![],
+            held: vec![],
+            causes: crate::lanes::Causes::default(),
+        };
+        let mut p = empty_prime();
+        p.lanes = vec![lane_row.clone()];
+        let prime_text = pretty(&Output::Prime(Box::new(p)), &plain(), &headed);
+        let lanes_idx = prime_text
+            .lines()
+            .position(|line| line == "lanes:")
+            .expect("lanes heading");
+        let prime_lane_hdr: Vec<&str> = prime_text
+            .lines()
+            .nth(lanes_idx + 1)
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(prime_lane_hdr, ["id", "P", "work", "title", "state"]);
+
+        let mut standalone_lane = lane_row;
+        standalone_lane.lane.goal_work = None;
+        let lanes_text = pretty(
+            &Output::Lanes(crate::output::LanesOut {
+                lanes: vec![standalone_lane],
+                warnings: vec![],
+            }),
+            &plain(),
+            &headed,
+        );
+        let lanes_hdr: Vec<&str> = lanes_text
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(lanes_hdr, ["id", "P", "title", "state"]);
+    }
+
+    #[test]
+    fn progress_render_goal_cells() {
+        use crate::goals::Pieces;
+        use crate::output::GoalWork;
+
+        let empty = GoalWork {
+            pieces: Pieces::default(),
+            unresolved_pieces: 1,
+        };
+        assert_eq!(present::goal_work(&empty).text, "- ?1");
+        let ideas = GoalWork {
+            pieces: Pieces {
+                ideas: 3,
+                ..Pieces::default()
+            },
+            unresolved_pieces: 1,
+        };
+        assert_eq!(present::goal_work(&ideas).text, "- +3 ?1");
+        assert_eq!(
+            present::goal_work(&GoalWork {
+                pieces: Pieces::default(),
+                unresolved_pieces: 0
+            })
+            .text,
+            "-"
+        );
+        assert_eq!(
+            present::goal_work(&GoalWork {
+                pieces: Pieces {
+                    done: 0,
+                    total: 0,
+                    ideas: 3
+                },
+                unresolved_pieces: 0
+            })
+            .text,
+            "- +3"
+        );
+        assert_eq!(
+            present::goal_work(&GoalWork {
+                pieces: Pieces {
+                    done: 4,
+                    total: 7,
+                    ideas: 0
+                },
+                unresolved_pieces: 0
+            })
+            .text,
+            "4/7"
+        );
+        assert_eq!(
+            present::goal_work(&GoalWork {
+                pieces: Pieces {
+                    done: 4,
+                    total: 7,
+                    ideas: 3
+                },
+                unresolved_pieces: 1
+            })
+            .text,
+            "4/7 +3 ?1"
+        );
+
+        // Bold goal IDs on Prime lane vs non-bold Output::Lanes, and non-bold pick/active refs.
+        let color = crate::palette::Rgb::parse_hex("#123456").unwrap();
+        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
+
+        for assigned in [None, Some(color)] {
+            let mut lane_sum = row("xx-000010", false);
+            lane_sum.lane = true;
+            lane_sum.project_color = assigned;
+            lane_sum.goal_work = Some(GoalWork {
+                pieces: Pieces {
+                    done: 2,
+                    total: 5,
+                    ideas: 0,
+                },
+                unresolved_pieces: 0,
+            });
+            let mut pick_sum = row("xx-000011", false);
+            pick_sum.project_color = assigned;
+            let mut active_sum = row("xx-000012", false);
+            active_sum.project_color = assigned;
+
+            let lr = crate::lanes::LaneRow {
+                lane: lane_sum,
+                guidance: None,
+                state: crate::lanes::LaneState::Ready,
+                pick: Some(pick_sum),
+                steps: 1,
+                active: vec![active_sum],
+                held: vec![],
+                causes: crate::lanes::Causes::default(),
+            };
+            let mut p = empty_prime();
+            p.lanes = vec![lr.clone()];
+            let prime_rendered = pretty(
+                &Output::Prime(Box::new(p)),
+                &colored,
+                &crate::table::Layout::default(),
+            );
+            let expected_goal_id = match assigned {
+                Some(_) => "\x1b[1;38;2;84;108;135mxx-000010\x1b[0m",
+                None => "\x1b[1mxx-000010\x1b[0m",
+            };
+            let expected_plain_id = match assigned {
+                Some(_) => "\x1b[38;2;84;108;135mxx-000011\x1b[0m",
+                None => "\x1b[2mxx-000011\x1b[0m",
+            };
+            assert!(
+                prime_rendered.contains(expected_goal_id),
+                "{prime_rendered:?}"
+            );
+            assert!(
+                prime_rendered.contains(expected_plain_id),
+                "{prime_rendered:?}"
+            );
+
+            let mut lanes_lr = lr;
+            lanes_lr.lane.goal_work = None;
+            let lanes_rendered = pretty(
+                &Output::Lanes(crate::output::LanesOut {
+                    lanes: vec![lanes_lr],
+                    warnings: vec![],
+                }),
+                &colored,
+                &crate::table::Layout::default(),
+            );
+            let expected_lanes_id = match assigned {
+                Some(_) => "\x1b[38;2;84;108;135mxx-000010\x1b[0m",
+                None => "\x1b[2mxx-000010\x1b[0m",
+            };
+            let expected_active_id = match assigned {
+                Some(_) => "\x1b[38;2;84;108;135mxx-000012\x1b[0m",
+                None => "\x1b[2mxx-000012\x1b[0m",
+            };
+            assert!(
+                lanes_rendered.contains(expected_lanes_id),
+                "{lanes_rendered:?}"
+            );
+            assert!(
+                lanes_rendered.contains(expected_active_id),
+                "{lanes_rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn progress_render_shared_section_alignment() {
+        use crate::goals::Pieces;
+        use crate::output::GoalWork;
+
+        let mut close_goal = row("xx-000001", false);
+        close_goal.goal_work = Some(GoalWork {
+            pieces: Pieces {
+                done: 2,
+                total: 2,
+                ideas: 0,
+            },
+            unresolved_pieces: 0,
+        });
+
+        let mut road_root = row("xx-000002", true);
+        road_root.goal_work = Some(GoalWork {
+            pieces: Pieces {
+                done: 12,
+                total: 34,
+                ideas: 5,
+            },
+            unresolved_pieces: 2,
+        });
+        let mut mid_a = row("xx-000003", false);
+        mid_a.goal_work = Some(GoalWork {
+            pieces: Pieces {
+                done: 1,
+                total: 3,
+                ideas: 0,
+            },
+            unresolved_pieces: 0,
+        });
+        let deep_leaf = row("xx-000004", false);
+        let mid_b = row("xx-000005", false);
+
+        let ready_leaf = row("xx-000006", false);
+        let mut doing_goal = row("xx-000007", false);
+        doing_goal.status = Status::Doing;
+        doing_goal.goal_work = Some(GoalWork {
+            pieces: Pieces {
+                done: 1,
+                total: 4,
+                ideas: 0,
+            },
+            unresolved_pieces: 0,
+        });
+
+        let mut p = empty_prime();
+        p.closeout = vec![close_goal];
+        p.roadmap = vec![TreeNode {
+            summary: road_root,
+            children: vec![
+                TreeNode {
+                    summary: mid_a,
+                    children: vec![TreeNode {
+                        summary: deep_leaf,
+                        children: vec![],
+                    }],
+                },
+                TreeNode {
+                    summary: mid_b,
+                    children: vec![],
+                },
+            ],
+        }];
+        p.ready = vec![ready_leaf];
+        p.doing = vec![doing_goal];
+
+        let rendered = pretty(
+            &Output::Prime(Box::new(p)),
+            &plain(),
+            &crate::table::Layout::default(),
+        );
+
+        let row_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains("2026-09-06"))
+            .collect();
+        assert_eq!(row_lines.len(), 7, "{rendered}");
+        let col_of = |line: &str, needle: &str| -> usize {
+            let byte = line
+                .find(needle)
+                .unwrap_or_else(|| panic!("missing {needle} in {line:?}"));
+            crate::table::visible_width(&line[..byte])
+        };
+        let date_col = col_of(row_lines[0], "2026-09-06");
+        let title_col = col_of(row_lines[0], "title ");
+        for line in &row_lines {
+            assert_eq!(col_of(line, "2026-09-06"), date_col, "{rendered}");
+            assert_eq!(col_of(line, "title "), title_col, "{rendered}");
+        }
+        // Left-aligned work column: `2/2`, `12/34 +5 ?2`, `1/3`, and `1/4` start at the same column!
+        let w_close = col_of(row_lines[0], "2/2");
+        let w_road = col_of(row_lines[1], "12/34 +5 ?2");
+        let w_mid = col_of(row_lines[2], "1/3");
+        let w_doing = col_of(row_lines[6], "1/4");
+        assert_eq!(w_close, w_road, "{rendered}");
+        assert_eq!(w_road, w_mid, "{rendered}");
+        assert_eq!(w_mid, w_doing, "{rendered}");
+
+        // Tree guide connectors across roots, non-last branch, nested rail, and last branch:
+        assert!(row_lines[1].starts_with("xx-000002"), "{}", row_lines[1]);
+        assert!(row_lines[2].starts_with("├─ xx-000003"), "{}", row_lines[2]);
+        assert!(
+            row_lines[3].starts_with("│  └─ xx-000004"),
+            "{}",
+            row_lines[3]
+        );
+        assert!(row_lines[4].starts_with("└─ xx-000005"), "{}", row_lines[4]);
+
+        // Depth-3 row keeps depth-1 and depth-2 shades on its first two guide segments!
+        let palette = crate::palette::Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap();
+        let scale = crate::style::TreeScale::new(&palette);
+        let proj = crate::palette::Rgb::parse_hex("#4e9af1").unwrap();
+        let painter = Painter::new(ColorMode::Always, Format::Pretty, false).with_tree_scale(scale);
+        let colored_node = |id: &str, is_goal: bool, children: Vec<TreeNode>| {
+            let mut r = row(id, false);
+            r.project_color = Some(proj);
+            if is_goal {
+                r.goal_work = Some(GoalWork {
+                    pieces: Pieces {
+                        done: 0,
+                        total: 1,
+                        ideas: 0,
+                    },
+                    unresolved_pieces: 0,
+                });
+            }
+            TreeNode {
+                summary: r,
+                children,
+            }
+        };
+        let d3_tree = Output::Tree(crate::output::TreeOut {
+            nodes: vec![colored_node(
+                "xx-000010",
+                true,
+                vec![
+                    colored_node(
+                        "xx-000011",
+                        true,
+                        vec![
+                            colored_node(
+                                "xx-000012",
+                                true,
+                                vec![colored_node("xx-000013", false, vec![])],
+                            ),
+                            colored_node("xx-000014", false, vec![]),
+                        ],
+                    ),
+                    colored_node("xx-000015", false, vec![]),
+                ],
+            )],
+            warnings: vec![],
+        });
+        let d3_rendered = pretty(&d3_tree, &painter, &crate::table::Layout::default());
+        let d3_line = d3_rendered
+            .lines()
+            .find(|l| l.contains("xx-000013"))
+            .unwrap();
+        let c1 = scale.color(Some(proj), 1);
+        let c2 = scale.color(Some(proj), 2);
+        let c3 = scale.color(Some(proj), 3);
+        let expected_prefix = format!(
+            "\x1b[38;2;{};{};{}m│  \x1b[0m\x1b[38;2;{};{};{}m│  \x1b[0m\x1b[38;2;{};{};{}m└─ \x1b[0m",
+            c1.r, c1.g, c1.b, c2.r, c2.g, c2.b, c3.r, c3.g, c3.b
+        );
+        assert!(d3_line.starts_with(&expected_prefix), "{d3_line:?}");
     }
 }

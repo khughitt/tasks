@@ -164,6 +164,7 @@ mod tests {
             depends: vec![],
             related: vec![],
             follows: vec![],
+            pieces: vec![],
             parent: None,
             tags: vec![],
             source: None,
@@ -670,6 +671,10 @@ pub struct Task {
     pub related: Vec<TaskId>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub follows: Vec<TaskId>,
+    /// Foreign tasks that are part of this goal; each is also in `depends`
+    /// (docs/task-model.md).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pieces: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<TaskId>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

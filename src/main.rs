@@ -17,6 +17,7 @@ mod doc_fetch;
 mod ellipsis;
 mod error;
 mod filter;
+mod follows;
 mod format;
 mod frontmatter;
 mod git;
@@ -31,6 +32,7 @@ mod inventory;
 mod lanes;
 mod link;
 mod locations;
+mod membership;
 mod migrating;
 mod model;
 mod moving;
@@ -41,6 +43,7 @@ mod output;
 mod palette;
 mod periodic;
 mod pidview;
+mod pieces;
 mod present;
 mod prime_summary;
 mod proposal;
@@ -298,7 +301,7 @@ fn main() {
         to_stderr(&format!("{}\n", output::render_error(error)));
         std::process::exit(1);
     }
-    match commands::run(cli, host) {
+    match commands::run(cli, host, format) {
         Ok(out) => {
             let raw = match &out {
                 output::Output::Doc(doc) => Some((doc.body.as_bytes(), &doc.warnings)),
@@ -348,7 +351,8 @@ fn main() {
                                 ::time::OffsetDateTime::now_utc().date(),
                                 &palette,
                             ))
-                            .with_title_scale(style::TitleScale::new(&palette));
+                            .with_title_scale(style::TitleScale::new(&palette))
+                            .with_tree_scale(style::TreeScale::new(&palette));
                         match palette.magenta {
                             Some(magenta) => painter
                                 .with_priority_scale(style::PriorityScale::new(magenta, &palette)),

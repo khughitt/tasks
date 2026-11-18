@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Drift signals for a project's open tasks, printed as the whole-project sweep's ledger.
+
+Reads, through the `tasks` CLI's JSON only (`where`, `list`, `show --no-fetch`, so no
+external document provider runs), the swept project's open tasks, and `git log` in its
+code checkout, plus directory listings of the checkout and the records directory. Never
+reads record files and writes nothing but the ledger rows on standard output: one header
+row, then one tab-separated row per pool task (idea, todo or blocked, no live claim),
+sorted by id. The last five columns are left empty for the sweep's controller.
+
+The signals are hints: no task is closed or skipped on a signal alone, and their absence
+clears nothing. Any failed `tasks` or `git` call ends the run with exit 1, the command
+named on standard error and nothing on standard output. The one exception is the read of a
+moved task's destination, which when unreadable simply does not count.
+"""
+import argparse
+import contextlib
+import json
+import os
+import re
+import subprocess
+import sys
+
+COLUMNS = (
+    "id status updated reviewed awaiting_user deferred_until parked dead_paths cited_closed "
+    "deps_closed touched_commits twins triggers cluster verdict action evidence decided"
+).split()
+POOL = {"idea", "todo", "blocked"}
+ALL_STATUSES = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"]
+PATH = re.compile(r"(?<![\w/.:~-])([\w.-]+(?:/[\w.-]+)+)")
+WORD = re.compile(r"[a-z0-9_-]{3,}")
+STOPWORDS = set("the and for with that from not its when into task tasks".split())
+TWIN_THRESHOLD = 0.4
+MAX_HOPS = 5
+
+
+class Fail(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def expect_shape(cmd):
+    try:
+        yield
+    except (KeyError, TypeError, AttributeError) as e:
+        raise Fail(f"{cmd}: unexpected JSON shape: {e}")
+
+
+class Sweep:
+    def __init__(self, tasks, root):
+        self.tasks = tasks
+        self.root = root
+        self.env = dict(os.environ)
+        local = self.run(["git", "rev-parse", "--local-env-vars"])
+        for name in local.stdout.split():
+            self.env.pop(name, None)
+        self.env["TASKS_FORMAT"] = "json"
+        self.git_counts = {}
+
+    def run(self, argv, check=True):
+        try:
+            out = subprocess.run(argv, capture_output=True, text=True, env=self.env)
+        except OSError as e:
+            raise Fail(f"{' '.join(argv)}: {e}")
+        if check and out.returncode != 0:
+            raise Fail(f"{' '.join(argv)} failed: {out.stderr.strip() or f'exit {out.returncode}'}")
+        return out
+
+    def tasks_json(self, *args):
+        argv = [self.tasks, "-C", self.root, *args]
+        cmd = " ".join(argv)
+        out = self.run(argv)
+        try:
+            return cmd, json.loads(out.stdout)
+        except ValueError as e:
+            raise Fail(f"{cmd}: bad JSON: {e}")
+
+    def destination(self, task_id):
+        """`show` of a moved task's destination, or None when it cannot be read."""
+        out = self.run([self.tasks, "-C", self.root, "show", task_id, "--no-fetch"], check=False)
+        if out.returncode != 0:
+            return None
+        try:
+            task = json.loads(out.stdout)["task"]
+            return task if isinstance(task, dict) else None
+        except (ValueError, KeyError, TypeError):
+            return None
+
+    def follow(self, task_id):
+        """The task a moved id ends at (at most five hops), or None when a destination
+        cannot be read or the chain is too long. The first read is strict."""
+        cmd, data = self.tasks_json("show", task_id, "--no-fetch")
+        with expect_shape(cmd):
+            task = data["task"]
+            if not isinstance(task, dict):
+                raise TypeError("task must be an object")
+        hops = 0
+        while (task.get("status") == "moved"
+               and isinstance(task.get("moved_to"), str)
+               and task["moved_to"]):
+            hops += 1
+            if hops > MAX_HOPS:
+                return None
+            task = self.destination(task["moved_to"])
+            if task is None:
+                return None
+        return task
+
+    def git_count(self, checkout, path, since):
+        key = (path, since)
+        if key not in self.git_counts:
+            out = self.run(["git", "-C", checkout, "log", "--oneline", f"--since={since}",
+                            "--", path])
+            self.git_counts[key] = len(out.stdout.splitlines())
+        return self.git_counts[key]
+
+
+def closing_stamp(row):
+    # `tasks` validates fixed-width whole-second UTC (`YYYY-MM-DDTHH:MM:SSZ`) on read
+    # (`src/time.rs`), so lexical comparison of stamps matches chronological order.
+    for key in ("closed", "completed", "updated"):
+        val = row.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return ""
+
+
+def words(title):
+    return set(WORD.findall(title.lower())) - STOPWORDS
+
+
+def named_paths(text):
+    return {m.rstrip(".") for m in PATH.findall(text)}
+
+
+def sweep(args):
+    s = Sweep(args.tasks, args.root)
+    cmd, data = s.tasks_json("where")
+    with expect_shape(cmd):
+        where = data["project"]
+        prefix, checkout, records = where["prefix"], where["checkout"], where["records"]
+        if not all(isinstance(v, str) for v in (prefix, checkout, records)):
+            raise TypeError("project fields must be strings")
+    top = set()
+    for base in (checkout, records):
+        try:
+            top.update(os.listdir(base))
+        except OSError as e:
+            raise Fail(f"cannot list {base}: {e}")
+    top -= {".git", ".worktrees"}
+
+    argv = []
+    for status in ALL_STATUSES:
+        argv += ["--status", status]
+    cmd, data = s.tasks_json("list", *argv)
+    with expect_shape(cmd):
+        rows = data["tasks"]
+        if not isinstance(rows, list):
+            raise TypeError("tasks must be a list")
+        by_id = {}
+        for r in rows:
+            rid, rstatus, rupdated, rtitle = r["id"], r["status"], r["updated"], r["title"]
+            if (not isinstance(rid, str)
+                    or not isinstance(rstatus, str)
+                    or not isinstance(rupdated, str)
+                    or not rupdated
+                    or not isinstance(rtitle, str)):
+                raise TypeError("row id, status, updated and title must be strings")
+            claim = r.get("claim")
+            if claim is not None and not isinstance(claim, dict):
+                raise TypeError("row claim must be an object")
+            deferred = r.get("deferred")
+            if deferred is not None and not isinstance(deferred, dict):
+                raise TypeError("row deferred must be an object")
+            by_id[rid] = r
+        pool = sorted((r for r in rows
+                       if r["status"] in POOL and not (r.get("claim") or {}).get("live")),
+                      key=lambda r: r["id"])
+    cite = re.compile(r"\b" + re.escape(prefix) + r"-[0-9a-f]{6}\b")
+
+    def counts_as_closed(entry_id, entry_status, since):
+        """Whether a cited or depended-on task is closed (after `since`, when given)."""
+        if entry_status == "moved":
+            task = s.follow(entry_id)
+            if task is None:
+                return False
+            status, stamp = task.get("status"), closing_stamp(task)
+        else:
+            status, stamp = entry_status, None
+        if status not in ("done", "dropped"):
+            return False
+        return since is None or stamp > since
+
+    results = []
+    for row in pool:
+        cmd, task = s.tasks_json("show", row["id"], "--no-fetch")
+        with expect_shape(cmd):
+            detail = task["task"]
+            if not isinstance(detail, dict):
+                raise TypeError("task must be an object")
+            title, body = detail["title"], detail["body"]
+            if not isinstance(title, str) or not isinstance(body, str):
+                raise TypeError("task title and body must be strings")
+            text = f"{title}\n{body}"
+            raw_deps = task.get("depends_on") or []
+            if not isinstance(raw_deps, list):
+                raise TypeError("depends_on must be a list")
+            dep_rows = []
+            for d in raw_deps:
+                did, dstatus = d["id"], d.get("status")
+                if (not isinstance(did, str)
+                        or (dstatus is not None and not isinstance(dstatus, str))):
+                    raise TypeError("dependency id and status must be strings")
+                dep_rows.append((did, dstatus, bool(d.get("resolved"))))
+
+        paths = sorted(named_paths(text))
+        dead, existing = [], []
+        for p in paths:
+            if p.split("/")[0] not in top:
+                continue
+            in_checkout = os.path.exists(os.path.join(checkout, p))
+            if in_checkout:
+                existing.append(p)
+            elif not os.path.exists(os.path.join(records, p)):
+                dead.append(p)
+
+        cited = set()
+        row_updated = row["updated"]
+        for cid in set(cite.findall(text)) - {row["id"]}:
+            target = by_id.get(cid)
+            if target is None:
+                continue
+            if target["status"] == "moved":
+                if counts_as_closed(cid, "moved", row_updated):
+                    cited.add(cid)
+            elif (target["status"] in ("done", "dropped")
+                  and closing_stamp(target) > row_updated):
+                cited.add(cid)
+
+        deps_closed = bool(dep_rows) and all(
+            resolved and counts_as_closed(did, dstatus, None)
+            for did, dstatus, resolved in dep_rows)
+
+        touched = sum(s.git_count(checkout, p, row_updated) for p in existing)
+
+        results.append({
+            "row": row, "dead": dead, "cited": sorted(cited), "deps_closed": deps_closed,
+            "touched": touched, "words": words(row["title"]),
+        })
+
+    out = [COLUMNS]
+    for r in results:
+        twins = sorted(o["row"]["id"] for o in results
+                       if o is not r and r["words"] and o["words"]
+                       and len(r["words"] & o["words"]) / len(r["words"] | o["words"])
+                       >= TWIN_THRESHOLD)
+        row = r["row"]
+        triggers = bool(r["dead"]) + bool(r["cited"]) + r["deps_closed"]
+        flag = lambda b: "true" if b else "false"
+        until = (row.get("deferred") or {}).get("until")
+        out.append([
+            row["id"], row["status"], row["updated"], flag(row.get("reviewed")),
+            flag(row.get("awaiting_user")), until if isinstance(until, str) else "",
+            flag(row.get("park")), ",".join(r["dead"]), ",".join(r["cited"]),
+            flag(r["deps_closed"]), str(r["touched"]), ",".join(twins), str(triggers),
+            "", "", "", "", "",
+        ])
+    return "".join("\t".join(line) + "\n" for line in out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Print drift signals for a project's open tasks.")
+    parser.add_argument("--root", default=".", help="the project directory (default: .)")
+    parser.add_argument("--tasks", default="tasks", help="the tasks binary (default: tasks)")
+    args = parser.parse_args()
+    try:
+        text = sweep(args)
+    except Fail as e:
+        print(f"sweep-signals: {e}", file=sys.stderr)
+        return 1
+    sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -92,23 +92,35 @@ work order. Read commands do not acquire claims or perform lifecycle transitions
 `parent` expresses same-project containment. A task with children is a goal;
 it does not become ready itself. `depends` expresses execution order and may
 cross projects. Neither relation implies the other, and cycles are refused.
-`goals` reports user or mixed-origin goals and their descendants (done goals are
-left out unless `--closed` adds those closed in the last 14 days); dependency
-counts are reported separately and do not redefine the goal's intended scope.
+`show` lists the tasks that depend on the shown one as `dependents` (pretty
+`dependent` rows), open and closed. Plain `show` finds those in its own project;
+`show --all-projects` also searches every reachable registered project, such as a
+hub goal elsewhere that depends on a cross-project piece. `next` uses its own scope.
+`goals` reports user or mixed-origin goals and their members across registered
+projects (`--project` and `--group` narrow which goals are listed; `--all-projects`
+is the default; done goals are left out unless `--closed` adds those closed in the
+last 14 days). A goal's members are its descendants plus its declared `pieces` and
+their members, in any project ([task model](task-model.md#goal-pieces)); they are
+read through the registry whatever the scope, so narrowing never changes a row's
+numbers. Dependency counts are reported separately and do not redefine the goal's
+intended scope. Declare a foreign task part of a goal with `tasks edit <goal> --piece
+<id>` (or `add --piece`), which also adds the dependency; `--rm-piece` unmarks one and
+keeps the dependency, `--no-pieces` unmarks all, and `dep --rm` removes both.
 
 The default `goals --sort project` groups canonical project prefixes A–Z, then
-shows newest subtree activity (the newest update on the goal or any descendant).
+shows newest activity (the newest update on the goal or any member).
 `--sort activity` instead ranks all goals by activity; `--sort priority` ranks P0
-first, then activity. Open ties use descendant total descending and id ascending.
+first, then activity. Open ties use work total descending and id ascending.
 `--reverse` reverses every key, including ties, within each open/closed section;
 it never moves closed goals ahead of open ones. Under `--closed`, closed rows use
 closure dates instead of activity and tie on id, without a descendant-total key.
 Sorting applies to JSON array order too; no JSON fields or counts change.
 
 Pretty progress uses separate aligned columns: `work` is done/total committed
-descendants, `+N` counts ideas, `deps` is satisfied/total distinct prerequisites
-outside the subtree, and `?N` counts unresolved prerequisites (`unres` with headers).
-Work includes done, todo, doing and blocked descendants, excluding the goal itself,
+descendants and declared pieces, `+N` counts ideas, `deps` is satisfied/total distinct
+prerequisites outside the membership, and `?N` counts unresolved prerequisites,
+including declared pieces no record answers (`unres` with headers).
+Work includes done, todo, doing and blocked members, excluding the goal itself,
 ideas, shelved, dropped and moved tasks. Dependency satisfied count is total minus
 open minus unresolved; unknown targets never count as satisfied. Fully satisfied
 sets remain visible as N/N, and rows without prerequisites show a dash. JSON keeps
@@ -116,34 +128,79 @@ its existing open/total/unresolved fields. Optional counter columns appear only
 when a category exists anywhere in the displayed open and closed report.
 
 The selected sort and counter legend appear before data, including with headers
-off. Long titles end in `…` to fit the available space, capped at 80 display cells.
-Attention, then secondary counters, then core metadata move into labelled row
+off, and a footer notes that parks and claims are host-local evidence from the
+running host. Long titles end in `…` to fit the available space, capped at 80
+display cells. Attention (`stalled` in yellow, `blocked` in red, `you` in bold
+red), then secondary counters, then core metadata move into labelled row
 details as space tightens; their legend clauses remain present. `COLUMNS` overrides
 the attached terminal width and must be a positive integer. Pipes with no known
 width keep one row per goal with the title cap; JSON and `tasks show <id>` preserve
 full titles. Project colors and `--color always` do not change width budgets.
 
+Pretty `prime` (across `closeout`, `lanes`, `roadmap`, `ready` and `doing`) and
+`tree` also reserve a left-aligned `work` column for goals of every origin,
+including childless lanes, childless declared-piece hubs and closed ancestors of
+open work; leaf rows leave `work` blank, and `list`, `ready`, `search`, `parked`
+and standalone `lanes` keep their existing columns. Each goal cell uses the same
+full membership before display filtering (hidden completed children and foreign
+declared-piece subtrees still count, and selecting `tree <id>` keeps the goal's
+full counts while starting at depth zero): `4/7`, `4/7 +3`, or `-` / `- +3` when
+committed work is zero, plus `?N` (`- ?1`, `- +3 ?1`) for distinct unresolved
+declared-piece targets encountered during the membership walk. Unlike `goals`,
+`prime` and `tree` do not walk ordinary `depends` for `work`, so `?N` reflects
+missing declared pieces only; `doing` goals read from another claimed checkout use
+that checkout's scan. Tree containment stays local to each project (foreign pieces
+contribute to `work` without becoming local child nodes), drawn with three-cell
+guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering and blank ID
+cells on wrapped continuations. When any displayed goal is present, a wrapping
+legend (`work: done/total local descendants and declared pieces; tree: local containment`,
+with `; +N: ideas` and `; ?N: unresolved declared pieces` appended only when
+displayed) appears after `prime`'s top summary block or before `tree`'s table;
+empty trees stay empty and leaves-only views omit the legend. Work metadata is
+computed only for resolved pretty output (`--pretty` or `TASKS_FORMAT=pretty`);
+JSON shapes and `prime --summary` are unchanged.
+
+Pretty task tables (`list`, `ready`, `tree`, `prime`'s rows) mark each row's type
+in one column: `≡` a lane, `◆` any other goal (a record with children or declared
+pieces), `p` a recurring record. The column appears only when some row needs it.
+
 
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
 `show` collects every task link in the `── related ──` section: rows run in the
-order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, and `child`,
+order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, and `child`,
 formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
 Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
 recency scale); an unresolved target leaves the date blank and prints
 `(unresolved)` with `?` for status, while a moved target reads `moved`.
 
-The reader release recognizes `follows`: this task continues work arising from
+`follows` means: this task continues work arising from
 one or more earlier tasks. `source` remains its filing origin, and `related` an
 informational citation. Follows does not require an earlier task to close or change
 readiness, review or completion. Existing source/related links are not converted.
 Show and next display stored outgoing follows rows, including foreign, moved and
-unresolved targets. They do not yet discover incoming follow-ups.
+unresolved targets. They also display direct incoming `followed by` rows, including closed follow-ups.
+Plain show searches its local scan, and `show --all-projects` every reachable
+registered project; next uses its existing group/all-project scope.
+No incoming row means none found in that readable scope. After a move, the view
+matches the focal work’s verified move history; old/new ids agree only over the
+same complete scan and history. Incomplete history warns once and keeps direct
+matches. A moved follower appears only through its in-scope live successor.
+After a cross-project move, use `show --all-projects` so followers in the old
+and new projects are both in scope.
 
-Writers remain disabled until every participating reader is upgraded: no follows
-flags are exposed, and editor additions, removals and reordering refuse. Unrelated
-saves preserve existing lists. Do not manually introduce follows into shared
-records before the reader rollout is confirmed.
+Set it explicitly with repeatable `add --follows REF` or `edit --follows REF`.
+Remove one with `edit ID --rm-follows REF`, or all with `edit ID --no-follows`.
+The same target cannot be added and removed in one write; clear conflicts with both.
+New self, missing or moved links refuse atomically (use a moved task's live successor).
+Editor changes follow the same validation. An unchanged unreachable list survives
+unrelated saves. Source/title reuse of add writes nothing; edit the returned task
+if it needs follows. Body/source/concerns text never infers follows.
+
+A new task filed from a brief can keep `--source docs/notes/brief.md` and name
+multiple predecessors with `--follows`. A normal plan constituent uses `--parent`,
+not follows merely because it came from a design. Existing source/related values
+are not retyped or backfilled.
 
 A lane is a goal marked `--lane`: its descendant tree is one stream of work.
 Lanes cannot nest. A live claim in a lane makes sibling work in that lane busy.
@@ -207,8 +264,9 @@ age is not a measurement of how long a person has been blocked.
 ## Route across projects
 
 The default scope is the current project, including a recognized worktree or
-linked checkout. `--project`, `--group` and `--all-projects` are mutually exclusive
-explicit scopes. An explicit scope wins over an id's prefix for scoped reads;
+linked checkout (`quiet` and `goals` instead read all reachable registered
+projects unless `--project` or `--group` narrows them). `--project`, `--group`
+and `--all-projects` are mutually exclusive explicit scopes. An explicit scope wins over an id's prefix for scoped reads;
 otherwise a foreign full id can route through the registry. Id-directed writes
 lock and mutate the target project. A malformed local config is an error, not a
 reason to retry against some other root. Foreign reads normally see the registered
@@ -288,5 +346,12 @@ move through a shared lightness range. On the builtin dark palette, lightness is
 lighter on dark backgrounds and darker on light backgrounds, keeping at least
 3.5:1 contrast. The project hue is preserved, with reduced chroma where needed;
 unusual backgrounds may limit the range. IDs keep their fixed project shade,
-independently of activity, and active titles can be lighter than IDs.
+independently of activity, and active titles can be lighter than IDs. In `prime`
+and `tree` pretty views, goal IDs add bold emphasis (retaining the fixed project ID
+shade when assigned, or bold alone without a project color; standalone `lanes` and
+nested lane pick/active references stay non-bold), and tree guide segments step in
+OKLab by column depth (capped at depth 6) from a muted project shade (or muted
+`fg`/`bg` mix when unassigned) toward readable foreground with at least 3:1
+contrast against `bg` (dim chrome without a resolved palette; plain connectors when
+color is disabled).
 Activity affects presentation only; priorities and work selection keep their order.

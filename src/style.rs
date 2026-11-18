@@ -77,10 +77,19 @@ pub enum Style {
     Project(Rgb),
     /// A task id: its fixed project shade toward white, independent of title activity.
     Id(Rgb),
+    /// A goal id: bold, in its fixed project shade when assigned, else bold alone.
+    GoalId(Option<Rgb>),
+    /// A tree guide segment painted at its column depth.
+    TreeGuide {
+        color: Option<Rgb>,
+        depth: usize,
+    },
     Status(Status),
     Chrome,
     Emphasis,
+    Warning,
     Error,
+    Urgent,
     Ok,
     /// A date, painted by its distance from today (docs/configuration.md).
     Date(When),
@@ -228,6 +237,71 @@ impl TitleScale {
     }
 }
 
+const MIN_TREE_CONTRAST: f64 = 3.0;
+const TREE_DEPTH_CAP: usize = 6;
+const TREE_START_MUTE: f64 = 0.45;
+const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+
+/// Depth-progressive OKLab connector scale with quantized 3:1 contrast floor against `bg`.
+#[derive(Debug, Clone, Copy)]
+pub struct TreeScale {
+    bg: Rgb,
+    target: Rgb,
+    bw_ink: Rgb,
+}
+
+impl TreeScale {
+    pub fn new(palette: &Palette) -> Self {
+        let bw_ink = if WHITE.contrast_ratio(palette.bg) >= BLACK.contrast_ratio(palette.bg) {
+            WHITE
+        } else {
+            BLACK
+        };
+        let target = if palette.fg.contrast_ratio(palette.bg) >= MIN_TREE_CONTRAST {
+            palette.fg
+        } else {
+            bw_ink
+        };
+        TreeScale {
+            bg: palette.bg,
+            target,
+            bw_ink,
+        }
+    }
+
+    fn repair(&self, sampled: Rgb) -> Rgb {
+        if sampled.contrast_ratio(self.bg) >= MIN_TREE_CONTRAST {
+            return sampled;
+        }
+        let (mut failed, mut passed) = (0.0_f64, 1.0_f64);
+        let mut result = self.bw_ink;
+        debug_assert!(result.contrast_ratio(self.bg) >= MIN_TREE_CONTRAST);
+        for _ in 0..20 {
+            let mid = 0.5 * (failed + passed);
+            let candidate = sampled.mix(self.bw_ink, mid);
+            if candidate.contrast_ratio(self.bg) >= MIN_TREE_CONTRAST {
+                passed = mid;
+                result = candidate;
+            } else {
+                failed = mid;
+            }
+        }
+        result
+    }
+
+    pub fn color(&self, project: Option<Rgb>, depth: usize) -> Rgb {
+        let clamped = depth.clamp(1, TREE_DEPTH_CAP);
+        let step = (clamped - 1) as f64 / (TREE_DEPTH_CAP - 1) as f64;
+        let start = match project {
+            Some(color) => color
+                .mix(WHITE, ID_TOWARD_WHITE)
+                .mix(self.bg, TREE_START_MUTE),
+            None => self.target.mix(self.bg, TREE_START_MUTE),
+        };
+        self.repair(start.mix(self.target, step))
+    }
+}
+
 /// Paints for one output stream. `main` builds one per stream, because stdout and stderr
 /// are redirected independently and only `Auto` can differ between them.
 pub struct Painter {
@@ -235,6 +309,7 @@ pub struct Painter {
     recency: Option<Recency>,
     priority: Option<PriorityScale>,
     title: Option<TitleScale>,
+    tree: Option<TreeScale>,
 }
 
 impl Painter {
@@ -249,6 +324,7 @@ impl Painter {
             recency: None,
             priority: None,
             title: None,
+            tree: None,
         }
     }
 
@@ -277,6 +353,13 @@ impl Painter {
         }
     }
 
+    pub fn with_tree_scale(self, scale: TreeScale) -> Painter {
+        Painter {
+            tree: Some(scale),
+            ..self
+        }
+    }
+
     pub fn enabled(&self) -> bool {
         self.enabled
     }
@@ -301,6 +384,18 @@ impl Painter {
                 let shade = color.mix(WHITE, ID_TOWARD_WHITE);
                 format!("38;2;{};{};{}", shade.r, shade.g, shade.b)
             }
+            Style::GoalId(Some(color)) => {
+                let shade = color.mix(WHITE, ID_TOWARD_WHITE);
+                format!("1;38;2;{};{};{}", shade.r, shade.g, shade.b)
+            }
+            Style::GoalId(None) => "1".into(),
+            Style::TreeGuide { color, depth } => match &self.tree {
+                Some(scale) => {
+                    let shade = scale.color(color, depth);
+                    format!("38;2;{};{};{}", shade.r, shade.g, shade.b)
+                }
+                None => "2".into(),
+            },
             Style::Date(when) => match &self.recency {
                 Some(recency) => {
                     let color = recency.color(when);
@@ -328,7 +423,9 @@ impl Painter {
             Style::Status(Status::Dropped | Status::Moved) => "2;31".into(),
             Style::Chrome => "2".into(),
             Style::Emphasis => "1".into(),
+            Style::Warning => "33".into(),
             Style::Error => "31".into(),
+            Style::Urgent => "1;31".into(),
             Style::Ok => "32".into(),
         };
         if self.enabled {
@@ -400,7 +497,9 @@ mod tests {
             (Style::Status(Status::Moved), "2;31"),
             (Style::Chrome, "2"),
             (Style::Emphasis, "1"),
+            (Style::Warning, "33"),
             (Style::Error, "31"),
+            (Style::Urgent, "1;31"),
             (Style::Ok, "32"),
             (Style::Heading(None), "1"),
         ] {
@@ -727,5 +826,125 @@ mod tests {
             "Title",
         );
         assert_ne!(cold_painted, "\x1b[38;2;171;205;239mTitle\x1b[0m");
+    }
+
+    #[test]
+    fn tree_guide_contrast_and_unassigned_depth() {
+        let dark = Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap();
+        let light = Palette::parse("fg=#1e1e1e bg=#ffffff cyan=#005f87").unwrap();
+        let arbitrary = Palette::parse("fg=#dbe7f0 bg=#223344 cyan=#00d7ff").unwrap();
+        let low_fg = Palette::parse("fg=#283848 bg=#223344 cyan=#00d7ff").unwrap();
+        let project = Rgb::parse_hex("#4e9af1").unwrap();
+
+        for pal in [&dark, &light, &arbitrary, &low_fg] {
+            let scale = TreeScale::new(pal);
+            for proj in [None, Some(project)] {
+                for depth in 1..=8 {
+                    let c = scale.color(proj, depth);
+                    assert!(
+                        c.contrast_ratio(pal.bg) >= 3.0,
+                        "contrast {} < 3.0 on bg {:?} proj {:?} depth {depth}",
+                        c.contrast_ratio(pal.bg),
+                        pal.bg,
+                        proj
+                    );
+                }
+            }
+        }
+
+        let dark_scale = TreeScale::new(&dark);
+        assert_ne!(dark_scale.color(None, 1), dark_scale.color(None, 6));
+        let light_scale = TreeScale::new(&light);
+        assert_ne!(light_scale.color(None, 1), light_scale.color(None, 6));
+    }
+
+    #[test]
+    fn tree_guide_column_depth_is_stable() {
+        let dark = Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap();
+        let scale = TreeScale::new(&dark);
+        let proj = Some(Rgb::parse_hex("#e07a5f").unwrap());
+
+        assert_eq!(scale.color(proj, 0), scale.color(proj, 1));
+        assert_ne!(scale.color(proj, 1), scale.color(proj, 2));
+        assert_ne!(scale.color(proj, 2), scale.color(proj, 6));
+        // Saturation at depth 6
+        assert_eq!(scale.color(proj, 6), scale.color(proj, 7));
+        assert_eq!(scale.color(proj, 6), scale.color(proj, 12));
+        assert_eq!(scale.color(None, 6), scale.color(None, 10));
+    }
+
+    #[test]
+    fn tree_guide_disabled_and_no_palette() {
+        let rgb = Rgb::parse_hex("#123456").unwrap();
+        let no_palette = Painter::new(ColorMode::Always, Format::Pretty, false);
+        assert_eq!(
+            no_palette.paint(
+                Style::TreeGuide {
+                    color: Some(rgb),
+                    depth: 1
+                },
+                "├─ "
+            ),
+            "\x1b[2m├─ \x1b[0m"
+        );
+        assert_eq!(
+            no_palette.paint(Style::GoalId(None), "aa-000001"),
+            "\x1b[1maa-000001\x1b[0m"
+        );
+        assert_eq!(
+            no_palette.paint(Style::GoalId(Some(rgb)), "aa-000001"),
+            "\x1b[1;38;2;84;108;135maa-000001\x1b[0m"
+        );
+
+        let disabled = Painter::new(ColorMode::Never, Format::Pretty, false)
+            .with_tree_scale(TreeScale::new(&Palette::BUILTIN));
+        assert_eq!(
+            disabled.paint(
+                Style::TreeGuide {
+                    color: Some(rgb),
+                    depth: 2
+                },
+                "│  "
+            ),
+            "│  "
+        );
+        assert_eq!(
+            disabled.paint(Style::GoalId(Some(rgb)), "aa-000001"),
+            "aa-000001"
+        );
+        assert_eq!(
+            disabled.paint(Style::GoalId(None), "aa-000001"),
+            "aa-000001"
+        );
+    }
+
+    #[test]
+    fn tree_guide_saturated_hues_near_fg_floor() {
+        let light_floor = Palette::parse("fg=#949494 bg=#ffffff cyan=#005f87").unwrap();
+        let dark_floor = Palette::parse("fg=#5a5a5a bg=#000000 cyan=#00d7ff").unwrap();
+        assert!(light_floor.fg.contrast_ratio(light_floor.bg) >= 3.0);
+        assert!(dark_floor.fg.contrast_ratio(dark_floor.bg) >= 3.0);
+
+        let hues = [
+            None,
+            Some(Rgb::parse_hex("#00ff00").unwrap()),
+            Some(Rgb::parse_hex("#00ffff").unwrap()),
+            Some(Rgb::parse_hex("#ffff00").unwrap()),
+        ];
+
+        for pal in [&light_floor, &dark_floor] {
+            let scale = TreeScale::new(pal);
+            for hue in hues {
+                for depth in [1, 2, 3, 4, 5, 6, 9] {
+                    let emitted = scale.color(hue, depth);
+                    assert!(
+                        emitted.contrast_ratio(pal.bg) >= 3.0,
+                        "hue={hue:?} depth={depth} bg={:?} emitted={emitted:?} ratio={}",
+                        pal.bg,
+                        emitted.contrast_ratio(pal.bg)
+                    );
+                }
+            }
+        }
     }
 }

@@ -431,6 +431,8 @@ options = [
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--related"], value = "ref", repeatable = true },
+  { names = ["--follows"], value = "ref", repeatable = true },
+  { names = ["--piece"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -447,6 +449,7 @@ summary = "Show one task with resolved links and dependencies"
 args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--no-fetch"], value = "none" },
+  { shared = "all_projects", value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -624,6 +627,10 @@ options = [
   { names = ["--no-depends"], value = "none" },
   { names = ["--rm-related"], value = "ref", repeatable = true },
   { names = ["--no-related"], value = "none" },
+  { names = ["--rm-follows"], value = "ref", repeatable = true },
+  { names = ["--no-follows"], value = "none" },
+  { names = ["--rm-piece"], value = "ref", repeatable = true },
+  { names = ["--no-pieces"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
@@ -639,6 +646,8 @@ options = [
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--related"], value = "ref", repeatable = true },
+  { names = ["--follows"], value = "ref", repeatable = true },
+  { names = ["--piece"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -1244,6 +1253,40 @@ path = ["index-state"]
 output = "json"
 summary = "print each indexed file's retention readiness and indexed-byte evidence"
 
+[[cli.obs.commands]]
+path = ["spend"]
+summary = "Compute, publish and replay live spend signals"
+
+[[cli.obs.commands]]
+path = ["spend", "baseline"]
+output = "json"
+summary = "Compute per-harness spend thresholds from the index"
+
+[[cli.obs.commands]]
+path = ["spend", "watch"]
+output = "json"
+summary = "Run one live spend cycle and publish spend signals"
+
+[[cli.obs.commands]]
+path = ["spend", "replay"]
+output = "json"
+summary = "Replay the spend detector day by day over the index"
+options = [
+  { names = ["--from"], value = "string", required = true },
+  { names = ["--to"], value = "string", required = true },
+  { names = ["--expect"], value = "string", repeatable = true },
+  { names = ["--lead"], value = "string", repeatable = true },
+]
+
+[[cli.obs.commands]]
+path = ["spend", "seed-history"]
+output = "json"
+summary = "Import an accepted replay's episodes into an empty spend state history"
+options = [
+  { names = ["--from-replay"], value = "path", required = true },
+  { names = ["--sha256"], value = "string", required = true },
+]
+
 # ---- lit
 
 [[cli.lit.commands]]
@@ -1646,6 +1689,35 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["source"]
+summary = "Record a published work as a source, addressed by its identifier"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--title"], value = "string", required = true },
+  { names = ["--doi"], value = "string" },
+  { names = ["--pmid"], value = "string" },
+  { names = ["--isbn"], value = "string" },
+  { names = ["--accession"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["source-correct"]
+summary = "Add or replace an identifier on a source; its address follows its identifiers"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--address"], value = "string", required = true },
+  { names = ["--grounds"], value = "string", required = true },
+  { names = ["--doi"], value = "string" },
+  { names = ["--pmid"], value = "string" },
+  { names = ["--isbn"], value = "string" },
+  { names = ["--accession"], value = "string" },
+]
+
+[[cli.science.commands]]
 path = ["spec"]
 summary = "Freeze an analysis spec against the kernel's reference rules and mint its record"
 options = [
@@ -1738,6 +1810,18 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["note"]
+summary = "Record a note in the current project: a name, a body, and the world records it is about"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--body"], value = "string", required = true },
+  { names = ["--about"], value = "string", repeatable = true },
+]
+
+[[cli.science.commands]]
 path = ["project"]
 summary = "Start a project: a name and a query over the world"
 options = [
@@ -1797,8 +1881,23 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["record"]
+summary = "Show one record in full: by address, or a source by identifier"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--address"], value = "string" },
+  { names = ["--doi"], value = "string" },
+  { names = ["--pmid"], value = "string" },
+  { names = ["--isbn"], value = "string" },
+  { names = ["--accession"], value = "string" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+]
+
+[[cli.science.commands]]
 path = ["revise"]
-summary = "Revise a project, question, hypothesis, task or decision"
+summary = "Revise a project, question, hypothesis, task, decision or topic"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
@@ -1846,7 +1945,7 @@ options = [
 
 [[cli.science.commands]]
 path = ["project-show"]
-summary = "Show one project: its query and its questions, hypotheses, tasks and decisions"
+summary = "Show one project: its query and its questions, hypotheses, tasks, decisions, topics and notes"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
@@ -1940,6 +2039,18 @@ options = [
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { names = ["--corpus-id"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["topic"]
+summary = "Record a topic in the current project: a background synthesis and the world records it draws on"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--body"], value = "string", required = true },
+  { names = ["--query"], value = "string", required = true },
 ]
 
 [[cli.science.commands]]
@@ -2552,7 +2663,52 @@ args = [{ name = "map-ref", value = "ref", required = true }]
 path = ["op"]
 output = "json"
 summary = "Send one raw op through the CLI's transport and print its result"
-args = [{ name = "op", value = "string", required = true }]
+exception = "JSON input requires exactly one literal JSON or - positional, including under --self; --capture-paste instead requires zero positionals. --origin, --capture-paste or --self select restricted HTTP mode. Structured error stderr requires explicit --json; op's result-only JSON stdout does not imply JSON errors."
+args = [{ name = "op", value = "string", required = false }]
+options = [
+  { names = ["--origin"], value = "string" },
+  { names = ["--capture-paste"], value = "none" },
+  { names = ["--stdin-terminator"], value = "string" },
+  { names = ["--via-agent"], value = "string" },
+  { names = ["--via-model"], value = "string" },
+  { names = ["--self"], value = "none" },
+  { shared = "tag", role = "set", value = "string", repeatable = true },
+]
+
+[[cli.mindful.commands]]
+path = ["runtime"]
+summary = "Inspect configuration, check or install the Mindful runtime"
+
+[[cli.mindful.commands]]
+path = ["runtime", "show"]
+verb = "show"
+summary = "Show resolved runtime configuration without opening a store"
+
+[[cli.mindful.commands]]
+path = ["runtime", "check"]
+verb = "check"
+summary = "Check installed runtime configuration and running-service agreement"
+exception = "Pretty is silent when clean and prints findings on discrepancy. JSON always emits the automation result, even when clean; a discrepancy exits 1, while inability to run is a stderr failure."
+options = [
+  { names = ["--running"], value = "none" },
+  { names = ["--service"], value = "string", default = "mindful-web.service" },
+]
+
+[[cli.mindful.commands]]
+path = ["runtime", "install"]
+summary = "Preview or apply runtime launcher links and rendered units"
+exception = "Package-specific installation, dry-run by default; --apply enacts the diff. Neither mode grants service activation authority or enables/restarts services."
+options = [{ names = ["--apply"], value = "none" }]
+
+[[cli.mindful.commands]]
+path = ["notice"]
+summary = "Mindful notice subscribers"
+
+[[cli.mindful.commands]]
+path = ["notice", "session-start"]
+summary = "Report capture backlog context at session start"
+protocol = "relay-subscriber-v2"
+exception = "Consumes a relay schema-2 session-start event SubscriberEnvelope; valid input outputs {} or nonempty context with exit 0, including operational unavailable context. Invalid JSON/schema/type/event is exit 1 with safe stderr and no stdout; structural argv errors are exit 2. Ignores MINDFUL_FORMAT, MINDFUL_COLOR and global --json, --pretty and --color values/conflicts before display validation. Standard help and root version remain store/input-free stdout preflights."
 
 [[cli.mindful.commands]]
 path = ["relate"]
@@ -3254,7 +3410,7 @@ options = [
 ]
 
 [cli.git-index-retention]
-project = "ops"
+project = "hostkit"
 tier = "automation"
 default_output = "pretty"
 env = "GIT-INDEX-RETENTION"
@@ -3315,9 +3471,9 @@ path = ["rm"]
 summary = "Harvest, inspect, unlock and remove a managed worktree"
 args = [{name = "target", value = "path", required = true}]
 
-# Minimal sweep adoption; existing survey, repair and guard modes are outside this inventory.
+# Sweep and subscriber adoption; existing survey, repair and guard modes are outside this inventory.
 [cli.git-index-health]
-project = "ops"
+project = "hostkit"
 tier = "automation"
 default_output = "pretty"
 env = "GIT-INDEX-HEALTH"
@@ -3326,3 +3482,9 @@ protocol = "one-shot textual sweep: non-ok results and complete coverage/count s
 [[cli.git-index-health.commands]]
 path = []
 options = [{names = ["--sweep"], value = "none"}]
+
+[[cli.git-index-health.commands]]
+path = ["--session-start"]
+summary = "Repair the session checkout index and report its recovery notice"
+protocol = "relay-subscriber-v2"
+exception = "Consumes a relay schema-2 subscriber envelope and writes notice JSON; notice failures use stderr and a nonzero exit. Ignores global --json, --pretty, --color, --headers, --no-headers and -C, their values/conflicts, and ordinary display environment/config; structural usage, help and version remain standard."

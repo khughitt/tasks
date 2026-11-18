@@ -241,11 +241,13 @@ impl RetentionRecord {
                 if self.kind != "worktree" && !self.sha256.value().is_some_and(digest) {
                     return Err(invalid("missing digest"));
                 }
-                if self.kind == "scratch" && !self.manifest.value().is_some_and(location) {
+                if self.kind == "scratch"
+                    && (self.manifest.absent() || self.manifest == FieldString::Null)
+                {
                     return Err(invalid("missing manifest"));
                 }
                 if !self.manifest.absent() && !self.manifest.value().is_some_and(location) {
-                    return Err(invalid("manifest"));
+                    return Err(invalid("manifest locator must start with / or $WORK_ROOT/"));
                 }
             }
             "unknown" => {
@@ -259,7 +261,9 @@ impl RetentionRecord {
                     && self.manifest != FieldString::Null
                     && !self.manifest.value().is_some_and(location)
                 {
-                    return Err(invalid("unknown manifest"));
+                    return Err(invalid(
+                        "unknown manifest locator must be null or start with / or $WORK_ROOT/",
+                    ));
                 }
             }
             _ => return Err(invalid("verification")),
@@ -479,6 +483,41 @@ pub struct ResolutionRelation {
     pub bad: Source,
     pub successors: Vec<u64>,
     pub reason: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolutionNote {
+    pub version: u8,
+    pub bad: Source,
+    pub successors: Vec<u64>,
+    pub reason: String,
+}
+pub fn decode_resolution(raw: &str) -> Result<ResolutionNote> {
+    let v = strict(raw.as_bytes())?;
+    if v.get("version")
+        .and_then(Value::as_u64)
+        .is_some_and(|v| v > 1)
+    {
+        return Err(invalid("unsupported_version"));
+    }
+    let n: ResolutionNote = serde_json::from_value(v).map_err(invalid)?;
+    if n.version != 1 {
+        return Err(invalid("unsupported_version"));
+    }
+    source_valid(&n.bad)?;
+    let mut seen = BTreeSet::new();
+    if n.successors
+        .iter()
+        .any(|s| *s <= n.bad.ordinal || !seen.insert(*s))
+    {
+        return Err(invalid(
+            "resolution successors must be distinct ordinals after bad.ordinal",
+        ));
+    }
+    if !line(&n.reason) {
+        return Err(invalid("resolution reason must be a non-empty single line"));
+    }
+    Ok(n)
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -176,12 +176,14 @@ mod tests {
         ), "fixture").unwrap();
         let scan = [task];
         let deps = crate::review::Deps::of_scan(&scan, |_| Ok(None)).unwrap();
+        let registry = crate::registry::Registry::default();
+        let hierarchy = crate::hierarchy::view_of(&scan, &["demo".to_string()], &registry);
         TaskSummary::of(
             &scan[0],
-            &scan,
+            &hierarchy,
             &deps,
             None,
-            &crate::registry::Registry::default(),
+            &registry,
             crate::time::parse("2026-10-24T00:00:00Z").unwrap(),
         )
     }

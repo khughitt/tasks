@@ -5283,6 +5283,50 @@ fn lane_field_round_trips_through_add_edit_and_every_row() {
     assert!(line.contains("≡ "), "lane rows carry the mark: {text}");
 }
 
+#[test]
+fn goal_rows_carry_the_goal_mark_in_pretty_tables() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    let leaf = id_of(env.json(&sci, &["add", "Leaf", "--parent", &goal]));
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane"]));
+
+    for args in [&["list"][..], &["tree"][..], &["prime"][..]] {
+        let text = env.pretty(&sci, args);
+        let line_of = |id: &str| {
+            text.lines()
+                .find(|line| line.contains(id))
+                .unwrap_or_else(|| panic!("{id} missing from {args:?}: {text}"))
+                .to_string()
+        };
+        assert!(
+            line_of(&goal).contains("◆ "),
+            "{args:?} marks the goal: {text}"
+        );
+        assert!(
+            !line_of(&leaf).contains('◆'),
+            "{args:?} leaves the leaf bare: {text}"
+        );
+        let lane_line = line_of(&lane);
+        assert!(
+            !lane_line.contains('◆'),
+            "{args:?} keeps lanes apart: {text}"
+        );
+        // prime shows lanes in their own block, which has no type column.
+        if args != ["prime"] {
+            assert!(
+                lane_line.contains("≡ "),
+                "{args:?} keeps the lane mark: {text}"
+            );
+        }
+    }
+    assert_eq!(
+        env.json(&sci, &["show", &goal])["task"].get("goal"),
+        None,
+        "JSON shape is unchanged"
+    );
+}
+
 /// Writes `last_done: <stamp>` into a task record, inserting the line if it is absent and
 /// replacing it if it is not. Fixture-only: it reaches states the CLI produces later, or
 /// (in Task 3) does not produce at all.
@@ -7325,10 +7369,10 @@ fn tree_nests_prunes_and_orders() {
 
     let out = env.cmd(&dir).args(["--pretty", "tree"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(&format!("{goal}      P1")), "{text}");
+    assert!(text.contains(&format!("{goal}        P1")), "{text}");
     assert!(
-        text.contains(&format!("  {big}    P2")),
-        "children are indented: {text}"
+        text.contains(&format!("└─ {big}     P2")),
+        "children carry tree connectors: {text}"
     );
 }
 
@@ -19962,6 +20006,7 @@ fn harness_shim_starts_from_isolated_env_and_drops_ambient_variables() {
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .env_clear()
             .envs(common::isolated_env(scratch.path()))
+            .env("CARGO_BIN_EXE_tasks", env!("CARGO_BIN_EXE_tasks"))
             .env("TASKS_SHIM_ENV_CHILD", "1")
             .env("DUMMY_SECRET", "sentinel-secret-value")
             .env("ANTIGRAVITY_CONVERSATION_ID", "leaked-agy-conv")

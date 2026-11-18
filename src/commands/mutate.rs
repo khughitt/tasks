@@ -150,8 +150,21 @@ pub fn apply_fields(
     // `edit --no-depends` clears the list before this runs; `dep --rm` removes one.
     let warnings = dep::add_dependencies(ctx, &resolver, task, &fields.depends)?;
     ctx.warnings.extend(warnings);
-    // Additive like `--depends`: an edit that names one related link appends to the list.
-    // `edit --no-related` clears the list before this runs; `edit --rm-related` removes one.
+    let warnings = crate::pieces::append(ctx, &resolver, task, &fields.pieces, original.is_some())?;
+    ctx.warnings.extend(warnings);
+    if original.is_none() && !fields.pieces.is_empty() {
+        crate::pieces::validate_list(&ctx.registry, task)?;
+    }
+    if !fields.follows.is_empty() {
+        let ids = fields
+            .follows
+            .iter()
+            .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
+            .collect::<Result<Vec<_>>>()?;
+        let warnings = crate::follows::append(&ctx.registry, &resolver, task, &ids)?;
+        ctx.warnings.extend(warnings);
+    }
+    // Related changes remain additive after explicit follows changes.
     let related_warnings = crate::related::add_related(ctx, &resolver, task, &fields.related)?;
     ctx.warnings.extend(related_warnings);
     if let Some(parent) = &fields.parent {

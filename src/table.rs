@@ -202,7 +202,7 @@ fn fits(columns: &[Column], natural: &[usize], kept: &[usize], width: usize) -> 
     let cells: usize = kept
         .iter()
         .map(|&index| match columns[index].fit {
-            Fit::Fixed => natural[index],
+            Fit::Fixed => natural[index].max(1),
             Fit::Wrap { min, .. } => min.min(natural[index]),
         })
         .sum();
@@ -886,5 +886,78 @@ mod tests {
         assert_eq!(wrap_width(None, None).unwrap(), None);
         assert!(wrap_width(Some("wide"), None).is_err());
         assert!(wrap_width(Some("0"), None).is_err());
+    }
+
+    #[test]
+    fn empty_fixed_columns_use_one_content_cell() {
+        let cols = [
+            Column::fixed("id"),
+            Column::fixed("work"),
+            Column::wrap("title", 20, None),
+        ];
+        let natural = [1, 0, 20];
+        let kept = [0, 1, 2];
+        assert!(!fits(&cols, &natural, &kept, 25));
+        assert!(fits(&cols, &natural, &kept, 26));
+        assert_eq!(mode(&cols, &natural, Some(25)), Mode::Unwrapped);
+        assert_eq!(mode(&cols, &natural, Some(26)), Mode::Table);
+
+        let rows = [Row::new(vec!["x".into(), String::new(), LONG.into()])];
+        let unwrapped = render(&cols, &rows, &at(25), None, &plain());
+        assert_eq!(unwrapped.lines().count(), 1, "{unwrapped}");
+        let wrapped = render(&cols, &rows, &at(26), None, &plain());
+        assert!(wrapped.lines().count() > 1, "{wrapped}");
+        assert!(
+            wrapped.lines().all(|line| visible_width(line) <= 26),
+            "{wrapped}"
+        );
+
+        // Shared widths (`Some(0)` on empty fixed column) and headers off/on:
+        let shared = shared_widths(&cols, &[&rows], false);
+        assert_eq!(shared.0, vec![Some(1), Some(0), None]);
+        let shared_25 = render(&cols, &rows, &at(25), Some(&shared), &plain());
+        assert_eq!(shared_25.lines().count(), 1, "{shared_25}");
+        let shared_26 = render(&cols, &rows, &at(26), Some(&shared), &plain());
+        assert!(shared_26.lines().count() > 1, "{shared_26}");
+        assert!(
+            shared_26.lines().all(|line| visible_width(line) <= 26),
+            "{shared_26}"
+        );
+
+        let headed_layout = Layout {
+            width: Some(31),
+            headers: true,
+        };
+        let shared_headed = shared_widths(&cols, &[&rows], true);
+        let headed = render(&cols, &rows, &headed_layout, Some(&shared_headed), &plain());
+        assert!(headed.lines().count() > 2, "{headed}");
+        assert!(
+            headed.lines().all(|line| visible_width(line) <= 31),
+            "{headed}"
+        );
+
+        // Multiple all-empty fixed columns: 1 + 1 + 1 + 20 + 3*2 = 29.
+        let multi_cols = [
+            Column::fixed("id"),
+            Column::fixed("work"),
+            Column::fixed("||"),
+            Column::wrap("title", 20, None),
+        ];
+        let multi_rows = [Row::new(vec![
+            "x".into(),
+            String::new(),
+            String::new(),
+            LONG.into(),
+        ])];
+        assert!(!fits(&multi_cols, &[1, 0, 0, 20], &[0, 1, 2, 3], 28));
+        assert!(fits(&multi_cols, &[1, 0, 0, 20], &[0, 1, 2, 3], 29));
+        let multi_28 = render(&multi_cols, &multi_rows, &at(28), None, &plain());
+        assert_eq!(multi_28.lines().count(), 1, "{multi_28}");
+        let multi_29 = render(&multi_cols, &multi_rows, &at(29), None, &plain());
+        assert!(multi_29.lines().count() > 1, "{multi_29}");
+        assert!(
+            multi_29.lines().all(|line| visible_width(line) <= 29),
+            "{multi_29}"
+        );
     }
 }

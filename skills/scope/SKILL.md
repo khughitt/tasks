@@ -363,6 +363,11 @@ to hold a document; keep the association in member notes.
 
 ## 5. Make follow-ups answerable
 
+For new work continuing earlier work, explicitly set `--follows <earlier-id>`;
+source remains the actual filing origin. Use the tasks skill's relation table:
+ordinary decomposition uses parent, and dependencies record waits. Do not retype
+historical links or infer continuation merely from a citation or shared subject.
+
 A research task title names the outcome. Its body has all five fields:
 
 ```markdown
