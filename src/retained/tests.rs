@@ -1675,3 +1675,69 @@ fn spaceless_resolution_replay_validates_scope_and_preserves_replay_invisibility
     assert!(s_zero.complete, "{s_zero:?}");
     assert!(s_zero.diagnostics.is_empty());
 }
+
+#[test]
+fn notes_mention_suffixes_handles_spaced_spaceless_malformed_and_unicode_escapes() {
+    use super::incoming::discovery::notes_mention_suffixes;
+    use std::collections::BTreeSet;
+
+    let suffixes = BTreeSet::from(["1abe9f".to_string(), "295f8d".to_string()]);
+    let note_vec = |text: &str| {
+        let mut t = task();
+        crate::commands::append_note(&mut t, "t", text).unwrap();
+        t.notes
+    };
+
+    // 1. Valid spaced `retained: ` record matching `task:<id>` -> true.
+    let mut matching = record();
+    matching["next_owner"] = json!("task:sci-1abe9f");
+    assert!(notes_mention_suffixes(
+        &note_vec(&format!("retained: {matching}")),
+        &suffixes
+    ));
+
+    // 2. Valid spaced `retained: ` record mentioning `<id>` ONLY in `purpose` -> false.
+    let mut purpose_only = record();
+    purpose_only["next_owner"] = json!("task:sci-000002");
+    purpose_only["purpose"] = json!("Filed follow-up for tasks-1abe9f");
+    assert!(!notes_mention_suffixes(
+        &note_vec(&format!("retained: {purpose_only}")),
+        &suffixes
+    ));
+
+    // 3. Spaceless `retained:{...}` record matching suffix -> true; non-matching -> false.
+    assert!(notes_mention_suffixes(
+        &note_vec(
+            r#"retained:{"version":1,"host":"host-a","kind":"worktree","path":".worktrees/x","state":"kept","verification":"verified","purpose":"p","next_owner":"task:sci-1abe9f","cleanup_trigger":"c"}"#
+        ),
+        &suffixes
+    ));
+    assert!(!notes_mention_suffixes(
+        &note_vec(
+            r#"retained:{"version":1,"host":"host-a","kind":"worktree","path":".worktrees/x","state":"kept","verification":"verified","purpose":"p","next_owner":"task:sci-000002","cleanup_trigger":"c"}"#
+        ),
+        &suffixes
+    ));
+
+    // 4. Malformed `retained: ` note missing `task:` prefix (`"ops-295f8d"`) -> true.
+    let mut unprefixed = record();
+    unprefixed["next_owner"] = json!("ops-295f8d");
+    assert!(notes_mention_suffixes(
+        &note_vec(&format!("retained: {unprefixed}")),
+        &suffixes
+    ));
+
+    // 5. Malformed `retained: ` note using `\uXXXX` escape for hex suffix -> true.
+    assert!(notes_mention_suffixes(
+        &note_vec(
+            r#"retained: {"version":1,"host":"host-a","next_owner":"sci-\u0031abe9f","bad":1}"#
+        ),
+        &suffixes
+    ));
+
+    // 6. Ordinary non-`retained:` note mentioning `task:sci-1abe9f` -> false.
+    assert!(!notes_mention_suffixes(
+        &note_vec("Custody note: transferred to task:sci-1abe9f"),
+        &suffixes
+    ));
+}
