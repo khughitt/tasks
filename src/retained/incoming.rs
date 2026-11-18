@@ -1,6 +1,12 @@
 //! Incoming `next_owner` retained custody queries across same-project and all-projects scopes.
 
-pub(crate) mod discovery;
+mod discovery;
+mod recheck;
+
+#[cfg(test)]
+pub(crate) use discovery::notes_mention_suffixes;
+#[cfg(test)]
+pub(crate) use recheck::DURING_INCOMING_RECHECK;
 
 use super::basis::PinnedTask;
 use super::model::{Identity, RetentionRecord, Source, decode_record, decode_resolution};
@@ -135,7 +141,6 @@ pub(crate) struct ParticipantEntry {
     pub pinned: PinnedTask,
 }
 
-#[allow(dead_code)]
 pub(crate) struct TrackedProject {
     pub project: Project,
     pub git_root: PathBuf,
@@ -147,10 +152,8 @@ pub(crate) struct TrackedProject {
     pub participants: BTreeMap<TaskId, ParticipantEntry>,
 }
 
-#[allow(dead_code)]
 pub(crate) struct PreparedIncoming {
     pub custody: IncomingCustody,
-    pub focal_ids: BTreeSet<TaskId>,
     pub suffixes: BTreeSet<String>,
     pub tracked_projects: Vec<TrackedProject>,
 }
@@ -159,14 +162,11 @@ fn upsert_tracked_project(
     tracked: &mut Vec<TrackedProject>,
     known_git_roots: &mut BTreeSet<PathBuf>,
     project: Project,
-    git_root: PathBuf,
-    basis_commit: String,
-    ref_b: Option<String>,
-    tasks_rel: String,
+    meta: discovery::SnapshotMeta,
     is_focal_project: bool,
     in_scan_scope: bool,
 ) -> usize {
-    known_git_roots.insert(git_root.clone());
+    known_git_roots.insert(meta.git_root.clone());
     if let Some(idx) = tracked
         .iter()
         .position(|t| t.project.prefix == project.prefix && t.project.records == project.records)
@@ -181,10 +181,10 @@ fn upsert_tracked_project(
     }
     tracked.push(TrackedProject {
         project,
-        git_root,
-        basis_commit,
-        ref_b,
-        tasks_rel,
+        git_root: meta.git_root,
+        basis_commit: meta.basis_commit,
+        ref_b: meta.ref_b,
+        tasks_rel: meta.tasks_rel,
         is_focal_project,
         in_scan_scope,
         participants: BTreeMap::new(),
@@ -305,18 +305,14 @@ pub(crate) fn collect(
     let mut diagnostics = Vec::new();
     let mut warnings = Vec::new();
 
-    let (focal_git_root, focal_b, focal_ref_b, focal_tasks_rel) =
-        discovery::snapshot_meta(&ctx.project)?;
+    let focal_meta = discovery::snapshot_meta(&ctx.project)?;
     let mut tracked_projects = Vec::new();
     let mut known_git_roots = BTreeSet::new();
     upsert_tracked_project(
         &mut tracked_projects,
         &mut known_git_roots,
         ctx.project.clone(),
-        focal_git_root,
-        focal_b,
-        focal_ref_b,
-        focal_tasks_rel,
+        focal_meta,
         true,
         true,
     );
@@ -385,15 +381,12 @@ pub(crate) fn collect(
                 && hop_project.records == ctx.project.records)
             {
                 match discovery::snapshot_meta(&hop_project) {
-                    Ok((g_root, b_p, r_b, t_rel)) => {
+                    Ok(hop_meta) => {
                         upsert_tracked_project(
                             &mut tracked_projects,
                             &mut known_git_roots,
                             hop_project.clone(),
-                            g_root,
-                            b_p,
-                            r_b,
-                            t_rel,
+                            hop_meta,
                             false,
                             false,
                         );
@@ -528,10 +521,12 @@ pub(crate) fn collect(
                 &mut tracked_projects,
                 &mut known_git_roots,
                 scan.project.clone(),
-                scan.git_root.clone(),
-                scan.basis_commit.clone(),
-                scan.ref_b.clone(),
-                scan.tasks_rel.clone(),
+                discovery::SnapshotMeta {
+                    git_root: scan.git_root.clone(),
+                    basis_commit: scan.basis_commit.clone(),
+                    ref_b: scan.ref_b.clone(),
+                    tasks_rel: scan.tasks_rel.clone(),
+                },
                 is_focal,
                 true,
             );
@@ -674,7 +669,6 @@ pub(crate) fn collect(
                 items,
                 diagnostics,
             },
-            focal_ids,
             suffixes,
             tracked_projects,
         },
@@ -1085,38 +1079,7 @@ pub(crate) fn recheck_freshness(
     ctx: &Ctx,
     focal_id: &TaskId,
     focal_pinned: &PinnedTask,
-    mut prepared: PreparedIncoming,
+    prepared: PreparedIncoming,
 ) -> Result<IncomingCustody> {
-    super::freshness::current(&ctx.project, focal_id, focal_pinned, false)?;
-    for tp in &prepared.tracked_projects {
-        for (raw_id, entry) in &tp.participants {
-            if let Err(err) = super::freshness::current(&tp.project, raw_id, &entry.pinned, false) {
-                prepared
-                    .custody
-                    .items
-                    .retain(|i| i.holder != entry.canonical_id);
-                prepared.custody.diagnostics.push(IncomingDiagnostic {
-                    code: err.kind().into(),
-                    project: tp.project.prefix.clone(),
-                    holder: Some(entry.canonical_id.clone()),
-                    host: None,
-                    identity: None,
-                    source: None,
-                    detail: err.to_string(),
-                    action: "Publish or recover the participant's clean Git basis before relying on incoming retained custody".into(),
-                });
-            }
-        }
-    }
-    prepared
-        .custody
-        .items
-        .sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-    prepared
-        .custody
-        .diagnostics
-        .sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-    prepared.custody.diagnostics.dedup();
-    prepared.custody.complete = Some(prepared.custody.diagnostics.is_empty());
-    Ok(prepared.custody)
+    recheck::recheck_freshness(ctx, focal_id, focal_pinned, prepared)
 }

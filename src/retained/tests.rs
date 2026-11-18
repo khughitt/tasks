@@ -1678,7 +1678,7 @@ fn spaceless_resolution_replay_validates_scope_and_preserves_replay_invisibility
 
 #[test]
 fn notes_mention_suffixes_handles_spaced_spaceless_malformed_and_unicode_escapes() {
-    use super::incoming::discovery::notes_mention_suffixes;
+    use super::incoming::notes_mention_suffixes;
     use std::collections::BTreeSet;
 
     let suffixes = BTreeSet::from(["1abe9f".to_string(), "295f8d".to_string()]);

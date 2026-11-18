@@ -1135,3 +1135,312 @@ fn incoming_spaceless_resolution_clears_guard_and_respects_host_filter() {
         );
     }
 }
+
+#[test]
+fn staged_only_index_handoff_and_working_tree_dirty_holder_fail_closed() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let env = TestEnv::new();
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().canonicalize().unwrap();
+
+    let sci = init_git_project(&env, &root, "sci", "sci");
+    let focal = env.json(&sci, &["add", "Focal"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let holder = env.json(&sci, &["add", "Non-candidate holder"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let arc_holder = env.json(&sci, &["add", "Archived clean holder"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for idx in 0..5 {
+        env.json(
+            &sci,
+            &[
+                "note",
+                &arc_holder,
+                &format!(
+                    "Clean archived note {idx} with enough padding bytes to enable lossless archive-notes"
+                ),
+            ],
+        );
+    }
+    let preview = env.json(&sci, &["archive-notes", &arc_holder]);
+    let expect_sha = preview["source_sha256"].as_str().unwrap().to_string();
+    env.json(
+        &sci,
+        &["archive-notes", &arc_holder, "--expect", &expect_sha],
+    );
+
+    let clean_commit = String::from_utf8(
+        git_fixture::command(env.home.path(), &sci)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    let holder_path = sci.join(format!("tasks/{holder}.md"));
+    let orig_holder_raw = std::fs::read_to_string(&holder_path).unwrap();
+
+    // 1. Staged-only `:0:` index handoff when BOTH `B_P` and working tree on disk lack the pointer!
+    let mut staged_raw = orig_holder_raw.clone();
+    staged_raw.push_str(&format!(
+        "- 2026-11-18T00:00:01Z (fixture): retained: {}\n",
+        kept_worktree("host-a", ".worktrees/staged-only", &format!("task:{focal}"))
+    ));
+    std::fs::write(&holder_path, &staged_raw).unwrap();
+    git(&sci, &["add", &format!("tasks/{holder}.md")]);
+    std::fs::write(&holder_path, &orig_holder_raw).unwrap();
+
+    let st_staged = env.json(&sci, &["retained", "state", &focal]);
+    assert_eq!(st_staged["incoming"]["complete"], false, "{st_staged}");
+    assert!(
+        st_staged["incoming"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "retained_stale_basis" && d["holder"] == holder),
+        "{st_staged}"
+    );
+
+    // 2. Unmerged index stage (`1..=3`) on `<holder>.md` -> `retained_stale_basis`.
+    git(&sci, &["reset", "--hard", &clean_commit]);
+    let head_blob = String::from_utf8(
+        git_fixture::command(env.home.path(), &sci)
+            .args(["rev-parse", &format!("HEAD:tasks/{holder}.md")])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    let mut upd = git_fixture::command(env.home.path(), &sci)
+        .args(["update-index", "--index-info"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(
+        upd.stdin.as_mut().unwrap(),
+        "000000 0000000000000000000000000000000000000000 0\ttasks/{holder}.md\n100644 {head_blob} 2\ttasks/{holder}.md"
+    )
+    .unwrap();
+    assert!(upd.wait().unwrap().success());
+
+    let st_unmerged = env.json(&sci, &["retained", "state", &focal]);
+    assert_eq!(st_unmerged["incoming"]["complete"], false, "{st_unmerged}");
+    assert!(
+        st_unmerged["incoming"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "retained_stale_basis" && d["holder"] == holder),
+        "{st_unmerged}"
+    );
+
+    // 3. Working-tree dirty edit introducing `<focal>`'s suffix (unstaged) -> `retained_stale_basis`.
+    git(&sci, &["reset", "--hard", &clean_commit]);
+    std::fs::write(&holder_path, &staged_raw).unwrap();
+    let st_wt = env.json(&sci, &["retained", "state", &focal]);
+    assert_eq!(st_wt["incoming"]["complete"], false, "{st_wt}");
+    assert!(
+        st_wt["incoming"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "retained_stale_basis" && d["holder"] == holder),
+        "{st_wt}"
+    );
+
+    // 4. Working-tree corrupt `.notes` archive on non-candidate task -> `retained_stale_basis`.
+    git(&sci, &["reset", "--hard", &clean_commit]);
+    let arc_dir = sci.join(format!("tasks/files/{arc_holder}"));
+    let arc_file = std::fs::read_dir(&arc_dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "notes"))
+        .unwrap();
+    std::fs::write(&arc_file, b"corrupted working-tree archive bytes\n").unwrap();
+    let st_wt_arc = env.json(&sci, &["retained", "state", &focal]);
+    assert_eq!(st_wt_arc["incoming"]["complete"], false, "{st_wt_arc}");
+    assert!(
+        st_wt_arc["incoming"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "retained_stale_basis" && d["holder"] == arc_holder),
+        "{st_wt_arc}"
+    );
+}
+
+#[test]
+fn recheck_ignores_untracked_ordinary_attachments_on_focal_holder_and_unrelated_tasks() {
+    let env = TestEnv::new();
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().canonicalize().unwrap();
+
+    let sci = init_git_project(&env, &root, "sci", "sci");
+    let focal = env.json(&sci, &["add", "Focal"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let holder = env.json(&sci, &["add", "Verified incoming holder"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let other = env.json(&sci, &["add", "Unrelated task"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    env.json(
+        &sci,
+        &[
+            "note",
+            &holder,
+            &format!(
+                "retained: {}",
+                kept_worktree("host-a", ".worktrees/h-clean", &format!("task:{focal}"))
+            ),
+        ],
+    );
+
+    for (tid, filename) in [
+        (&focal, "draft.json"),
+        (&holder, "note.txt"),
+        (&other, "img.png"),
+    ] {
+        let dir = sci.join(format!("tasks/files/{tid}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(filename), b"ordinary untracked payload").unwrap();
+    }
+
+    for extra in [vec![], vec!["--all-projects"]] {
+        let mut args = vec!["retained", "state", focal.as_str()];
+        args.extend(extra.clone());
+        let st = env.json(&sci, &args);
+        assert_eq!(st["complete"], true, "{extra:?}: {st}");
+        assert_eq!(st["incoming"]["complete"], true, "{extra:?}: {st}");
+        assert_eq!(st["incoming"]["items"].as_array().unwrap().len(), 1);
+        assert_eq!(st["incoming"]["items"][0]["holder"], holder);
+        assert_eq!(st["incoming"]["diagnostics"], json!([]), "{extra:?}: {st}");
+    }
+}
+
+#[test]
+fn all_projects_shared_detached_git_root_isolates_per_project_subdirs() {
+    let env = TestEnv::new();
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().canonicalize().unwrap();
+
+    let shared_records = root.join("records");
+    std::fs::create_dir_all(&shared_records).unwrap();
+    git(&shared_records, &["init", "-q", "-b", "main"]);
+    git_fixture::assert_repo(env.home.path(), &shared_records);
+    std::fs::write(
+        shared_records.join("README.md"),
+        "Shared detached records\n",
+    )
+    .unwrap();
+    git(&shared_records, &["add", "README.md"]);
+    git(&shared_records, &["commit", "-qm", "seed shared records"]);
+
+    let init_detached = |name: &str, prefix: &str| {
+        let checkout = root.join(name);
+        std::fs::create_dir_all(&checkout).unwrap();
+        git(&checkout, &["init", "-q", "-b", "main"]);
+        git_fixture::assert_repo(env.home.path(), &checkout);
+        env.json(
+            &checkout,
+            &[
+                "init",
+                "--prefix",
+                prefix,
+                "--records",
+                shared_records.to_str().unwrap(),
+            ],
+        );
+        let cfg = shared_records.join(format!("{prefix}/tasks/.config.toml"));
+        let mut cfg_val: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        cfg_val.as_table_mut().unwrap().insert(
+            "git".into(),
+            toml::Value::Table(toml::map::Map::from_iter([(
+                "commit".into(),
+                toml::Value::Boolean(true),
+            )])),
+        );
+        std::fs::write(&cfg, toml::to_string(&cfg_val).unwrap()).unwrap();
+        git(&shared_records, &["add", "."]);
+        git(
+            &shared_records,
+            &["commit", "-qm", &format!("init detached {prefix}")],
+        );
+        checkout
+    };
+
+    let alpha = init_detached("alpha", "alp");
+    let beta = init_detached("beta", "bet");
+    let gamma = init_detached("gamma", "gam");
+
+    let focal = env.json(&alpha, &["add", "Alpha focal"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let h_bet_clean = env.json(&beta, &["add", "Beta fresh holder"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let h_gam_verified = env.json(&gamma, &["add", "Gamma verified holder"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    env.json(
+        &gamma,
+        &[
+            "note",
+            &h_gam_verified,
+            &format!(
+                "retained: {}",
+                kept_worktree("host-a", "/work/gamma-item", &format!("task:{focal}"))
+            ),
+        ],
+    );
+
+    // Dirty uncommitted handoff in `beta` (`records/bet/tasks/<h_bet_clean>.md`) only!
+    let bet_md = shared_records.join(format!("bet/tasks/{h_bet_clean}.md"));
+    let mut bet_raw = std::fs::read_to_string(&bet_md).unwrap();
+    bet_raw.push_str(&format!(
+        "- 2026-11-18T00:00:01Z (fixture): retained: {}\n",
+        kept_worktree("host-a", "/work/beta-dirty", &format!("task:{focal}"))
+    ));
+    std::fs::write(&bet_md, bet_raw).unwrap();
+
+    let st = env.json(&alpha, &["retained", "state", &focal, "--all-projects"]);
+    assert_eq!(
+        st["complete"], true,
+        "alpha top-level state must stay complete: {st}"
+    );
+    assert_eq!(st["incoming"]["complete"], false, "{st}");
+    assert_eq!(st["incoming"]["items"].as_array().unwrap().len(), 1, "{st}");
+    assert_eq!(st["incoming"]["items"][0]["holder"], h_gam_verified);
+
+    let diags = st["incoming"]["diagnostics"].as_array().unwrap();
+    assert!(
+        diags
+            .iter()
+            .all(|d| d["project"] == "bet" && d["code"] == "retained_stale_basis"),
+        "only beta should report stale diagnostics: {st}"
+    );
+    assert!(diags.iter().any(|d| d["holder"] == h_bet_clean), "{st}");
+}

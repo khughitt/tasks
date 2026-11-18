@@ -1,3 +1,5 @@
+//! Snapshot-bound Git and non-Git candidate discovery for incoming retained custody.
+
 use super::IncomingDiagnostic;
 use crate::error::{Error, Result};
 use crate::model::{Note, TaskId};
@@ -112,7 +114,7 @@ impl BatchReader {
         self.stdout.read_exact(&mut buf)?;
         let mut nl = [0u8; 1];
         self.stdout.read_exact(&mut nl)?;
-        if nl != [b'\n'] {
+        if nl != *b"\n" {
             return Err(Error::RetainedHistoryBlocked(format!(
                 "cat-file --batch missing trailing newline for {oid}"
             )));
@@ -122,9 +124,15 @@ impl BatchReader {
     }
 }
 
-pub(crate) fn snapshot_meta(
-    project: &Project,
-) -> Result<(PathBuf, String, Option<String>, String)> {
+#[derive(Clone)]
+pub(super) struct SnapshotMeta {
+    pub git_root: PathBuf,
+    pub basis_commit: String,
+    pub ref_b: Option<String>,
+    pub tasks_rel: String,
+}
+
+pub(super) fn snapshot_meta(project: &Project) -> Result<SnapshotMeta> {
     let git_root = super::super::basis::root(project)?;
     let basis_commit = super::super::basis::resolve(project, "HEAD")?;
     let sym = super::super::read::run(project, &["symbolic-ref", "-q", "HEAD"])?.output;
@@ -149,7 +157,12 @@ pub(crate) fn snapshot_meta(
     } else {
         format!("{sub}/tasks")
     };
-    Ok((git_root, basis_commit, ref_b, tasks_rel))
+    Ok(SnapshotMeta {
+        git_root,
+        basis_commit,
+        ref_b,
+        tasks_rel,
+    })
 }
 
 fn scan_failed_diag(
@@ -227,7 +240,7 @@ pub(crate) fn discover_project(
         }
     };
 
-    let (git_root, basis_commit, ref_b, tasks_rel) = match snapshot_meta(&pinned_project) {
+    let meta = match snapshot_meta(&pinned_project) {
         Ok(meta) => meta,
         Err(err) => {
             diagnostics.push(IncomingDiagnostic {
@@ -247,9 +260,9 @@ pub(crate) fn discover_project(
     let candidates = scan_pinned_tree(
         registry,
         &pinned_project,
-        &git_root,
-        &basis_commit,
-        &tasks_rel,
+        &meta.git_root,
+        &meta.basis_commit,
+        &meta.tasks_rel,
         batch_readers,
         focal_ids,
         suffixes,
@@ -258,10 +271,10 @@ pub(crate) fn discover_project(
 
     Some(PinnedProjectScan {
         project: pinned_project,
-        git_root,
-        basis_commit,
-        ref_b,
-        tasks_rel,
+        git_root: meta.git_root,
+        basis_commit: meta.basis_commit,
+        ref_b: meta.ref_b,
+        tasks_rel: meta.tasks_rel,
         candidates,
     })
 }
