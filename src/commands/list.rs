@@ -759,6 +759,9 @@ pub fn next(
     })))
 }
 
+/// Distinct elsewhere checkouts with their scans, and each claimed task indexed into them.
+type ClaimedElsewhere = (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>);
+
 /// Live claims on tasks this scan does not hold: work started in a checkout whose branch
 /// has not merged. Each is read from the claim's recorded worktree, with that checkout's
 /// scan, the docs/ownership.md resolves a store-only park, so `doing` never drops a
@@ -768,7 +771,7 @@ fn claimed_elsewhere(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
-) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+) -> ClaimedElsewhere {
     claimed_elsewhere_with(ctx, all, claims, super::parked::open_recorded)
 }
 
@@ -780,7 +783,7 @@ fn claimed_elsewhere_with(
         &TaskId,
         &std::path::Path,
     ) -> Result<Option<(Project, Task, Vec<Task>)>>,
-) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+) -> ClaimedElsewhere {
     struct CachedCheckout {
         project: Project,
         scan: Vec<Task>,
