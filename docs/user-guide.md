@@ -41,6 +41,9 @@ tasks done demo-abcdef "Verified the corrected behavior"
 ```
 
 `start` establishes a host-local work claim and records an advisory owner.
+Starting a goal with local descendants in `todo`, `blocked`, or `doing` also
+suggests `tasks ready --under <goal-id>` to find eligible work. The claim is on
+the goal you started.
 `park` records an actionable continuation and releases the active claim without
 changing status. Read [ownership](ownership.md) before takeover, release or
 automation. `block` records an explicit obstacle; dependencies alone do not

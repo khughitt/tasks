@@ -124,6 +124,15 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
     }
     super::finish(&mut ctx);
     warn_if_uncommitted_with_worktrees(&mut ctx, &task);
+    if crate::hierarchy::descendants(&local, &task.id, &ctx.registry)
+        .iter()
+        .any(|child| matches!(child.status, Status::Todo | Status::Blocked | Status::Doing))
+    {
+        ctx.warnings.push(format!(
+            "goal {} has open local work. Run `tasks ready --under {}` to find eligible descendants",
+            task.id, task.id
+        ));
+    }
     Ok(id_out(ctx, &task))
 }
 
