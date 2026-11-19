@@ -869,7 +869,7 @@ fn sweep_signals_scans_promoted_refs_spec_plan_and_existing_root_files() {
         &env,
         &dir,
         "Subpath and bare non-root word",
-        "mentions src/justfile and sweep.md only",
+        "mentions src/justfile, justfile.bak/foo and sweep.md only",
     );
     set_stamps(&dir, &subpath_only, &[("updated", "2026-06-01T00:00:00Z")]);
 
@@ -958,4 +958,48 @@ fn sweep_signals_twins_excludes_direct_parent_child_pairs() {
     assert_eq!(row(&rows, &goal)["twins"], "");
     assert_eq!(row(&rows, &child_a)["twins"], child_b);
     assert_eq!(row(&rows, &child_b)["twins"], child_a);
+}
+
+#[test]
+fn sweep_signals_foreign_citation_ignores_missing_root_and_fails_on_corrupt_record() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let gone = env.init("gone");
+    let bad = env.init("bad");
+
+    let gone_id = add(&env, &gone, "Vanishes with root", "x");
+    std::fs::remove_dir_all(&gone).unwrap();
+
+    let cites_gone = add(
+        &env,
+        &dir,
+        "Cites removed foreign root",
+        &format!("see {gone_id}"),
+    );
+    backdate(&dir, &cites_gone);
+
+    let (code, rows, stderr) = ledger(&env, &dir);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(row(&rows, &cites_gone)["cited_closed"], "");
+
+    let bad_id = add(&env, &bad, "Corrupted later", "x");
+    std::fs::write(
+        bad.join("tasks").join(format!("{bad_id}.md")),
+        "---\nbroken: [\n---\n",
+    )
+    .unwrap();
+    let cites_bad = add(
+        &env,
+        &dir,
+        "Cites corrupt foreign task",
+        &format!("see {bad_id}"),
+    );
+    backdate(&dir, &cites_bad);
+
+    let (code, rows, stderr) = ledger(&env, &dir);
+    assert_eq!(code, 1, "{stderr}");
+    assert!(rows.is_empty());
+    assert!(stderr.starts_with("sweep-signals:"), "{stderr}");
+    assert!(stderr.contains("show"), "{stderr}");
+    assert!(!stderr.contains("Traceback"), "{stderr}");
 }
