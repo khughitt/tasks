@@ -321,7 +321,8 @@ maximal token matching `[a-z][a-z0-9]{1,7}-[0-9a-f]{6}` whose prefix the registr
 knows. Only new citations count: every id in an appended note counts, and only
 ids absent from the old body count. Each new citation resolves to its live
 destination across move chains (`tombstone::follow`). Unresolvable citations warn
-`<task> cites <id>, which resolves to no task here; not linked`. Citations are
+`<task> cites <id>, which resolves to no task here; not linked`. For `add`,
+`<task>` is the ID returned for the created record. Citations are
 skipped without warning if the cited id or its destination matches the record
 itself, a child, an id already in `related`, or an id held in `depends`, `parent`,
 `wake_on`, `follows`, `moved_to`, `moved_from`, a task-id `source`, or removed in

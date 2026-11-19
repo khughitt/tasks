@@ -3520,6 +3520,30 @@ fn body_leading_whitespace_survives_routine_writes() {
 }
 
 #[test]
+fn add_unresolved_citation_warning_names_the_created_id() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    env.init("bb");
+    let args = ["add", "Citer", "--body", "see bb-ffffff"];
+    let out = env.json(&dir, &args);
+    let id = out["id"].as_str().unwrap();
+    let warning =
+        |id: &str| format!("{id} cites bb-ffffff, which resolves to no task here; not linked");
+    assert!(warnings_of(&out).contains(&warning(id)), "{out}");
+    assert!(
+        env.json(&dir, &["show", id])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    let pretty = env.cmd(&dir).args(args).arg("--pretty").output().unwrap();
+    assert!(pretty.status.success(), "{pretty:?}");
+    let stdout = String::from_utf8(pretty.stdout).unwrap();
+    let stderr = String::from_utf8(pretty.stderr).unwrap();
+    assert!(stderr.contains(&warning(stdout.trim())), "{stdout}{stderr}");
+}
+
+#[test]
 fn add_validates_before_writing() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

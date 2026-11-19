@@ -224,11 +224,19 @@ pub fn apply_fields(
 
 /// `save` for a task that does not exist yet: validates, then creates exclusively. Takes
 /// the project rather than `Ctx` because the feedback command creates in another project.
-pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result<()> {
+pub(super) fn create<T>(
+    project: &Project,
+    registry: &Registry,
+    task: &mut Task,
+    mut prepare: impl FnMut(&mut Task) -> Result<T>,
+) -> Result<T> {
     task.updated = crate::time::now();
-    validate_task(task)?;
-    project.validate_docs(task)?;
-    project.create_task(registry, task)
+    project.create_task(registry, task, |draft| {
+        let result = prepare(draft)?;
+        validate_task(draft)?;
+        project.validate_docs(draft)?;
+        Ok(result)
+    })
 }
 
 pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {

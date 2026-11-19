@@ -255,7 +255,7 @@ fn create(
         attribution.origin,
         attribution.session,
     )?;
-    super::create(target, registry, &mut task)?;
+    super::create(target, registry, &mut task, |_| Ok(()))?;
     Ok(task)
 }
 

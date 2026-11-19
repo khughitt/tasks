@@ -1685,35 +1685,45 @@ impl Project {
         Ok(self.status_paths(&["tasks/"], false)?.map(|s| s.dirty))
     }
 
-    /// Assigns a fresh id and links the file into place with an exclusive operation, so a
-    /// concurrent creator that drew the same id can never be overwritten: on a collision
-    /// the id is regenerated. The temp file lives under tasks/ like every other write.
-    pub fn create_task(&self, registry: &Registry, task: &mut Task) -> Result<()> {
-        self.create_task_with(registry, task, || fastrand::u32(..0x100_0000))
+    /// Tries the task's id first, then redraws on collision. The preparation and result
+    /// belong to a single candidate and are kept only if its file is created exclusively.
+    pub(crate) fn create_task<T>(
+        &self,
+        registry: &Registry,
+        task: &mut Task,
+        prepare: impl FnMut(&mut Task) -> Result<T>,
+    ) -> Result<T> {
+        self.create_task_with(registry, task, || fastrand::u32(..0x100_0000), prepare)
     }
 
-    fn create_task_with(
+    fn create_task_with<T>(
         &self,
         registry: &Registry,
         task: &mut Task,
         mut candidate: impl FnMut() -> u32,
-    ) -> Result<()> {
-        self.validate_invariants(registry, task)?;
-        // `add`'s write path: a new record has nothing to restore.
-        crate::migrating::freeze::check_write(registry, self, None, task)?;
-        for _ in 0..16 {
-            task.id = TaskId {
-                prefix: self.prefix.clone(),
-                hex: format!("{:06x}", candidate()),
-            };
-            let path = self.task_path(&task.id);
-            if self.is_reserved_suffix(&task.id.hex) || path.exists() {
+        mut prepare: impl FnMut(&mut Task) -> Result<T>,
+    ) -> Result<T> {
+        let retries = std::iter::repeat_with(|| TaskId {
+            prefix: self.prefix.clone(),
+            hex: format!("{:06x}", candidate()),
+        });
+        for id in std::iter::once(task.id.clone()).chain(retries).take(16) {
+            if self.is_reserved_suffix(&id.hex) || self.task_path(&id).exists() {
                 continue;
             }
-            let raw = serialize_physical(&self.physical_for_save(task)?);
-            let linked = self.create_task_file(task, &raw);
+            let mut draft = task.clone();
+            draft.id = id;
+            let result = prepare(&mut draft)?;
+            self.validate_invariants(registry, &draft)?;
+            // A new record has nothing to restore.
+            crate::migrating::freeze::check_write(registry, self, None, &draft)?;
+            let raw = serialize_physical(&self.physical_for_save(&draft)?);
+            let linked = self.create_task_file(&draft, &raw);
             match linked {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    *task = draft;
+                    return Ok(result);
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error.into()),
             }
@@ -1856,8 +1866,8 @@ mod tests {
         let p = project.unwrap();
         let registry = Registry::default();
         let mut task = sample(&p);
-        let mut candidates = [1, 2].into_iter();
-        p.create_task_with(&registry, &mut task, || candidates.next().unwrap())
+        task.id.hex = "000001".into();
+        p.create_task_with(&registry, &mut task, || 2, |_| Ok(()))
             .unwrap();
         assert_eq!(task.id.hex, "000002");
         task.id.hex = "000001".into();
@@ -2277,12 +2287,49 @@ mod tests {
         p.write_task(&registry, &first).unwrap();
         let mut second = sample(&p);
         second.title = "second".into();
-        let mut candidates = [1, 2].into_iter();
-        p.create_task_with(&registry, &mut second, || candidates.next().unwrap())
+        second.id = first.id.clone();
+        let in_flight = p.tasks_dir().join(".tst-000002.new.tmp");
+        std::fs::write(&in_flight, "other creator").unwrap();
+        let mut candidates = [2, 3].into_iter();
+        let cited = [
+            TaskId::parse("tst-000002").unwrap(),
+            TaskId::parse("tst-000003").unwrap(),
+        ];
+        let host = crate::config::HostConfig::default();
+        let resolver = crate::resolve::Resolver::new(&p, &registry, &host);
+        let mut attempted = Vec::new();
+        let warnings = p
+            .create_task_with(
+                &registry,
+                &mut second,
+                || candidates.next().unwrap(),
+                |draft| {
+                    attempted.push(draft.id.clone());
+                    crate::related::link_citations(
+                        &p,
+                        &registry,
+                        &resolver,
+                        draft,
+                        &cited,
+                        &crate::related::RelatedChange::default(),
+                    )
+                },
+            )
             .unwrap();
-        assert_eq!(second.id.hex, "000002");
+        assert_eq!(attempted, cited);
+        assert_eq!(second.id, cited[1]);
+        assert_eq!(
+            warnings,
+            ["tst-000003 cites tst-000002, which resolves to no task here; not linked"]
+        );
         assert_eq!(p.read_task(&first.id).unwrap().title, "first");
-        assert_eq!(p.read_task(&second.id).unwrap().title, "second");
+        assert_eq!(p.read_task(&second.id).unwrap(), second);
+        assert!(second.related.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&in_flight).unwrap(),
+            "other creator"
+        );
+        std::fs::remove_file(&in_flight).unwrap();
         assert!(std::fs::read_dir(p.tasks_dir()).unwrap().all(|entry| {
             !entry
                 .unwrap()
@@ -2299,7 +2346,7 @@ mod tests {
         let mut task = sample(&p);
         task.reviewed = true;
         assert!(matches!(
-            p.create_task(&registry, &mut task),
+            p.create_task(&registry, &mut task, |_| Ok(())),
             Err(Error::Validation(_))
         ));
         assert!(!p.task_path(&task.id).exists());
@@ -2309,7 +2356,7 @@ mod tests {
                 .all(|entry| entry.unwrap().file_name() == ".config.toml")
         );
         task.status = Status::Idea;
-        p.create_task(&registry, &mut task).unwrap();
+        p.create_task(&registry, &mut task, |_| Ok(())).unwrap();
         assert_eq!(p.read_task(&task.id).unwrap(), task);
     }
 

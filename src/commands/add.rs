@@ -135,16 +135,8 @@ pub fn run(
     };
     let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let cited = crate::related::new_citations(&ctx.registry, None, &task.body, &[]);
-    let warnings = crate::related::link_citations(
-        &ctx.project,
-        &ctx.registry,
-        &resolver,
-        &mut task,
-        &cited,
-        &related_change,
-    )?;
-    ctx.warnings.extend(warnings);
-    let stamp = super::occurrence_stamp(&mut ctx.warnings);
+    let mut stamp_warnings = Vec::new();
+    let stamp = super::occurrence_stamp(&mut stamp_warnings);
     let at = task.created.clone();
     super::append_occurrence_note(
         &mut task,
@@ -155,7 +147,18 @@ pub fn run(
         attribution.origin,
         attribution.session,
     )?;
-    create(&ctx.project, &ctx.registry, &mut task)?;
+    let warnings = create(&ctx.project, &ctx.registry, &mut task, |draft| {
+        crate::related::link_citations(
+            &ctx.project,
+            &ctx.registry,
+            &resolver,
+            draft,
+            &cited,
+            &related_change,
+        )
+    })?;
+    ctx.warnings.extend(warnings);
+    ctx.warnings.extend(stamp_warnings);
     super::finish(&mut ctx);
     Ok(Output::Add(AddOut {
         id: task.id.to_string(),
