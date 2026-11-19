@@ -293,8 +293,9 @@ mean those documents were verified.
    When closing work changes what an open task should do next, update that record in the same
    session. Check the closing task's parent and open dependents in `tasks show <id> --all-projects`,
    and open records whose body or park names the work as pending. State what landed with its
-   revision or version, what remains, and who acts next or what blocks them. If integration
-   is pending, give the branch revision and say what still needs to land. Update the body if it
+   revision or version, what remains, and who acts next or what blocks them. Write the update
+   after integration when it happens in the same session. If integration is still pending at
+   handoff, give the branch revision and say what still needs to land. Update the body if it
    already states the status or describes the delivered work as pending. Replace the stale status
    text and preserve acceptance and decision history. Otherwise, append a short note with `tasks note`.
    Complete [retention accounting](#artifact-placement-and-retention) before closing (`done` or
