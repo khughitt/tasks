@@ -899,34 +899,21 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
                 ));
             }
         }
-        // Current contract (docs/user-guide.md): the writers refuse it, so only a hand edit lands here.
-        if task.reviewed && task.status != Status::Idea {
-            errors.push(finding(
-                Some(task),
-                file.clone(),
-                "review_status",
-                format!(
-                    "is {} and carries reviewed; only an idea carries it",
-                    task.status.as_str()
-                ),
-            ));
-        }
         // Current contract (docs/user-guide.md): the writers refuse these, so only a hand edit lands here.
-        if task.awaiting_user && !task.reviewed {
-            errors.push(finding(
-                Some(task),
-                file.clone(),
-                "review_status",
-                "carries awaiting_user without reviewed; only a reviewed idea carries it".into(),
-            ));
-        }
-        if task.reviewed_at.is_some() && !task.reviewed {
-            errors.push(finding(
-                Some(task),
-                file.clone(),
-                "review_status",
-                "carries reviewed_at without reviewed".into(),
-            ));
+        for issue in crate::review::metadata_issues(task) {
+            let detail = match issue {
+                crate::review::MetadataIssue::ReviewedNonIdea(status) => format!(
+                    "is {} and carries reviewed; only an idea carries it",
+                    status.as_str()
+                ),
+                crate::review::MetadataIssue::AwaitingUserWithoutReviewed => {
+                    "carries awaiting_user without reviewed; only a reviewed idea carries it".into()
+                }
+                crate::review::MetadataIssue::ReviewedAtWithoutReviewed => {
+                    "carries reviewed_at without reviewed".into()
+                }
+            };
+            errors.push(finding(Some(task), file.clone(), "review_status", detail));
         }
         if task.closed.is_some() && !matches!(task.status, Status::Done | Status::Dropped) {
             errors.push(finding(

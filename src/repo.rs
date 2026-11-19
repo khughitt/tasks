@@ -2408,4 +2408,30 @@ mod tests {
         task.related.clear();
         assert!(p.validate_invariants_among(&registry, &task, &[]).is_ok());
     }
+
+    #[test]
+    fn validate_invariants_reports_first_error_on_simultaneous_review_issues() {
+        let (_dir, p) = temp_project();
+        let registry = Registry::default();
+        let mut task = sample(&p);
+        task.status = Status::Idea;
+        task.reviewed = false;
+        task.awaiting_user = true;
+        task.reviewed_at = Some("2026-10-17T09:00:00Z".into());
+        let err = p
+            .validate_invariants_among(&registry, &task, &[])
+            .unwrap_err();
+        match err {
+            Error::Validation(msg) => {
+                assert_eq!(
+                    msg,
+                    format!(
+                        "{} is not reviewed; only a reviewed idea carries awaiting_user",
+                        task.id
+                    )
+                );
+            }
+            other => panic!("expected Validation error, got: {other:?}"),
+        }
+    }
 }
