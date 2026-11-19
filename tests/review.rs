@@ -785,7 +785,7 @@ fn the_mark_stays_left_of_a_tree_indent() {
     let child = id_of(env.json(&dir, &["add", "Child", "--parent", &goal]));
     let tree = env.pretty(&dir, &["tree"]);
     let line = tree.lines().find(|l| l.contains(&child)).unwrap();
-    assert!(line.starts_with(&format!("*   {child}")), "{tree}");
+    assert!(line.starts_with(&format!("* └─ {child}")), "{tree}");
     assert!(
         tree.lines()
             .find(|l| l.contains(&goal))
