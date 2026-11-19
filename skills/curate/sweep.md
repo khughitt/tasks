@@ -177,10 +177,16 @@ duplicate.
 
 ## Order
 
-Clusters run in order of how many trigger signals their tasks carry, most first: the
-sum of the `triggers` column over the cluster's rows. Break a tie by the sum of
-`touched_commits`, most first. A sweep that stops early has then done the part most
-likely to hold stale tasks.
+Clusters run in order of:
+
+1. the sum of `triggers` over rows with `status` `todo` or `blocked`, plus rows with
+   `status` `idea` and `reviewed` `true`, most first;
+2. the sum of `triggers` over unreviewed ideas (rows with `status` `idea` and
+   `reviewed` `false`), most first;
+3. the sum of `touched_commits` over all rows in the cluster, most first.
+
+A sweep that stops early has then processed the clusters most likely to hold stale or
+editable tasks ahead of unreviewed ideas waiting on `/scope`.
 
 ## One cluster
 
