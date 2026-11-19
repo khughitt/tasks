@@ -290,6 +290,13 @@ mean those documents were verified.
    --name <file> --caption "<what it shows>"`) and name the attachment in the message. If
    dependencies are still open, do not `--force` unless the dependency is genuinely irrelevant;
    say why in the message.
+   When closing work changes what an open task should do next, update that record in the same
+   session. Check the closing task's parent and open dependents in `tasks show <id> --all-projects`,
+   and open records whose body or park names the work as pending. State what landed with its
+   revision or version, what remains, and who acts next or what blocks them. If integration
+   is pending, give the branch revision and say what still needs to land. Update the body if it
+   already states the status or describes the delivered work as pending. Replace the stale status
+   text and preserve acceptance and decision history. Otherwise, append a short note with `tasks note`.
    Complete [retention accounting](#artifact-placement-and-retention) before closing (`done` or
    `drop`): run `tasks retained state <id> --all-projects` and require exit 0, `complete: true`,
    `incoming.scope == "all_projects"`, `incoming.complete: true`, no unsettled `kept` items in
