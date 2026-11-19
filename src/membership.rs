@@ -5,7 +5,7 @@
 pub(crate) mod closeout;
 
 use crate::error::Result;
-use crate::hierarchy::HierarchyIndex;
+use crate::hierarchy::{HierarchyIndex, HierarchyView, project_records};
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -71,6 +71,29 @@ impl<'r> Membership<'r> {
             reached: BTreeSet::new(),
             warnings: Vec::new(),
         }
+    }
+
+    /// Pair the caller's capture with its seeded indexes, including empty projects.
+    pub(crate) fn hierarchy_view<'a>(
+        &self,
+        captured: &'a [Task],
+        opened: &[String],
+    ) -> HierarchyView<'a> {
+        let records = project_records(captured, opened, self.registry);
+        let indexes = records
+            .keys()
+            .map(|prefix| {
+                let scan = self
+                    .projects
+                    .get(prefix)
+                    .and_then(Option::as_ref)
+                    .unwrap_or_else(|| {
+                        panic!("Membership is missing the captured scan for {prefix}")
+                    });
+                (prefix.clone(), Arc::clone(&scan.index))
+            })
+            .collect();
+        HierarchyView::new(records, indexes, self.registry)
     }
 
     /// Ordered local children followed by resolved declared pieces. Missing pieces

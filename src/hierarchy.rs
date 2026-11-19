@@ -1642,15 +1642,7 @@ pub(crate) mod tests {
 
         reset_test_index_counts();
         let mut membership = crate::membership::Membership::new(&registry, &opened, &all);
-        let records = project_records(&all, &opened, &registry);
-        let mut indexes = ProjectIndexes::new();
-        for prefix in records.keys() {
-            indexes.insert(
-                prefix.clone(),
-                membership.hierarchy(prefix).unwrap().unwrap(),
-            );
-        }
-        let view = HierarchyView::new(records, indexes, &registry);
+        let view = membership.hierarchy_view(&all, &opened);
         // Exactly one index per captured project scan (aa + empty bb = 2), no union index.
         assert_eq!(test_index_counts().0, 2);
 

@@ -902,18 +902,8 @@ pub fn prime(
     let registry = ctx.registry.clone();
     let mut membership = (format == crate::output::Format::Pretty)
         .then(|| crate::membership::Membership::new(&registry, &prefixes, &all));
-    let hierarchy = match &mut membership {
-        Some(membership) => {
-            let records = crate::hierarchy::project_records(&all, &prefixes, &registry);
-            let mut indexes = crate::hierarchy::ProjectIndexes::new();
-            for prefix in records.keys() {
-                let index = membership
-                    .hierarchy(prefix)?
-                    .expect("preseeded project in Membership has an index");
-                indexes.insert(prefix.clone(), index);
-            }
-            crate::hierarchy::HierarchyView::new(records, indexes, &registry)
-        }
+    let hierarchy = match &membership {
+        Some(membership) => membership.hierarchy_view(&all, &prefixes),
         None => crate::hierarchy::view_of(&all, &prefixes, &registry),
     };
     let deps = review_deps(&mut ctx, &all)?;
@@ -1015,22 +1005,10 @@ pub fn prime(
         })
         .collect();
     let mut elsewhere_views = Vec::with_capacity(elsewhere_scans.len());
-    for ((project, scan), membership_opt) in
-        elsewhere_scans.iter().zip(elsewhere_memberships.iter_mut())
-    {
+    for ((project, scan), membership) in elsewhere_scans.iter().zip(&elsewhere_memberships) {
         let opened = std::slice::from_ref(&project.prefix);
-        let view = match membership_opt {
-            Some(em) => {
-                let records = crate::hierarchy::project_records(scan, opened, &registry);
-                let mut indexes = crate::hierarchy::ProjectIndexes::new();
-                for prefix in records.keys() {
-                    let index = em
-                        .hierarchy(prefix)?
-                        .expect("preseeded project in Membership has an index");
-                    indexes.insert(prefix.clone(), index);
-                }
-                crate::hierarchy::HierarchyView::new(records, indexes, &registry)
-            }
+        let view = match membership {
+            Some(membership) => membership.hierarchy_view(scan, opened),
             None => crate::hierarchy::view_of(scan, opened, &registry),
         };
         elsewhere_views.push(view);

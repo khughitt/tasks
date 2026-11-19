@@ -15,15 +15,7 @@ pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Re
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;
     let mut membership = Membership::new(&ctx.registry, &prefixes, &all);
-    let records = crate::hierarchy::project_records(&all, &prefixes, &ctx.registry);
-    let mut indexes = crate::hierarchy::ProjectIndexes::new();
-    for prefix in records.keys() {
-        let index = membership
-            .hierarchy(prefix)?
-            .expect("preseeded project in Membership has an index");
-        indexes.insert(prefix.clone(), index);
-    }
-    let hierarchy = crate::hierarchy::HierarchyView::new(records, indexes, &ctx.registry);
+    let hierarchy = membership.hierarchy_view(&all, &prefixes);
     // Only active goals carry attention, so only their members widen the claim stores.
     let (active, _) = crate::goals::shown(&all, &hierarchy, &ctx.registry, now, closed)?;
     for goal in active {
