@@ -949,6 +949,133 @@ fn check_reports_review_stamps_and_closed_out_of_place() {
 }
 
 #[test]
+fn simultaneous_awaiting_user_and_reviewed_at_report_both_in_check_and_first_in_writers() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(
+        &dir,
+        &idea,
+        "awaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z",
+    );
+    let todo = id_of(env.json(&dir, &["add", "T"]));
+    seed(
+        &dir,
+        &todo,
+        "awaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z",
+    );
+
+    // Parser acceptance stays unchanged: reads expose the stored fields without failing.
+    for id in [&idea, &todo] {
+        let shown = task(&env, &dir, id);
+        assert_eq!(shown["reviewed"], false);
+        assert_eq!(shown["awaiting_user"], true);
+        assert_eq!(shown["reviewed_at"], "2026-10-17T09:00:00Z");
+    }
+
+    // `check` reports both review_status errors per record in exact order, never as warnings.
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    for id in [&idea, &todo] {
+        assert!(
+            report["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|w| w["id"] != id.as_str()),
+            "{id} should not appear in warnings: {report}"
+        );
+        let findings: Vec<(String, String)> = report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["id"] == id.as_str())
+            .map(|f| {
+                (
+                    f["kind"].as_str().unwrap().to_string(),
+                    f["detail"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            findings,
+            vec![
+                (
+                    "review_status".into(),
+                    "carries awaiting_user without reviewed; only a reviewed idea carries it"
+                        .into(),
+                ),
+                (
+                    "review_status".into(),
+                    "carries reviewed_at without reviewed".into(),
+                ),
+            ],
+            "{id}: {report}"
+        );
+    }
+
+    // Ordinary writes refuse on the first error and leave files untouched.
+    for (id, args) in [
+        (&idea, vec!["note", idea.as_str(), "aside"]),
+        (&idea, vec!["edit", idea.as_str(), "-p", "1"]),
+        (&todo, vec!["edit", todo.as_str(), "-p", "1"]),
+    ] {
+        let file = format!("tasks/{id}.md");
+        let before = env.read(&dir, &file);
+        let out = env.cmd(&dir).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "validation", "{args:?}: {error}");
+        assert_eq!(
+            error["error"]["detail"],
+            format!("{id} is not reviewed; only a reviewed idea carries awaiting_user"),
+            "{args:?}: {error}"
+        );
+        assert_eq!(env.read(&dir, &file), before, "{args:?}");
+    }
+
+    // Editor repair on the idea (setting reviewed: true) and editor status transition on a
+    // drifted idea both keep working and clear the check errors.
+    let repair_idea = editor_script(
+        &dir,
+        "sed -i 's/^priority: /reviewed: true\\npriority: /' \"$1\"",
+    );
+    env.cmd(&dir)
+        .env("EDITOR", &repair_idea)
+        .args(["edit", &idea, "--editor"])
+        .assert()
+        .success();
+    assert_eq!(task(&env, &dir, &idea)["reviewed"], true);
+    assert_ne!(
+        task(&env, &dir, &idea)["reviewed_at"],
+        "2026-10-17T09:00:00Z"
+    );
+
+    let drifted_idea = id_of(env.json(&dir, &["add", "D", "--status", "idea"]));
+    seed(
+        &dir,
+        &drifted_idea,
+        "awaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z",
+    );
+    let promote_to_todo = editor_script(&dir, "sed -i 's/^status: idea/status: todo/' \"$1\"");
+    env.cmd(&dir)
+        .env("EDITOR", &promote_to_todo)
+        .args(["edit", &drifted_idea, "--editor"])
+        .assert()
+        .success();
+    let promoted = task(&env, &dir, &drifted_idea);
+    assert_eq!(promoted["status"], "todo");
+    assert_eq!(promoted["reviewed"], false);
+    assert_eq!(promoted["awaiting_user"], false);
+    assert!(promoted.get("reviewed_at").is_none(), "{promoted}");
+
+    // Clearing via --no-reviewed on the todo also repairs both fields cleanly.
+    env.json(&dir, &["edit", &todo, "--no-reviewed"]);
+    assert_eq!(env.check(&dir)["errors"], serde_json::json!([]));
+}
+
+#[test]
 fn the_editor_refuses_to_change_closed_or_reviewed_at() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
