@@ -1358,7 +1358,7 @@ fn goal_completion_forced_leaf_with_unrelated_bad_record() {
     f.env.json(&f.aa, &["edit", &leaf, "--status", "todo"]);
     // A declared child with corrupt data must still fail the force.
     std::fs::write(
-        path,
+        &path,
         original.replace(
             "status: todo",
             &format!("parent: \"{leaf}\"\nstatus: broken"),
@@ -1366,4 +1366,71 @@ fn goal_completion_forced_leaf_with_unrelated_bad_record() {
     )
     .unwrap();
     assert_eq!(f.env.fail(&f.aa, &["done", &leaf, "--force"]), "parse");
+
+    // Late malformed and nonadjacent duplicate parent declarations report their
+    // original 1-based header lines rather than projected offsets 1 and 2.
+    let late_malformed = format!(
+        concat!(
+            "---\n",
+            "id: {bad}\n",
+            "title: broken record\n",
+            "status: broken\n",
+            "priority: 2\n",
+            "created: 2026-11-18T00:00:00Z\n",
+            "updated: 2026-11-18T00:00:00Z\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "parent: \"{leaf}\n",
+            "---\n",
+        ),
+        bad = bad,
+        leaf = leaf,
+    );
+    std::fs::write(&path, late_malformed).unwrap();
+    let out = f
+        .env
+        .cmd(&f.aa)
+        .args(["done", &leaf, "--force"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "parse");
+    assert_eq!(
+        err["error"]["detail"],
+        format!("tasks/{bad}.md: line 10: unterminated quoted string")
+    );
+
+    let nonadjacent_duplicate = format!(
+        concat!(
+            "---\n",
+            "id: {bad}\n",
+            "status: broken\n",
+            "parent: {bad}\n",
+            "priority: 2\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "origin: agent\n",
+            "parent: {leaf}\n",
+            "---\n",
+        ),
+        bad = bad,
+        leaf = leaf,
+    );
+    std::fs::write(&path, nonadjacent_duplicate).unwrap();
+    let out = f
+        .env
+        .cmd(&f.aa)
+        .args(["done", &leaf, "--force"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "parse");
+    assert_eq!(
+        err["error"]["detail"],
+        format!("tasks/{bad}.md: line 9: duplicate key parent")
+    );
 }

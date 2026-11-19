@@ -119,12 +119,14 @@ pub(crate) fn declared_parent(text: &str, file: &str) -> Result<Option<TaskId>> 
         return Ok(None);
     }
     let (header, _) = split_frontmatter(text, file)?;
-    let fields = header
-        .lines()
-        .filter(|line| line.starts_with("parent:"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let fields = parse_fields(&fields, file)?;
+    let fields = parse_numbered_fields(
+        header
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with("parent:"))
+            .map(|(index, line)| (index + 1, line)),
+        file,
+    )?;
     match fields.first().map(|(_, value)| value) {
         None => Ok(None),
         Some(Value::Scalar(value)) => TaskId::parse(value)
@@ -135,7 +137,19 @@ pub(crate) fn declared_parent(text: &str, file: &str) -> Result<Option<TaskId>> 
 }
 
 fn parse_fields(text: &str, file: &str) -> Result<Vec<(String, Value)>> {
-    frontmatter::parse(text).map_err(|e| match e {
+    parse_numbered_fields(
+        text.lines()
+            .enumerate()
+            .map(|(index, line)| (index + 1, line)),
+        file,
+    )
+}
+
+fn parse_numbered_fields<'a>(
+    lines: impl IntoIterator<Item = (usize, &'a str)>,
+    file: &str,
+) -> Result<Vec<(String, Value)>> {
+    frontmatter::parse_lines(lines).map_err(|e| match e {
         Error::Parse { detail, .. } => perr(file, detail),
         other => other,
     })
@@ -1417,6 +1431,55 @@ mod tests {
                 Err(Error::Parse { .. })
             ));
         }
+    }
+
+    #[test]
+    fn declared_parent_reports_late_malformed_header_line() {
+        let file = "tasks/sci-000001.md";
+        let late_malformed = concat!(
+            "---\n",
+            "id: sci-000001\n",
+            "title: broken\n",
+            "status: broken\n",
+            "priority: 2\n",
+            "created: 2026-11-18T00:00:00Z\n",
+            "updated: 2026-11-18T00:00:00Z\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "parent: \"sci-000002\n",
+            "---\n",
+        );
+        assert_eq!(
+            declared_parent(late_malformed, file)
+                .unwrap_err()
+                .to_string(),
+            "tasks/sci-000001.md: line 10: unterminated quoted string"
+        );
+    }
+
+    #[test]
+    fn declared_parent_reports_nonadjacent_duplicate_header_line() {
+        let file = "tasks/sci-000001.md";
+        let nonadjacent_duplicate = concat!(
+            "---\n",
+            "id: sci-000001\n",
+            "status: broken\n",
+            "parent: sci-000002\n",
+            "priority: 2\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "origin: agent\n",
+            "parent: sci-000003\n",
+            "---\n",
+        );
+        assert_eq!(
+            declared_parent(nonadjacent_duplicate, file)
+                .unwrap_err()
+                .to_string(),
+            "tasks/sci-000001.md: line 9: duplicate key parent"
+        );
     }
 
     #[test]

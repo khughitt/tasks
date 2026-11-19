@@ -18,9 +18,14 @@ fn bad(detail: impl Into<String>) -> Error {
 }
 
 pub fn parse(text: &str) -> Result<Vec<(String, Value)>> {
+    parse_lines(text.lines().enumerate().map(|(n, line)| (n + 1, line)))
+}
+
+pub(crate) fn parse_lines<'a>(
+    lines: impl IntoIterator<Item = (usize, &'a str)>,
+) -> Result<Vec<(String, Value)>> {
     let mut out: Vec<(String, Value)> = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let n = n + 1;
+    for (n, line) in lines {
         let Some((key, rest)) = line.split_once(':') else {
             return Err(bad(format!("line {n}: expected `key: value`")));
         };
