@@ -233,11 +233,11 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     ];
     if let Some(to) = &t.moved_to {
         let to = to.to_string();
-        rows.push(("moved to", vec![present::id(&to, color(o, &to))]));
+        rows.push(("moved to", vec![present::id(&to, o.moved_to_color)]));
     }
     if let Some(from) = &t.moved_from {
         let from = from.to_string();
-        rows.push(("moved from", vec![present::id(&from, color(o, &from))]));
+        rows.push(("moved from", vec![present::id(&from, o.moved_from_color)]));
     }
     if t.size.is_some() {
         rows.push(("size", vec![present::size(t.size)]));
@@ -862,6 +862,8 @@ mod tests {
             needs_review: false,
             review_reason: None,
             project_colors: Default::default(),
+            moved_to_color: None,
+            moved_from_color: None,
             spec_path: None,
             plan_path: None,
             step_found: None,

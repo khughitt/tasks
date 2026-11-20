@@ -526,10 +526,14 @@ pub struct ShowFields {
     pub needs_review: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_reason: Option<crate::review::ReviewReason>,
-    /// Pretty-only colours of every project the view names (the record's own, its
-    /// dependencies' and its move counterpart's), by prefix.
+    /// Pretty-only project colors by canonical prefix.
     #[serde(skip)]
     pub project_colors: ProjectColors,
+    /// Move pointers display their stored IDs, so each uses its own resolved color.
+    #[serde(skip)]
+    pub moved_to_color: Option<crate::palette::Rgb>,
+    #[serde(skip)]
+    pub moved_from_color: Option<crate::palette::Rgb>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

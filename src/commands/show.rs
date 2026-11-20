@@ -1,6 +1,6 @@
 use super::Ctx;
 use crate::error::{Error, Result};
-use crate::model::Task;
+use crate::model::{Task, TaskId};
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
@@ -377,12 +377,9 @@ pub fn describe(
             .entry(prefix.clone())
             .or_insert_with(|| crate::resolve::color_or_warning(registry, &prefix, warnings));
     }
-    // Move metadata in the overview still displays the stored spelling.
-    for id in task.moved_to.iter().chain(&task.moved_from) {
-        let canonical = registry.canonical_id(id);
-        let color = looked_up[&canonical.prefix];
-        looked_up.entry(id.prefix.clone()).or_insert(color);
-    }
+    let move_color = |id: &TaskId| looked_up[&registry.canonical_id(id).prefix];
+    let moved_to_color = task.moved_to.as_ref().and_then(move_color);
+    let moved_from_color = task.moved_from.as_ref().and_then(move_color);
     let project_colors: crate::output::ProjectColors = looked_up
         .into_iter()
         .filter_map(|(prefix, color)| color.map(|color| (prefix, color)))
@@ -391,6 +388,8 @@ pub fn describe(
         needs_review: review_reason.is_some(),
         review_reason,
         project_colors,
+        moved_to_color,
+        moved_from_color,
         spec_path,
         plan_path,
         step_found,
