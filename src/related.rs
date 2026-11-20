@@ -257,6 +257,12 @@ pub fn link_citations(
         };
 
         let dest_canonical = registry.canonical_id(&dest.id);
+        let local_dependent_or_follower = dest_canonical.prefix == task_canonical.prefix
+            && dest
+                .depends
+                .iter()
+                .chain(&dest.follows)
+                .any(|id| registry.canonical_id(id) == task_canonical);
 
         let child_of_task = dest
             .parent
@@ -311,6 +317,7 @@ pub fn link_citations(
                     c == cited_canonical || c == dest_canonical
                 })
             || child_of_task
+            || local_dependent_or_follower
             || would_link.contains(&dest_canonical);
 
         if is_skip {

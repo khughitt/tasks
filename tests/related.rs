@@ -1266,6 +1266,80 @@ fn held_child_and_own_ids_are_not_linked() {
 }
 
 #[test]
+fn automatic_citations_keep_foreign_dependents_in_plain_show() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let focal = id_of(env.json(&aa, &["add", "Prerequisite"]));
+    let local = id_of(env.json(&aa, &["add", "Local dependent", "--depends", &focal]));
+    let foreign = id_of(env.json(&bb, &["add", "Foreign dependent", "--depends", &focal]));
+
+    env.json(
+        &aa,
+        &["note", &focal, &format!("See {local} and {foreign}")],
+    );
+    let shown = env.json(&aa, &["show", &focal]);
+    assert_eq!(shown["task"]["related"], json!([foreign]));
+    assert_eq!(shown["related_to"][0]["id"], foreign);
+    assert_eq!(shown["dependents"][0]["id"], local);
+
+    env.json(&aa, &["edit", &focal, "--related", &local]);
+    env.json(&aa, &["note", &focal, &format!("Handoff to {local}")]);
+    let shown = env.json(&aa, &["show", &focal]);
+    assert_eq!(shown["task"]["related"], json!([foreign, local]));
+}
+
+#[test]
+fn automatic_citations_skip_local_followers_after_rename_and_move() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let old_focal = id_of(env.json(&aa, &["add", "Earlier work"]));
+    let old_follower = id_of(env.json(&bb, &["add", "Local handoff", "--follows", &old_focal]));
+    let foreign = id_of(env.json(&bb, &["add", "Foreign handoff", "--follows", &old_focal]));
+    env.json(&aa, &["rename", "aa", "ac"]);
+    let focal = old_focal.replacen("aa-", "ac-", 1);
+    let local = id_of(env.json(&bb, &["move", &old_follower, "--to", "ac"]));
+    assert_eq!(
+        env.json(&aa, &["show", &local])["task"]["follows"],
+        json!([old_focal])
+    );
+
+    let handoff = format!("Hand off to {old_follower} and {foreign}");
+    let parked = env.json(&aa, &["park", &focal, &handoff, "--waiting-on", "user"]);
+    assert!(parked["warnings"].as_array().unwrap().is_empty());
+    let shown = env.json(&aa, &["show", &focal]);
+    assert_eq!(shown["task"]["related"], json!([foreign]));
+    assert_eq!(shown["related_to"][0]["id"], foreign);
+    assert_eq!(shown["followed_by"][0]["id"], local);
+}
+
+#[test]
+fn automatic_citations_keep_inverse_links_that_require_focal_move_history() {
+    let mut env = TestEnv::new();
+    let aa = env.init("aa");
+    let bb = env.init("bb");
+    let old_focal = id_of(env.json(&aa, &["add", "Earlier work"]));
+    let target = id_of(env.json(
+        &bb,
+        &[
+            "add",
+            "Handoff",
+            "--depends",
+            &old_focal,
+            "--follows",
+            &old_focal,
+        ],
+    ));
+    let focal = id_of(env.json(&aa, &["move", &old_focal, "--to", "bb"]));
+
+    env.json(&bb, &["note", &focal, &format!("See {target}")]);
+    let shown = env.json(&bb, &["show", &focal]);
+    assert_eq!(shown["task"]["related"], json!([target]));
+    assert_eq!(shown["followed_by"][0]["id"], target);
+}
+
+#[test]
 fn an_unresolvable_citation_warns_and_is_not_linked() {
     let mut env = TestEnv::new();
     let dir = env.init("aa");

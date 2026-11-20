@@ -326,10 +326,20 @@ destination across move chains (`tombstone::follow`). Unresolvable citations war
 skipped without warning if the cited id or its destination matches the record
 itself, a child, an id already in `related`, or an id held in `depends`, `parent`,
 `wake_on`, `follows`, `moved_to`, `moved_from`, a task-id `source`, or removed in
-the same write. Explicit related changes (`--rm-related`, `--no-related`, editor
-changes to `related`) take precedence over automatic linking. While a retained
-operation is pending on the record, automatic linking is deferred with a warning
-naming the unlinked ids.
+the same write.
+
+Plain `show` finds dependents and followers in the task's own project. Automatic
+linking skips a resolved destination in that project when its `depends` or
+`follows` directly names the current task's canonical ID. Retired-prefix aliases
+count as direct matches. Foreign dependents and followers remain eligible for
+automatic linking, as do destinations whose inverse links match the current task
+only through its move history.
+
+Explicit related changes (`--rm-related`, `--no-related`, editor changes to
+`related`) take precedence over automatic linking. Explicit additions can
+overlap with other links, and existing `related` entries are preserved. While a
+retained operation is pending on the record, automatic linking is deferred with
+a warning naming the unlinked ids.
 
 ## Origin and provenance
 
