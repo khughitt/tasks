@@ -41,7 +41,7 @@ fn show_dependents_local_open_and_closed_in_ready_order() {
     let pretty = e.cmd(&aa).args(["--pretty", "show", &q]).output().unwrap();
     assert!(pretty.status.success());
     let text = String::from_utf8(pretty.stdout).unwrap();
-    let block = text.split_once("── related ").unwrap().1;
+    let block = text.split_once("── links ").unwrap().1;
     assert!(block.contains(&format!("dependent  {open}")), "{block}");
 }
 
@@ -55,6 +55,19 @@ fn show_dependents_foreign_only_with_all_projects() {
     e.json(&aa, &["dep", &local, "--on", &q]);
     let hub = id_of(e.json(&bb, &["add", "Hub goal"]));
     e.json(&bb, &["dep", &hub, "--on", &q]);
+
+    e.json(&aa, &["edit", &q, "--related", &hub]);
+
+    for (args, role) in [
+        (vec!["show", &q], "related"),
+        (vec!["show", &q, "--all-projects"], "dependent"),
+        (vec!["next", "--all-projects"], "dependent"),
+    ] {
+        let pretty = e.pretty(&aa, &args);
+        let rows: Vec<_> = pretty.lines().filter(|line| line.contains(&hub)).collect();
+        assert_eq!(rows.len(), 1, "{pretty}");
+        assert!(rows[0].starts_with(role), "{pretty}");
+    }
 
     let plain = e.json(&aa, &["show", &q]);
     assert_eq!(dependents(&plain), vec![local.clone()]);

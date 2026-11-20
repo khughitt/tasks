@@ -801,26 +801,30 @@ fn pieces_reader_show_labels_piece_rows() {
     let y = add(&env, &bb, "Prerequisite", &[]);
     let hub = hub(&env, &aa, "Hub", &[], &[&x]);
     env.json(&aa, &["dep", &hub, "--on", &y]);
-    let labelled = |env: &TestEnv| {
+    let labelled = |piece_id: &str, dep_id: &str| {
         let text = env.pretty(&aa, &["show", &hub, "--color", "never"]);
         let piece = text
             .lines()
-            .any(|line| line.starts_with("piece") && line.contains(&x));
+            .position(|line| line.starts_with("piece") && line.contains(piece_id))
+            .unwrap_or_else(|| panic!("missing piece {piece_id}: {text}"));
         let dep = text
             .lines()
-            .any(|line| line.starts_with("depends on") && line.contains(&y));
-        assert!(piece && dep, "{text}");
+            .position(|line| line.starts_with("depends on") && line.contains(dep_id))
+            .unwrap_or_else(|| panic!("missing dependency {dep_id}: {text}"));
+        assert!(piece < dep, "{text}");
     };
-    labelled(&env);
-    let shown = env.json(&aa, &["show", &hub]);
-    for row in shown["depends_on"].as_array().unwrap() {
-        assert!(row.get("piece").is_none(), "{row}");
-    }
+    labelled(&x, &y);
     env.json(&bb, &["rename", "bb", "cc"]);
     let stored = env.read(&aa, &format!("tasks/{hub}.md"));
     assert!(x.starts_with("bb-"), "{x}");
     assert!(stored.contains(&format!("pieces: [{x}]\n")), "{stored}");
-    labelled(&env);
+    labelled(&x.replacen("bb-", "cc-", 1), &y.replacen("bb-", "cc-", 1));
+
+    let shown = env.json(&aa, &["show", &hub]);
+    for (row, stored_id) in shown["depends_on"].as_array().unwrap().iter().zip([&x, &y]) {
+        assert_eq!(row["id"], *stored_id, "{row}");
+        assert!(row.get("piece").is_none(), "{row}");
+    }
 }
 
 fn finding_on(check: &Value, level: &str, kind: &str, id: &str) -> Option<Value> {

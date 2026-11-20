@@ -1360,7 +1360,7 @@ fn next_is_the_head_of_ready_in_show_shape() {
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("Top (") && text.contains("── related") && text.contains("depends on"),
+        text.contains("Top (") && text.contains("── links") && text.contains("depends on"),
         "{text}"
     );
 }

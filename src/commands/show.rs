@@ -282,18 +282,18 @@ pub fn describe(
         status: task.status,
         updated: task.updated.clone(),
     };
-    let parent = match &task.parent {
-        Some(id) => match all
-            .iter()
-            .find(|candidate| candidate.id == registry.canonical_id(id))
-        {
-            Some(found) => Some(related(found)),
-            None => {
-                warnings.push(format!("parent {id} not found"));
-                None
+    let (parent, unresolved_parent) = match &task.parent {
+        Some(id) => {
+            let canonical = registry.canonical_id(id);
+            match all.iter().find(|candidate| candidate.id == canonical) {
+                Some(found) => (Some(related(found)), None),
+                None => {
+                    warnings.push(format!("parent {id} not found"));
+                    (None, Some(canonical.to_string()))
+                }
             }
-        },
-        None => None,
+        }
+        None => (None, None),
     };
     let identity = crate::follows::identity_set(registry, &task, |id| {
         match all
@@ -358,8 +358,6 @@ pub fn describe(
             bytes: file.bytes,
         })
         .collect();
-    // Keyed by the prefix as stored, which is how the view prints the id; looked up by
-    // the live prefix a retired one resolves to, once per prefix.
     let mut looked_up = HashMap::from([(project.prefix.clone(), project.color)]);
     let named = task
         .depends
@@ -369,19 +367,21 @@ pub fn describe(
         .chain(&task.wake_on)
         .chain(&task.moved_to)
         .chain(&task.moved_from)
-        .chain(source_id.as_ref())
-        .chain(depending.iter().map(|task| &task.id))
-        .chain(following.iter().map(|task| &task.id));
-    for id in named {
-        if !looked_up.contains_key(&id.prefix) {
-            let live = registry.canonical_id(id).prefix;
-            let color = if live == project.prefix {
-                project.color
-            } else {
-                crate::resolve::color_or_warning(registry, &live, warnings)
-            };
-            looked_up.insert(id.prefix.clone(), color);
-        }
+        .chain(source_id.as_ref());
+    let prefixes = named
+        .map(|id| registry.canonical_id(id).prefix)
+        .chain(depending.iter().map(|task| task.id.prefix.clone()))
+        .chain(following.iter().map(|task| task.id.prefix.clone()));
+    for prefix in prefixes {
+        looked_up
+            .entry(prefix.clone())
+            .or_insert_with(|| crate::resolve::color_or_warning(registry, &prefix, warnings));
+    }
+    // Move metadata in the overview still displays the stored spelling.
+    for id in task.moved_to.iter().chain(&task.moved_from) {
+        let canonical = registry.canonical_id(id);
+        let color = looked_up[&canonical.prefix];
+        looked_up.entry(id.prefix.clone()).or_insert(color);
     }
     let project_colors: crate::output::ProjectColors = looked_up
         .into_iter()
@@ -402,6 +402,7 @@ pub fn describe(
         wake_targets,
         source_task,
         parent,
+        unresolved_parent,
         in_lane: crate::hierarchy::lane_of(all, &task, registry),
         children,
         claim: claims
@@ -431,11 +432,13 @@ fn resolve_row(
     let canonical = registry.canonical_id(id);
     let resolved = match all.iter().find(|candidate| candidate.id == canonical) {
         Some(found) => Some(found.clone()),
-        None => resolver.resolve_task(id)?,
+        None => resolver.resolve_canonical_task(&canonical)?,
     };
+    let canonical_id = canonical.to_string();
     match resolved {
         Some(task) => Ok(DepInfo {
             id: id.to_string(),
+            canonical_id,
             title: Some(task.title),
             status: Some(task.status),
             updated: Some(task.updated),
@@ -444,6 +447,7 @@ fn resolve_row(
         }),
         None => Ok(DepInfo {
             id: id.to_string(),
+            canonical_id,
             title: None,
             status: None,
             updated: None,

@@ -178,19 +178,29 @@ pieces), `p` a recurring record. The column appears only when some row needs it.
 
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
-`show` collects every task link in the `── related ──` section: rows run in the
-order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, and `child`,
-formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
-Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
-recency scale); an unresolved target leaves the date blank and prints
-`(unresolved)` with `?` for status, while a moved target reads `moved`.
+`show` and `next` list one row per canonical task ID under `links`. Retired
+prefix spellings group under the canonical ID even when the target is unreachable.
+A move tombstone and its successor keep separate rows.
+
+Each row shows its roles, ID, status, updated date, and full title. Roles and
+rows follow this order, with the highest-precedence role setting the row position
+and ties keeping the order within that role. The order is `parent`, `piece`,
+`depends on`, `dependent`, `wake on`, `follows`, `followed by`, `child`,
+`source`, and `related`. A piece covers its dependency role. A row shows
+`related` only when it has no other role. Long role lists and titles wrap under
+their own columns.
+
+Resolved rows use the target's live status and recency-colored `updated` date
+(`YYYY-MM-DD`). An unresolved row shows `?` for status and `(unresolved)` for
+its title, with a blank date. JSON keeps separate relationship fields and their
+existing ID spellings.
 
 `follows` means: this task continues work arising from
 one or more earlier tasks. `source` remains its filing origin, and `related` an
 informational citation. Follows does not require an earlier task to close or change
 readiness, review or completion. Existing source/related links are not converted.
-Show and next display stored outgoing follows rows, including foreign, moved and
-unresolved targets. They also display direct incoming `followed by` rows, including closed follow-ups.
+Show and next display outgoing follows links to foreign, moved and unresolved
+targets. They also display direct incoming `followed by` links, including closed follow-ups.
 Plain show searches its local scan, and `show --all-projects` every reachable
 registered project; next uses its existing group/all-project scope.
 No incoming row means none found in that readable scope. After a move, the view

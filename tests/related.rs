@@ -484,8 +484,8 @@ fn moved_rows_show_the_tombstone() {
     let b = id_of(env.json(&aa, &["add", "B"]));
     let c = id_of(env.json(&aa, &["add", "C"]));
     env.json(&aa, &["dep", &c, "--on", &b]);
-    relate_by_hand(&aa, &a, &[&b]);
-    env.json(&aa, &["move", &b, "--to", "bb"]);
+    let successor = id_of(env.json(&aa, &["move", &b, "--to", "bb"]));
+    relate_by_hand(&aa, &a, &[&b, &successor]);
 
     let b_updated = env.json(&aa, &["show", &b])["task"]["updated"].clone();
     let shown_a = env.json(&aa, &["show", &a]);
@@ -499,6 +499,11 @@ fn moved_rows_show_the_tombstone() {
         shown_c["depends_on"][0],
         json!({"id": b, "title": "B", "status": "moved", "updated": b_updated, "resolved": true})
     );
+
+    let pretty = env.pretty(&aa, &["show", &a]);
+    let links = pretty.split_once("── links ").unwrap().1;
+    assert!(links.contains(&format!("{b}  moved ")), "{links}");
+    assert!(links.contains(&format!("{successor}  todo ")), "{links}");
 }
 
 #[test]
@@ -608,7 +613,90 @@ fn next_embeds_the_same_rows() {
 }
 
 #[test]
-fn pretty_related_section_lists_every_link_in_order() {
+fn pretty_links_group_retired_spellings_and_preserve_json() {
+    let mut env = TestEnv::new();
+    let local = env.init("aa");
+    let foreign = env.init("old");
+    let target = id_of(env.json(&foreign, &["add", "Foreign target"]));
+    let task = id_of(env.json(&local, &["add", "Subject", "--source", &target]));
+    env.json(&local, &["dep", &task, "--on", &target]);
+    env.json(&foreign, &["rename", "old", "new"]);
+    let canonical = target.replacen("old-", "new-", 1);
+    let config = foreign.join("tasks/.config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "color = \"#abcdef\"\n{}",
+            std::fs::read_to_string(&config).unwrap()
+        ),
+    )
+    .unwrap();
+
+    // Prior records can overlap roles and retain missing IDs and alias spellings.
+    let missing = "old-ffffff";
+    let path = local.join(format!("tasks/{task}.md"));
+    let before = std::fs::read_to_string(&path).unwrap().replacen(
+        &format!("depends: [{target}]"),
+        &format!("depends: [{target}, {missing}]"),
+        1,
+    );
+    std::fs::write(&path, before).unwrap();
+    relate_by_hand(&local, &task, &[&target, "new-ffffff"]);
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let json = env.json(&local, &["show", &task]);
+    let updated = &json["depends_on"][0]["updated"];
+    let resolved = serde_json::json!({
+        "id": target, "title": "Foreign target", "status": "todo", "updated": updated, "resolved": true,
+    });
+    assert_eq!(
+        json["depends_on"],
+        serde_json::json!([resolved, {"id": missing, "resolved": false}])
+    );
+    assert_eq!(json["source_task"], resolved);
+    assert_eq!(
+        json["related_to"],
+        serde_json::json!([resolved, {"id": "new-ffffff", "resolved": false}])
+    );
+    assert!(json.get("links").is_none());
+
+    let pretty = env.pretty(&local, &["show", &task]);
+    assert_eq!(pretty.matches(&canonical).count(), 1, "{pretty}");
+    assert_eq!(pretty.matches("new-ffffff").count(), 1, "{pretty}");
+    let links = pretty.split_once("── links ").unwrap().1;
+    assert!(
+        links
+            .lines()
+            .any(|line| line.starts_with("depends on, source") && line.contains(&canonical)),
+        "{links}"
+    );
+    assert!(
+        links.lines().any(|line| line.starts_with("depends on ")
+            && line.contains("new-ffffff")
+            && line.ends_with("(unresolved)")),
+        "{links}"
+    );
+
+    let out = env
+        .cmd(&local)
+        .args(["--pretty", "--color", "always", "show", &task])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let colored = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        colored.contains("\x1b[38;2;171;205;239mForeign target\x1b[0m"),
+        "{colored:?}"
+    );
+    assert!(
+        colored.contains(&format!("\x1b[38;2;196;220;244m{canonical}")),
+        "{colored:?}"
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), before);
+}
+
+#[test]
+fn pretty_links_section_lists_every_role_in_order() {
     let mut env = TestEnv::new();
     let dir = env.init("aa");
     let p = id_of(env.json(&dir, &["add", "Parent"]));
@@ -638,16 +726,14 @@ fn pretty_related_section_lists_every_link_in_order() {
         "unexpected source in overview: {pretty_a}"
     );
 
-    // The `── related ──` lines start, in order, with "parent", "depends on", "wake on", "related",
-    // "source", "child"; each carries the id, a status and the title; an unresolved related id
-    // prints "(unresolved)".
+    // The links show the child and source ahead of the informational rows.
     let related_section = pretty_a
-        .split_once("── related ")
+        .split_once("── links ")
         .expect("related section present")
         .1
         .split_once("\n── ")
         .map(|(s, _)| s)
-        .unwrap_or_else(|| pretty_a.split_once("── related ").unwrap().1);
+        .unwrap_or_else(|| pretty_a.split_once("── links ").unwrap().1);
     let rows: Vec<&str> = related_section
         .lines()
         .skip(1)
@@ -680,38 +766,20 @@ fn pretty_related_section_lists_every_link_in_order() {
         "row 2 mismatch: {:?}",
         rows[2]
     );
-    assert!(
-        rows[3].starts_with("related")
-            && rows[3].contains(&b)
-            && rows[3].contains("done")
-            && rows[3].contains("B"),
-        "row 3 mismatch: {:?}",
-        rows[3]
-    );
-    assert!(
-        rows[4].starts_with("related")
-            && rows[4].contains("aa-ffffff")
-            && rows[4].contains("?")
-            && rows[4].contains("(unresolved)"),
-        "row 4 mismatch: {:?}",
-        rows[4]
-    );
-    assert!(
-        rows[5].starts_with("source")
-            && rows[5].contains(&s)
-            && rows[5].contains("todo")
-            && rows[5].contains("S"),
-        "row 5 mismatch: {:?}",
-        rows[5]
-    );
-    assert!(
-        rows[6].starts_with("child")
-            && rows[6].contains(&c)
-            && rows[6].contains("todo")
-            && rows[6].contains("Child"),
-        "row 6 mismatch: {:?}",
-        rows[6]
-    );
+    for (row, role, id, status, title) in [
+        (rows[3], "child", c.as_str(), "todo", "Child"),
+        (rows[4], "source", s.as_str(), "todo", "S"),
+        (rows[5], "related", b.as_str(), "done", "B"),
+        (rows[6], "related", "aa-ffffff", "?", "(unresolved)"),
+    ] {
+        assert!(
+            row.starts_with(role)
+                && row.contains(id)
+                && row.contains(status)
+                && row.ends_with(title),
+            "{row}"
+        );
+    }
 
     // A task whose source is a URL keeps "source:".
     let u = id_of(env.json(
@@ -802,7 +870,7 @@ fn pretty_related_shows_target_updated_dates_recency_colors_and_next() {
         "color-off output must not contain ANSI escapes: {pretty:?}"
     );
     let related_section = pretty
-        .split_once("── related ")
+        .split_once("── links ")
         .expect("related section present")
         .1;
     let lines: Vec<&str> = related_section
@@ -816,10 +884,10 @@ fn pretty_related_shows_target_updated_dates_recency_colors_and_next() {
             format!("parent      {p}  todo     2026-01-10  Parent"),
             format!("depends on  {dep}  done     2026-02-11  Dep"),
             format!("wake on     {w}  todo     2026-03-12  W"),
+            format!("child       {c}  todo     2026-04-13  Child"),
+            format!("source      {s}  todo     {today}  S"),
             format!("related     {x}  todo     2020-01-01  Foreign Rel"),
             "related     bb-ffffff  ?                    (unresolved)".to_string(),
-            format!("source      {s}  todo     {today}  S"),
-            format!("child       {c}  todo     2026-04-13  Child"),
         ],
         "{related_section}"
     );
