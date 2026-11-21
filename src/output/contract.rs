@@ -208,6 +208,11 @@ pub struct WhereProject {
     pub records: String,
     pub kind: crate::repo::Kind,
     pub linked: bool,
+    pub registered: bool,
+    pub retired: bool,
+    pub stage: Option<crate::repo::ProjectStage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
 }
@@ -300,6 +305,9 @@ pub struct EntryRow {
     pub shorthand: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    pub stage: Option<crate::repo::ProjectStage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
     /// Derived xterm-256 stand-in; present exactly when color is present.

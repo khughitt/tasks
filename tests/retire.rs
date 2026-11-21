@@ -314,6 +314,27 @@ fn retire_cmd_writes_the_table_and_unretire_removes_it_keeping_comments() {
 }
 
 #[test]
+fn retire_cmd_unretire_requires_stage() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let config = old.join("tasks/.config.toml");
+    std::fs::write(&config, "prefix = \"old\"\n").unwrap();
+    env.json(&old, &["retire", "--reason", "paused"]);
+    let retired = std::fs::read_to_string(&config).unwrap();
+    let output = env.cmd(&old).args(["unretire"]).output().unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("stage"));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), retired);
+
+    let valid = format!("stage = \"experimental\"\n{retired}");
+    std::fs::write(&config, &valid).unwrap();
+    env.json(&old, &["unretire"]);
+    let restored = std::fs::read_to_string(&config).unwrap();
+    assert!(restored.contains("stage = \"experimental\""));
+    assert!(!restored.contains("[retired]"));
+}
+
+#[test]
 fn retire_cmd_unretire_on_an_active_project_changes_nothing() {
     let mut env = TestEnv::new();
     let old = env.init("old");
