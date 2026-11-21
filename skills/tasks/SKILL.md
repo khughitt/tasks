@@ -524,9 +524,10 @@ and not synced. Each host declares its own groups.
 ## Process and workspace
 
 Follow the affected projects' delivered workflow ahead of generic Superpowers
-triggers. When project maturity is active, resolve each target with
-`tasks resolve <prefix-or-path>` at pickup and use its `entry.stage`. A session
-can start in a different project from the one its work changes. Take the trial
+triggers. When project maturity is active, use `tasks where <path>` at pickup
+and use `project.stage` only when `project.registered` is true. Use
+`tasks resolve <prefix>` for an explicitly named project. The session and an
+independent nested checkout can belong to different projects. Take the trial
 lookup first and preserve assigned process and review rules for retained units.
 For other work, re-evaluate the recorded `process` even on an already scoped
 task. Keep a documented user process choice or an approved in-flight plan.

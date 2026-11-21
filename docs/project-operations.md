@@ -42,6 +42,8 @@ it stays in that repository, reports whether the project is registered there, an
 reads the stage and retirement flag from the registered configuration. Outside
 Git it walks configs without checking registration. The JSON `stage` field is
 null when absent or invalid, with `stage_error` for invalid declarations.
+An older worktree without a local config can report its registered policy while
+ordinary task operations still require their usual records location.
 `holds_records` also
 recognizes tracked config in HEAD even when deleted locally. `root <full-id>`
 prints the registered root. `projects --paths` displays detached record locations.

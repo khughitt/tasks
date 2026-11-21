@@ -8890,11 +8890,12 @@ const SCI_HOT_TITLE: &str = "\x1b[38;2;198;225;255m";
 const DOTS_HOT_TITLE: &str = "\x1b[38;2;197;226;255m";
 
 fn write_project_color(dir: &std::path::Path, prefix: &str, color: &str) {
-    std::fs::write(
-        dir.join("tasks/.config.toml"),
-        format!("prefix = \"{prefix}\"\ncolor = \"{color}\"\n"),
-    )
-    .unwrap();
+    let path = dir.join("tasks/.config.toml");
+    let mut config: toml_edit::DocumentMut =
+        std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    assert_eq!(config["prefix"].as_str(), Some(prefix));
+    config["color"] = toml_edit::value(color);
+    std::fs::write(path, config.to_string()).unwrap();
 }
 
 #[test]
@@ -9270,6 +9271,28 @@ fn project_colors_reject_invalid_config_values() {
 }
 
 #[test]
+fn where_recognizes_project_repository_before_worktree_has_config() {
+    let env = TestEnv::new();
+    let holder = tempfile::tempdir().unwrap();
+    let main = holder.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    git(&main, &["init", "-qb", "main"]);
+    git(&main, &["commit", "--allow-empty", "-qm", "seed"]);
+    let worktree = holder.path().join("worktree");
+    git(
+        &main,
+        &["worktree", "add", "-qb", "old", worktree.to_str().unwrap()],
+    );
+    env.json(&main, &["init", "--prefix", "sci"]);
+    let out = env.json(&worktree, &["where"]);
+    assert!(!worktree.join("tasks/.config.toml").exists());
+    assert_eq!(out["project"]["root"], main.to_str().unwrap(), "{out}");
+    assert_eq!(out["project"]["registered"], true, "{out}");
+    assert_eq!(out["project"]["stage"], "experimental", "{out}");
+    assert_eq!(env.fail(&worktree, &["list"]), "no_project");
+}
+
+#[test]
 fn where_and_resolve_report_stage() {
     let mut env = TestEnv::new();
     let (checkout, worktree, _) = repo_with_worktree(&mut env);
@@ -9363,6 +9386,17 @@ fn where_and_resolve_report_stage() {
     let local = env.json(root, &["where"]);
     assert_eq!(local["project"]["stage"], "supported");
     assert_eq!(local["project"]["registered"], false);
+    std::fs::write(
+        root.join("tasks/.config.toml"),
+        "prefix = \"det\"\nstage = \"supported\"\n",
+    )
+    .unwrap();
+    let unrelated = env.json(root, &["where"]);
+    assert_eq!(unrelated["project"]["registered"], false, "{unrelated}");
+
+    std::fs::create_dir(side.join("tasks")).unwrap();
+    std::fs::write(side.join("tasks/.config.toml"), "prefix = \"det\"\n").unwrap();
+    assert_eq!(env.fail(&side, &["where"]), "records_moved");
 }
 
 #[test]
