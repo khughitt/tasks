@@ -523,8 +523,20 @@ and not synced. Each host declares its own groups.
 
 ## Process and workspace
 
-When the project's agent instructions adopt this policy, the recorded `process`
-decides whether brainstorming runs, ahead of generic Superpowers triggers:
+Follow the affected projects' delivered workflow ahead of generic Superpowers
+triggers. When project maturity is active, use `tasks where <path>` at pickup
+and use `project.stage` only when `project.registered` is true. Use
+`tasks resolve <prefix>` for an explicitly named project. The session and an
+independent nested checkout can belong to different projects. Take the trial
+lookup first and preserve assigned process and review rules for retained units.
+For other work, re-evaluate the recorded `process` even on an already scoped
+task. Keep a documented user process choice or an approved in-flight plan.
+`origin: user` alone establishes neither. Otherwise use the affected stage's
+default, including direct for ordinary experimental or pre-release work. Record
+a process choice or change and its source; preserve prior notes and artifacts.
+
+Where the delivered workflow still chooses from the recorded process, use it.
+The two process values mean:
 
 - `direct`: the scoped task or reviewed plan settles the outcome, approach, and
   verification. Execute without brainstorming or new design/plan documents.
@@ -541,7 +553,8 @@ decides whether brainstorming runs, ahead of generic Superpowers triggers:
   or document links. Ideas still require scoping.
 
 If direct work exposes an unresolved design decision or grows beyond the scoped
-task, record the evidence and change it to planned before continuing implementation.
+task, record the evidence and apply the stage's planning rules before continuing
+implementation.
 Bounded choices covered by the task do not require that change. Both paths retain
 applicable debugging, testing, verification, and code-review skills.
 

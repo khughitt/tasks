@@ -147,6 +147,7 @@ pub struct Project {
     pub(crate) retention_recovery: Option<crate::retained::recovery::RecoveryDeclaration>,
     pub color: Option<crate::palette::Rgb>,
     pub profile: Option<String>,
+    pub(crate) stage: Option<toml::Value>,
     pub shorthand: Vec<String>,
     pub identity: Option<crate::catalogue::snapshot::Snapshot>,
     /// Roots a `spec` link may live under; also the search path for bare spec names.
@@ -214,6 +215,8 @@ struct Config {
     color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stage: Option<toml::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shorthand: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -249,6 +252,15 @@ struct RetiredConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     successor: Option<String>,
     reason: String,
+}
+
+/// The maturity declaration independent of project retirement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectStage {
+    Experimental,
+    PreRelease,
+    Supported,
 }
 
 /// A project's own retirement declaration, the `[retired]` table (docs/project-operations.md).
@@ -731,6 +743,7 @@ impl Project {
                 retention_recovery: None,
                 color: None,
                 profile: None,
+                stage: Some(toml::Value::String("experimental".into())),
                 shorthand: Vec::new(),
                 identity: None,
                 spec_dirs: None,
@@ -856,6 +869,7 @@ impl Project {
                 retention_recovery: None,
                 color: None,
                 profile: None,
+                stage: Some(toml::Value::String("experimental".into())),
                 shorthand: Vec::new(),
                 identity: None,
                 spec_dirs: None,
@@ -968,6 +982,7 @@ impl Project {
             retention_lineage: config.retention_lineage,
             retention_recovery: config.retention_recovery,
             profile: config.profile,
+            stage: config.stage,
             shorthand: config.shorthand,
             identity: config
                 .identity
@@ -999,6 +1014,25 @@ impl Project {
             retired: retirement(config.retired)?,
             predecessor: config.predecessor,
         })
+    }
+
+    /// Validate maturity when a caller needs policy, independently of ordinary reads.
+    pub fn declared_stage(&self) -> Result<Option<ProjectStage>> {
+        let Some(value) = &self.stage else {
+            return Ok(None);
+        };
+        let stage = match value.as_str() {
+            Some("experimental") => ProjectStage::Experimental,
+            Some("pre-release") => ProjectStage::PreRelease,
+            Some("supported") => ProjectStage::Supported,
+            _ => {
+                return Err(Error::Config(format!(
+                    "{}: stage must be experimental, pre-release or supported",
+                    self.records.join(CONFIG_REL).display()
+                )));
+            }
+        };
+        Ok(Some(stage))
     }
 
     /// Checks that a task's `spec`/`plan` links lie under this project's configured roots.
