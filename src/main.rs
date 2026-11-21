@@ -6,6 +6,7 @@ mod catalogue;
 mod claims;
 mod cli;
 mod clipboard;
+mod codex_model;
 mod commands;
 mod complete;
 mod complexity;

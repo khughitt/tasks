@@ -422,21 +422,50 @@ fn provenance_var(name: &str) -> Result<Option<String>> {
     }
 }
 
-/// The model the harness reports for this completion, from `TASKS_MODEL`.
-pub(crate) fn completion_model() -> Result<Option<String>> {
+fn push_warning_once(warnings: &mut Vec<String>, warning: &str) {
+    if !warnings.iter().any(|existing| existing == warning) {
+        warnings.push(warning.to_string());
+    }
+}
+
+/// The model the harness reports for this completion, from `relay` inside Codex or
+/// `TASKS_MODEL` otherwise.
+pub(crate) fn completion_model(warnings: &mut Vec<String>) -> Result<Option<String>> {
+    if crate::codex_model::triggered() {
+        return match crate::codex_model::resolve() {
+            crate::codex_model::Outcome::Verified { model, .. } => Ok(Some(model.clone())),
+            crate::codex_model::Outcome::Environment => provenance_var("TASKS_MODEL"),
+            crate::codex_model::Outcome::Bare { warning, .. } => {
+                push_warning_once(warnings, warning);
+                Ok(None)
+            }
+        };
+    }
     provenance_var("TASKS_MODEL")
 }
 
 /// The agent filing a task: an explicit `--agent` when given, validated first so a bad
-/// environment cannot fail an add that names a valid agent; otherwise `TASKS_AGENT`.
-pub fn creation_agent(explicit: Option<&str>) -> Result<Option<String>> {
-    match explicit {
-        Some(agent) => {
-            validate_line("agent", agent)?;
-            Ok(Some(agent.to_string()))
-        }
-        None => provenance_var("TASKS_AGENT"),
+/// environment cannot fail an add that names a valid agent; otherwise `relay` inside
+/// Codex or `TASKS_AGENT`.
+pub fn creation_agent(
+    explicit: Option<&str>,
+    warnings: &mut Vec<String>,
+) -> Result<Option<String>> {
+    if let Some(agent) = explicit {
+        validate_line("agent", agent)?;
+        return Ok(Some(agent.to_string()));
     }
+    if crate::codex_model::triggered() {
+        return match crate::codex_model::resolve() {
+            crate::codex_model::Outcome::Verified { agent, .. } => Ok(Some(agent.clone())),
+            crate::codex_model::Outcome::Environment => provenance_var("TASKS_AGENT"),
+            crate::codex_model::Outcome::Bare { agent, warning } => {
+                push_warning_once(warnings, warning);
+                Ok(Some((*agent).to_string()))
+            }
+        };
+    }
+    provenance_var("TASKS_AGENT")
 }
 
 /// When a recurrence completed at `now` comes due again.
@@ -574,7 +603,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     // `completed` and `last_done` agree to the second (docs/task-model.md).
     let now = crate::time::now();
     let model = if completing {
-        completion_model()?
+        completion_model(&mut ctx.warnings)?
     } else {
         None
     };

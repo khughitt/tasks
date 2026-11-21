@@ -122,7 +122,7 @@ pub fn run(
             }));
         }
     }
-    let agent = super::creation_agent(fields.agent.as_deref())?;
+    let agent = super::creation_agent(fields.agent.as_deref(), &mut ctx.warnings)?;
     let mut task = blank(&ctx.project, title, status, agent)?;
     task.origin = attribution.origin;
     apply_fields(&mut ctx, &mut task, &fields, None)?;

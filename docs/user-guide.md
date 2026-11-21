@@ -339,6 +339,22 @@ with a note citing evidence. [Task model](task-model.md#origin-and-provenance)
 defines field versus occurrence precedence and provenance limits.
 
 Creation can stamp `--agent`/`TASKS_AGENT`; completion can stamp `TASKS_MODEL`.
+Inside a Codex tool call (`CODEX_THREAD_ID` set and nonempty, with no explicit
+`--agent`), `tasks` asks `relay model --harness codex --json` once per process
+(2 s deadline, 64 KiB stdout cap, stderr discarded) instead of trusting
+inherited `TASKS_AGENT`/`TASKS_MODEL`: a verified answer records
+`codex/<model>[@<effort>]` on creation and `<model>` on completion;
+`not-under-codex` naming another harness `H` reads `TASKS_AGENT`/`TASKS_MODEL`
+when `TASKS_AGENT`'s harness prefix matches `H`, and otherwise records bare `H`
+with warning `model unverified: other-harness`; any other outcome records bare
+`codex` and no completion `model`, warning `model unverified: no-harness`,
+`model unverified: <reason>` (including `unbound-call` and `earlier-turn`),
+`model resolver timeout`, `model resolver missing`, or `model resolver failed`
+without failing the write. Known limits of the resolver route: user TUI shell
+escapes take the latest turn's model; a shell kept from an earlier turn stamps
+bare `codex` (`earlier-turn`); other harnesses launched under Codex require a
+matching `TASKS_AGENT`; and sandbox reparenting resolves through call binding
+(`unbound-call`/`earlier-turn` when unbound).
 `note --stamp` adds verified native harness provenance when available. A session
 claim is not proof of native provenance. Failure to establish provenance is
 reported rather than guessed.

@@ -200,6 +200,7 @@ pub fn run(
                 &from,
                 &stamp,
                 attribution,
+                &mut ctx.warnings,
             )?;
             let at = task.created.clone();
             (task, "created", at)
@@ -239,8 +240,9 @@ fn create(
     from: &str,
     stamp: &super::Stamp,
     attribution: Attribution<'_>,
+    warnings: &mut Vec<String>,
 ) -> Result<Task> {
-    let agent = super::creation_agent(None)?;
+    let agent = super::creation_agent(None, warnings)?;
     let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
@@ -421,17 +423,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let project = Project::init(dir.path(), "tst", None).unwrap();
         let registry = Registry::default();
-        let mut seed = create(
-            &project,
-            &registry,
-            "seed".into(),
-            String::new(),
-            "gap",
-            "from:tst",
-            &super::super::Stamp::default(),
-            Attribution::default(),
-        )
-        .unwrap();
+        let mut seed =
+            super::super::add::blank(&project, "seed".into(), Status::Idea, None).unwrap();
+        super::super::create(&project, &registry, &mut seed, |_| Ok(())).unwrap();
+        assert!(seed.agent.is_none());
         let id = seed.id.clone();
 
         let always = |_: &Task| Ok(());
