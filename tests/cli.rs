@@ -5369,6 +5369,9 @@ fn goal_rows_carry_the_goal_mark_in_pretty_tables() {
             line_of(&goal).contains("◆ "),
             "{args:?} marks the goal: {text}"
         );
+        if args == ["tree"] {
+            assert!(line_of(&goal).starts_with("◆ "), "{text}");
+        }
         assert!(
             !line_of(&leaf).contains('◆'),
             "{args:?} leaves the leaf bare: {text}"

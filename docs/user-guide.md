@@ -164,16 +164,19 @@ that checkout's scan. Tree containment stays local to each project (foreign piec
 contribute to `work` without becoming local child nodes), drawn with three-cell
 guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering and blank ID
 cells on wrapped continuations. When any displayed goal is present, a wrapping
-legend (`work: done/total local descendants and declared pieces; tree: local containment`,
-with `; +N: ideas` and `; ?N: unresolved declared pieces` appended only when
-displayed) appears after `prime`'s top summary block or before `tree`'s table;
+legend (`work: done/total local descendants and declared pieces`, with
+`; tree: local containment` in `prime` and `; +N: ideas` and
+`; ?N: unresolved declared pieces` when displayed) appears after `prime`'s top
+summary block or before `tree`'s table;
 empty trees stay empty and leaves-only views omit the legend. Work metadata is
 computed only for resolved pretty output (`--pretty` or `TASKS_FORMAT=pretty`);
 JSON shapes and `prime --summary` are unchanged.
 
 Pretty task tables (`list`, `ready`, `tree`, `prime`'s rows) mark each row's type
-in one column: `≡` a lane, `◆` any other goal (a record with children or declared
-pieces), `p` a recurring record. The column appears only when some row needs it.
+in one column using `≡` for a lane, `◆` for any other goal (a record with children
+or declared pieces), and `p` for a recurring record. `tree` places this column at
+the far left and leaves its heading blank. The column appears only when some row
+needs it.
 
 
 `related` expresses non-blocking informational links and may name foreign task
