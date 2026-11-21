@@ -22,6 +22,7 @@ The supported top-level keys/tables are listed below.
 | `prefix` | Required `[a-z][a-z0-9]{1,7}` project id; agrees with registration and records. |
 | `color` | Optional `#RRGGBB` project color, normalized lowercase in JSON (`projects`, `where`, `resolve` and `goals` rows). `check` warns with `color_missing` when unset; it never assigns a color. |
 | `profile` | Optional single profile name using lowercase letters, digits and hyphens, with no leading hyphen. Absent means unassigned; tasks validates the grammar, not whether the profile exists. |
+| `stage` | Project maturity: `experimental`, `pre-release` or `supported`. New projects start at `experimental`. Independent of `[retired]`. Existing projects can be read without a declaration. Stage consumers get a diagnostic for an invalid value. |
 | `shorthand` | Optional list of private aliases, each nonempty single-line text; defaults to empty. Uniqueness across projects is checked by consumers when routing, not by `tasks check`. |
 | `[identity]` | Optional snapshot of public identity, written only by tasks; fields described below. |
 | `spec_dirs` | Optional list; defaults to `docs/specs`, `docs/designs`, `docs/superpowers/specs`, `docs/superpowers/designs`. |

@@ -38,7 +38,11 @@ start and check before completion. Add checks only with a pinned binary source;
 do not silently skip a missing tool. [Configuration](configuration.md) lists keys.
 
 `where` reports project root/checkout/records/kind and holds_records. Within git
-it stays in that repository; outside git it walks configs. holds_records also
+it stays in that repository, reports whether the project is registered there, and
+reads the stage and retirement flag from the registered configuration. Outside
+Git it walks configs without checking registration. The JSON `stage` field is
+null when absent or invalid, with `stage_error` for invalid declarations.
+`holds_records` also
 recognizes tracked config in HEAD even when deleted locally. `root <full-id>`
 prints the registered root. `projects --paths` displays detached record locations.
 `projects` JSON rows add `name` and `purpose` from the snapshot when present and
@@ -56,7 +60,7 @@ with positional inputs and `--stdin`. Registered projects retain their existing
 resolution statuses and fields; discovered-only prefixes stay `unregistered`.
 Enumeration keeps literal catalogue keys; explicit inputs still follow rename aliases.
 Each readable records entry adds `entry`: config, records and declared checkout
-paths, layout kind, shorthand and optional profile, color, derived `color_256`, retirement and feedback
+paths, layout kind, shorthand, stage and optional profile, color, derived `color_256`, retirement and feedback
 scope. A snapshot adds name, public aliases, purpose and source/refreshed metadata
 (plus commit/blob for a HEAD snapshot). Unset optional fields are omitted.
 An unreadable or malformed entry adds `entry_error` and a warning while other rows
@@ -549,8 +553,8 @@ commits, prefix renames and rename adoption remain available. `init --force` may
 preserving its exact retired date, reason and successor. If its old in-tree
 checkout was moved away, init adopts the config at the destination; a reachable
 retired authority cannot be replaced with an active or differently retired config.
-Unretire removes the table for a project outside a handoff, after checking its
-declared successor is reachable; commit config separately. A handoff participant
+Unretire requires a valid stage and removes the table for a project outside a
+handoff. Commit the configuration separately. A handoff participant
 keeps its retirement and shared successor evidence. Unregister removes host registration/aliases/history,
 not shared task history. Broader project lifecycle coordination belongs to ops.
 

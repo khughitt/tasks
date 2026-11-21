@@ -65,6 +65,10 @@ pub fn run(
 
 fn entry_row(project: &Project, with_freshness: bool, warnings: &mut Vec<String>) -> EntryRow {
     let snapshot = project.identity.as_ref();
+    let (stage, stage_error) = project.declared_stage().map_or_else(
+        |error| (None, Some(error.to_string())),
+        |stage| (stage, None),
+    );
     let freshness = with_freshness.then(|| {
         if !project.root.is_dir() {
             return crate::catalogue::source::Freshness::Unknown;
@@ -97,6 +101,8 @@ fn entry_row(project: &Project, with_freshness: bool, warnings: &mut Vec<String>
         }),
         shorthand: project.shorthand.clone(),
         profile: project.profile.clone(),
+        stage,
+        stage_error,
         color: project.color,
         color_256: project.color.map(crate::palette::Rgb::terminal_index),
         retired: project.retired.clone(),

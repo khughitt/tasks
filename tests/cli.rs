@@ -9270,6 +9270,102 @@ fn project_colors_reject_invalid_config_values() {
 }
 
 #[test]
+fn where_and_resolve_report_stage() {
+    let mut env = TestEnv::new();
+    let (checkout, worktree, _) = repo_with_worktree(&mut env);
+    let config = checkout.join("tasks/.config.toml");
+    let from_init = env.json(&checkout, &["where"]);
+    assert_eq!(from_init["project"]["stage"], "experimental");
+    for (declaration, stage, invalid) in [
+        ("stage = \"pre-release\"\n", Some("pre-release"), false),
+        ("", None, false),
+        ("stage = 4\n", None, true),
+        ("stage = \"preview\"\n", None, true),
+    ] {
+        std::fs::write(&config, format!("prefix = \"sci\"\n{declaration}")).unwrap();
+        for dir in [&checkout, &worktree] {
+            let out = env.json(dir, &["where"]);
+            let row = &out["project"];
+            assert_eq!(row["stage"], serde_json::json!(stage), "{out}");
+            assert_eq!(row["registered"], true);
+            assert_eq!(row["retired"], false);
+            assert_eq!(row.get("stage_error").is_some(), invalid);
+        }
+        let out = env.json(&worktree, &["resolve", "sci"]);
+        let row = &out["results"][0];
+        assert_eq!(row["status"], "resolved", "{out}");
+        let entry = &row["entry"];
+        assert_eq!(entry["stage"], serde_json::json!(stage), "{out}");
+        assert_eq!(entry.get("stage_error").is_some(), invalid);
+    }
+
+    let layout = tempfile::tempdir().unwrap();
+    let root = layout.path();
+    let code = root.join("code");
+    let records = root.join("records");
+    let overlay = root.join("overlay");
+    for directory in [&code, &records, &overlay] {
+        std::fs::create_dir(directory).unwrap();
+        git(directory, &["init", "-q", "-b", "main"]);
+        git(directory, &["commit", "--allow-empty", "-qm", "seed"]);
+    }
+    let side = root.join("side");
+    git(
+        &code,
+        &["worktree", "add", "-qb", "side", side.to_str().unwrap()],
+    );
+    env.json(
+        &overlay,
+        &[
+            "init",
+            "--prefix",
+            "lnk",
+            "--checkout",
+            code.to_str().unwrap(),
+        ],
+    );
+    for directory in [&code, &side] {
+        let row = env.json(directory, &["where"]);
+        assert_eq!(row["project"]["kind"], "linked", "{row}");
+        assert_eq!(row["project"]["stage"], "experimental");
+        assert_eq!(row["project"]["registered"], true);
+    }
+
+    env.json(&overlay, &["unregister", "lnk"]);
+    env.json(
+        &code,
+        &[
+            "init",
+            "--prefix",
+            "det",
+            "--records",
+            records.to_str().unwrap(),
+        ],
+    );
+    for directory in [&code, &side] {
+        let row = env.json(directory, &["where"]);
+        assert_eq!(row["project"]["kind"], "detached", "{row}");
+        assert_eq!(row["project"]["stage"], "experimental");
+        assert_eq!(row["project"]["registered"], true);
+    }
+    let resolved = env.json(&side, &["resolve", "det"]);
+    assert_eq!(resolved["results"][0]["entry"]["stage"], "experimental");
+
+    let outside = tempfile::tempdir().unwrap();
+    let root = outside.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir(root.join("tasks")).unwrap();
+    std::fs::write(
+        root.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nstage = \"supported\"\n",
+    )
+    .unwrap();
+    let local = env.json(root, &["where"]);
+    assert_eq!(local["project"]["stage"], "supported");
+    assert_eq!(local["project"]["registered"], false);
+}
+
+#[test]
 fn where_and_resolve_report_the_project_color() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

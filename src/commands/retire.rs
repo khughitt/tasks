@@ -68,6 +68,13 @@ pub fn unretire(here: Project) -> Result<()> {
     let project = authority(&registry, &here)?;
     if project.retired.is_some() {
         crate::rename::check_handoff_bound(&registry, &project)?;
+        if project.declared_stage()?.is_none() {
+            return Err(Error::Config(format!(
+                "{}: declare a stage before unretiring {}",
+                project.records.join(CONFIG_REL).display(),
+                project.prefix
+            )));
+        }
         write_table(&project, None)?;
     }
     Ok(())
