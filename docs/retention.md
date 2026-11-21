@@ -199,28 +199,65 @@ walk is added to admission.
 
 ## Query state
 
-`retained state <id> [--at <revision>] [--host <host>]` reads one immutable commit
-and returns version 1, contract retention-1, task, basis, host_filter, complete,
-items, checkpoints, operations, diagnostics and warnings. Default HEAD refuses
-dirty required task/archive inputs; explicit --at uses only its pinned blobs.
-Before a default query returns, it freshly checks branch/pairing, protected
-committed paths and live task/archive bytes and index state. Unrelated records
-commits can advance HEAD without invalidating the query: output keeps its original
-B and logical source ordinals. Ordinary attachment/payload bytes are not live query
-inputs; their historical proof uses pinned Git bytes. Explicit --at skips live
-checks. This is a pinned snapshot, with no guarantee HEAD stays still after return.
-No implicit fetch/push/provider occurs. Historical interpretation is not fresh
-filesystem verification.
+`retained state <id> [--at <revision>] [--host <host>] [--all-projects]` reads one
+immutable commit for `<id>` and returns `version` 1, `contract` `retention-1`, `task`,
+`basis`, `host_filter`, `complete`, `items`, `checkpoints`, `operations`,
+`diagnostics`, `incoming` and `warnings`. `--all-projects` conflicts with `--at` at
+parse time. Default `HEAD` refuses dirty required task/archive inputs on `<id>`;
+explicit `--at` uses only its pinned blobs and sets `incoming` to `{ "scope": "none",
+"complete": null, "items": [], "diagnostics": [] }`. Before a default query returns,
+it runs a joint bounded `(symbolic-ref, HEAD)` convergence loop (`0..4` iterations)
+across `<id>`, `<id>`'s `moved_from`/`moved_to` hops, `moved`-holder hops, verified
+candidate holders, newly observed `B_P..HEAD` lineage commit edges, staged `:0:` index
+entries, unmerged index stages and working-tree task/archive files. Unrelated records
+commits can advance `HEAD` without invalidating the query: output keeps its original
+`B` and logical source ordinals. Ordinary non-archive attachment/payload files under
+`tasks/files/<tid>/` are not live query inputs; historical proof uses pinned Git
+blobs. Explicit `--at` skips live checks and incoming discovery. No implicit
+fetch/push/provider occurs, and historical interpretation never hashes live retained
+payload bytes on disk.
 
-Each item has identity, nullable effective record/source, observed_at, nullable
-checkpoint Source and coverage recorded/changed/unknown/blocked. Checkpoint entries
-have source and nullable note/text; operation entries source/note. Diagnostics
-have code, scope (identity/host/task), nullable host/identity/source, detail, action
-and optional resolved_by Source. A malformed later note quarantines the identity,
-host or whole task it could supersede; effective record becomes null, complete
-false. A host filter never hides task-wide uncertainty or falls back to older
-valid state. Interpretable incomplete state can exit 0; unreadable/corrupt required
-bases fail. Resolve the exact bad source, not an assumed latest equivalent.
+Each top-level item has `identity`, nullable effective `record`/`source`,
+`observed_at`, nullable `checkpoint` `Source` and `coverage`
+`recorded`/`changed`/`unknown`/`blocked`. Checkpoint entries have `source` and
+nullable `note`/`text`; operation entries `source`/`note`. Top-level diagnostics have
+`code`, `scope` (`identity`/`host`/`task`), nullable `host`/`identity`/`source`,
+`detail`, `action` and optional `resolved_by` `Source`. A malformed later note
+quarantines the identity, host or whole task it could supersede; effective `record`
+becomes `null`, `complete` `false`. A host filter never hides task-wide uncertainty or
+falls back to older valid state. Interpretable incomplete state can exit 0;
+unreadable/corrupt required bases on `<id>` fail. Resolve the exact bad source, not an
+assumed latest equivalent.
+
+`incoming` reports `next_owner: "task:<id>"` custody held on tasks outside `<id>` and
+`<id>`'s own `moved_from`/`moved_to` chain without altering top-level `items`,
+`complete` or `diagnostics`:
+
+- `scope` is `"project"` on bare `retained state <id>`, `"all_projects"` with
+  `--all-projects` (scanning all registered projects, including retired projects), or
+  `"none"` with `--at`. Clearing task closure (`done`, `drop` or curation closeout)
+  requires a complete `--all-projects` result (`complete: true`, `incoming.scope ==
+  "all_projects"`, `incoming.complete: true`); bare `scope: "project"` is for local
+  inspection and basis lookup only and never clears cross-project custody (`moved`
+  local holders that migrated to another project emit `holder_moved_out_of_scope`
+  under `scope: "project"`).
+- Candidate discovery is bound to each Git-backed project's pinned `B_P` tree
+  (`ls-tree` + `cat-file --batch`) and verifies required `.notes` archives through
+  `history::load_logical` (descriptor, SHA-256 digest, UTF-8/note syntax, `note_count`
+  and live `attached:` ledger; mismatches emit `code: "parse"`). Non-Git projects stay
+  silent when clean and emit per-holder `retained_publication_unsupported` when
+  mentioning `<id>`'s suffix; corrupt `.git` metadata fails closed. Matching resolves
+  reciprocal `moved_from`/`moved_to` chains, retired registry aliases, `[predecessor]`
+  displaced suffixes and unadopted `[retention_lineage]` edges.
+- Each `IncomingItem` carries `holder` (canonical holder task ID), `identity`,
+  effective `kept` `record`, `source`, `observed_at`, nullable `checkpoint` and
+  `coverage`, sorted by `(holder, identity)`. Each `IncomingDiagnostic` carries
+  `code`, `project`, nullable `holder`/`host`/`identity`/`source`, `detail` and
+  `action`; `incoming.complete` is `Some(incoming.diagnostics.is_empty())` on live
+  queries (`None` under `--at`). Changes to `<id>` or non-convergence on `<id>`'s
+  project return top-level `Err(retained_stale_basis)`; stale, malformed or blocked
+  external holders drop that holder's `IncomingItem`s and emit `IncomingDiagnostic`
+  (`incoming.complete: false`).
 
 ## Requests and checkpoints
 
@@ -364,6 +401,19 @@ resolution_ordinal`):
   append `retention resolution:` with `"successors": []` (no successor item note
   needed), then record any intended prose under a non-reserved prefix such as
   `Custody note: ...`.
+- **Historical spaceless `retained:` notes (`retained:{...}` without a space after
+  `retained:`):** `state::replay` leaves unresolved spaceless `retained:` notes out of
+  item replay so lifecycle write admission (`retained transfer`, `checkpoint`,
+  `reconcile`) is unchanged, while `incoming` custody discovery diagnoses any
+  unresolved spaceless `retained:` note mentioning `<id>`'s suffix or falling within a
+  matching identity's blast radius (`code: "malformed_record"`, `detail: "missing space
+  after 'retained:'"`, quarantining earlier provisional `IncomingItem`s in that blast
+  radius). Append a valid `version: 1` `retained: <json>` successor note if needed
+  (for example `state: "released"` or a re-homed `next_owner`) followed by a
+  standalone `retention resolution: <json>` note via `tasks note` binding `bad.basis`
+  and `bad.ordinal` (`CheckpointRequest.resolutions` targets spaced `retained: ` notes
+  only); once verified, `incoming` clears the spaceless diagnostic and replays the
+  spaced successor normally across unfiltered and `--host` queries.
 
 Because `verify::preflight` strictly requires integer `version: 1` and refuses
 pre-`Manifest 1` historical manifests (`unsupported historical manifest format;

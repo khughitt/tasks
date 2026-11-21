@@ -41,6 +41,9 @@ tasks done demo-abcdef "Verified the corrected behavior"
 ```
 
 `start` establishes a host-local work claim and records an advisory owner.
+Starting a goal with local descendants in `todo`, `blocked`, or `doing` also
+suggests `tasks ready --under <goal-id>` to find eligible work. The claim is on
+the goal you started.
 `park` records an actionable continuation and releases the active claim without
 changing status. Read [ownership](ownership.md) before takeover, release or
 automation. `block` records an explicit obstacle; dependencies alone do not
@@ -49,7 +52,15 @@ nonrecurring task with `edit --status todo` before starting it again; a recurrin
 done task can be started directly for its next occurrence. A moved record is a
 redirect to its successor, not editable work.
 
-`done` refuses open dependencies or descendants unless explicitly forced.
+For a goal, `prime` offers closeout when its direct dependencies and effective
+members are closed. Both the offer and `done` follow children and foreign pieces
+through done subgoals and stop at dropped ones. If a foreign piece is offline,
+the warning `G has unresolved goal members: H -> B` names the goal G and
+the declaration to check. Restore access or deliberately waive it with
+`done --force`. A membership cycle warning gives its path, for example
+`G has a membership cycle: X -> Y -> X`. The result names
+the waived work. Cycles and read failures still require repair. The writer
+rechecks even after an offer. See [goal completion](task-model.md#goal-completion).
 `drop` refuses open descendants and has no force override. A `halt` tag on open
 work prevents lower-priority starts in that project without an explicit override;
 `prime` reports halts. See the [task model](task-model.md#lifecycle).
@@ -153,33 +164,46 @@ that checkout's scan. Tree containment stays local to each project (foreign piec
 contribute to `work` without becoming local child nodes), drawn with three-cell
 guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering and blank ID
 cells on wrapped continuations. When any displayed goal is present, a wrapping
-legend (`work: done/total local descendants and declared pieces; tree: local containment`,
-with `; +N: ideas` and `; ?N: unresolved declared pieces` appended only when
-displayed) appears after `prime`'s top summary block or before `tree`'s table;
+legend (`work: done/total local descendants and declared pieces`, with
+`; tree: local containment` in `prime` and `; +N: ideas` and
+`; ?N: unresolved declared pieces` when displayed) appears after `prime`'s top
+summary block or before `tree`'s table;
 empty trees stay empty and leaves-only views omit the legend. Work metadata is
 computed only for resolved pretty output (`--pretty` or `TASKS_FORMAT=pretty`);
 JSON shapes and `prime --summary` are unchanged.
 
 Pretty task tables (`list`, `ready`, `tree`, `prime`'s rows) mark each row's type
-in one column: `≡` a lane, `◆` any other goal (a record with children or declared
-pieces), `p` a recurring record. The column appears only when some row needs it.
+in one column using `≡` for a lane, `◆` for any other goal (a record with children
+or declared pieces), and `p` for a recurring record. `tree` places this column at
+the far left and leaves its heading blank. The column appears only when some row
+needs it.
 
 
 `related` expresses non-blocking informational links and may name foreign task
 ids. It does not affect readiness, review, lanes or blocker ranking. Pretty
-`show` collects every task link in the `── related ──` section: rows run in the
-order `parent`, `depends on`, `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, and `child`,
-formatted as `<label>  <id>  <status>  <date>  <title>` with aligned columns.
-Resolved rows show the target's `updated` date (`YYYY-MM-DD`, painted on the
-recency scale); an unresolved target leaves the date blank and prints
-`(unresolved)` with `?` for status, while a moved target reads `moved`.
+`show` and `next` list one row per canonical task ID under `links`. Retired
+prefix spellings group under the canonical ID even when the target is unreachable.
+A move tombstone and its successor keep separate rows.
+
+Each row shows its roles, ID, status, updated date, and full title. Roles and
+rows follow this order, with the highest-precedence role setting the row position
+and ties keeping the order within that role. The order is `parent`, `piece`,
+`depends on`, `dependent`, `wake on`, `follows`, `followed by`, `child`,
+`source`, and `related`. A piece covers its dependency role. A row shows
+`related` only when it has no other role. Long role lists and titles wrap under
+their own columns.
+
+Resolved rows use the target's live status and recency-colored `updated` date
+(`YYYY-MM-DD`). An unresolved row shows `?` for status and `(unresolved)` for
+its title, with a blank date. JSON keeps separate relationship fields and their
+existing ID spellings.
 
 `follows` means: this task continues work arising from
 one or more earlier tasks. `source` remains its filing origin, and `related` an
 informational citation. Follows does not require an earlier task to close or change
 readiness, review or completion. Existing source/related links are not converted.
-Show and next display stored outgoing follows rows, including foreign, moved and
-unresolved targets. They also display direct incoming `followed by` rows, including closed follow-ups.
+Show and next display outgoing follows links to foreign, moved and unresolved
+targets. They also display direct incoming `followed by` links, including closed follow-ups.
 Plain show searches its local scan, and `show --all-projects` every reachable
 registered project; next uses its existing group/all-project scope.
 No incoming row means none found in that readable scope. After a move, the view
@@ -223,6 +247,10 @@ is given again. Once waits clear, new closure/deferral evidence can wake them; a
 with no supported wait or wake evidence is stranded. Unassessed `todo`/`blocked`
 leaves need review when process is absent, except lanes. Use the scope skill for
 the review workflow rather than treating the mark as an execution decision.
+
+Plain notes preserve the review marker and its timestamp. `note` reminds you
+when the idea explicitly awaits the user. Use `note --no-reviewed` to record
+new evidence or an answer and return the idea to the review queue.
 
 `shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` sets aside open
 work with a required future review checkpoint and optional wake targets. Shelves

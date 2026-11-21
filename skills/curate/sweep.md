@@ -119,11 +119,11 @@ The script fills the first thirteen columns; the controller fills the last five:
 |---|---|
 | `id` | the pool task |
 | `status`, `updated`, `reviewed`, `awaiting_user`, `deferred_until`, `parked` | what the snapshot read: status, last update, the scope reviewed mark, the waiting-on-user mark, the deferral date, whether it carries a park |
-| `dead_paths` | named paths that exist in neither the code checkout nor the records directory (trigger) |
-| `cited_closed` | cited task ids closed after this task was last updated (trigger) |
-| `deps_closed` | `true` when every dependency is closed (trigger) |
-| `touched_commits` | commits since `updated` that touch a named path (orders clusters; never a trigger) |
-| `twins` | other pool tasks whose titles share at least 0.4 of their words (a hint for clustering) |
+| `dead_paths` | paths named in `title`/`body` (under a top-level checkout or records entry) or in local `spec`, `plan`, or `input`/`context` `refs` that exist in neither the code checkout nor the records directory (trigger) |
+| `cited_closed` | registered task ids (same-project or foreign, following moves) cited in `title`/`body` that closed after this task was last updated (trigger) |
+| `deps_closed` | `true` when every dependency is closed (following moves) and at least one closed after this task was last updated (trigger) |
+| `touched_commits` | commits in the code checkout since `updated` that touch an existing path from `dead_paths`'s sources or an existing checkout root file named in `title`/`body` (orders clusters; never a trigger) |
+| `twins` | other pool tasks, excluding direct parent-child pairs, whose titles share at least 0.4 of their words (a hint for clustering) |
 | `triggers` | how many of `dead_paths`, `cited_closed`, `deps_closed` fired |
 | `cluster` | the cluster label, written at clustering |
 | `verdict` | one of `keep`, `refined`, `stale`, `duplicate`, `decision`, `decompose`, `skipped`, `left`, `pending`, `unwritten` |
@@ -177,10 +177,16 @@ duplicate.
 
 ## Order
 
-Clusters run in order of how many trigger signals their tasks carry, most first: the
-sum of the `triggers` column over the cluster's rows. Break a tie by the sum of
-`touched_commits`, most first. A sweep that stops early has then done the part most
-likely to hold stale tasks.
+Clusters run in order of:
+
+1. the sum of `triggers` over rows with `status` `todo` or `blocked`, plus rows with
+   `status` `idea` and `reviewed` `true`, most first;
+2. the sum of `triggers` over unreviewed ideas (rows with `status` `idea` and
+   `reviewed` `false`), most first;
+3. the sum of `touched_commits` over all rows in the cluster, most first.
+
+A sweep that stops early has then processed the clusters most likely to hold stale or
+editable tasks ahead of unreviewed ideas waiting on `/scope`.
 
 ## One cluster
 

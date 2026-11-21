@@ -523,19 +523,18 @@ fn progress_display_members_match_goals() {
         "{tree_all}"
     );
 
-    // Selected root starts at depth zero (`""` tree prefix, after the 2-cell review column)
-    // and keeps identical work counts!
+    // Selected root starts at depth zero, after the leading mark and reserved review prefix.
     let selected = env.pretty(&aa, &["tree", &closed_anc]);
     let sel_line = selected.lines().find(|l| l.contains(&closed_anc)).unwrap();
     assert!(
-        sel_line.starts_with(&format!("  {closed_anc}")),
+        sel_line.starts_with(&format!("◆    {closed_anc}")),
         "{sel_line}"
     );
     assert!(sel_line.contains(&expected_anc), "{sel_line}");
     assert!(
         selected
             .lines()
-            .any(|l| l.starts_with(&format!("* └─ {open_grand}"))),
+            .any(|l| l.starts_with(&format!("   * └─ {open_grand}"))),
         "{selected}"
     );
 }
@@ -850,7 +849,7 @@ fn progress_display_legends_and_width() {
     // Base legend (goal with committed work only, no ideas, no missing pieces):
     let goal = add(&env, &aa, "Plain goal", &[]);
     env.json(&aa, &["edit", &leaf, "--parent", &goal]);
-    let base = "work: done/total local descendants and declared pieces; tree: local containment";
+    let base = "work: done/total local descendants and declared pieces";
 
     let tree_base = env.pretty(&aa, &["tree"]);
     assert!(tree_base.starts_with(&format!("{base}\n")), "{tree_base:?}");
@@ -864,7 +863,7 @@ fn progress_display_legends_and_width() {
     let lines: Vec<&str> = prime_base.lines().collect();
     assert_eq!(lines[0], "project aa");
     assert!(lines[1].starts_with("idea "), "{prime_base}");
-    assert_eq!(lines[2], base);
+    assert_eq!(lines[2], format!("{base}; tree: local containment"));
     assert_eq!(lines[3], "");
     assert_eq!(lines[4], "closeout:");
 
@@ -901,8 +900,12 @@ fn progress_display_legends_and_width() {
         assert!(out.status.success(), "{out:?}");
         let stdout = String::from_utf8(out.stdout).unwrap();
         let clean = strip_ansi(&stdout);
-        assert!(clean.contains("+N: ideas"), "{clean}");
-        assert!(clean.contains("?N: unresolved declared pieces"), "{clean}");
+        let wrapped = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(wrapped.contains("+N: ideas"), "{clean}");
+        assert!(
+            wrapped.contains("?N: unresolved declared pieces"),
+            "{clean}"
+        );
         for line in clean.lines() {
             assert!(
                 line.chars().count() <= 80,
@@ -923,8 +926,12 @@ fn progress_display_legends_and_width() {
             .unwrap();
         assert!(out.status.success(), "{out:?}");
         let clean = strip_ansi(&String::from_utf8(out.stdout).unwrap());
-        assert!(clean.contains("+N: ideas"), "{clean}");
-        assert!(clean.contains("?N: unresolved declared pieces"), "{clean}");
+        let wrapped = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(wrapped.contains("+N: ideas"), "{clean}");
+        assert!(
+            wrapped.contains("?N: unresolved declared pieces"),
+            "{clean}"
+        );
         assert!(
             clean
                 .lines()

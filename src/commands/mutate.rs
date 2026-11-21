@@ -224,11 +224,19 @@ pub fn apply_fields(
 
 /// `save` for a task that does not exist yet: validates, then creates exclusively. Takes
 /// the project rather than `Ctx` because the feedback command creates in another project.
-pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result<()> {
+pub(super) fn create<T>(
+    project: &Project,
+    registry: &Registry,
+    task: &mut Task,
+    mut prepare: impl FnMut(&mut Task) -> Result<T>,
+) -> Result<T> {
     task.updated = crate::time::now();
-    validate_task(task)?;
-    project.validate_docs(task)?;
-    project.create_task(registry, task)
+    project.create_task(registry, task, |draft| {
+        let result = prepare(draft)?;
+        validate_task(draft)?;
+        project.validate_docs(draft)?;
+        Ok(result)
+    })
 }
 
 pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
@@ -354,6 +362,45 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
         }
     }
     Ok(open)
+}
+
+fn guard_completion(ctx: &mut Ctx, task: &Task, force: bool) -> Result<()> {
+    let declared = crate::hierarchy::is_goal(task, false);
+    if force && !declared && !ctx.project.has_declared_child(&task.id, &ctx.registry)? {
+        return Ok(());
+    }
+    let mut scan = ctx.project.scan()?;
+    // The incoming edge at the edited parent changes even though that parent's
+    // file does not. Build all membership indexes over the proposed record.
+    let root = scan
+        .iter_mut()
+        .find(|t| t.id == task.id)
+        .ok_or_else(|| Error::TaskNotFound(task.id.to_string()))?;
+    *root = task.clone();
+    let goal = declared || !crate::hierarchy::children(&scan, &task.id, &ctx.registry).is_empty();
+    if goal {
+        let mut membership = crate::membership::Membership::new(
+            &ctx.registry,
+            std::slice::from_ref(&ctx.project.prefix),
+            &scan,
+        );
+        let evidence = membership.closeout(task)?;
+        let id = ctx.registry.canonical_id(&task.id);
+        if force {
+            ctx.warnings.extend(evidence.waived(&id, &ctx.registry));
+        } else if let Some(error) = evidence.refusal(&id) {
+            return Err(error);
+        }
+    } else if !force {
+        let open = open_deps(ctx, task)?;
+        if !open.is_empty() {
+            return Err(Error::OpenDependencies(
+                task.id.to_string(),
+                open.join(", "),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A provenance variable the harness exports (`TASKS_MODEL`, `TASKS_AGENT`). Unset or
@@ -538,18 +585,10 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             &ctx.project,
             task,
         )?;
-    }
-    if completing && !force {
-        let open = open_deps(ctx, task)?;
-        if !open.is_empty() {
-            return Err(Error::OpenDependencies(
-                task.id.to_string(),
-                open.join(", "),
-            ));
-        }
+        guard_completion(ctx, task, force)?;
     }
     let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
-    if closing && !(force && to == Status::Done) {
+    if closing && to == Status::Dropped {
         let all = ctx.project.scan()?;
         let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
             .iter()

@@ -1495,3 +1495,249 @@ fn freshness_current_reports_unpublished_changes_before_unledgered_file() {
     );
     assert!(!msg_staged.contains("unledgered file"), "got: {msg_staged}");
 }
+
+#[test]
+fn incoming_schema_serializes_all_nullable_keys_and_rejects_missing_keys() {
+    use super::incoming::{IncomingCustody, IncomingDiagnostic, IncomingItem, IncomingScope};
+
+    let none = serde_json::to_value(IncomingCustody::none()).unwrap();
+    assert_eq!(
+        none,
+        json!({
+            "scope": "none",
+            "complete": null,
+            "items": [],
+            "diagnostics": []
+        })
+    );
+    let _: IncomingCustody = serde_json::from_value(none).unwrap();
+    assert!(
+        serde_json::from_value::<IncomingCustody>(json!({
+            "scope": "none",
+            "items": [],
+            "diagnostics": []
+        }))
+        .is_err(),
+        "missing complete key must fail deserialization"
+    );
+
+    let rec = decode_record(&record().to_string()).unwrap();
+    let item = IncomingItem {
+        holder: "sci-000002".into(),
+        identity: rec.identity(),
+        record: rec,
+        source: Source {
+            basis: basis(),
+            ordinal: 3,
+        },
+        observed_at: "2026-11-18T00:00:00Z".into(),
+        checkpoint: None,
+        coverage: "changed".into(),
+    };
+    let item_json = serde_json::to_value(&item).unwrap();
+    assert!(item_json.get("checkpoint").unwrap().is_null());
+    assert_eq!(
+        serde_json::from_value::<IncomingItem>(item_json.clone()).unwrap(),
+        item
+    );
+    let mut missing_cp = item_json;
+    missing_cp.as_object_mut().unwrap().remove("checkpoint");
+    assert!(serde_json::from_value::<IncomingItem>(missing_cp).is_err());
+
+    let diag = IncomingDiagnostic {
+        code: "project_unreachable".into(),
+        project: "ops".into(),
+        holder: None,
+        host: None,
+        identity: None,
+        source: None,
+        detail: "Project unreachable".into(),
+        action: "Restore config".into(),
+    };
+    let diag_json = serde_json::to_value(&diag).unwrap();
+    for key in ["holder", "host", "identity", "source"] {
+        assert!(
+            diag_json.get(key).unwrap().is_null(),
+            "{key} must serialize as null"
+        );
+        let mut missing = diag_json.clone();
+        missing.as_object_mut().unwrap().remove(key);
+        assert!(
+            serde_json::from_value::<IncomingDiagnostic>(missing).is_err(),
+            "missing {key} must fail deserialization"
+        );
+    }
+    let custody = IncomingCustody {
+        scope: IncomingScope::AllProjects,
+        complete: Some(false),
+        items: vec![item],
+        diagnostics: vec![diag],
+    };
+    assert_eq!(
+        serde_json::from_value::<IncomingCustody>(serde_json::to_value(&custody).unwrap()).unwrap(),
+        custody
+    );
+}
+
+#[test]
+fn spaceless_resolution_replay_validates_scope_and_preserves_replay_invisibility() {
+    let spaceless = r#"retained:{"version":1,"host":"host-a","kind":"worktree","path":".worktrees/old","state":"kept","verification":"verified","purpose":"p","next_owner":"task:sci-999999","cleanup_trigger":"c"}"#;
+
+    // 1. Unresolved spaceless note stays invisible to state::replay.
+    let mut t = task();
+    crate::commands::append_note(&mut t, "t", spaceless).unwrap();
+    crate::commands::append_note(&mut t, "t", &format!("retained: {}", record())).unwrap();
+    let s = state::replay(&project(), &t, &basis(), None).unwrap();
+    assert!(s.complete);
+    assert!(s.diagnostics.is_empty());
+    assert_eq!(s.items.len(), 1);
+    assert_eq!(s.incoming, super::incoming::IncomingCustody::none());
+
+    // 2. Directly committed uncovered standalone resolution (successors: [] on identity-scoped
+    //    spaceless note) records a task-scoped diagnostic even under --host other.
+    let mut uncovered = t.clone();
+    let bad_res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [],
+        "reason": "Missing successor for identity-scoped spaceless note"
+    });
+    crate::commands::append_note(
+        &mut uncovered,
+        "t",
+        &format!("retention resolution: {bad_res}"),
+    )
+    .unwrap();
+    for filter in [None, Some("other")] {
+        let s_bad = state::replay(&project(), &uncovered, &basis(), filter).unwrap();
+        assert!(!s_bad.complete, "{filter:?}: {s_bad:?}");
+        assert_eq!(s_bad.diagnostics.len(), 1);
+        assert_eq!(s_bad.diagnostics[0].scope, "task");
+        assert!(s_bad.diagnostics[0].host.is_none());
+        assert_eq!(s_bad.diagnostics[0].source.as_ref().unwrap().ordinal, 3);
+        assert!(
+            s_bad.diagnostics[0]
+                .detail
+                .contains("retention resolution does not cover all affected identities in scope"),
+            "got: {}",
+            s_bad.diagnostics[0].detail
+        );
+    }
+
+    // 3. Valid released v1 successor + standalone resolution succeeds unfiltered and under --host other.
+    let mut covered = t;
+    let released = json!({
+        "version": 1,
+        "host": "host-a",
+        "kind": "worktree",
+        "path": ".worktrees/old",
+        "state": "released",
+        "verification": "verified",
+        "purpose": "Removed old worktree",
+        "next_owner": "none",
+        "cleanup_trigger": "none"
+    });
+    crate::commands::append_note(&mut covered, "t", &format!("retained: {released}")).unwrap();
+    let ok_res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [3],
+        "reason": "Repaired historical spaceless retained note"
+    });
+    crate::commands::append_note(
+        &mut covered,
+        "t",
+        &format!("retention resolution: {ok_res}"),
+    )
+    .unwrap();
+    for filter in [None, Some("other"), Some("host-a")] {
+        let s_ok = state::replay(&project(), &covered, &basis(), filter).unwrap();
+        assert!(s_ok.complete, "{filter:?}: {s_ok:?}");
+        assert!(s_ok.diagnostics.is_empty(), "{filter:?}: {s_ok:?}");
+    }
+
+    // 4. 0-item broken spaceless prose accepts successors: [] iff zero prior items exist in scope.
+    let mut zero_items = task();
+    crate::commands::append_note(&mut zero_items, "t", "retained:{broken").unwrap();
+    let zero_res = json!({
+        "version": 1,
+        "bad": {"basis": basis(), "ordinal": 1},
+        "successors": [],
+        "reason": "Zero-item broken spaceless note"
+    });
+    crate::commands::append_note(
+        &mut zero_items,
+        "t",
+        &format!("retention resolution: {zero_res}"),
+    )
+    .unwrap();
+    let s_zero = state::replay(&project(), &zero_items, &basis(), None).unwrap();
+    assert!(s_zero.complete, "{s_zero:?}");
+    assert!(s_zero.diagnostics.is_empty());
+}
+
+#[test]
+fn notes_mention_suffixes_handles_spaced_spaceless_malformed_and_unicode_escapes() {
+    use super::incoming::notes_mention_suffixes;
+    use std::collections::BTreeSet;
+
+    let suffixes = BTreeSet::from(["1abe9f".to_string(), "295f8d".to_string()]);
+    let note_vec = |text: &str| {
+        let mut t = task();
+        crate::commands::append_note(&mut t, "t", text).unwrap();
+        t.notes
+    };
+
+    // 1. Valid spaced `retained: ` record matching `task:<id>` -> true.
+    let mut matching = record();
+    matching["next_owner"] = json!("task:sci-1abe9f");
+    assert!(notes_mention_suffixes(
+        &note_vec(&format!("retained: {matching}")),
+        &suffixes
+    ));
+
+    // 2. Valid spaced `retained: ` record mentioning `<id>` ONLY in `purpose` -> false.
+    let mut purpose_only = record();
+    purpose_only["next_owner"] = json!("task:sci-000002");
+    purpose_only["purpose"] = json!("Filed follow-up for tasks-1abe9f");
+    assert!(!notes_mention_suffixes(
+        &note_vec(&format!("retained: {purpose_only}")),
+        &suffixes
+    ));
+
+    // 3. Spaceless `retained:{...}` record matching suffix -> true; non-matching -> false.
+    assert!(notes_mention_suffixes(
+        &note_vec(
+            r#"retained:{"version":1,"host":"host-a","kind":"worktree","path":".worktrees/x","state":"kept","verification":"verified","purpose":"p","next_owner":"task:sci-1abe9f","cleanup_trigger":"c"}"#
+        ),
+        &suffixes
+    ));
+    assert!(!notes_mention_suffixes(
+        &note_vec(
+            r#"retained:{"version":1,"host":"host-a","kind":"worktree","path":".worktrees/x","state":"kept","verification":"verified","purpose":"p","next_owner":"task:sci-000002","cleanup_trigger":"c"}"#
+        ),
+        &suffixes
+    ));
+
+    // 4. Malformed `retained: ` note missing `task:` prefix (`"ops-295f8d"`) -> true.
+    let mut unprefixed = record();
+    unprefixed["next_owner"] = json!("ops-295f8d");
+    assert!(notes_mention_suffixes(
+        &note_vec(&format!("retained: {unprefixed}")),
+        &suffixes
+    ));
+
+    // 5. Malformed `retained: ` note using `\uXXXX` escape for hex suffix -> true.
+    assert!(notes_mention_suffixes(
+        &note_vec(
+            r#"retained: {"version":1,"host":"host-a","next_owner":"sci-\u0031abe9f","bad":1}"#
+        ),
+        &suffixes
+    ));
+
+    // 6. Ordinary non-`retained:` note mentioning `task:sci-1abe9f` -> false.
+    assert!(!notes_mention_suffixes(
+        &note_vec("Custody note: transferred to task:sci-1abe9f"),
+        &suffixes
+    ));
+}

@@ -19,15 +19,17 @@ fn collect_tree_goal_work<'a>(nodes: &'a [TreeNode], out: &mut Vec<&'a GoalWork>
 
 fn render_goal_legend(
     works: &[&GoalWork],
+    describe_tree: bool,
     painter: &Painter,
     layout: &crate::table::Layout,
 ) -> Option<String> {
     if works.is_empty() {
         return None;
     }
-    let mut text = String::from(
-        "work: done/total local descendants and declared pieces; tree: local containment",
-    );
+    let mut text = String::from("work: done/total local descendants and declared pieces");
+    if describe_tree {
+        text.push_str("; tree: local containment");
+    }
     if works.iter().any(|work| work.pieces.ideas > 0) {
         text.push_str("; +N: ideas");
     }
@@ -551,7 +553,7 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
         }
         Output::Prime(o) => {
             let mut marks = Marks::of(&o.closeout)
-                .or(Marks::of_tree(&o.roadmap))
+                .or(Marks::of_tree(&o.roadmap, TypeColumn::Labeled))
                 .or(Marks::of(&o.ready))
                 .or(Marks::of(&o.doing));
             marks.review |= o.parked.iter().any(|row| row.needs_review == Some(true));
@@ -679,7 +681,7 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                 rendered.push_str(&line);
                 rendered.push('\n');
             }
-            if let Some(legend) = render_goal_legend(&displayed_works, painter, layout) {
+            if let Some(legend) = render_goal_legend(&displayed_works, true, painter, layout) {
                 rendered.push_str(&legend);
             }
 
@@ -783,14 +785,14 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             if o.nodes.is_empty() {
                 return String::new();
             }
-            let marks = Marks::of_tree(&o.nodes);
+            let marks = Marks::of_tree(&o.nodes, TypeColumn::Leading);
             let mut rows = Vec::new();
             let mut rails = Vec::new();
             tree_rows(&o.nodes, 0, &mut rails, painter, marks, &mut rows);
             let mut displayed_works = Vec::new();
             collect_tree_goal_work(&o.nodes, &mut displayed_works);
             let mut rendered =
-                render_goal_legend(&displayed_works, painter, layout).unwrap_or_default();
+                render_goal_legend(&displayed_works, false, painter, layout).unwrap_or_default();
             rendered.push_str(&crate::table::render(
                 &task_columns(marks, true),
                 &rows,
@@ -1035,8 +1037,13 @@ struct Marks {
     review: bool,
     /// The `||` column.
     parallel: bool,
-    /// The type column.
-    kind: bool,
+    kind: Option<TypeColumn>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeColumn {
+    Leading,
+    Labeled,
 }
 
 impl Marks {
@@ -1044,15 +1051,15 @@ impl Marks {
         Marks {
             review: rows.iter().any(|row| row.needs_review),
             parallel: any_parallel(rows),
-            kind: any_type(rows),
+            kind: any_type(rows).then_some(TypeColumn::Labeled),
         }
     }
 
-    fn of_tree(nodes: &[TreeNode]) -> Marks {
+    fn of_tree(nodes: &[TreeNode], kind: TypeColumn) -> Marks {
         Marks {
             review: any_needs_review_tree(nodes),
             parallel: any_parallel_tree(nodes),
-            kind: any_type_tree(nodes),
+            kind: any_type_tree(nodes).then_some(kind),
         }
     }
 
@@ -1060,7 +1067,7 @@ impl Marks {
         Marks {
             review: self.review || other.review,
             parallel: self.parallel || other.parallel,
-            kind: self.kind || other.kind,
+            kind: self.kind.or(other.kind),
         }
     }
 }
@@ -1126,8 +1133,10 @@ fn task_columns(marks: Marks, show_work: bool) -> Vec<crate::table::Column> {
     if marks.parallel {
         columns.push(Column::fixed("||"));
     }
-    if marks.kind {
-        columns.push(Column::fixed("type"));
+    match marks.kind {
+        Some(TypeColumn::Leading) => columns.insert(0, Column::fixed("")),
+        Some(TypeColumn::Labeled) => columns.push(Column::fixed("type")),
+        None => {}
     }
     columns.push(Column::fixed("date"));
     columns.push(Column::wrap("title", 20, None));
@@ -1189,12 +1198,14 @@ fn task_row(
             String::new()
         });
     }
-    if marks.kind {
-        cells.push(
-            type_letter(row)
-                .map(|letter| painter.paint(Style::Emphasis, &letter.to_string()))
-                .unwrap_or_default(),
-        );
+    if let Some(kind) = marks.kind {
+        let cell = type_letter(row)
+            .map(|letter| painter.paint(Style::Emphasis, &letter.to_string()))
+            .unwrap_or_default();
+        match kind {
+            TypeColumn::Leading => cells.insert(0, cell),
+            TypeColumn::Labeled => cells.push(cell),
+        }
     }
     cells.push(date);
     cells.push(title_cell(row, painter));
@@ -1495,7 +1506,7 @@ mod tests {
     ) -> String {
         let marks = Marks {
             parallel,
-            kind,
+            kind: kind.then_some(TypeColumn::Labeled),
             ..Marks::of(rows)
         };
         let built: Vec<_> = rows
@@ -1514,8 +1525,8 @@ mod tests {
     ) -> String {
         let marks = Marks {
             parallel,
-            kind,
-            ..Marks::of_tree(nodes)
+            kind: kind.then_some(TypeColumn::Leading),
+            ..Marks::of_tree(nodes, TypeColumn::Leading)
         };
         let mut built = Vec::new();
         let mut rails = Vec::new();
@@ -2204,7 +2215,7 @@ mod tests {
             ]
         );
 
-        // Output::Tree is byte-empty on empty nodes, and has `work` at index 6 before `||`/`type`.
+        // Output::Tree is byte-empty on empty nodes and puts the type mark before the ID.
         assert_eq!(
             pretty(
                 &Output::Tree(crate::output::TreeOut {
@@ -2224,6 +2235,11 @@ mod tests {
             warnings: vec![],
         });
         let tree_text = pretty(&tree_out, &plain(), &headed);
+        assert!(tree_text.starts_with("   id"), "{tree_text}");
+        assert!(
+            tree_text.lines().nth(1).unwrap().starts_with("≡  "),
+            "{tree_text}"
+        );
         let tree_hdr: Vec<&str> = tree_text
             .lines()
             .next()
@@ -2233,7 +2249,7 @@ mod tests {
         assert_eq!(
             tree_hdr,
             [
-                "id", "P", "size", "cx", "process", "status", "work", "||", "type", "date", "title"
+                "id", "P", "size", "cx", "process", "status", "work", "||", "date", "title"
             ]
         );
 

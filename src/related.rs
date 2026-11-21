@@ -239,6 +239,9 @@ pub fn link_citations(
         .map(|id| registry.canonical_id(&id));
 
     for id in cited {
+        if *id == task_canonical {
+            continue;
+        }
         let cited_canonical = id.clone();
         let resolved: Option<Task> = crate::dependency::resolve_canonical(registry, id, |id| {
             resolver.resolve_canonical_task(id)
@@ -254,6 +257,12 @@ pub fn link_citations(
         };
 
         let dest_canonical = registry.canonical_id(&dest.id);
+        let local_dependent_or_follower = dest_canonical.prefix == task_canonical.prefix
+            && dest
+                .depends
+                .iter()
+                .chain(&dest.follows)
+                .any(|id| registry.canonical_id(id) == task_canonical);
 
         let child_of_task = dest
             .parent
@@ -267,8 +276,7 @@ pub fn link_citations(
                 _ => false,
             };
 
-        let is_skip = cited_canonical == task_canonical
-            || dest_canonical == task_canonical
+        let is_skip = dest_canonical == task_canonical
             || task.depends.iter().any(|d| {
                 let c = registry.canonical_id(d);
                 c == cited_canonical || c == dest_canonical
@@ -309,6 +317,7 @@ pub fn link_citations(
                     c == cited_canonical || c == dest_canonical
                 })
             || child_of_task
+            || local_dependent_or_follower
             || would_link.contains(&dest_canonical);
 
         if is_skip {

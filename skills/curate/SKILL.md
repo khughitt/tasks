@@ -211,35 +211,25 @@ dependents, the absorb note, and the drop last:
 - the task is `doing`, has a live claim or a park, has open children, is a lane, is
   tagged `halt`, or recurs (`every`);
 - the task has unsettled retained custody: off-tree evidence, a plan workspace or a
-  worktree it still owns. `drop` does not refuse such a task and `check` stays clean,
-  so the closure would leave the item without an open owner. Read the state with
-  `tasks retained state <id>` before a closure, not by searching notes for `kept`: an
-  item kept in one note may be released in a later one, and a task can owe custody
-  with no `kept` note at all. The guard holds when the query shows an effective kept
-  item or an unfinished retention operation, reports its history incomplete or
-  blocked, or refuses. The query lists only items recorded on the queried task, so it
-  misses a kept item recorded on another task whose `next_owner` names this task (by
-  `<id>`, a retired-prefix alias, or an earlier `moved_from` id): before a closure, walk
-  `task.moved_from` backwards with `tasks show` to build the canonical id set containing
-  `<id>` and each hop's `task.id` (the guard holds if any `moved_from` hop cannot be
-  read), take each id's six-hex suffix, and search every registered project's task
-  records and note archives (read-only; records directories from `tasks projects`, each
-  row's `records`) with
-  `grep -rlE --include='*.md' --include='*.notes' '"next_owner"[[:space:]]*:[[:space:]]*"task:[a-z][a-z0-9]{0,7}-(<hex6>|...)"' <records>/tasks`.
-  Matching by six-hex suffix catches retired prefixes without parsing `projects.toml`,
-  and the pattern tolerates whitespace around the colon (`"next_owner":"task:…"` and
-  `"next_owner": "task:…"`). `grep` exit `1` means no match; the guard holds when any
-  registered project is unreachable, `<records>/tasks` is missing, or `grep` exits `>= 2`.
-  Keep matches at `<records>/tasks/<other-id>.md` and
-  `<records>/tasks/files/<other-id>/notes-*.notes` (ignoring attached `.md` files under
-  `tasks/files/`), and for each distinct `<other-id>` read
-  `tasks retained state <other-id>`: the guard holds when it is incomplete, blocked or
-  refuses, or shows an effective kept item whose `next_owner` is `task:<owner>` unless
-  `tasks resolve <owner>` returns `results[0].status == "resolved"` with `results[0].id`
-  outside the canonical id set above (released items and items re-homed elsewhere clear
-  that match). This search stands until tasks-1abe9f gives the CLI a read for it. The
-  guard holds for a duplicate too: moving custody to the survivor is a retained transfer,
-  which a curation pass does not do;
+  worktree it still owns, or incoming custody another task named it to receive. `drop`
+  does not refuse such a task and `check` stays clean, so the closure would leave the
+  item without an open owner. Read the state with
+  `tasks -C <root> retained state <id> --all-projects` before a closure, not by searching
+  notes for `kept`: an item kept in one note may be released in a later one, and another
+  task (across any registered or retired project, including across `moved_from`/`moved_to`
+  chains, retired-prefix aliases, `[predecessor]` displaced suffixes and
+  `[retention_lineage]`) can owe `kept` custody naming this task as `next_owner` with no
+  `kept` note on `<id>` itself. Bare `retained state <id>` (`incoming.scope == "project"`)
+  never clears curation closure. The guard holds whenever
+  `tasks -C <root> retained state <id> --all-projects` refuses, `complete` is `false`,
+  `incoming.scope` is not `"all_projects"`, `incoming.complete` is not `true`, `items`
+  contains an effective `kept` item, `incoming.items` is non-empty, or `operations` has
+  an unfinished retention operation. If `tasks -C <root> retained state <id> --all-projects`
+  refuses (including an unrecognized `--all-projects` option on a secondary host that
+  synced `tasks` `main` before rebuilding), treat custody as unresolved (the guard holds)
+  and rebuild the host's binary with `just install` in the `tasks` main checkout before
+  retrying. The guard holds for a duplicate too: moving custody to the survivor is a
+  retained transfer, which a curation pass does not do;
 - closing a duplicate would need a write to a survivor or open dependent that is
   `doing`, live-claimed or parked, or to an open dependent in another project, or to a
   survivor that is itself held: its latest note is a pending proposal, or it is an

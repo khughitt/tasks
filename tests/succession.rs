@@ -395,6 +395,49 @@ fn succession_routes_literal_ids_and_keeps_bare_suffixes_local() {
 }
 
 #[test]
+fn pretty_show_colors_move_pointer_and_dependency_by_their_canonical_projects() {
+    let mut env = TestEnv::new();
+    let old = env.init("forge1");
+    let current = env.init("forge");
+    let subject = env.init("aa");
+    write_task(&old, "forge1-0e720e", "moved_to: aa-000001\n");
+    let old_task = old.join("tasks/forge1-0e720e.md");
+    let record = std::fs::read_to_string(&old_task)
+        .unwrap()
+        .replace("status: done", "status: moved");
+    std::fs::write(old_task, record).unwrap();
+    write_task(&current, "forge-18dae2", "");
+    write_task(&subject, "aa-000001", "moved_from: forge-0e720e\n");
+    let subject_task = subject.join("tasks/aa-000001.md");
+    let record = std::fs::read_to_string(&subject_task)
+        .unwrap()
+        .replace("depends: []", "depends: [forge2-18dae2]");
+    std::fs::write(subject_task, record).unwrap();
+    predecessor(&env, &current, "forge1", &["0e720e"]);
+    for (dir, color) in [(&old, "#123456"), (&current, "#abcdef")] {
+        let path = dir.join("tasks/.config.toml");
+        let config = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(path, format!("color = \"{color}\"\n{config}")).unwrap();
+    }
+
+    let output = env
+        .cmd(&subject)
+        .args(["--pretty", "--color", "always", "show", "aa-000001"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("\x1b[38;2;84;108;135mforge-0e720e\x1b[0m"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("\x1b[38;2;196;220;244mforge-18dae2\x1b[0m"),
+        "{text:?}"
+    );
+}
+
+#[test]
 fn check_reports_retired_successor_and_predecessor_errors() {
     for retired in [false, true] {
         let mut env = TestEnv::new();

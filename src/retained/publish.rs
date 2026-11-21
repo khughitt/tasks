@@ -267,6 +267,7 @@ fn validate_appended_resolutions(project: &Project, old: &Task, new: &Task) -> R
             .diagnostics
             .iter()
             .any(|d| d.source.as_ref().is_some_and(|s| s.ordinal == res_ordinal));
+        let bad_is_spaceless = !new.notes[bad_ordinal - 1].text.starts_with("retained: ");
         let bad_resolved = replayed.diagnostics.iter().any(|d| {
             d.source
                 .as_ref()
@@ -275,7 +276,7 @@ fn validate_appended_resolutions(project: &Project, old: &Task, new: &Task) -> R
                     .as_ref()
                     .is_some_and(|s| s.ordinal == res_ordinal)
         });
-        if res_had_diagnostic || !bad_resolved {
+        if res_had_diagnostic || (!bad_is_spaceless && !bad_resolved) {
             return Err(invalid(
                 "retention resolution did not cleanly resolve a diagnostic at bad.ordinal",
             ));
@@ -2750,9 +2751,15 @@ mod tests {
                 let crate::output::Output::RetainedState(out) = result.unwrap() else {
                     panic!("state output")
                 };
-                let historical =
+                let mut historical =
                     super::super::state::replay(&project, &original.task, &original.basis, None)
                         .unwrap();
+                historical.incoming = super::super::incoming::IncomingCustody {
+                    scope: super::super::incoming::IncomingScope::Project,
+                    complete: Some(true),
+                    items: Vec::new(),
+                    diagnostics: Vec::new(),
+                };
                 assert_eq!(
                     serde_json::to_value(out).unwrap(),
                     serde_json::to_value(historical).unwrap()
@@ -2763,6 +2770,471 @@ mod tests {
                     "{case} must refuse"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn retained_state_concurrent_incoming_and_focal_windows() {
+        let Some((dir, id)) = fixture(
+            "retained::publish::tests::retained_state_concurrent_incoming_and_focal_windows",
+        ) else {
+            return;
+        };
+        std::fs::remove_file(dir.join(".git/hooks/pre-commit")).unwrap();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+
+        let ext_tmp = tempfile::tempdir().unwrap();
+        let ext_dir = ext_tmp.path().join("ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        git(&home, &ext_dir, &["init", "-q", "-b", "main"]);
+        assert_repo(&home, &ext_dir);
+        run_cli(&home, &ext_dir, &["init", "--prefix", "ext"]);
+        let ext_cfg = ext_dir.join("tasks/.config.toml");
+        let mut ext_val: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&ext_cfg).unwrap()).unwrap();
+        ext_val.as_table_mut().unwrap().insert(
+            "git".into(),
+            toml::Value::Table(toml::map::Map::from_iter([(
+                "commit".into(),
+                toml::Value::Boolean(true),
+            )])),
+        );
+        std::fs::write(&ext_cfg, toml::to_string(&ext_val).unwrap()).unwrap();
+        git(&home, &ext_dir, &["add", "."]);
+        git(&home, &ext_dir, &["commit", "-qm", "ext config"]);
+
+        // Seed clean non-candidate holder + unrelated task in `sci`, same-project move pair, and cross-project move pair.
+        let fresh_holder = run_cli(&home, &dir, &["add", "Non-candidate holder"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let unrelated_task = run_cli(&home, &dir, &["add", "Unrelated task"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let hop_ext = run_cli(&home, &ext_dir, &["add", "Cross-project hop old"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let focal_cross = run_cli(&home, &ext_dir, &["move", &hop_ext, "--to", "sci"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let hop_same = run_cli(&home, &dir, &["add", "Same-project hop old"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let focal_same = run_cli(&home, &dir, &["add", "Same-project focal"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let hop_same_path = dir.join(format!("tasks/{hop_same}.md"));
+        let focal_same_path = dir.join(format!("tasks/{focal_same}.md"));
+        let hop_raw = std::fs::read_to_string(&hop_same_path).unwrap().replacen(
+            "status: todo\n",
+            &format!("status: moved\nmoved_to: {focal_same}\n"),
+            1,
+        );
+        std::fs::write(&hop_same_path, hop_raw).unwrap();
+        let focal_same_raw = std::fs::read_to_string(&focal_same_path).unwrap().replacen(
+            "status: todo\n",
+            &format!("status: todo\nmoved_from: {hop_same}\n"),
+            1,
+        );
+        std::fs::write(&focal_same_path, focal_same_raw).unwrap();
+        git(&home, &dir, &["add", "."]);
+        git(
+            &home,
+            &dir,
+            &["commit", "-qm", "seed same-project move pair"],
+        );
+
+        let sci_base = String::from_utf8(git(&home, &dir, &["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+        let ext_base = String::from_utf8(git(&home, &ext_dir, &["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_string();
+
+        let reset_all = || {
+            git(&home, &dir, &["checkout", "main"]);
+            git(&home, &dir, &["reset", "--hard", &sci_base]);
+            git(&home, &dir, &["clean", "-fd"]);
+            git(&home, &ext_dir, &["checkout", "main"]);
+            git(&home, &ext_dir, &["reset", "--hard", &ext_base]);
+            git(&home, &ext_dir, &["clean", "-fd"]);
+        };
+
+        let run_state = |target_id: &str| {
+            let cli = <crate::cli::Cli as clap::Parser>::try_parse_from([
+                "tasks",
+                "-C",
+                dir.to_str().unwrap(),
+                "retained",
+                "state",
+                target_id,
+            ])
+            .unwrap();
+            crate::commands::run(
+                cli,
+                Some(Arc::new(HostConfig::default())),
+                crate::output::Format::Json,
+            )
+        };
+
+        let kept_note_line = |owner: &str| {
+            format!(
+                "- 2026-11-18T00:00:01Z (fixture): retained: {{\"version\":1,\"host\":\"host-a\",\"kind\":\"worktree\",\"path\":\".worktrees/conc\",\"state\":\"kept\",\"verification\":\"verified\",\"purpose\":\"conc\",\"next_owner\":\"task:{owner}\",\"cleanup_trigger\":\"done\"}}\n"
+            )
+        };
+
+        // 1. Commit new `kept` item to `<id>` itself inside `DURING_INCOMING_RECHECK` -> Err(Error::RetainedStaleBasis).
+        reset_all();
+        {
+            let home_c = home.clone();
+            let dir_c = dir.clone();
+            let id_str = id.to_string();
+            let note = kept_note_line(&id_str);
+            super::super::incoming::DURING_INCOMING_RECHECK.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || {
+                    let p = dir_c.join(format!("tasks/{id_str}.md"));
+                    let mut raw = std::fs::read_to_string(&p).unwrap();
+                    raw.push_str(&note);
+                    std::fs::write(&p, raw).unwrap();
+                    git(&home_c, &dir_c, &["add", "."]);
+                    git(
+                        &home_c,
+                        &dir_c,
+                        &["commit", "-qm", "focal kept during recheck"],
+                    );
+                }));
+            });
+            let res = run_state(&id.to_string());
+            assert!(
+                matches!(res, Err(Error::RetainedStaleBasis(_))),
+                "focal commit during recheck must fail with RetainedStaleBasis"
+            );
+        }
+
+        // 2a. Same-project `focal_ids` `moved_from` hop committed inside `DURING_INCOMING_RECHECK` -> incoming.complete == false, retained_stale_basis.
+        reset_all();
+        {
+            let home_c = home.clone();
+            let dir_c = dir.clone();
+            let hop_c = hop_same.clone();
+            super::super::incoming::DURING_INCOMING_RECHECK.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || {
+                    let p = dir_c.join(format!("tasks/{hop_c}.md"));
+                    let mut raw = std::fs::read_to_string(&p).unwrap();
+                    raw.push_str("- 2026-11-18T00:00:02Z (fixture): concurrent hop edit\n");
+                    std::fs::write(&p, raw).unwrap();
+                    git(&home_c, &dir_c, &["add", "."]);
+                    git(&home_c, &dir_c, &["commit", "-qm", "same-project hop edit"]);
+                }));
+            });
+            let crate::output::Output::RetainedState(out) = run_state(&focal_same).unwrap() else {
+                panic!("expected state output");
+            };
+            assert_eq!(out.incoming.complete, Some(false), "{out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.code == "retained_stale_basis" && d.holder.as_deref() == Some(&hop_same)
+                }),
+                "{out:?}"
+            );
+        }
+
+        // 2b. Cross-project `focal_ids` `moved_from` hop committed inside `DURING_INCOMING_RECHECK` under `scope: "project"` -> incoming.complete == false, retained_stale_basis.
+        reset_all();
+        {
+            let home_c = home.clone();
+            let ext_c = ext_dir.clone();
+            let hop_c = hop_ext.clone();
+            super::super::incoming::DURING_INCOMING_RECHECK.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || {
+                    let p = ext_c.join(format!("tasks/{hop_c}.md"));
+                    let mut raw = std::fs::read_to_string(&p).unwrap();
+                    raw.push_str("- 2026-11-18T00:00:02Z (fixture): concurrent cross hop edit\n");
+                    std::fs::write(&p, raw).unwrap();
+                    git(&home_c, &ext_c, &["add", "."]);
+                    git(
+                        &home_c,
+                        &ext_c,
+                        &["commit", "-qm", "cross-project hop edit"],
+                    );
+                }));
+            });
+            let crate::output::Output::RetainedState(out) = run_state(&focal_cross).unwrap() else {
+                panic!("expected state output");
+            };
+            assert_eq!(out.incoming.complete, Some(false), "{out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.code == "retained_stale_basis"
+                        && d.project == "ext"
+                        && d.holder.as_deref() == Some(&hop_ext)
+                }),
+                "{out:?}"
+            );
+        }
+
+        // 3. Custody handoff naming `task:<id>` on previously non-candidate task in BEFORE_STATE_RETURN and DURING_INCOMING_RECHECK.
+        for window in ["before_return", "during_recheck"] {
+            reset_all();
+            let home_c = home.clone();
+            let dir_c = dir.clone();
+            let holder_c = fresh_holder.clone();
+            let note = kept_note_line(&id.to_string());
+            let action: Box<dyn FnOnce()> = Box::new(move || {
+                let p = dir_c.join(format!("tasks/{holder_c}.md"));
+                let mut raw = std::fs::read_to_string(&p).unwrap();
+                raw.push_str(&note);
+                std::fs::write(&p, raw).unwrap();
+                git(&home_c, &dir_c, &["add", "."]);
+                git(&home_c, &dir_c, &["commit", "-qm", "new holder handoff"]);
+            });
+            if window == "before_return" {
+                crate::commands::retained::BEFORE_STATE_RETURN
+                    .with(|h| *h.borrow_mut() = Some(action));
+            } else {
+                super::super::incoming::DURING_INCOMING_RECHECK
+                    .with(|h| *h.borrow_mut() = Some(action));
+            }
+            let crate::output::Output::RetainedState(out) = run_state(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert_eq!(out.incoming.complete, Some(false), "{window}: {out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.code == "retained_stale_basis" && d.holder.as_deref() == Some(&fresh_holder)
+                }),
+                "{window}: {out:?}"
+            );
+        }
+
+        // 4. ABA commit + revert of handoff on previously non-candidate external task across two commits in B_P..HEAD.
+        for window in ["before_return", "during_recheck"] {
+            reset_all();
+            let home_c = home.clone();
+            let dir_c = dir.clone();
+            let holder_c = fresh_holder.clone();
+            let note = kept_note_line(&id.to_string());
+            let action: Box<dyn FnOnce()> = Box::new(move || {
+                let p = dir_c.join(format!("tasks/{holder_c}.md"));
+                let orig = std::fs::read_to_string(&p).unwrap();
+                let mut with_handoff = orig.clone();
+                with_handoff.push_str(&note);
+                std::fs::write(&p, with_handoff).unwrap();
+                git(&home_c, &dir_c, &["add", "."]);
+                git(&home_c, &dir_c, &["commit", "-qm", "ABA add handoff"]);
+                std::fs::write(&p, orig).unwrap();
+                git(&home_c, &dir_c, &["add", "."]);
+                git(&home_c, &dir_c, &["commit", "-qm", "ABA revert handoff"]);
+            });
+            if window == "before_return" {
+                crate::commands::retained::BEFORE_STATE_RETURN
+                    .with(|h| *h.borrow_mut() = Some(action));
+            } else {
+                super::super::incoming::DURING_INCOMING_RECHECK
+                    .with(|h| *h.borrow_mut() = Some(action));
+            }
+            let crate::output::Output::RetainedState(out) = run_state(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert_eq!(out.incoming.complete, Some(false), "ABA {window}: {out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.code == "retained_stale_basis" && d.holder.as_deref() == Some(&fresh_holder)
+                }),
+                "ABA {window}: {out:?}"
+            );
+        }
+
+        // 5. Unrelated task + README.md commit in BEFORE_STATE_RETURN and DURING_INCOMING_RECHECK converges cleanly.
+        for window in ["before_return", "during_recheck"] {
+            reset_all();
+            let home_c = home.clone();
+            let dir_c = dir.clone();
+            let unrel_c = unrelated_task.clone();
+            let action: Box<dyn FnOnce()> = Box::new(move || {
+                std::fs::write(dir_c.join("README.md"), format!("unrelated {window}\n")).unwrap();
+                let p = dir_c.join(format!("tasks/{unrel_c}.md"));
+                let mut raw = std::fs::read_to_string(&p).unwrap();
+                raw.push_str("- 2026-11-18T00:00:05Z (fixture): harmless unrelated note\n");
+                std::fs::write(&p, raw).unwrap();
+                git(&home_c, &dir_c, &["add", "."]);
+                git(&home_c, &dir_c, &["commit", "-qm", "unrelated commit"]);
+            });
+            if window == "before_return" {
+                crate::commands::retained::BEFORE_STATE_RETURN
+                    .with(|h| *h.borrow_mut() = Some(action));
+            } else {
+                super::super::incoming::DURING_INCOMING_RECHECK
+                    .with(|h| *h.borrow_mut() = Some(action));
+            }
+            let crate::output::Output::RetainedState(out) = run_state(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "unrelated {window}: {out:?}");
+            assert_eq!(
+                out.incoming.complete,
+                Some(true),
+                "unrelated {window}: {out:?}"
+            );
+            assert!(
+                out.incoming.diagnostics.is_empty(),
+                "unrelated {window}: {out:?}"
+            );
+        }
+
+        let run_state_all_projects = |target_id: &str| {
+            let cli = <crate::cli::Cli as clap::Parser>::try_parse_from([
+                "tasks",
+                "-C",
+                dir.to_str().unwrap(),
+                "retained",
+                "state",
+                target_id,
+                "--all-projects",
+            ])
+            .unwrap();
+            crate::commands::run(
+                cli,
+                Some(Arc::new(HostConfig::default())),
+                crate::output::Format::Json,
+            )
+        };
+
+        // 6. Zero-participant peer project config/rename change during query under `--all-projects` fails closed via freshness::context.
+        reset_all();
+        {
+            let ext_c = ext_dir.clone();
+            super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move || {
+                    let cfg = ext_c.join("tasks/.config.toml");
+                    let mut raw = std::fs::read_to_string(&cfg).unwrap();
+                    raw.push_str("\n[attachments]\nmax_bytes = 1024\n");
+                    std::fs::write(&cfg, raw).unwrap();
+                }));
+            });
+            let crate::output::Output::RetainedState(out) =
+                run_state_all_projects(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "focal state stays complete: {out:?}");
+            assert_eq!(
+                out.incoming.complete,
+                Some(false),
+                "peer config drift must fail closed: {out:?}"
+            );
+            assert!(
+                out.incoming
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.project == "ext" && d.holder.is_none()),
+                "expected project-level ext diagnostic: {out:?}"
+            );
+        }
+
+        // 7a. 4-iteration non-convergence exhaustion on `ctx.project` returns hard Err(Error::RetainedStaleBasis).
+        reset_all();
+        {
+            fn install_focal_churn(home: PathBuf, repo: PathBuf, step: usize) {
+                super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        std::fs::write(repo.join("README.md"), format!("churn {step}\n")).unwrap();
+                        git(&home, &repo, &["add", "README.md"]);
+                        git(&home, &repo, &["commit", "-qm", &format!("churn {step}")]);
+                        if step + 1 < 4 {
+                            install_focal_churn(home, repo, step + 1);
+                        }
+                    }));
+                });
+            }
+            install_focal_churn(home.clone(), dir.clone(), 0);
+            let res = run_state(&id.to_string());
+            assert!(
+                matches!(res, Err(Error::RetainedStaleBasis(_))),
+                "4-iteration non-convergence on focal project must return Err(RetainedStaleBasis)"
+            );
+        }
+
+        // 7b. 4-iteration non-convergence exhaustion on peer `ext` under `--all-projects` isolates to IncomingDiagnostic (never top-level Err).
+        reset_all();
+        {
+            fn install_peer_churn(home: PathBuf, repo: PathBuf, step: usize) {
+                super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        std::fs::write(repo.join("README.md"), format!("peer churn {step}\n"))
+                            .unwrap();
+                        git(&home, &repo, &["add", "README.md"]);
+                        git(
+                            &home,
+                            &repo,
+                            &["commit", "-qm", &format!("peer churn {step}")],
+                        );
+                        if step + 1 < 4 {
+                            install_peer_churn(home, repo, step + 1);
+                        }
+                    }));
+                });
+            }
+            install_peer_churn(home.clone(), ext_dir.clone(), 0);
+            let crate::output::Output::RetainedState(out) =
+                run_state_all_projects(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "focal state stays complete: {out:?}");
+            assert_eq!(out.incoming.complete, Some(false), "{out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.project == "ext" && d.holder.is_none() && d.code == "retained_stale_basis"
+                }),
+                "expected peer non-convergence diagnostic on ext: {out:?}"
+            );
+        }
+
+        // 7c. Peer branch switch on the 4th iteration isolates to IncomingDiagnostic (never top-level Err).
+        reset_all();
+        {
+            fn install_peer_branch_flip(home: PathBuf, repo: PathBuf, step: usize) {
+                super::super::incoming::DURING_INCOMING_RECHECK.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        if step < 3 {
+                            std::fs::write(repo.join("README.md"), format!("flip {step}\n"))
+                                .unwrap();
+                            git(&home, &repo, &["add", "README.md"]);
+                            git(&home, &repo, &["commit", "-qm", &format!("flip {step}")]);
+                            install_peer_branch_flip(home, repo, step + 1);
+                        } else {
+                            git(&home, &repo, &["checkout", "-B", "other-branch"]);
+                        }
+                    }));
+                });
+            }
+            install_peer_branch_flip(home.clone(), ext_dir.clone(), 0);
+            let crate::output::Output::RetainedState(out) =
+                run_state_all_projects(&id.to_string()).unwrap()
+            else {
+                panic!("expected state output");
+            };
+            assert!(out.complete, "focal state stays complete: {out:?}");
+            assert_eq!(out.incoming.complete, Some(false), "{out:?}");
+            assert!(
+                out.incoming.diagnostics.iter().any(|d| {
+                    d.project == "ext" && d.holder.is_none() && d.code == "retained_stale_basis"
+                }),
+                "expected peer branch-flip diagnostic on ext: {out:?}"
+            );
         }
     }
 

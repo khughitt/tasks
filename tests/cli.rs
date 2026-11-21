@@ -1360,7 +1360,7 @@ fn next_is_the_head_of_ready_in_show_shape() {
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("Top (") && text.contains("── related") && text.contains("depends on"),
+        text.contains("Top (") && text.contains("── links") && text.contains("depends on"),
         "{text}"
     );
 }
@@ -3520,6 +3520,30 @@ fn body_leading_whitespace_survives_routine_writes() {
 }
 
 #[test]
+fn add_unresolved_citation_warning_names_the_created_id() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    env.init("bb");
+    let args = ["add", "Citer", "--body", "see bb-ffffff"];
+    let out = env.json(&dir, &args);
+    let id = out["id"].as_str().unwrap();
+    let warning =
+        |id: &str| format!("{id} cites bb-ffffff, which resolves to no task here; not linked");
+    assert!(warnings_of(&out).contains(&warning(id)), "{out}");
+    assert!(
+        env.json(&dir, &["show", id])["task"]
+            .get("related")
+            .is_none()
+    );
+
+    let pretty = env.cmd(&dir).args(args).arg("--pretty").output().unwrap();
+    assert!(pretty.status.success(), "{pretty:?}");
+    let stdout = String::from_utf8(pretty.stdout).unwrap();
+    let stderr = String::from_utf8(pretty.stderr).unwrap();
+    assert!(stderr.contains(&warning(stdout.trim())), "{stdout}{stderr}");
+}
+
+#[test]
 fn add_validates_before_writing() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -4749,6 +4773,48 @@ fn start_done_drop_block_unblock_transitions() {
 }
 
 #[test]
+fn start_goal_advisory_covers_active_local_descendants_and_keeps_the_goal_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let idea = id_of(env.json(
+        &dir,
+        &["add", "Idea", "--status", "idea", "--parent", &goal],
+    ));
+    let child = id_of(env.json(&dir, &["add", "Nested work", "--parent", &idea]));
+    let hint = format!("tasks ready --under {goal}");
+    let assert_goal_hint = || {
+        let started = env.json(&dir, &["start", &goal]);
+        assert_eq!(started["id"], goal);
+        let warnings = warnings_of(&started);
+        assert!(
+            warnings.iter().any(|warning| warning.contains(&hint)),
+            "{started}"
+        );
+    };
+
+    assert_goal_hint();
+    let shown = env.json(&dir, &["show", &goal]);
+    assert_eq!(shown["task"]["status"], "doing");
+    assert!(shown["claim"].is_object(), "{shown}");
+    let shown = env.json(&dir, &["show", &child]);
+    assert_eq!(shown["task"]["status"], "todo");
+    assert!(shown["claim"].is_null(), "{shown}");
+
+    env.json(&dir, &["block", &child, "waiting"]);
+    assert_goal_hint();
+    let started = env.json(&dir, &["start", &child]);
+    assert!(warnings_of(&started).is_empty(), "{started}");
+    assert_goal_hint();
+
+    env.json(&dir, &["done", &child, "landed"]);
+    let shelved = id_of(env.json(&dir, &["add", "Later", "--parent", &goal]));
+    env.json(&dir, &["shelve", &shelved, "--defer", "30d", "later"]);
+    let started = env.json(&dir, &["start", &goal]);
+    assert!(warnings_of(&started).is_empty(), "{started}");
+}
+
+#[test]
 fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -5303,6 +5369,9 @@ fn goal_rows_carry_the_goal_mark_in_pretty_tables() {
             line_of(&goal).contains("◆ "),
             "{args:?} marks the goal: {text}"
         );
+        if args == ["tree"] {
+            assert!(line_of(&goal).starts_with("◆ "), "{text}");
+        }
         assert!(
             !line_of(&leaf).contains('◆'),
             "{args:?} leaves the leaf bare: {text}"

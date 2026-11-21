@@ -29,7 +29,8 @@ mean those documents were verified.
    work is zero, `+N` ideas, and `?N` unresolved declared pieces; leaves are blank), a
    conditional wrapping legend when goals are shown, local-only tree connectors (`├─ `,
    `└─ `, `│  `), and bold goal IDs. Pretty task tables mark goals `◆` (lanes `≡`,
-   recurring records `p`) in their type column; JSON shapes and `prime --summary` are unchanged.
+   recurring records `p`) in their type column. `tree` puts these marks in an unlabeled
+   column at the far left. JSON shapes and `prime --summary` are unchanged.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    Read picker warnings for omitted work; see `tasks ready --help` and the
@@ -73,7 +74,7 @@ mean those documents were verified.
    A parent must be in the same project, so a goal whose pieces live in other projects
    declares them with `tasks edit <goal> --piece <id>`: each piece is also a dependency,
    and declaring one makes the record a goal, so it leaves `ready` and reaches `prime`'s
-   closeout once its children and pieces close. A cross-project hub that only holds
+   closeout when its effective members and direct dependencies close. A cross-project hub that only holds
    foreign work as `depends`, without declared pieces, is still a leaf: `ready` offers it
    once those close, for the closeout; rate it as that closeout (usually `--process
    direct`), which also takes it out of the `needs_review` queue.
@@ -290,12 +291,37 @@ mean those documents were verified.
    --name <file> --caption "<what it shows>"`) and name the attachment in the message. If
    dependencies are still open, do not `--force` unless the dependency is genuinely irrelevant;
    say why in the message.
-   Complete [retention accounting](#artifact-placement-and-retention) before closing;
-   any surviving item needs an open owner or an agreed handoff.
+   When closing work changes what an open task should do next, update that record in the same
+   session. Check the closing task's parent and open dependents in `tasks show <id> --all-projects`,
+   and open records whose body or park names the work as pending. State what landed with its
+   revision or version, what remains, and who acts next or what blocks them. Write the update
+   after integration when it happens in the same session. If integration is still pending at
+   handoff, give the branch revision and say what still needs to land. Update the body if it
+   already states the status or describes the delivered work as pending. Replace the stale status
+   text and preserve acceptance and decision history. Otherwise, append a short note with `tasks note`.
+   Complete [retention accounting](#artifact-placement-and-retention) before closing (`done` or
+   `drop`): run `tasks retained state <id> --all-projects` and require exit 0, `complete: true`,
+   `incoming.scope == "all_projects"`, `incoming.complete: true`, no unsettled `kept` items in
+   `items` (any surviving `kept` item needs an open follow-up task owner other than `<id>`, an
+   agreed `"user"` handoff, or — for `done` only — `session:<stamped-identity>` within `done`'s
+   immediate same-turn integration window for items this session will merge and dispose of before
+   its turn ends, released or re-homed before `park` or the final report; a `kept` item still
+   naming `<id>`, a closed task, or an expired/other session, or using `session:...` on `drop`,
+   blocks closure), empty `incoming.items` (transfer or re-home incoming custody first),
+   and no unfinished `operations`. Bare `tasks retained state <id>` (`incoming.scope == "project"`)
+   is for local inspection and basis lookup only and never clears cross-project custody for
+   closure; if `tasks retained state <id> --all-projects` refuses (including an unrecognized
+   `--all-projects` option on a secondary host that synced `tasks` `main` before rebuilding),
+   treat custody as unresolved and rebuild the host's binary with `just install` in the `tasks`
+   main checkout before retrying.
    To reopen a done or dropped task (a correction handed back after close), run
    `tasks edit <id> --status todo`, then `tasks start <id>`; `start` alone refuses and names
    that edit.
-   `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
+   A closeout offer and a fresh goal completion both follow children and foreign pieces
+   through Done subgoals and stop at Dropped ones. The writer rechecks. Restore missing
+   evidence or say why a forced completion is justified. Force reports the obligations
+   waived on this write. Cycles, read failures, claims and required outputs still bind.
+   `drop` refuses while any local
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
    For creation and completion stamps, see the [stamp contract](../../docs/task-model.md#origin-and-provenance)
@@ -646,16 +672,38 @@ unchanged. A recorded observation is not proof of current filesystem state.
 
 ### Retained-state queries
 
-Use `tasks retained state <id> [--at <revision>] [--host <host>]` to inspect
-Git-pinned logical retention history. JSON reports the immutable basis, effective
-items and their source ordinals, checkpoint coverage, operation phases and scoped
-diagnostics. `complete: false` or a null item record means unresolved uncertainty;
-never substitute its predecessor. Default reads refuse dirty task/archive working
-or index inputs and freshly recheck branch/pairing before return. Unrelated committed records changes can succeed while
+Use `tasks retained state <id> [--at <revision>] [--host <host>] [--all-projects]` to inspect
+Git-pinned logical retention history (`--all-projects` conflicts with `--at`). JSON reports the
+immutable basis, effective items and their source ordinals, checkpoint coverage, operation phases,
+scoped diagnostics, and `incoming` (`scope`, `complete`, `items`, `diagnostics`) covering external
+`next_owner: "task:<id>"` custody across same-project (`"project"`) or all registered and retired
+projects (`"all_projects"`, `"none"` under `--at`). `complete: false`, `incoming.complete: false`,
+or a null item record means unresolved uncertainty; never substitute its predecessor. Default reads
+bind incoming candidate discovery to each project's pinned `B_P` tree (verifying required `.notes`
+archives via `history::load_logical`), refuse dirty task/archive working or index inputs, and run a
+joint stabilizing `(symbolic-ref, HEAD)` freshness recheck across `<id>`, move-chain hops,
+candidate holders, newly observed commit edges, staged `:0:` index entries, and working-tree
+task/archive files before return. Unrelated committed records changes can succeed while
 preserving the original basis and ordinals; intervening participant-tree edits,
-including a revert, refuse. Ordinary attachment/payload bytes stay historical query
-inputs. Explicit historical reads use only pinned task/archive blobs. Missing or
+including a revert, refuse on `<id>` and isolate to `incoming.diagnostics` (`incoming.complete:
+false`) on external holders. Ordinary attachment/payload bytes stay historical query
+inputs. Explicit `--at` historical reads use only pinned task/archive blobs and skip incoming
+discovery (`incoming.scope == "none"`, `incoming.complete: null`). Missing or
 conflicting evidence fails explicitly. This query does not verify current retained payload bytes.
+Whenever clearing a task closure (`done` or `drop`), require `tasks retained state <id>
+--all-projects` to exit 0 with `complete: true`, `incoming.scope == "all_projects"`,
+`incoming.complete: true`, no unsettled `kept` items in `items` (an effective `kept` item already
+naming an open follow-up task other than `<id>`, an agreed `"user"` handoff, or — for `done` only
+— `session:<stamped-identity>` within `done`'s immediate same-turn integration window for items
+this session will merge and dispose of before its turn ends, released or re-homed before `park`
+or the final report, permits ordinary closure, while a `kept` item still naming `<id>`, a closed
+task, or an expired/other session, or using `session:...` on `drop`, blocks closure), empty
+`incoming.items`, and no unfinished `operations`; bare `tasks retained state <id>`
+(`incoming.scope == "project"`) is for local inspection and basis lookup only and never clears
+cross-project custody for closure. If `tasks retained state <id> --all-projects` refuses (including
+an unrecognized `--all-projects` option on a secondary host that synced `tasks` `main` before
+rebuilding), custody remains unresolved until `just install` is run in the `tasks` main checkout
+and the retry succeeds.
 For an existing `[retention_recovery]` declaration, preserve its source repository,
 retaining branch, frozen endpoints and exact historical notes. The declaration
 selects independent source read contexts for old in-tree Bases; new operations
@@ -743,11 +791,16 @@ running whole-host enumeration, append a source-bound resolution via `tasks note
 `retention resolution: {"version":1,"bad":<Source>,"successors":[...],"reason":"..."}`
 (targeting `retained:` item notes only, never `retention operation:` or machine
 `retention checkpoint:` envelopes, with `bad.basis` verified against pinned Git
-history). This works directly on closed (`done`) tasks without reopening
+history). This works directly on closed (`done` or `dropped`) tasks without reopening
 implementation (`edit --status todo`) or `tasks start` (preserving existing
 attached manifests at `<records>/tasks/files/<id>/<name>` when appending valid
 `version: 1` `retained:` successor notes), on `released` items, on other-host items
-(replayed unfiltered before `--host`), and on 0-item accidental `retained:` prose
+(replayed unfiltered before `--host`), on historical spaceless `retained:` notes
+(`retained:{...}` without a space after `retained:`, keeping unresolved spaceless notes
+out of `state::replay` so `checkpoint`/`transfer` admission is preserved while clearing
+`incoming`'s source-bound `malformed_record` diagnostic and replaying any spaced
+`version: 1` `retained: ` successor normally; `CheckpointRequest.resolutions` targets
+spaced `retained: ` notes only), and on 0-item accidental `retained:` prose
 (`"successors": []`, or `CheckpointRequest.resolutions` with `"declarations": []`).
 `verify::preflight` strictly requires integer `version: 1` on existing manifests
 and refuses pre-`Manifest 1` historical formats (`unsupported historical manifest
@@ -1001,8 +1054,8 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. `tasks dep <id> --on <new> --rm <old>` swaps a
   dependency in one save; any failure in the batch changes nothing. A goal that is committed work is a `todo` with a
-  body, however large; `idea` is for uncommitted thoughts. `done` refuses while any
-  descendant is open (`--force` overrides); `drop` refuses while any descendant is
+  body, however large; `idea` is for uncommitted thoughts. Goal completion follows
+  [effective membership](../../docs/task-model.md#goal-completion). `drop` refuses while any local descendant is
   open and has no override — drop or reparent the subtree first
   (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
 - An effort meant to run beside the project's other efforts:
@@ -1046,7 +1099,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `tasks add "<piece>" --project <prefix>` per affected project and one
   `tasks edit <goal> --piece <piece>` each, which marks it a piece and adds the
   dependency. `goals` counts declared pieces as the goal's work; the goal reaches
-  `prime`'s closeout when the last piece closes; verify and `tasks done` it then.
+  `prime`'s closeout when all effective members and direct prerequisites close. Verify the outcome then.
   `tasks edit <goal> --rm-piece <piece>` unmarks one and keeps the dependency;
   `tasks dep <goal> --rm <piece>` removes both. `tasks root <id>` prints where a piece
   lives.

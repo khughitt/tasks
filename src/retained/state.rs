@@ -37,7 +37,36 @@ pub struct RetainedState {
     pub checkpoints: Vec<CheckpointEntry>,
     pub operations: Vec<OperationEntry>,
     pub diagnostics: Vec<Diagnostic>,
+    pub incoming: super::incoming::IncomingCustody,
     pub warnings: Vec<String>,
+}
+
+pub(super) fn extract_partial_scope(
+    raw: &str,
+    task_id: &crate::model::TaskId,
+) -> (Option<String>, Option<Identity>) {
+    // Partial identity is diagnostic scope only, never a usable predecessor.
+    let v = strict(raw.as_bytes()).unwrap_or(Value::Null);
+    let h = v
+        .get("host")
+        .and_then(Value::as_str)
+        .filter(|h| text(h))
+        .map(str::to_string);
+    let identity = serde_json::from_value::<Identity>(
+        serde_json::json!({"host":v.get("host"),"kind":v.get("kind"),"path":v.get("path")}),
+    )
+    .ok()
+    .filter(|identity| {
+        Declaration {
+            kind: identity.kind.clone(),
+            path: identity.path.clone(),
+            purpose: "Diagnostic scope".into(),
+            cleanup_trigger: "Recover exact history".into(),
+        }
+        .record(&identity.host, &task_id.to_string())
+        .is_ok()
+    });
+    (h, identity)
 }
 
 const RETAINED_DIAGNOSTIC_ACTION: &str = "Recover exact history, append valid version: 1 'retained:' successor note(s) for each affected identity (or none when no identities exist; use <records>/tasks/files/<id>/<name> for an existing attached manifest, including on closed tasks without reopening), then append 'retention resolution: {\"version\":1,\"bad\":<source>,\"successors\":[...],\"reason\":\"...\"}' or pass resolutions to tasks retained checkpoint";
@@ -144,6 +173,29 @@ fn apply_resolution(
             }
         }
     }
+    if standalone
+        && !matched
+        && let Some(raw) = notes
+            .get(bad_idx)
+            .and_then(|n| n.text.strip_prefix("retained:"))
+            .filter(|r| !r.starts_with(' '))
+    {
+        matched = true;
+        let (extracted_host, extracted_identity) = extract_partial_scope(raw, task_id);
+        covered_any = match (&extracted_identity, &extracted_host) {
+            (Some(id), _) => {
+                !corrected.is_empty() && corrected.as_slice() == std::slice::from_ref(id)
+            }
+            (None, Some(h)) => {
+                corrected.iter().all(|c| c.host == *h)
+                    && items
+                        .keys()
+                        .filter(|i| i.host == *h)
+                        .all(|i| corrected.contains(i))
+            }
+            (None, None) => items.keys().all(|i| corrected.contains(i)),
+        };
+    }
     if standalone && (!matched || !covered_any) {
         return Err(invalid(if !matched {
             "retention resolution does not match a diagnostic at bad.ordinal"
@@ -171,6 +223,7 @@ pub fn replay(
         checkpoints: Vec::new(),
         operations: Vec::new(),
         diagnostics: Vec::new(),
+        incoming: super::incoming::IncomingCustody::none(),
         warnings: Vec::new(),
     };
     let mut items = BTreeMap::<Identity, RetainedItem>::new();
@@ -397,27 +450,7 @@ pub fn replay(
             Ok(())
         };
         if let Err((raw, detail, action)) = parsed {
-            // Partial identity is diagnostic scope only, never a usable predecessor.
-            let v = strict(raw.as_bytes()).unwrap_or(Value::Null);
-            let h = v
-                .get("host")
-                .and_then(Value::as_str)
-                .filter(|h| text(h))
-                .map(str::to_string);
-            let identity = serde_json::from_value::<Identity>(
-                serde_json::json!({"host":v.get("host"),"kind":v.get("kind"),"path":v.get("path")}),
-            )
-            .ok()
-            .filter(|identity| {
-                Declaration {
-                    kind: identity.kind.clone(),
-                    path: identity.path.clone(),
-                    purpose: "Diagnostic scope".into(),
-                    cleanup_trigger: "Recover exact history".into(),
-                }
-                .record(&identity.host, &task.id.to_string())
-                .is_ok()
-            });
+            let (h, identity) = extract_partial_scope(raw, &task.id);
             s.diagnostics.push(Diagnostic {
                 code: if detail.contains("unsupported_version") {
                     "unsupported_version"

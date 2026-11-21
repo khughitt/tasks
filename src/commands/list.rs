@@ -759,6 +759,9 @@ pub fn next(
     })))
 }
 
+/// Distinct elsewhere checkouts with their scans, and each claimed task indexed into them.
+type ClaimedElsewhere = (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>);
+
 /// Live claims on tasks this scan does not hold: work started in a checkout whose branch
 /// has not merged. Each is read from the claim's recorded worktree, with that checkout's
 /// scan, the docs/ownership.md resolves a store-only park, so `doing` never drops a
@@ -768,7 +771,7 @@ fn claimed_elsewhere(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
-) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+) -> ClaimedElsewhere {
     claimed_elsewhere_with(ctx, all, claims, super::parked::open_recorded)
 }
 
@@ -780,7 +783,7 @@ fn claimed_elsewhere_with(
         &TaskId,
         &std::path::Path,
     ) -> Result<Option<(Project, Task, Vec<Task>)>>,
-) -> (Vec<(Project, Vec<Task>)>, Vec<(usize, Task)>) {
+) -> ClaimedElsewhere {
     struct CachedCheckout {
         project: Project,
         scan: Vec<Task>,
@@ -899,18 +902,8 @@ pub fn prime(
     let registry = ctx.registry.clone();
     let mut membership = (format == crate::output::Format::Pretty)
         .then(|| crate::membership::Membership::new(&registry, &prefixes, &all));
-    let hierarchy = match &mut membership {
-        Some(membership) => {
-            let records = crate::hierarchy::project_records(&all, &prefixes, &registry);
-            let mut indexes = crate::hierarchy::ProjectIndexes::new();
-            for prefix in records.keys() {
-                let index = membership
-                    .hierarchy(prefix)?
-                    .expect("preseeded project in Membership has an index");
-                indexes.insert(prefix.clone(), index);
-            }
-            crate::hierarchy::HierarchyView::new(records, indexes, &registry)
-        }
+    let hierarchy = match &membership {
+        Some(membership) => membership.hierarchy_view(&all, &prefixes),
         None => crate::hierarchy::view_of(&all, &prefixes, &registry),
     };
     let deps = review_deps(&mut ctx, &all)?;
@@ -1012,22 +1005,10 @@ pub fn prime(
         })
         .collect();
     let mut elsewhere_views = Vec::with_capacity(elsewhere_scans.len());
-    for ((project, scan), membership_opt) in
-        elsewhere_scans.iter().zip(elsewhere_memberships.iter_mut())
-    {
+    for ((project, scan), membership) in elsewhere_scans.iter().zip(&elsewhere_memberships) {
         let opened = std::slice::from_ref(&project.prefix);
-        let view = match membership_opt {
-            Some(em) => {
-                let records = crate::hierarchy::project_records(scan, opened, &registry);
-                let mut indexes = crate::hierarchy::ProjectIndexes::new();
-                for prefix in records.keys() {
-                    let index = em
-                        .hierarchy(prefix)?
-                        .expect("preseeded project in Membership has an index");
-                    indexes.insert(prefix.clone(), index);
-                }
-                crate::hierarchy::HierarchyView::new(records, indexes, &registry)
-            }
+        let view = match membership {
+            Some(membership) => membership.hierarchy_view(scan, opened),
             None => crate::hierarchy::view_of(scan, opened, &registry),
         };
         elsewhere_views.push(view);
@@ -1044,43 +1025,34 @@ pub fn prime(
         &ctx.registry,
         now,
     );
-    // closeout is an invitation to run `done`, so it holds only what `done` will accept.
-    // Children are one gate and dependencies are the other; listing a goal its dependencies
-    // still hold would invite a close the tool then refuses with `open_dependencies`. Held
-    // goals are named in a warning instead, so none of them goes silent. A goal still
-    // waiting on one of its own declared pieces is unfinished work, not held, so it stays
-    // out silently (docs/task-model.md). A childless lane is not a candidate.
-    let mut closeout: Vec<Task> = Vec::new();
-    let mut held: Vec<String> = Vec::new();
-    'goals: for task in &all {
-        let canonical = ctx.registry.canonical_id(&task.id);
-        // Current contract (docs/task-model.md): todo, doing, or blocked; an idea is open but not a candidate
+    // JSON has no display membership cache. Create its closeout cache only
+    // when a candidate survives the local screen. Pretty reuses its own.
+    let mut json_closeout = None;
+    let mut closeout = Vec::new();
+    let mut held = Vec::new();
+    for task in &all {
+        let canonical = registry.canonical_id(&task.id);
         if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
             || (task.pieces.is_empty() && hierarchy.child_count(&canonical) == 0)
-            || hierarchy.open_descendant_count(&canonical) > 0
+            || hierarchy.has_effective_open_descendant(&canonical)
         {
             continue;
         }
-        let mut open = Vec::new();
-        for dependency in &task.depends {
-            // An unreachable dependency counts as open, exactly as `done` treats it: what
-            // we cannot resolve, we cannot call closed.
-            if !satisfied(&ctx, &all, dependency)? {
-                if crate::pieces::is_piece(&ctx.registry, task, dependency) {
-                    continue 'goals;
+        let cache = membership.as_mut().unwrap_or_else(|| {
+            json_closeout.get_or_insert_with(|| {
+                crate::membership::Membership::new(&registry, &prefixes, &all)
+            })
+        });
+        match cache.closeout(task) {
+            Ok(evidence) => {
+                if evidence.offer(&canonical, &mut held) {
+                    closeout.push(task.clone());
                 }
-                open.push(dependency.to_string());
             }
-        }
-        if open.is_empty() {
-            closeout.push(task.clone());
-        } else {
-            held.push(format!(
-                "{} has no open children or pieces but is held by open prerequisites: {}; it \
-                 joins closeout when they close",
-                task.id,
-                open.join(", ")
-            ));
+            Err(error @ crate::error::Error::GoalMembershipCycle(..)) => {
+                held.push(error.to_string())
+            }
+            Err(error) => return Err(error),
         }
     }
     sort_ready(&mut closeout);

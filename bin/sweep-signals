@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Drift signals for a project's open tasks, printed as the whole-project sweep's ledger.
 
-Reads, through the `tasks` CLI's JSON only (`where`, `list`, `show --no-fetch`, so no
-external document provider runs), the swept project's open tasks, and `git log` in its
-code checkout, plus directory listings of the checkout and the records directory. Never
-reads record files and writes nothing but the ledger rows on standard output: one header
-row, then one tab-separated row per pool task (idea, todo or blocked, no live claim),
-sorted by id. The last five columns are left empty for the sweep's controller.
+Reads, through the `tasks` CLI's JSON only (`where`, `list`, `resolve`, `show --no-fetch`,
+so no external document provider runs), the swept project's open tasks and any cited or
+depended-on foreign tasks, and `git log` in its code checkout, plus directory listings of
+the checkout and the records directory. Never reads record files and writes nothing but
+the ledger rows on standard output: one header row, then one tab-separated row per pool
+task (idea, todo or blocked, no live claim), sorted by id. The last five columns are left
+empty for the sweep's controller.
 
 The signals are hints: no task is closed or skipped on a signal alone, and their absence
 clears nothing. Any failed `tasks` or `git` call ends the run with exit 1, the command
-named on standard error and nothing on standard output. The one exception is the read of a
-moved task's destination, which when unreadable simply does not count.
+named on standard error and nothing on standard output. Missing or unreachable foreign
+citations and unreadable moved-task destinations simply do not count.
 """
 import argparse
 import contextlib
@@ -28,10 +29,22 @@ COLUMNS = (
 POOL = {"idea", "todo", "blocked"}
 ALL_STATUSES = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"]
 PATH = re.compile(r"(?<![\w/.:~-])([\w.-]+(?:/[\w.-]+)+)")
+ROOT_TOKEN = re.compile(r"(?<![\w/.:~-])([\w.-]+)(?![\w/.-])")
+CITE = re.compile(r"(?<![A-Za-z0-9_-])([a-z][a-z0-9]{1,7})-([0-9a-f]{6})(?![A-Za-z0-9_-])")
 WORD = re.compile(r"[a-z0-9_-]{3,}")
 STOPWORDS = set("the and for with that from not its when into task tasks".split())
 TWIN_THRESHOLD = 0.4
 MAX_HOPS = 5
+UNREADABLE_FOREIGN_KINDS = {
+    "task_not_found",
+    "unresolvable_id",
+    "checkout_missing",
+    "unreadable_checkout",
+    "no_project",
+    "not_registered_checkout",
+    "records_unpaired",
+    "records_moved",
+}
 
 
 class Fail(Exception):
@@ -56,20 +69,23 @@ class Sweep:
             self.env.pop(name, None)
         self.env["TASKS_FORMAT"] = "json"
         self.git_counts = {}
+        self.followed = {}
 
-    def run(self, argv, check=True):
+    def run(self, argv, check=True, input_text=None):
         try:
-            out = subprocess.run(argv, capture_output=True, text=True, env=self.env)
+            out = subprocess.run(
+                argv, capture_output=True, text=True, env=self.env, input=input_text
+            )
         except OSError as e:
             raise Fail(f"{' '.join(argv)}: {e}")
         if check and out.returncode != 0:
             raise Fail(f"{' '.join(argv)} failed: {out.stderr.strip() or f'exit {out.returncode}'}")
         return out
 
-    def tasks_json(self, *args):
+    def tasks_json(self, *args, input_text=None):
         argv = [self.tasks, "-C", self.root, *args]
         cmd = " ".join(argv)
-        out = self.run(argv)
+        out = self.run(argv, input_text=input_text)
         try:
             return cmd, json.loads(out.stdout)
         except ValueError as e:
@@ -86,24 +102,60 @@ class Sweep:
         except (ValueError, KeyError, TypeError):
             return None
 
-    def follow(self, task_id):
-        """The task a moved id ends at (at most five hops), or None when a destination
-        cannot be read or the chain is too long. The first read is strict."""
-        cmd, data = self.tasks_json("show", task_id, "--no-fetch")
+    def read_foreign(self, task_id):
+        """`show` of a foreign task id, or None when the task or its project is absent here."""
+        argv = [self.tasks, "-C", self.root, "show", task_id, "--no-fetch"]
+        cmd = " ".join(argv)
+        out = self.run(argv, check=False)
+        if out.returncode != 0:
+            raw = out.stderr.strip() or out.stdout.strip()
+            try:
+                err = json.loads(raw)["error"]
+                kind = err["kind"] if isinstance(err, dict) else None
+            except (ValueError, KeyError, TypeError):
+                kind = None
+            if kind in UNREADABLE_FOREIGN_KINDS:
+                return None
+            raise Fail(f"{cmd} failed: {raw or f'exit {out.returncode}'}")
+        try:
+            data = json.loads(out.stdout)
+        except ValueError as e:
+            raise Fail(f"{cmd}: bad JSON: {e}")
         with expect_shape(cmd):
             task = data["task"]
             if not isinstance(task, dict):
                 raise TypeError("task must be an object")
+        return task
+
+    def follow(self, task_id, strict=True):
+        """The task an id ends at (at most five move hops), or None when unreadable or too deep."""
+        key = (task_id, strict)
+        if key in self.followed:
+            return self.followed[key]
+        if strict:
+            cmd, data = self.tasks_json("show", task_id, "--no-fetch")
+            with expect_shape(cmd):
+                task = data["task"]
+                if not isinstance(task, dict):
+                    raise TypeError("task must be an object")
+        else:
+            task = self.read_foreign(task_id)
+            if task is None:
+                self.followed[key] = None
+                return None
         hops = 0
         while (task.get("status") == "moved"
                and isinstance(task.get("moved_to"), str)
                and task["moved_to"]):
             hops += 1
             if hops > MAX_HOPS:
+                self.followed[key] = None
                 return None
             task = self.destination(task["moved_to"])
             if task is None:
+                self.followed[key] = None
                 return None
+        self.followed[key] = task
         return task
 
     def git_count(self, checkout, path, since):
@@ -133,6 +185,41 @@ def named_paths(text):
     return {m.rstrip(".") for m in PATH.findall(text)}
 
 
+def named_root_files(text, root_files):
+    if not root_files:
+        return set()
+    return {m.rstrip(".") for m in ROOT_TOKEN.findall(text)} & root_files
+
+
+def is_local_ref_path(reference):
+    return (bool(reference)
+            and not reference.startswith("files:")
+            and ":" not in reference.split("/")[0])
+
+
+def structured_paths(detail):
+    """Local paths declared on the task via `spec`, `plan`, and `input`/`context` `refs`."""
+    paths = set()
+    for key in ("spec", "plan"):
+        val = detail.get(key)
+        if val is not None and not isinstance(val, str):
+            raise TypeError(f"task {key} must be a string")
+        if isinstance(val, str) and is_local_ref_path(val):
+            paths.add(val)
+    raw_refs = detail.get("refs") or []
+    if not isinstance(raw_refs, list):
+        raise TypeError("task refs must be a list")
+    for entry in raw_refs:
+        if not isinstance(entry, dict):
+            raise TypeError("task ref entry must be an object")
+        relation, reference = entry.get("relation"), entry.get("reference")
+        if not isinstance(relation, str) or not isinstance(reference, str):
+            raise TypeError("task ref relation and reference must be strings")
+        if relation in ("input", "context") and is_local_ref_path(reference):
+            paths.add(reference)
+    return paths
+
+
 def sweep(args):
     s = Sweep(args.tasks, args.root)
     cmd, data = s.tasks_json("where")
@@ -141,13 +228,20 @@ def sweep(args):
         prefix, checkout, records = where["prefix"], where["checkout"], where["records"]
         if not all(isinstance(v, str) for v in (prefix, checkout, records)):
             raise TypeError("project fields must be strings")
-    top = set()
-    for base in (checkout, records):
-        try:
-            top.update(os.listdir(base))
-        except OSError as e:
-            raise Fail(f"cannot list {base}: {e}")
-    top -= {".git", ".worktrees"}
+    try:
+        checkout_entries = os.listdir(checkout)
+    except OSError as e:
+        raise Fail(f"cannot list {checkout}: {e}")
+    try:
+        records_entries = os.listdir(records)
+    except OSError as e:
+        raise Fail(f"cannot list {records}: {e}")
+    excluded_top = {".git", ".worktrees"}
+    top = (set(checkout_entries) | set(records_entries)) - excluded_top
+    root_files = {
+        name for name in checkout_entries
+        if name not in excluded_top and os.path.isfile(os.path.join(checkout, name))
+    }
 
     argv = []
     for status in ALL_STATUSES:
@@ -172,26 +266,16 @@ def sweep(args):
             deferred = r.get("deferred")
             if deferred is not None and not isinstance(deferred, dict):
                 raise TypeError("row deferred must be an object")
+            rparent = r.get("parent")
+            if rparent is not None and not isinstance(rparent, str):
+                raise TypeError("row parent must be a string")
             by_id[rid] = r
         pool = sorted((r for r in rows
                        if r["status"] in POOL and not (r.get("claim") or {}).get("live")),
                       key=lambda r: r["id"])
-    cite = re.compile(r"\b" + re.escape(prefix) + r"-[0-9a-f]{6}\b")
 
-    def counts_as_closed(entry_id, entry_status, since):
-        """Whether a cited or depended-on task is closed (after `since`, when given)."""
-        if entry_status == "moved":
-            task = s.follow(entry_id)
-            if task is None:
-                return False
-            status, stamp = task.get("status"), closing_stamp(task)
-        else:
-            status, stamp = entry_status, None
-        if status not in ("done", "dropped"):
-            return False
-        return since is None or stamp > since
-
-    results = []
+    loaded_pool = []
+    foreign_prefixes = set()
     for row in pool:
         cmd, task = s.tasks_json("show", row["id"], "--no-fetch")
         with expect_shape(cmd):
@@ -202,6 +286,17 @@ def sweep(args):
             if not isinstance(title, str) or not isinstance(body, str):
                 raise TypeError("task title and body must be strings")
             text = f"{title}\n{body}"
+            promoted = structured_paths(detail)
+            tparent = task.get("parent")
+            if tparent is not None and not isinstance(tparent, dict):
+                raise TypeError("parent must be an object")
+            tparent_id = (tparent or {}).get("id")
+            if tparent_id is not None and not isinstance(tparent_id, str):
+                raise TypeError("parent id must be a string")
+            dparent = detail.get("parent")
+            if dparent is not None and not isinstance(dparent, str):
+                raise TypeError("task parent must be a string")
+            parent_id = tparent_id or dparent or row.get("parent")
             raw_deps = task.get("depends_on") or []
             if not isinstance(raw_deps, list):
                 raise TypeError("depends_on must be a list")
@@ -212,46 +307,115 @@ def sweep(args):
                         or (dstatus is not None and not isinstance(dstatus, str))):
                     raise TypeError("dependency id and status must be strings")
                 dep_rows.append((did, dstatus, bool(d.get("resolved"))))
+        cites = set(CITE.findall(text))
+        for pfx, _ in cites:
+            if pfx != prefix:
+                foreign_prefixes.add(pfx)
+        loaded_pool.append((row, text, promoted, parent_id, dep_rows, cites))
 
-        paths = sorted(named_paths(text))
-        dead, existing = [], []
-        for p in paths:
-            if p.split("/")[0] not in top:
-                continue
-            in_checkout = os.path.exists(os.path.join(checkout, p))
-            if in_checkout:
-                existing.append(p)
+    known_prefixes = {prefix: prefix}
+    if foreign_prefixes:
+        stdin_lines = "\n".join(sorted(foreign_prefixes)) + "\n"
+        cmd, resolved = s.tasks_json("resolve", "--stdin", input_text=stdin_lines)
+        with expect_shape(cmd):
+            res_rows = resolved["results"]
+            if not isinstance(res_rows, list):
+                raise TypeError("resolve results must be a list")
+            for rr in res_rows:
+                if not isinstance(rr, dict):
+                    raise TypeError("resolve row must be an object")
+                inp, status = rr["input"], rr["status"]
+                if not isinstance(inp, str) or not isinstance(status, str):
+                    raise TypeError("resolve input and status must be strings")
+                if status == "resolved":
+                    canon_pfx = rr["prefix"]
+                    if not isinstance(canon_pfx, str) or not canon_pfx:
+                        raise TypeError("resolved prefix must be a string")
+                    known_prefixes[inp] = canon_pfx
+
+    def local_closed_stamp(local_id):
+        target = by_id.get(local_id)
+        if target is None:
+            return None
+        if target["status"] == "moved":
+            dest = s.follow(local_id, strict=True)
+            if dest is None or dest.get("status") not in ("done", "dropped"):
+                return None
+            return closing_stamp(dest) or None
+        if target["status"] in ("done", "dropped"):
+            return closing_stamp(target) or None
+        return None
+
+    results = []
+    for row, text, promoted, parent_id, dep_rows, cites in loaded_pool:
+        prose_slash = {p for p in named_paths(text) if p.split("/")[0] in top}
+        prose_roots = named_root_files(text, root_files)
+        dead_set, existing_set = set(), set()
+        for p in prose_slash | promoted:
+            if os.path.exists(os.path.join(checkout, p)):
+                existing_set.add(p)
             elif not os.path.exists(os.path.join(records, p)):
-                dead.append(p)
+                dead_set.add(p)
+        existing_set.update(prose_roots)
+        dead = sorted(dead_set)
+        existing = sorted(existing_set)
 
         cited = set()
         row_updated = row["updated"]
-        for cid in set(cite.findall(text)) - {row["id"]}:
-            target = by_id.get(cid)
-            if target is None:
+        for pfx, hex6 in cites:
+            canon_pfx = known_prefixes.get(pfx)
+            if canon_pfx is None:
                 continue
-            if target["status"] == "moved":
-                if counts_as_closed(cid, "moved", row_updated):
-                    cited.add(cid)
-            elif (target["status"] in ("done", "dropped")
-                  and closing_stamp(target) > row_updated):
+            canon_id = f"{canon_pfx}-{hex6}"
+            if canon_id == row["id"]:
+                continue
+            cid = f"{pfx}-{hex6}"
+            if canon_pfx == prefix:
+                stamp = local_closed_stamp(canon_id)
+            else:
+                dest = s.follow(cid, strict=False)
+                stamp = (closing_stamp(dest) or None
+                         if dest is not None and dest.get("status") in ("done", "dropped")
+                         else None)
+            if stamp is not None and stamp > row_updated:
                 cited.add(cid)
 
-        deps_closed = bool(dep_rows) and all(
-            resolved and counts_as_closed(did, dstatus, None)
-            for did, dstatus, resolved in dep_rows)
+        dep_stamps = []
+        all_deps_closed = bool(dep_rows)
+        for did, dstatus, resolved in dep_rows:
+            if not resolved:
+                all_deps_closed = False
+                break
+            if did in by_id and dstatus != "moved":
+                stamp = local_closed_stamp(did)
+            elif dstatus in ("done", "dropped", "moved"):
+                dest = s.follow(did, strict=(did in by_id))
+                stamp = (closing_stamp(dest) or None
+                         if dest is not None and dest.get("status") in ("done", "dropped")
+                         else None)
+            else:
+                stamp = None
+            if stamp is None:
+                all_deps_closed = False
+                break
+            dep_stamps.append(stamp)
+        deps_closed = all_deps_closed and max(dep_stamps) > row_updated
 
         touched = sum(s.git_count(checkout, p, row_updated) for p in existing)
 
         results.append({
-            "row": row, "dead": dead, "cited": sorted(cited), "deps_closed": deps_closed,
-            "touched": touched, "words": words(row["title"]),
+            "row": row, "parent": parent_id, "dead": dead, "cited": sorted(cited),
+            "deps_closed": deps_closed, "touched": touched, "words": words(row["title"]),
         })
 
     out = [COLUMNS]
     for r in results:
+        rid = r["row"]["id"]
         twins = sorted(o["row"]["id"] for o in results
-                       if o is not r and r["words"] and o["words"]
+                       if o is not r
+                       and r["parent"] != o["row"]["id"]
+                       and o["parent"] != rid
+                       and r["words"] and o["words"]
                        and len(r["words"] & o["words"]) / len(r["words"] | o["words"])
                        >= TWIN_THRESHOLD)
         row = r["row"]

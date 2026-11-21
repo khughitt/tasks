@@ -1271,6 +1271,9 @@ pub enum RetainedAction {
         at: Option<String>,
         #[arg(long)]
         host: Option<String>,
+        /// Also scan every other reachable registered project for incoming next_owner custody.
+        #[arg(long, conflicts_with = "at")]
+        all_projects: bool,
     },
     /// Verify and publish a resumable retained host checkpoint.
     Checkpoint {

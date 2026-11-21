@@ -194,6 +194,7 @@ args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--at"], value = "string" },
   { names = ["--host"], value = "string" },
+  { shared = "all_projects", value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -1104,7 +1105,7 @@ summary = "index local harness transcripts"
 options = [
   { names = ["--full"], value = "none" },
   { names = ["--replay"], value = "path", arity = "2", repeatable = true },
-  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
+  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex", "agy"], repeatable = false },
   { shared = "project", role = "select", value = "string", repeatable = false },
 ]
 
@@ -1118,7 +1119,7 @@ summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks
 args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile", "usage-trend"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
-  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
+  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex", "agy"], repeatable = false },
   { shared = "since", role = "bound", value = "when", repeatable = false },
   { shared = "until", role = "bound", value = "when", repeatable = false },
   { names = ["--task"], value = "string" },

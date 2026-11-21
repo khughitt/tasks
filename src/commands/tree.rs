@@ -47,18 +47,8 @@ pub fn run(mut ctx: ReadCtx, id: Option<String>, all: bool, format: Format) -> R
     let registry = ctx.registry.clone();
     let mut membership =
         (format == Format::Pretty).then(|| Membership::new(&registry, &opened, &captured));
-    let hierarchy = match &mut membership {
-        Some(membership) => {
-            let records = crate::hierarchy::project_records(&captured, &opened, &registry);
-            let mut indexes = crate::hierarchy::ProjectIndexes::new();
-            for prefix in records.keys() {
-                let index = membership
-                    .hierarchy(prefix)?
-                    .expect("preseeded project in Membership has an index");
-                indexes.insert(prefix.clone(), index);
-            }
-            crate::hierarchy::HierarchyView::new(records, indexes, &registry)
-        }
+    let hierarchy = match &membership {
+        Some(membership) => membership.hierarchy_view(&captured, &opened),
         None => crate::hierarchy::view_of(&captured, &opened, &registry),
     };
     // Activity sees cross-project edges, while each forest keeps its project ordering.

@@ -50,6 +50,12 @@ pub enum Error {
     OpenDependencies(String, String),
     #[error("{0} has open descendants: {1}")]
     OpenDescendants(String, String),
+    #[error("{0} has open goal members: {1}")]
+    OpenGoalMembers(String, String),
+    #[error("{0} has unresolved goal members: {1}")]
+    UnresolvedGoalMembers(String, String),
+    #[error("{0} has a membership cycle: {1}")]
+    GoalMembershipCycle(String, String),
     #[error("invalid transition {0} -> {1}")]
     InvalidTransition(String, String),
     #[error("dependency cycle: {0}")]
@@ -191,6 +197,13 @@ impl Error {
 
             Error::OpenDependencies(id, detail) => Error::OpenDependencies(id, detail + suffix),
             Error::OpenDescendants(id, detail) => Error::OpenDescendants(id, detail + suffix),
+            Error::OpenGoalMembers(id, detail) => Error::OpenGoalMembers(id, detail + suffix),
+            Error::UnresolvedGoalMembers(id, detail) => {
+                Error::UnresolvedGoalMembers(id, detail + suffix)
+            }
+            Error::GoalMembershipCycle(id, detail) => {
+                Error::GoalMembershipCycle(id, detail + suffix)
+            }
             Error::InvalidTransition(from, to) => Error::InvalidTransition(from, to + suffix),
             Error::Cycle(detail) => Error::Cycle(detail + suffix),
             Error::Ambiguous(detail) => Error::Ambiguous(detail + suffix),
@@ -289,6 +302,9 @@ impl Error {
 
             Error::OpenDependencies(..) => "open_dependencies",
             Error::OpenDescendants(..) => "open_descendants",
+            Error::OpenGoalMembers(..) => "open_goal_members",
+            Error::UnresolvedGoalMembers(..) => "unresolved_goal_members",
+            Error::GoalMembershipCycle(..) => "goal_membership_cycle",
             Error::InvalidTransition(..) => "invalid_transition",
             Error::Cycle(_) => "cycle",
             Error::Ambiguous(_) => "ambiguous",

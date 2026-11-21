@@ -103,18 +103,62 @@ impl PhysicalTask {
     }
 }
 
-pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
+fn split_frontmatter<'a>(text: &'a str, file: &str) -> Result<(&'a str, &'a str)> {
     let rest = text
         .strip_prefix("---\n")
         .ok_or_else(|| perr(file, "missing opening ---"))?;
-    let (fm, after) = rest
-        .split_once("\n---\n")
-        .ok_or_else(|| perr(file, "missing closing ---"))?;
-    let fm = quote_timestamps(fm);
-    let pairs = frontmatter::parse(&format!("{fm}\n")).map_err(|e| match e {
+    rest.split_once("\n---\n")
+        .ok_or_else(|| perr(file, "missing closing ---"))
+}
+
+/// Read just the relation that could make a forced action a goal. A parent
+/// declaration always occupies its own line in the physical grammar. Without
+/// one, even an unrelated broken record supplies no incoming edge.
+pub(crate) fn declared_parent(text: &str, file: &str) -> Result<Option<TaskId>> {
+    if !text.lines().any(|line| line.starts_with("parent:")) {
+        return Ok(None);
+    }
+    let (header, _) = split_frontmatter(text, file)?;
+    let fields = parse_numbered_fields(
+        header
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with("parent:"))
+            .map(|(index, line)| (index + 1, line)),
+        file,
+    )?;
+    match fields.first().map(|(_, value)| value) {
+        None => Ok(None),
+        Some(Value::Scalar(value)) => TaskId::parse(value)
+            .map(Some)
+            .map_err(|e| perr(file, e.to_string())),
+        Some(_) => Err(perr(file, "parent must be a scalar")),
+    }
+}
+
+fn parse_fields(text: &str, file: &str) -> Result<Vec<(String, Value)>> {
+    parse_numbered_fields(
+        text.lines()
+            .enumerate()
+            .map(|(index, line)| (index + 1, line)),
+        file,
+    )
+}
+
+fn parse_numbered_fields<'a>(
+    lines: impl IntoIterator<Item = (usize, &'a str)>,
+    file: &str,
+) -> Result<Vec<(String, Value)>> {
+    frontmatter::parse_lines(lines).map_err(|e| match e {
         Error::Parse { detail, .. } => perr(file, detail),
-        e => e,
-    })?;
+        other => other,
+    })
+}
+
+pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
+    let (fm, after) = split_frontmatter(text, file)?;
+    let fm = quote_timestamps(fm);
+    let pairs = parse_fields(&fm, file)?;
     for (k, _) in &pairs {
         if !KEYS.contains(&k.as_str()) {
             return Err(perr(file, format!("unknown key {k:?}")));
@@ -1365,6 +1409,79 @@ mod tests {
             "{error}"
         );
     }
+    #[test]
+    fn declared_parent_reads_only_the_relation() {
+        let file = "tasks/sci-000001.md";
+        let target = TaskId::parse("sci-000002").unwrap();
+        for value in ["sci-000002", "\"sci-000002\""] {
+            let raw = format!("---\nstatus: broken\nparent: {value}\n---\n");
+            assert_eq!(declared_parent(&raw, file).unwrap().as_ref(), Some(&target));
+        }
+        assert_eq!(
+            declared_parent("---\nid: invalid\n---\nparent: sci-000002", file).unwrap(),
+            None
+        );
+        for malformed in [
+            "parent: sci-000002",
+            "---\nparent: [sci-000002]\n---\n",
+            "---\nparent: sci-000002\nparent: sci-000003\n---\n",
+        ] {
+            assert!(matches!(
+                declared_parent(malformed, file),
+                Err(Error::Parse { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn declared_parent_reports_late_malformed_header_line() {
+        let file = "tasks/sci-000001.md";
+        let late_malformed = concat!(
+            "---\n",
+            "id: sci-000001\n",
+            "title: broken\n",
+            "status: broken\n",
+            "priority: 2\n",
+            "created: 2026-11-18T00:00:00Z\n",
+            "updated: 2026-11-18T00:00:00Z\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "parent: \"sci-000002\n",
+            "---\n",
+        );
+        assert_eq!(
+            declared_parent(late_malformed, file)
+                .unwrap_err()
+                .to_string(),
+            "tasks/sci-000001.md: line 10: unterminated quoted string"
+        );
+    }
+
+    #[test]
+    fn declared_parent_reports_nonadjacent_duplicate_header_line() {
+        let file = "tasks/sci-000001.md";
+        let nonadjacent_duplicate = concat!(
+            "---\n",
+            "id: sci-000001\n",
+            "status: broken\n",
+            "parent: sci-000002\n",
+            "priority: 2\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "origin: agent\n",
+            "parent: sci-000003\n",
+            "---\n",
+        );
+        assert_eq!(
+            declared_parent(nonadjacent_duplicate, file)
+                .unwrap_err()
+                .to_string(),
+            "tasks/sci-000001.md: line 9: duplicate key parent"
+        );
+    }
+
     #[test]
     fn parent_roundtrips_after_depends() {
         let with_parent = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000002");

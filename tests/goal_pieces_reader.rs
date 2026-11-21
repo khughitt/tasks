@@ -801,26 +801,30 @@ fn pieces_reader_show_labels_piece_rows() {
     let y = add(&env, &bb, "Prerequisite", &[]);
     let hub = hub(&env, &aa, "Hub", &[], &[&x]);
     env.json(&aa, &["dep", &hub, "--on", &y]);
-    let labelled = |env: &TestEnv| {
+    let labelled = |piece_id: &str, dep_id: &str| {
         let text = env.pretty(&aa, &["show", &hub, "--color", "never"]);
         let piece = text
             .lines()
-            .any(|line| line.starts_with("piece") && line.contains(&x));
+            .position(|line| line.starts_with("piece") && line.contains(piece_id))
+            .unwrap_or_else(|| panic!("missing piece {piece_id}: {text}"));
         let dep = text
             .lines()
-            .any(|line| line.starts_with("depends on") && line.contains(&y));
-        assert!(piece && dep, "{text}");
+            .position(|line| line.starts_with("depends on") && line.contains(dep_id))
+            .unwrap_or_else(|| panic!("missing dependency {dep_id}: {text}"));
+        assert!(piece < dep, "{text}");
     };
-    labelled(&env);
-    let shown = env.json(&aa, &["show", &hub]);
-    for row in shown["depends_on"].as_array().unwrap() {
-        assert!(row.get("piece").is_none(), "{row}");
-    }
+    labelled(&x, &y);
     env.json(&bb, &["rename", "bb", "cc"]);
     let stored = env.read(&aa, &format!("tasks/{hub}.md"));
     assert!(x.starts_with("bb-"), "{x}");
     assert!(stored.contains(&format!("pieces: [{x}]\n")), "{stored}");
-    labelled(&env);
+    labelled(&x.replacen("bb-", "cc-", 1), &y.replacen("bb-", "cc-", 1));
+
+    let shown = env.json(&aa, &["show", &hub]);
+    for (row, stored_id) in shown["depends_on"].as_array().unwrap().iter().zip([&x, &y]) {
+        assert_eq!(row["id"], *stored_id, "{row}");
+        assert!(row.get("piece").is_none(), "{row}");
+    }
 }
 
 fn finding_on(check: &Value, level: &str, kind: &str, id: &str) -> Option<Value> {
@@ -1028,5 +1032,409 @@ fn pieces_reader_migrate_refuses_into_piece_project() {
         out["inbound"],
         json!([{"id": x, "dependents": [g]}]),
         "{out}"
+    );
+}
+
+fn reopened_grandchild(f: &Two) -> (String, String, String) {
+    let b = add(&f.env, &f.bb, "deliverable", &[]);
+    let g = add(&f.env, &f.aa, "umbrella", &[]);
+    let h = hub(&f.env, &f.aa, "subgoal", &["--parent", &g], &[&b]);
+    f.env.json(&f.bb, &["done", &b]);
+    f.env.json(&f.aa, &["done", &h]);
+    f.env.json(&f.bb, &["edit", &b, "--status", "todo"]);
+    (g, h, b)
+}
+
+#[test]
+fn goal_completion_reopened_foreign_grandchild_writer() {
+    let f = two();
+    let (g, _, b) = reopened_grandchild(&f);
+    let before = f.env.read(&f.aa, &format!("tasks/{g}.md"));
+    let expected = format!("{g} has open goal members: {b}");
+    let error = common::error_of(&f.env, &f.aa, &["done", &g]);
+    assert_eq!(error["error"]["kind"], "open_goal_members");
+    assert_eq!(error["error"]["detail"], expected);
+    let pretty = stderr_of(&f.env, &f.aa, &["done", &g, "--pretty"]);
+    assert!(pretty.contains(&expected), "{pretty}");
+    assert_eq!(before, f.env.read(&f.aa, &format!("tasks/{g}.md")));
+    f.env.json(&f.bb, &["done", &b]);
+    f.env.json(&f.aa, &["done", &g]);
+}
+
+#[test]
+fn goal_completion_reopened_foreign_grandchild_reader() {
+    let f = two();
+    let (g, _, b) = reopened_grandchild(&f);
+    assert!(!ids(&f.env.json(&f.aa, &["prime"])["closeout"]).contains(&g));
+    f.env.json(&f.bb, &["done", &b]);
+    assert!(ids(&f.env.json(&f.aa, &["prime"])["closeout"]).contains(&g));
+}
+
+#[test]
+fn goal_completion_reopened_child_of_foreign_goal() {
+    let Two { env, aa, bb } = two();
+    let h = add(&env, &bb, "foreign goal", &[]);
+    let b = add(&env, &bb, "child", &["--parent", &h]);
+    let g = hub(&env, &aa, "umbrella", &[], &[&h]);
+    env.json(&bb, &["done", &b]);
+    env.json(&bb, &["done", &h]);
+    env.json(&bb, &["edit", &b, "--status", "todo"]);
+    assert_eq!(env.fail(&aa, &["done", &g]), "open_goal_members");
+}
+
+#[test]
+fn goal_completion_offline_frontier() {
+    let f = two();
+    let (g, h, b) = reopened_grandchild(&f);
+    std::fs::rename(f.bb.join("tasks"), f.bb.join("offline")).unwrap();
+    let prime = f.env.json(&f.aa, &["prime"]);
+    assert!(!ids(&prime["closeout"]).contains(&g));
+    assert!(warnings(&prime).contains(&format!("{g} has unresolved goal members: {h} -> {b}")));
+    assert_eq!(
+        f.env.fail(&f.aa, &["edit", &g, "--status", "done"]),
+        "unresolved_goal_members"
+    );
+    let forced = f.env.json(&f.aa, &["done", &g, "--force"]);
+    assert!(warnings(&forced).contains(&format!(
+        "{g} forced completion: unresolved goal members: {h} -> {b}"
+    )));
+}
+
+#[test]
+fn goal_completion_dropped_only_and_active_route() {
+    let Two { env, aa, bb } = two();
+    let g = add(&env, &aa, "umbrella", &[]);
+    let h = add(&env, &aa, "abandoned", &["--parent", &g]);
+    let b = add(&env, &aa, "reopened", &["--parent", &h]);
+    env.json(&aa, &["done", &b]);
+    env.json(&aa, &["drop", &h, "abandon"]);
+    env.json(&aa, &["edit", &b, "--status", "todo"]);
+    let offers = env.json(&aa, &["prime"]);
+    let row = offers["closeout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == g)
+        .unwrap();
+    assert_eq!(row["open_descendant_count"], 1);
+    env.json(&aa, &["done", &g]);
+    env.json(&aa, &["edit", &g, "--status", "todo"]);
+    let other = hub(&env, &bb, "active route", &[], &[&b]);
+    env.json(&bb, &["done", &other, "--force"]);
+    env.json(&aa, &["edit", &g, "--piece", &other]);
+    assert!(!ids(&env.json(&aa, &["prime"])["closeout"]).contains(&g));
+    assert_eq!(env.fail(&aa, &["done", &g]), "open_goal_members");
+}
+
+#[test]
+fn goal_completion_mixed_holds_and_force() {
+    let f = two();
+    let (g, h, b) = reopened_grandchild(&f);
+    let p = add(&f.env, &f.aa, "audit", &[]);
+    f.env.json(&f.aa, &["dep", &g, "--on", &p]);
+    let absent = "bb-000000";
+    f.env.json(&f.aa, &["edit", &h, "--no-pieces"]);
+    raw(&f.env, &f.aa, &h, "pieces", &[&b, absent]);
+    assert_eq!(f.env.fail(&f.aa, &["done", &g]), "open_dependencies");
+    let force = f
+        .env
+        .json(&f.aa, &["edit", &g, "--status", "done", "--force"]);
+    assert_eq!(
+        warnings(&force),
+        vec![
+            format!("{g} forced completion: direct dependencies: {p}"),
+            format!("{g} forced completion: unresolved goal members: {h} -> {absent}"),
+            format!("{g} forced completion: open members: {b}")
+        ]
+    );
+}
+
+#[test]
+fn goal_completion_diamond_and_cycle() {
+    let f = two();
+    let (g, h, b) = reopened_grandchild(&f);
+    f.env.json(&f.aa, &["edit", &g, "--piece", &b]);
+    let forced = f.env.json(&f.aa, &["done", &g, "--force"]);
+    assert_eq!(
+        warnings(&forced)
+            .iter()
+            .filter(|w| w.contains("open members"))
+            .collect::<Vec<_>>(),
+        vec![&format!("{g} forced completion: open members: {b}")]
+    );
+    f.env.json(&f.aa, &["edit", &g, "--status", "todo"]);
+    raw(&f.env, &f.bb, &b, "pieces", &[&h]);
+    assert_eq!(
+        f.env.fail(&f.aa, &["done", &g, "--force"]),
+        "goal_membership_cycle"
+    );
+    let prime = f.env.json(&f.aa, &["prime"]);
+    assert!(warnings(&prime).contains(&format!("{g} has a membership cycle: {h} -> {b} -> {h}")));
+}
+
+#[test]
+fn goal_completion_corrupt_with_force() {
+    let f = two();
+    let (g, _, b) = reopened_grandchild(&f);
+    let path = f.bb.join(format!("tasks/{b}.md"));
+    std::fs::write(path, "corrupt").unwrap();
+    assert_eq!(f.env.fail(&f.aa, &["done", &g, "--force"]), "parse");
+}
+
+#[test]
+fn goal_completion_recurring_and_leaf() {
+    let Two { env, aa, .. } = two();
+    let g = add(&env, &aa, "umbrella", &[]);
+    let b = add(&env, &aa, "sweep", &["--every", "1w", "--parent", &g]);
+    env.json(&aa, &["done", &b]);
+    env.json(&aa, &["done", &g]);
+    env.json(&aa, &["start", &b]);
+    assert_eq!(env.json(&aa, &["show", &g])["task"]["status"], "done");
+    env.json(&aa, &["edit", &g, "--status", "todo"]);
+    assert_eq!(env.fail(&aa, &["done", &g]), "open_descendants");
+    let leaf = add(&env, &aa, "leaf", &["--depends", &b]);
+    assert!(warnings(&env.json(&aa, &["done", &leaf, "--force"])).is_empty());
+}
+
+#[test]
+fn goal_completion_moved_nested_piece() {
+    let mut f = two();
+    let cc = f.env.init("cc");
+    let (g, h, b1) = reopened_grandchild(&f);
+    let b2 = id_of(f.env.json(&f.bb, &["move", &b1, "--to", "cc"]));
+    let error = stderr_of(&f.env, &f.aa, &["done", &g]);
+    assert!(
+        error.contains(&format!("{g} has open goal members: {b2}")),
+        "{error}"
+    );
+    std::fs::remove_file(cc.join(format!("tasks/{b2}.md"))).unwrap();
+    let error = stderr_of(&f.env, &f.aa, &["done", &g]);
+    assert!(error.contains(&format!("{h} -> {b1}")), "{error}");
+}
+
+#[test]
+fn goal_completion_authority_and_edit() {
+    let mut f = two();
+    let (g, _, b) = reopened_grandchild(&f);
+    let registered = f.env.init_forced("aa");
+    assert!(!registered.join(format!("tasks/{g}.md")).exists());
+    assert_eq!(
+        f.env.fail(&f.aa, &["edit", &g, "--status", "done"]),
+        "open_goal_members"
+    );
+    assert!(!ids(&f.env.json(&f.aa, &["prime"])["closeout"]).contains(&g));
+    // A foreign candidate in wide scope sees the registered copy of G.
+    std::fs::copy(
+        f.aa.join(format!("tasks/{g}.md")),
+        registered.join(format!("tasks/{g}.md")),
+    )
+    .unwrap();
+    f.env.json(&registered, &["done", &g]);
+    let foreign = hub(&f.env, &f.bb, "foreign candidate", &[], &[&g]);
+    let wide = f.env.json(&f.aa, &["prime", "--all-projects"]);
+    assert!(ids(&wide["closeout"]).contains(&foreign));
+    let pretty = f.env.pretty(&f.aa, &["prime", "--all-projects"]);
+    let (_, closeout) = pretty.split_once("closeout:\n").unwrap();
+    assert!(
+        closeout.split("\n\n").next().unwrap().contains(&foreign),
+        "{pretty}"
+    );
+    // The proposed editor state declares a new piece H whose reopened local child B
+    // is visible only by traversing H. A direct dependency on completed H would pass.
+    let h = add(&f.env, &f.bb, "foreign parent", &[]);
+    f.env.json(&f.bb, &["edit", &b, "--parent", &h]);
+    f.env.json(&f.bb, &["done", &h, "--force"]);
+    let edited = add(&f.env, &f.aa, "new hub", &["--depends", &h]);
+    let err = editor_fail(
+        &f.env,
+        &f.aa,
+        &edited,
+        &format!("s/^status: todo/status: done/;s/^depends:/pieces: [{h}]\\ndepends:/"),
+    );
+    assert!(
+        err.contains("open_goal_members") && err.contains(&b),
+        "{err}"
+    );
+    let task = &f.env.json(&f.aa, &["show", &edited])["task"];
+    assert_eq!(task["status"], "todo");
+    assert!(task.get("pieces").is_none());
+}
+
+#[test]
+fn goal_completion_protected_gates_and_retry() {
+    let f = two();
+    let (g, _, b) = reopened_grandchild(&f);
+    f.env
+        .json(&f.aa, &["edit", &g, "--ref", "result (output): missing.md"]);
+    assert_eq!(
+        f.env.fail(&f.aa, &["done", &g, "--force"]),
+        "ref_output_missing"
+    );
+    f.env.json(&f.aa, &["edit", &g, "--rm-ref", "result"]);
+    f.env.json(&f.aa, &["start", &g]);
+    let before = f.env.read(&f.aa, &format!("tasks/{g}.md"));
+    let claim = std::fs::read(f.env.claim_store("aa")).unwrap();
+    assert_eq!(f.env.fail(&f.aa, &["done", &g]), "open_goal_members");
+    assert_eq!(before, f.env.read(&f.aa, &format!("tasks/{g}.md")));
+    assert_eq!(claim, std::fs::read(f.env.claim_store("aa")).unwrap());
+    f.env.json(&f.bb, &["done", &b]);
+    f.env.json(&f.aa, &["done", &g]);
+    let complete = f.env.json(&f.aa, &["show", &g]);
+    f.env.json(&f.aa, &["done", &g]);
+    let retried = f.env.json(&f.aa, &["show", &g]);
+    for key in ["completed", "closed", "notes", "status"] {
+        assert_eq!(complete["task"][key], retried["task"][key], "{key}");
+    }
+    assert!(retried["claim"].is_null());
+}
+
+#[test]
+fn goal_completion_local_filter_and_cost() {
+    let f = two();
+    let (g, h, b) = reopened_grandchild(&f);
+    f.env.json(&f.aa, &["edit", &h, "--status", "todo"]);
+    // Reading any other file from the foreign collection now fails its scan.
+    // The direct target remains readable for the ordinary review/depends lookup.
+    let unrelated = add(&f.env, &f.bb, "outside", &[]);
+    std::fs::write(f.bb.join(format!("tasks/{unrelated}.md")), "corrupt").unwrap();
+    // Disqualify H locally as well as G.
+    let k = add(&f.env, &f.aa, "local hold", &["--parent", &h]);
+    let prime = f.env.json(&f.aa, &["prime"]);
+    assert!(!ids(&prime["closeout"]).contains(&h));
+    assert!(!ids(&prime["closeout"]).contains(&g));
+    f.env.json(&f.aa, &["done", &k]);
+    let error = stderr_of(&f.env, &f.aa, &["prime"]);
+    assert!(
+        error.contains(&unrelated) && !error.contains(&format!("{b} is not registered")),
+        "{error}"
+    );
+}
+
+#[test]
+fn goal_completion_proposed_parent_cycle() {
+    let f = two();
+    let h = add(&f.env, &f.aa, "local member", &[]);
+    f.env.json(&f.aa, &["done", &h]);
+    let b = hub(&f.env, &f.bb, "foreign member", &[], &[&h]);
+    f.env.json(&f.bb, &["done", &b]);
+    let g = hub(&f.env, &f.aa, "goal", &[], &[&b]);
+    for force in [false, true] {
+        let mut args = vec!["edit", &g, "--parent", &h, "--status", "done"];
+        if force {
+            args.push("--force");
+        }
+        assert_eq!(f.env.fail(&f.aa, &args), "goal_membership_cycle");
+    }
+    let err = editor_fail(
+        &f.env,
+        &f.aa,
+        &g,
+        &format!("s/^status: todo$/status: done/;s/^depends:/parent: {h}\\ndepends:/"),
+    );
+    assert!(err.contains("goal_membership_cycle"), "{err}");
+    f.env.json(&f.aa, &["edit", &g, "--parent", &h]);
+    let saved = f.env.read(&f.aa, &format!("tasks/{g}.md"));
+    f.env
+        .json(&f.aa, &["edit", &g, "--no-parent", "--status", "done"]);
+    std::fs::write(f.aa.join(format!("tasks/{g}.md")), saved).unwrap();
+    let editor = editor_script(
+        &f.aa,
+        "sed -i '/^parent:/d;s/^status: todo$/status: done/' \"$1\"",
+    );
+    f.env
+        .cmd(&f.aa)
+        .env("EDITOR", editor)
+        .args(["edit", &g, "--editor"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn goal_completion_forced_leaf_with_unrelated_bad_record() {
+    let f = two();
+    let leaf = add(&f.env, &f.aa, "leaf", &[]);
+    let bad = add(&f.env, &f.aa, "broken record", &[]);
+    let path = f.aa.join(format!("tasks/{bad}.md"));
+    let original = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, "malformed").unwrap();
+    assert!(warnings(&f.env.json(&f.aa, &["done", &leaf, "--force"])).is_empty());
+    std::fs::write(&path, &original).unwrap();
+    f.env.json(&f.aa, &["edit", &leaf, "--status", "todo"]);
+    // A declared child with corrupt data must still fail the force.
+    std::fs::write(
+        &path,
+        original.replace(
+            "status: todo",
+            &format!("parent: \"{leaf}\"\nstatus: broken"),
+        ),
+    )
+    .unwrap();
+    assert_eq!(f.env.fail(&f.aa, &["done", &leaf, "--force"]), "parse");
+
+    // Late malformed and nonadjacent duplicate parent declarations report their
+    // original 1-based header lines rather than projected offsets 1 and 2.
+    let late_malformed = format!(
+        concat!(
+            "---\n",
+            "id: {bad}\n",
+            "title: broken record\n",
+            "status: broken\n",
+            "priority: 2\n",
+            "created: 2026-11-18T00:00:00Z\n",
+            "updated: 2026-11-18T00:00:00Z\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "parent: \"{leaf}\n",
+            "---\n",
+        ),
+        bad = bad,
+        leaf = leaf,
+    );
+    std::fs::write(&path, late_malformed).unwrap();
+    let out = f
+        .env
+        .cmd(&f.aa)
+        .args(["done", &leaf, "--force"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "parse");
+    assert_eq!(
+        err["error"]["detail"],
+        format!("tasks/{bad}.md: line 10: unterminated quoted string")
+    );
+
+    let nonadjacent_duplicate = format!(
+        concat!(
+            "---\n",
+            "id: {bad}\n",
+            "status: broken\n",
+            "parent: {bad}\n",
+            "priority: 2\n",
+            "depends: []\n",
+            "tags: []\n",
+            "source: notes\n",
+            "origin: agent\n",
+            "parent: {leaf}\n",
+            "---\n",
+        ),
+        bad = bad,
+        leaf = leaf,
+    );
+    std::fs::write(&path, nonadjacent_duplicate).unwrap();
+    let out = f
+        .env
+        .cmd(&f.aa)
+        .args(["done", &leaf, "--force"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "parse");
+    assert_eq!(
+        err["error"]["detail"],
+        format!("tasks/{bad}.md: line 9: duplicate key parent")
     );
 }

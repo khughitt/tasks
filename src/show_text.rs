@@ -3,11 +3,12 @@
 //! prints its task through the same renderer.
 
 use crate::claims::Escalation;
-use crate::model::Note;
-use crate::output::{ParkInfo, ShowFields};
+use crate::model::{Note, Status};
+use crate::output::{DepInfo, ParkInfo, Related, ShowFields};
 use crate::palette::Rgb;
 use crate::present::{self, Span};
 use crate::style::{Painter, Style};
+use std::collections::HashMap;
 use unicode_width::UnicodeWidthChar;
 
 // ponytail: per-character widths can split joined emoji; use grapheme clusters if needed.
@@ -128,8 +129,8 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
         sections.push(escalated(escalation, painter, width));
     }
     sections.push(description(&o.task.body, painter, width));
-    if let Some(related) = related(o, painter, width) {
-        sections.push(related);
+    if let Some(links) = links(o, painter, width) {
+        sections.push(links);
     }
     if !o.inventory.is_empty() {
         sections.push(references(o, painter, width));
@@ -222,7 +223,7 @@ fn color(o: &ShowFields, id: &str) -> Option<Rgb> {
 }
 
 /// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): one row per field with a value, in this
-/// order. Links (`parent`, `depends on`, `follows`, `wake on`, `related`, and a task `source`) are listed under `── related ──`
+/// order. Links (`parent`, `depends on`, `follows`, `wake on`, `related`, and a task `source`) are listed under `── links ──`
 /// instead.
 fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     let t = &o.task;
@@ -232,11 +233,11 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     ];
     if let Some(to) = &t.moved_to {
         let to = to.to_string();
-        rows.push(("moved to", vec![present::id(&to, color(o, &to))]));
+        rows.push(("moved to", vec![present::id(&to, o.moved_to_color)]));
     }
     if let Some(from) = &t.moved_from {
         let from = from.to_string();
-        rows.push(("moved from", vec![present::id(&from, color(o, &from))]));
+        rows.push(("moved from", vec![present::id(&from, o.moved_from_color)]));
     }
     if t.size.is_some() {
         rows.push(("size", vec![present::size(t.size)]));
@@ -447,141 +448,157 @@ fn hang(line: &str) -> usize {
     }
 }
 
-/// Current contract (docs/user-guide.md, "Goals, lanes and dependencies"): `<label>  <id>  <status>  <date>  <title>`,
-/// columns aligned, titles hanging. Rows run in order: `parent`, `depends on` (or `piece` for a
-/// declared piece), `follows`, `wake on`, `related`, `source`, `dependent`, `followed by`, `child`.
-fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
-    let date_of = |updated: Option<&str>| match updated {
-        Some(ts) => present::date(ts),
-        None => Span::plain(""),
+struct LinkTarget<'a> {
+    id: &'a str,
+    title: &'a str,
+    status: Option<Status>,
+    updated: Option<&'a str>,
+}
+
+impl<'a> From<&'a DepInfo> for LinkTarget<'a> {
+    fn from(row: &'a DepInfo) -> Self {
+        Self {
+            id: &row.canonical_id,
+            title: row.title.as_deref().unwrap_or("(unresolved)"),
+            status: row.status,
+            updated: row.updated.as_deref(),
+        }
+    }
+}
+
+impl<'a> From<&'a Related> for LinkTarget<'a> {
+    fn from(row: &'a Related) -> Self {
+        Self {
+            id: &row.id,
+            title: &row.title,
+            status: Some(row.status),
+            updated: Some(&row.updated),
+        }
+    }
+}
+
+/// Visit roles in precedence order so the first occurrence sets each row's position.
+fn link_rows(o: &ShowFields) -> Vec<(LinkTarget<'_>, Vec<&'static str>)> {
+    let mut rows: Vec<(LinkTarget<'_>, Vec<&'static str>)> = Vec::new();
+    let mut positions: HashMap<&str, usize> = HashMap::new();
+    let mut add = |role, target| {
+        let target: LinkTarget<'_> = target;
+        if let Some(&position) = positions.get(target.id) {
+            let (current, roles) = &mut rows[position];
+            if current.status.is_none() && target.status.is_some() {
+                *current = target;
+            }
+            if role != "related"
+                && !roles.contains(&role)
+                && !(role == "depends on" && roles.contains(&"piece"))
+            {
+                roles.push(role);
+            }
+        } else {
+            positions.insert(target.id, rows.len());
+            rows.push((target, vec![role]));
+        }
     };
-    // The last field is the row's project colour; an unresolved dependency has none.
-    let mut rows = Vec::new();
     if let Some(parent) = &o.parent {
-        rows.push((
+        add("parent", parent.into());
+    } else if let Some(id) = &o.unresolved_parent {
+        add(
             "parent",
-            parent.id.as_str(),
-            present::status(parent.status),
-            present::date(&parent.updated),
-            parent.title.as_str(),
-            color(o, &parent.id),
-        ));
-    }
-    for dependency in &o.depends_on {
-        rows.push((
-            if dependency.piece {
-                "piece"
-            } else {
-                "depends on"
+            LinkTarget {
+                id,
+                title: "(unresolved)",
+                status: None,
+                updated: None,
             },
-            dependency.id.as_str(),
-            present::status_of(dependency.status),
-            date_of(dependency.updated.as_deref()),
-            dependency.title.as_deref().unwrap_or("(unresolved)"),
-            color(o, &dependency.id).filter(|_| dependency.resolved),
-        ));
+        );
     }
-    for rel in &o.follows_tasks {
-        rows.push((
-            "follows",
-            rel.id.as_str(),
-            present::status_of(rel.status),
-            date_of(rel.updated.as_deref()),
-            rel.title.as_deref().unwrap_or("(unresolved)"),
-            color(o, &rel.id).filter(|_| rel.resolved),
-        ));
+    for row in o.depends_on.iter().filter(|row| row.piece) {
+        add("piece", row.into());
     }
-    for wake in &o.wake_targets {
-        rows.push((
-            "wake on",
-            wake.id.as_str(),
-            present::status_of(wake.status),
-            date_of(wake.updated.as_deref()),
-            wake.title.as_deref().unwrap_or("(unresolved)"),
-            color(o, &wake.id).filter(|_| wake.resolved),
-        ));
+    for row in o.depends_on.iter().filter(|row| !row.piece) {
+        add("depends on", row.into());
     }
-    for rel in &o.related_to {
-        rows.push((
-            "related",
-            rel.id.as_str(),
-            present::status_of(rel.status),
-            date_of(rel.updated.as_deref()),
-            rel.title.as_deref().unwrap_or("(unresolved)"),
-            color(o, &rel.id).filter(|_| rel.resolved),
-        ));
+    for row in &o.dependents {
+        add("dependent", row.into());
     }
-    if let Some(source) = &o.source_task {
-        rows.push((
-            "source",
-            source.id.as_str(),
-            present::status_of(source.status),
-            date_of(source.updated.as_deref()),
-            source.title.as_deref().unwrap_or("(unresolved)"),
-            color(o, &source.id).filter(|_| source.resolved),
-        ));
+    for row in &o.wake_targets {
+        add("wake on", row.into());
     }
-    for dependent in &o.dependents {
-        rows.push((
-            "dependent",
-            dependent.id.as_str(),
-            present::status(dependent.status),
-            present::date(&dependent.updated),
-            dependent.title.as_str(),
-            color(o, &dependent.id),
-        ));
+    for row in &o.follows_tasks {
+        add("follows", row.into());
     }
-    for follower in &o.followed_by {
-        rows.push((
-            "followed by",
-            follower.id.as_str(),
-            present::status(follower.status),
-            present::date(&follower.updated),
-            follower.title.as_str(),
-            color(o, &follower.id),
-        ));
+    for row in &o.followed_by {
+        add("followed by", row.into());
     }
-    for child in &o.children {
-        rows.push((
-            "child",
-            child.id.as_str(),
-            present::status(child.status),
-            present::date(&child.updated),
-            child.title.as_str(),
-            color(o, &child.id),
-        ));
+    for row in &o.children {
+        add("child", row.into());
     }
-    if rows.is_empty() {
-        return None;
+    if let Some(row) = &o.source_task {
+        add("source", row.into());
     }
-    let label_width = rows.iter().map(|row| row.0.len()).max().unwrap_or(0);
-    let id_width = rows
-        .iter()
-        .map(|row| row.1.chars().count())
-        .max()
-        .unwrap_or(0);
-    // The longest status names (`blocked`, `shelved`, `dropped`) are seven wide.
+    for row in &o.related_to {
+        add("related", row.into());
+    }
+    rows
+}
+
+/// Render the five columns with independent hanging wraps for roles and titles.
+fn links(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
+    let rows = link_rows(o);
+    let id_width = rows.iter().map(|(target, _)| target.id.len()).max()?;
+    let labels: Vec<_> = rows.iter().map(|(_, roles)| roles.join(", ")).collect();
+    let label_width = labels.iter().map(String::len).max()?;
     let status_width = 7;
-    // Dates are `YYYY-MM-DD`, ten columns wide.
     let date_width = 10;
-    let lead_width = label_width + 2 + id_width + 2 + status_width + 2 + date_width + 2;
-    let mut rendered = present::rule("related", painter, width.unwrap_or(MEASURE));
-    for (label, id, status, date, title, project) in rows {
-        let lead = format!(
-            "{}  {}  {}  {}  ",
-            painter.paint(Style::Chrome, &format!("{label:<label_width$}")),
-            present::id(id, project).left(id_width).paint(painter),
+    let fixed_width = id_width + status_width + date_width + 8;
+    let label_budget = width.map_or(20, |width| {
+        width.saturating_sub(fixed_width + 10).clamp(1, 20)
+    });
+    let label_width = label_width.min(label_budget);
+    let lead_width = label_width + fixed_width;
+    let mut rendered = present::rule("links", painter, width.unwrap_or(MEASURE));
+    for ((target, _), labels) in rows.into_iter().zip(labels) {
+        let project = target.status.and_then(|_| color(o, target.id));
+        let status = present::status_of(target.status);
+        let date = target
+            .updated
+            .map_or_else(|| Span::plain(""), present::date);
+        let identity = format!(
+            "{}  {}  {}  ",
+            present::id(target.id, project)
+                .left(id_width)
+                .paint(painter),
             status.left(status_width).paint(painter),
             date.left(date_width).paint(painter),
         );
-        rendered.push_str(&block(
-            &lead,
-            lead_width,
-            &[(title, present::title(title, project, None).style)],
-            lead_width,
-            painter,
-            width,
-        ));
+        let labels: Vec<_> = labels.chars().map(|c| (c, Some(Style::Chrome))).collect();
+        let label_lines = wrap_lines(&labels, label_width);
+        let title_style = present::title(target.title, project, None).style;
+        let title: Vec<_> = target.title.chars().map(|c| (c, title_style)).collect();
+        let title_lines = match width {
+            Some(width) => wrap_lines(&title, width.saturating_sub(lead_width).max(1)),
+            None => vec![title],
+        };
+        for line in 0..label_lines.len().max(title_lines.len()) {
+            if let Some(label) = label_lines.get(line) {
+                rendered.push_str(&paint_runs(label, painter));
+                if line == 0 || title_lines.get(line).is_some() {
+                    rendered.push_str(&" ".repeat(label_width - columns(label)));
+                }
+            } else {
+                rendered.push_str(&" ".repeat(label_width));
+            }
+            if line == 0 {
+                rendered.push_str("  ");
+                rendered.push_str(&identity);
+            } else if title_lines.get(line).is_some() {
+                rendered.push_str(&" ".repeat(fixed_width));
+            }
+            if let Some(title) = title_lines.get(line) {
+                rendered.push_str(&paint_runs(title, painter));
+            }
+            rendered.push('\n');
+        }
     }
     Some(rendered)
 }
@@ -845,6 +862,8 @@ mod tests {
             needs_review: false,
             review_reason: None,
             project_colors: Default::default(),
+            moved_to_color: None,
+            moved_from_color: None,
             spec_path: None,
             plan_path: None,
             step_found: None,
@@ -856,6 +875,7 @@ mod tests {
             wake_targets: vec![],
             source_task: None,
             parent: None,
+            unresolved_parent: None,
             in_lane: None,
             children: vec![],
             claim: None,
@@ -967,7 +987,7 @@ mod tests {
             "{text}"
         );
         assert!(text.ends_with("(no description)\n"), "{text}");
-        for absent in ["── parked", "── related", "── files", "── notes", "size:"] {
+        for absent in ["── parked", "── links", "── files", "── notes", "size:"] {
             assert!(!text.contains(absent), "{absent}: {text}");
         }
     }
@@ -995,6 +1015,7 @@ mod tests {
         });
         o.depends_on = vec![DepInfo {
             id: "fam-000003".into(),
+            canonical_id: "fam-000003".into(),
             title: None,
             status: None,
             updated: None,
@@ -1006,7 +1027,7 @@ mod tests {
             "── overview",
             "── parked",
             "── description",
-            "── related",
+            "── links",
             "── notes",
         ]
         .iter()
@@ -1028,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn follows_reader_related_rows_render_in_exact_order_and_overview_omits_wake_and_task_source() {
+    fn links_render_in_role_order_and_overview_omits_wake_and_task_source() {
         let mut o = fields();
         o.task.wake_on = vec![crate::model::TaskId::parse("sci-000003").unwrap()];
         o.task.source = Some("sci-000005".into());
@@ -1040,6 +1061,7 @@ mod tests {
         });
         o.depends_on = vec![DepInfo {
             id: "sci-000002".into(),
+            canonical_id: "sci-000002".into(),
             title: Some("Dep".into()),
             status: Some(Status::Todo),
             updated: Some("2026-01-02T00:00:00Z".into()),
@@ -1048,6 +1070,7 @@ mod tests {
         }];
         o.follows_tasks = vec![DepInfo {
             id: "sci-000002".into(),
+            canonical_id: "sci-000002".into(),
             title: Some("Dep".into()),
             status: Some(Status::Todo),
             updated: Some("2026-01-02T00:00:00Z".into()),
@@ -1056,6 +1079,7 @@ mod tests {
         }];
         o.wake_targets = vec![DepInfo {
             id: "sci-000003".into(),
+            canonical_id: "sci-000003".into(),
             title: Some("Wake".into()),
             status: Some(Status::Todo),
             updated: Some("2026-01-03T00:00:00Z".into()),
@@ -1064,6 +1088,7 @@ mod tests {
         }];
         o.related_to = vec![DepInfo {
             id: "sci-000004".into(),
+            canonical_id: "sci-000004".into(),
             title: Some("Rel".into()),
             status: Some(Status::Done),
             updated: Some("2026-01-04T00:00:00Z".into()),
@@ -1072,6 +1097,7 @@ mod tests {
         }];
         o.source_task = Some(DepInfo {
             id: "sci-000005".into(),
+            canonical_id: "sci-000005".into(),
             title: Some("Source".into()),
             status: Some(Status::Todo),
             updated: Some("2026-01-05T00:00:00Z".into()),
@@ -1089,20 +1115,28 @@ mod tests {
         assert!(!text.contains("wake on:"), "{text}");
         assert!(!text.contains("source:"), "{text}");
 
-        let related_block = text.split_once("── related ").unwrap().1;
-        let lines: Vec<&str> = related_block
+        let links = text.split_once("── links ").unwrap().1;
+        let lines: Vec<_> = links
             .lines()
             .skip(1)
             .take_while(|l| !l.is_empty())
             .collect();
-        assert_eq!(lines.len(), 7, "{lines:?}");
-        assert!(lines[0].starts_with("parent      sci-000001  todo     2026-01-01  Parent"));
-        assert!(lines[1].starts_with("depends on  sci-000002  todo     2026-01-02  Dep"));
-        assert!(lines[2].starts_with("follows     sci-000002  todo     2026-01-02  Dep"));
-        assert!(lines[3].starts_with("wake on     sci-000003  todo     2026-01-03  Wake"));
-        assert!(lines[4].starts_with("related     sci-000004  done     2026-01-04  Rel"));
-        assert!(lines[5].starts_with("source      sci-000005  todo     2026-01-05  Source"));
-        assert!(lines[6].starts_with("child       sci-000006  todo     2026-01-06  Child"));
+        let expected = [
+            ("parent", "sci-000001  todo     2026-01-01  Parent"),
+            (
+                "depends on, follows",
+                "sci-000002  todo     2026-01-02  Dep",
+            ),
+            ("wake on", "sci-000003  todo     2026-01-03  Wake"),
+            ("child", "sci-000006  todo     2026-01-06  Child"),
+            ("source", "sci-000005  todo     2026-01-05  Source"),
+            ("related", "sci-000004  done     2026-01-04  Rel"),
+        ];
+        assert_eq!(
+            lines,
+            expected.map(|(role, target)| format!("{role:<19}  {target}")),
+            "{links}"
+        );
 
         // When source is opaque (source_task is None), it stays in overview.
         o.source_task = None;
@@ -1112,6 +1146,61 @@ mod tests {
             value(&text_url, "source").as_deref() == Some("https://example.com/item"),
             "{text_url}"
         );
+    }
+
+    #[test]
+    fn pretty_links_wrap_roles_and_full_titles_in_their_own_columns() {
+        let mut o = fields();
+        let id = "longname-000002";
+        let title = "Alpha beta gamma delta epsilon zeta eta theta iota kappa";
+        let row = || DepInfo {
+            id: id.into(),
+            canonical_id: id.into(),
+            title: Some(title.into()),
+            status: Some(Status::Todo),
+            updated: Some("2026-01-01T00:00:00Z".into()),
+            resolved: true,
+            piece: false,
+        };
+        o.depends_on = vec![
+            DepInfo {
+                piece: true,
+                ..row()
+            },
+            row(),
+        ];
+        o.wake_targets = vec![row()];
+        o.follows_tasks = vec![row()];
+        o.source_task = Some(row());
+        o.related_to = vec![row()];
+
+        let text = render(&o, &plain(), Some(80));
+        assert_eq!(text.matches(id).count(), 1, "{text}");
+        let links = text.split_once("── links ").unwrap().1;
+        let rows: Vec<_> = links
+            .lines()
+            .skip(1)
+            .take_while(|line| !line.is_empty())
+            .collect();
+        let title_start = rows[0].find("Alpha").unwrap();
+        assert!(title_start <= 60, "{links}");
+        assert!(rows.iter().all(|row| row.len() <= 80), "{links}");
+        let roles = rows
+            .iter()
+            .map(|row| row[..20].trim_end())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            roles.trim_end(),
+            "piece, wake on, follows, source",
+            "{links}"
+        );
+        let wrapped_title = rows
+            .iter()
+            .map(|row| &row[title_start..])
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(wrapped_title, title);
     }
 
     #[test]
@@ -1127,6 +1216,7 @@ mod tests {
             o.related_to = vec![
                 DepInfo {
                     id: "fam-000002".into(),
+                    canonical_id: "fam-000002".into(),
                     title: Some("Old target".into()),
                     status: Some(Status::Done),
                     updated: Some("2020-01-01T00:00:00Z".into()),
@@ -1135,6 +1225,7 @@ mod tests {
                 },
                 DepInfo {
                     id: "fam-000003".into(),
+                    canonical_id: "fam-000003".into(),
                     title: None,
                     status: None,
                     updated: None,
@@ -1149,7 +1240,7 @@ mod tests {
             let label = if follows { "follows" } else { "related" };
             // label_width = 7 ("related"), id_width = 10, status_width = 7, date_width = 10 -> lead_width = 42.
             let text = render(&o, &plain(), Some(56));
-            let related_block = text.split_once("── related ").unwrap().1;
+            let related_block = text.split_once("── links ").unwrap().1;
             let lines: Vec<&str> = related_block
                 .lines()
                 .skip(1)
@@ -1210,6 +1301,7 @@ mod tests {
         let mut o = fields();
         o.source_task = Some(DepInfo {
             id: "sci-000001".into(),
+            canonical_id: "sci-000001".into(),
             title: Some("Source".into()),
             status: Some(Status::Todo),
             updated: Some("2026-01-01T00:00:00Z".into()),
@@ -1237,8 +1329,8 @@ mod tests {
             },
         );
         let text = render(&o, &plain(), Some(56));
-        let block = text.split_once("── related ").unwrap().1;
-        assert!(block.find("source").unwrap() < block.find("followed by").unwrap());
+        let block = text.split_once("── links ").unwrap().1;
+        assert!(block.find("child").unwrap() < block.find("source").unwrap());
         assert!(block.find("followed by").unwrap() < block.find("child").unwrap());
         let lines: Vec<_> = block
             .lines()
@@ -1257,7 +1349,7 @@ mod tests {
     }
 
     #[test]
-    fn dependent_rows_sit_between_source_and_followed_by() {
+    fn dependent_rows_precede_followed_by_children_and_source() {
         let mut o = fields();
         let row = |id: &str, title: &str| Related {
             id: id.into(),
@@ -1267,6 +1359,7 @@ mod tests {
         };
         o.source_task = Some(DepInfo {
             id: "sci-000001".into(),
+            canonical_id: "sci-000001".into(),
             title: Some("Source".into()),
             status: Some(Status::Todo),
             updated: Some("2026-01-01T00:00:00Z".into()),
@@ -1277,15 +1370,15 @@ mod tests {
         o.followed_by = vec![row("sci-000002", "Later")];
         o.children = vec![row("sci-000003", "Child")];
         let text = render(&o, &plain(), Some(120));
-        let block = text.split_once("── related ").unwrap().1;
+        let block = text.split_once("── links ").unwrap().1;
         let at = |label: &str| {
             block
                 .find(label)
                 .unwrap_or_else(|| panic!("{label}: {block}"))
         };
-        assert!(at("source") < at("dependent  "));
         assert!(at("dependent  ") < at("followed by"));
         assert!(at("followed by") < at("child"));
+        assert!(at("child") < at("source"));
         assert!(block.contains("fam-000004"), "{block}");
     }
 

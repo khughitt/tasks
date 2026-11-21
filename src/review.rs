@@ -174,27 +174,59 @@ fn stamp(text: &str) -> OffsetDateTime {
     crate::time::parse(text).expect("record stamps are validated at parse")
 }
 
+/// An invalid review-metadata combination on a stored record, classified once for writers
+/// and `check` (docs/task-model.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MetadataIssue {
+    ReviewedNonIdea(Status),
+    AwaitingUserWithoutReviewed,
+    ReviewedAtWithoutReviewed,
+}
+
+/// Returns every invalid review-metadata combination on `task` in the canonical order:
+/// `ReviewedNonIdea`, `AwaitingUserWithoutReviewed`, `ReviewedAtWithoutReviewed`.
+pub(crate) fn metadata_issues(task: &Task) -> impl Iterator<Item = MetadataIssue> {
+    [
+        (task.reviewed && task.status != Status::Idea)
+            .then_some(MetadataIssue::ReviewedNonIdea(task.status)),
+        (task.awaiting_user && !task.reviewed)
+            .then_some(MetadataIssue::AwaitingUserWithoutReviewed),
+        (task.reviewed_at.is_some() && !task.reviewed)
+            .then_some(MetadataIssue::ReviewedAtWithoutReviewed),
+    ]
+    .into_iter()
+    .flatten()
+}
+
 /// The refusal for `reviewed` on anything but an idea (docs/user-guide.md).
-pub fn not_an_idea(task: &Task) -> Error {
+fn not_an_idea(id: &TaskId, status: Status) -> Error {
     Error::Validation(format!(
-        "{} is {}; only an idea carries reviewed",
-        task.id,
-        task.status.as_str()
+        "{id} is {}; only an idea carries reviewed",
+        status.as_str()
     ))
 }
 
 /// The refusal for `awaiting_user` without `reviewed` (docs/user-guide.md).
-pub fn not_reviewed(task: &Task) -> Error {
+fn not_reviewed(id: &TaskId) -> Error {
     Error::Validation(format!(
-        "{} is not reviewed; only a reviewed idea carries awaiting_user",
-        task.id
+        "{id} is not reviewed; only a reviewed idea carries awaiting_user"
     ))
+}
+
+fn validation_error(id: &TaskId, issue: MetadataIssue) -> Error {
+    match issue {
+        MetadataIssue::ReviewedNonIdea(status) => not_an_idea(id, status),
+        MetadataIssue::AwaitingUserWithoutReviewed => not_reviewed(id),
+        MetadataIssue::ReviewedAtWithoutReviewed => {
+            Error::Validation(format!("{id} carries reviewed_at without reviewed"))
+        }
+    }
 }
 
 /// The write-time rule (docs/user-guide.md docs/user-guide.md). Never called
 /// from parsing: `parse_physical` must accept a hand-edited record so `check` can report it
 /// and an editor save can transition it.
-pub fn validate(task: &Task) -> Result<()> {
+pub(crate) fn validate(task: &Task) -> Result<()> {
     if !task.wake_on.is_empty() && task.status != Status::Shelved {
         return Err(Error::Validation(format!(
             "{} is {}; only a shelved task carries wake_on",
@@ -202,17 +234,8 @@ pub fn validate(task: &Task) -> Result<()> {
             task.status.as_str()
         )));
     }
-    if task.reviewed && task.status != Status::Idea {
-        return Err(not_an_idea(task));
-    }
-    if task.awaiting_user && !task.reviewed {
-        return Err(not_reviewed(task));
-    }
-    if task.reviewed_at.is_some() && !task.reviewed {
-        return Err(Error::Validation(format!(
-            "{} carries reviewed_at without reviewed",
-            task.id
-        )));
+    if let Some(issue) = metadata_issues(task).next() {
+        return Err(validation_error(&task.id, issue));
     }
     Ok(())
 }
@@ -256,8 +279,7 @@ impl Awaiting {
 }
 
 /// Applies `review`, then `awaiting`, before anything is written, so a refusal leaves the
-/// file untouched. A write that changes neither (a plain note) on a reviewed idea warns:
-/// it does not readmit the idea.
+/// file untouched. Reminds the caller when a plain note leaves an explicit user wait in place.
 pub fn apply(
     task: &mut Task,
     review: Review,
@@ -267,7 +289,7 @@ pub fn apply(
     match review {
         Review::Set => {
             if task.status != Status::Idea {
-                return Err(not_an_idea(task));
+                return Err(not_an_idea(&task.id, task.status));
             }
             task.reviewed = true;
             task.reviewed_at = Some(crate::time::now());
@@ -282,10 +304,10 @@ pub fn apply(
     match awaiting {
         Awaiting::Set => {
             if task.status != Status::Idea {
-                return Err(not_an_idea(task));
+                return Err(not_an_idea(&task.id, task.status));
             }
             if !task.reviewed {
-                return Err(not_reviewed(task));
+                return Err(not_reviewed(&task.id));
             }
             task.awaiting_user = true;
         }
@@ -300,18 +322,11 @@ pub fn apply(
             }
         }
     }
-    if review == Review::Keep && awaiting == Awaiting::Keep && task.reviewed {
-        warnings.push(if task.awaiting_user {
-            format!(
-                "{} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope",
-                task.id
-            )
-        } else {
-            format!(
-                "{} stays reviewed; add --no-reviewed to readmit it for scope",
-                task.id
-            )
-        });
+    if review == Review::Keep && awaiting == Awaiting::Keep && task.reviewed && task.awaiting_user {
+        warnings.push(format!(
+            "{} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope",
+            task.id
+        ));
     }
     Ok(())
 }
@@ -601,5 +616,65 @@ mod tests {
         task.status = crate::model::Status::Todo;
         task.reviewed = false;
         assert!(validate(&task).is_ok());
+    }
+
+    #[test]
+    fn metadata_issues_orders_simultaneous_and_status_violations() {
+        let parse = |status: &str, extra: &str| {
+            crate::history::fixture(
+                &format!(
+                    "---\nid: sci-000001\ntitle: T\nstatus: {status}\npriority: 2\n{extra}\
+                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+                     depends: []\ntags: []\n---\n"
+                ),
+                "sci-000001.md",
+            )
+            .unwrap()
+        };
+        for valid in [
+            parse("idea", ""),
+            parse("idea", "reviewed: true\n"),
+            parse(
+                "idea",
+                "reviewed: true\nawaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z\n",
+            ),
+            parse("todo", ""),
+        ] {
+            assert_eq!(metadata_issues(&valid).collect::<Vec<_>>(), []);
+            assert!(validate(&valid).is_ok());
+        }
+
+        let reviewed_todo = parse(
+            "todo",
+            "reviewed: true\nawaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z\n",
+        );
+        assert_eq!(
+            metadata_issues(&reviewed_todo).collect::<Vec<_>>(),
+            [MetadataIssue::ReviewedNonIdea(Status::Todo)]
+        );
+        assert_eq!(
+            validate(&reviewed_todo).unwrap_err().to_string(),
+            "sci-000001 is todo; only an idea carries reviewed"
+        );
+
+        for status in ["idea", "todo"] {
+            let both = parse(
+                status,
+                "awaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z\n",
+            );
+            assert_eq!(
+                metadata_issues(&both).collect::<Vec<_>>(),
+                [
+                    MetadataIssue::AwaitingUserWithoutReviewed,
+                    MetadataIssue::ReviewedAtWithoutReviewed,
+                ],
+                "{status}"
+            );
+            assert_eq!(
+                validate(&both).unwrap_err().to_string(),
+                "sci-000001 is not reviewed; only a reviewed idea carries awaiting_user",
+                "{status}"
+            );
+        }
     }
 }
