@@ -371,11 +371,17 @@ fn dispatch(
         Command::Detach { id, name, why } => {
             attach::detach(open_id_write_ctx(dir, &id, host.clone())?, id, name, why)
         }
-        Command::Start { id, force, reason } => status::start(
+        Command::Start {
+            id,
+            force,
+            reason,
+            claim_fence_v1,
+        } => status::start(
             open_id_write_ctx(dir, &id, host.clone())?,
             id,
             force,
             reason,
+            claim_fence_v1,
         ),
         Command::Park {
             id,

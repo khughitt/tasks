@@ -715,6 +715,7 @@ summary = "Claim a task: status=doing, owner=you"
 args = [{ name = "id", value = "ref", required = true }]
 options = [
   { shared = "force", value = "none" },
+  { names = ["--claim-fence-v1"], value = "string" },
   { names = ["--reason"], value = "string" },
 ]
 
@@ -1716,6 +1717,40 @@ options = [
   { names = ["--pmid"], value = "string" },
   { names = ["--isbn"], value = "string" },
   { names = ["--accession"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["source-assertion"]
+summary = "Record that a source asserts, denies or hypothesizes a proposition at a quoted span"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--source"], value = "string", required = true },
+  { names = ["--proposition"], value = "string", required = true },
+  { names = ["--sign"], value = "enum", values = ["asserts", "denies", "hypothesizes"], required = true },
+  { names = ["--quote"], value = "string", required = true },
+  { names = ["--locator"], value = "string", required = true },
+  { names = ["--sha256"], value = "string", required = true },
+  { names = ["--media-type"], value = "string", required = true },
+  { names = ["--extent"], value = "enum", values = ["full", "abstract"], required = true },
+  { names = ["--extracted-by"], value = "string", required = true },
+  { names = ["--attributed-to"], value = "string" },
+  { names = ["--title"], value = "string", required = true },
+  { names = ["--body"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["source-coreference"]
+summary = "Attest whether two source records identify the same citable version"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--left"], value = "string", required = true },
+  { names = ["--right"], value = "string", required = true },
+  { names = ["--stance"], value = "enum", values = ["same", "distinct"], required = true },
+  { names = ["--grounds"], value = "string", required = true },
 ]
 
 [[cli.science.commands]]

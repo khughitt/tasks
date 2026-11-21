@@ -1,4 +1,5 @@
 //! Host-local ownership claims and serialized record mutations.
+pub mod fence;
 mod wait;
 use crate::error::{Error, Result};
 use crate::model::TaskId;

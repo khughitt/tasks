@@ -637,6 +637,7 @@ pub fn finish_report(ctx: &mut Ctx) -> Vec<crate::record_commit::Committed> {
 pub fn id_out(mut ctx: Ctx, task: &Task) -> Output {
     finish(&mut ctx);
     Output::Id(crate::output::IdOut {
+        claim_fence_v1: None,
         id: task.id.to_string(),
         warnings: ctx.warnings,
     })

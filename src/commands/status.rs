@@ -6,8 +6,21 @@ use crate::error::{Error, Result};
 use crate::model::{Status, Task, TaskId};
 use crate::output::Output;
 
-pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> Result<Output> {
-    let mut task = load(&mut ctx, &id)?;
+pub fn start(
+    mut ctx: Ctx,
+    id: String,
+    force: bool,
+    reason: Option<String>,
+    fence: Option<crate::claims::fence::Binding>,
+) -> Result<Output> {
+    let mut task = if let Some(binding) = &fence {
+        let task_id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
+        let (task, raw) = super::load_with_raw(&mut ctx, &task_id)?;
+        binding.check_source(&task.id.to_string(), &ctx.project.task_path(&task.id), &raw)?;
+        task
+    } else {
+        load(&mut ctx, &id)?
+    };
     if task.status == Status::Shelved {
         return Err(Error::InvalidTransition(
             "shelved".into(),
@@ -71,6 +84,14 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
         Some((_, ClaimIntent::Acquire(claim))) => claim.session.clone(),
         _ => unreachable!("start prepared an acquire claim"),
     };
+    if fence
+        .as_ref()
+        .is_some_and(|binding| binding.session != session)
+    {
+        return Err(Error::Validation(
+            "claim fence acquired session mismatch".into(),
+        ));
+    }
     if !blockers.is_empty() {
         let reason = reason.as_deref().expect("override reason was validated");
         let ids = blockers
@@ -122,7 +143,7 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
     if let Some(notes) = holder_notes {
         super::note_need_holders(&mut ctx, notes);
     }
-    super::finish(&mut ctx);
+    let publications = super::finish_report(&mut ctx);
     warn_if_uncommitted_with_worktrees(&mut ctx, &task);
     if crate::hierarchy::descendants(&local, &task.id, &ctx.registry)
         .iter()
@@ -133,7 +154,24 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
             task.id, task.id
         ));
     }
-    Ok(id_out(ctx, &task))
+    let claim_fence_v1 = fence.map(|binding| {
+        use crate::claims::fence::Publication;
+        match publications
+            .into_iter()
+            .find(|result| result.paths.contains(&binding.record))
+        {
+            Some(result) if ctx.warnings.is_empty() => Publication::Committed {
+                binding,
+                commit: result.commit,
+            },
+            _ => Publication::Unknown { binding },
+        }
+    });
+    Ok(Output::Id(crate::output::IdOut {
+        id: task.id.to_string(),
+        warnings: ctx.warnings,
+        claim_fence_v1,
+    }))
 }
 
 fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {

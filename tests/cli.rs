@@ -30245,3 +30245,120 @@ fn foreign_claim_hints_cover_guarded_writes_start_and_ordinary_writes() {
         "{detail}"
     );
 }
+
+#[test]
+fn fenced_start_validates_handoff_and_reports_only_confirmed_publication() {
+    use sha2::{Digest, Sha256};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::{
+        fs::{MetadataExt, PermissionsExt},
+        process::CommandExt,
+    };
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    git(&root, &["init", "-q", "-b", "main"]);
+    common::git_fixture::assert_repo(env.home.path(), &root);
+    let lock_path = env.home.path().join("item.lock");
+    let lock = File::create(&lock_path).unwrap();
+    let meta = lock.metadata().unwrap();
+    let add = || id_of(env.json(&root, &["add", "test fenced writer"]));
+    let manual = add();
+    assert!(
+        env.json(&root, &["start", &manual])
+            .get("claim_fence_v1")
+            .is_none()
+    );
+    let id = add();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "fixture"]);
+    let record = |id: &str| root.join(format!("tasks/{id}.md"));
+    let binding = |id: &str| {
+        serde_json::json!({
+            "task": id, "session": "band:fixture", "record": record(id),
+            "before_sha256": format!("{:x}", Sha256::digest(std::fs::read(record(id)).unwrap())),
+            "dev": meta.dev().to_string(), "ino": meta.ino().to_string()
+        })
+    };
+    let run = |id: &str, handoff: &serde_json::Value| {
+        let mut cmd = env.raw(&root);
+        cmd.env("TASKS_SESSION", "band:fixture")
+            .env("TASKS_SESSION_PID", std::process::id().to_string())
+            .args(["start", id, "--claim-fence-v1", &handoff.to_string()]);
+        let fd = lock.as_raw_fd();
+        unsafe {
+            cmd.pre_exec(move || {
+                if libc::dup2(fd, 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        cmd.output().unwrap()
+    };
+    let good = binding(&id);
+    assert!(!run(&id, &good).status.success());
+    lock.try_lock().unwrap();
+    for field in ["task", "dev", "ino", "record", "session", "before_sha256"] {
+        let mut bad = good.clone();
+        bad[field] = "mismatch".into();
+        let refused = run(&id, &bad);
+        assert!(!refused.status.success(), "{field}");
+        let error: serde_json::Value = serde_json::from_slice(&refused.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "claim_fence_refused", "{field}");
+        assert_eq!(binding(&id), good);
+        assert!(env.json(&root, &["show", &id])["claim"].is_null());
+    }
+    let deferred = run(&id, &good);
+    assert!(deferred.status.success(), "{deferred:?}");
+    let receipt = |out: &[u8]| {
+        serde_json::from_slice::<serde_json::Value>(out).unwrap()["claim_fence_v1"].clone()
+    };
+    assert_eq!(receipt(&deferred.stdout)["outcome"], "unknown");
+
+    let cfg = root.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&cfg).unwrap();
+    if text.contains("[git]") {
+        text = text.replace("commit = false", "commit = true");
+    } else {
+        text.push_str("\n[git]\ncommit = true\n");
+    }
+    std::fs::write(cfg, text).unwrap();
+    let second = add();
+    let hook = root.join(".git/hooks/pre-commit");
+    git(&root, &["config", "core.hooksPath", ".git/hooks"]);
+    git(&root, &["config", "hook.pre-commit.enabled", "true"]);
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\n/bin/ls -l /proc/self/fd > \"$HOME/fds\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let expected = binding(&second);
+    let out = run(&second, &expected);
+    assert!(out.status.success(), "{out:?}");
+    let published = receipt(&out.stdout);
+    assert_eq!(published["outcome"], "committed", "{out:?}");
+    assert_eq!(published["binding"], expected);
+    let committed = common::git_fixture::command(env.home.path(), &root)
+        .args([
+            "show",
+            &format!(
+                "{}:tasks/{second}.md",
+                published["commit"].as_str().unwrap()
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(committed.status.success());
+    assert_eq!(committed.stdout, std::fs::read(record(&second)).unwrap());
+    assert!(
+        !std::fs::read_to_string(env.home.path().join("fds"))
+            .unwrap()
+            .contains(lock_path.to_str().unwrap())
+    );
+    let third = add();
+    std::fs::write(hook, "#!/bin/sh\nexit 1\n").unwrap();
+    let failed = run(&third, &binding(&third));
+    assert!(failed.status.success());
+    assert_eq!(receipt(&failed.stdout)["outcome"], "unknown");
+}

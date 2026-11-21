@@ -35,6 +35,23 @@ refresh or follow a live claim only when the caller already owns it, never makin
 a foreign session the owner. Claim and record writes can fail separately: inspect
 the named landed paths before retrying.
 
+A supervised Linux writer can discover the v1 handoff in `tasks start --help`.
+It sends `tasks start <id> --claim-fence-v1 '<JSON>'` with the already exclusively
+flocked regular file on descriptor 3. The JSON fields are strings: `task` (full
+id), `session` (exact `TASKS_SESSION`), `record` (canonical task file path),
+`before_sha256` (lowercase SHA-256 of the file bytes), and `dev` and `ino`
+(decimal lock device and inode). It cannot override a halt or force a takeover.
+Tasks sets close-on-exec before any helper, checks the source under the mutation
+lock, and retains its descriptor through synchronous publication or rollback.
+Closing the process releases its copy. A Git process already publishing can
+outlive a killed Tasks writer.
+
+JSON success adds `claim_fence_v1` with the original `binding` and an `outcome`.
+A warning-free, verified commit of this record yields `committed` and its full
+`commit` id. A deferred, failed or unidentified commit, or a warning, yields
+`unknown`. An absent result is also uncertain. `claim_fence_refused` identifies
+a rejected handoff before claim mutation. Manual starts retain their usual JSON.
+
 Live or unverifiable foreign claims block work. `ready`, `next` and `prime` omit
 held choices and explain why. Exclusive needs and lanes also block other
 sessions' picks. A claim reserves the exclusive needs declared by that task's

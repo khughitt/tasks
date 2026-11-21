@@ -191,6 +191,7 @@ mod tests {
         assert!(parked.meta().needs_theme);
         assert!(!parked.meta().shows_priority);
         let id = Output::Id(IdOut {
+            claim_fence_v1: None,
             id: "xx-000001".into(),
             warnings: vec![],
         });

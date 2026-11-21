@@ -872,6 +872,9 @@ pub enum Command {
     Start {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
+        /// Require the v1 supervised claim handoff on inherited descriptor 3.
+        #[arg(long, conflicts_with_all = ["force", "reason"])]
+        claim_fence_v1: Option<crate::claims::fence::Binding>,
         /// Take over a claim another live session holds, or acquire past a held need.
         #[arg(long)]
         force: bool,

@@ -122,14 +122,22 @@ fn usage_error(error: &clap::Error) -> String {
 
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
-    if let Some(code) = commands::hooks::try_run(&args) {
-        std::process::exit(code);
+    // A fenced request must be parsed and confined before the hook or completion
+    // dispatch can run a child. Clap parsing itself starts no subprocess.
+    let fence_arg = args.iter().any(|arg| {
+        let bytes = arg.as_encoded_bytes();
+        bytes == b"--claim-fence-v1" || bytes.starts_with(b"--claim-fence-v1=")
+    });
+    if !fence_arg {
+        if let Some(code) = commands::hooks::try_run(&args) {
+            std::process::exit(code);
+        }
+        // Must run before anything writes to stdout. Returns immediately unless
+        // TASKS_COMPLETE is set, so an ordinary run pays one getenv.
+        clap_complete::CompleteEnv::with_factory(cli::Cli::command)
+            .var("TASKS_COMPLETE")
+            .complete();
     }
-    // Must run before anything writes to stdout. Returns immediately unless
-    // TASKS_COMPLETE is set, so an ordinary run pays one getenv.
-    clap_complete::CompleteEnv::with_factory(cli::Cli::command)
-        .var("TASKS_COMPLETE")
-        .complete();
 
     let cli = match cli::Cli::try_parse() {
         Ok(cli) => cli,
@@ -147,6 +155,16 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let cli::Command::Start {
+        id,
+        claim_fence_v1: Some(fence),
+        ..
+    } = &cli.command
+        && let Err(error) = fence.confine(id)
+    {
+        to_stderr(&format!("{}\n", output::render_error(&error)));
+        std::process::exit(1);
+    }
     // clap checks a conflict within one command's arguments; a global given before the
     // command and its rival after it land in different commands, so the pair is checked
     // here, whatever the placement.

@@ -128,6 +128,8 @@ pub struct RenameOut {
 
 #[derive(Serialize)]
 pub struct IdOut {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_fence_v1: Option<crate::claims::fence::Publication>,
     pub id: String,
     pub warnings: Vec<String>,
 }

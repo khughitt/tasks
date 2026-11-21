@@ -146,6 +146,8 @@ mean those documents were verified.
    what that evidence leaves to the user.
    `ready` and `next` omit live claims; see the [claim and checkout contract](../../docs/ownership.md#acquire-refresh-and-release)
    and `tasks start --help` / `tasks release --help` for ownership and recovery.
+   A supervised writer using `--claim-fence-v1` follows the descriptor, source
+   binding and publication contract in the project's `docs/ownership.md`.
    `tasks start --force <id>` deliberately takes over another session's claim and records it;
    do not treat it as an ordinary retry. When a harness continues your own conversation under
    a new native session id (a Claude Code `/background` hand-off or `--resume` copy, or Codex

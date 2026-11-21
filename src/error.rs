@@ -46,6 +46,8 @@ pub enum Error {
     Parse { file: String, detail: String },
     #[error("{0}")]
     Validation(String),
+    #[error("{0}")]
+    ClaimFenceRefused(String),
     #[error("{0} has open dependencies: {1}")]
     OpenDependencies(String, String),
     #[error("{0} has open descendants: {1}")]
@@ -186,6 +188,7 @@ impl Error {
                 file,
                 detail: detail + suffix,
             },
+            Error::ClaimFenceRefused(detail) => Error::ClaimFenceRefused(detail + suffix),
             Error::Validation(detail) => Error::Validation(detail + suffix),
             Error::RetainedOwnership(detail) => Error::RetainedOwnership(detail + suffix),
             Error::RetainedInput(detail) => Error::RetainedInput(detail + suffix),
@@ -293,6 +296,7 @@ impl Error {
             Error::UnresolvableId(_) => "unresolvable_id",
             Error::InvalidId(..) => "invalid_id",
             Error::Parse { .. } => "parse",
+            Error::ClaimFenceRefused(_) => "claim_fence_refused",
             Error::Validation(_) => "validation",
             Error::RetainedOwnership(_) => "retained_ownership",
             Error::RetainedInput(_) => "retained_input",
