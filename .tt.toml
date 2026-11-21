@@ -1,2 +1,0 @@
-automatic_broad = false
-broad_targets = ["test", "test-fast", "check-code"]
