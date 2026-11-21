@@ -9271,6 +9271,43 @@ fn project_colors_reject_invalid_config_values() {
 }
 
 #[test]
+fn where_uses_the_live_policy_in_a_pre_rename_worktree() {
+    let mut env = TestEnv::new();
+    let main = env.init("old");
+    let path = main.join("tasks/.config.toml");
+    std::fs::write(&path, "prefix = \"old\"\nstage = \"supported\"\n").unwrap();
+    git(&main, &["init", "-qb", "main"]);
+    git(&main, &["add", "tasks"]);
+    git(&main, &["commit", "-qm", "Before rename"]);
+    git(&main, &["tag", "before-rename"]);
+    env.json(&main, &["rename", "old", "new"]);
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("supported", "experimental")).unwrap();
+
+    let side = main.join("side");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            side.to_str().unwrap(),
+            "before-rename",
+        ],
+    );
+    let current = env.json(&main, &["where"]);
+    assert_eq!(current["project"]["stage"], "experimental");
+    let historical = env.json(&side, &["where"]);
+    assert_eq!(historical["project"]["prefix"], "old");
+    assert_eq!(historical["project"]["registered"], true, "{historical}");
+    assert_eq!(
+        historical["project"]["stage"], "experimental",
+        "{historical}"
+    );
+}
+
+#[test]
 fn where_recognizes_project_repository_before_worktree_has_config() {
     let env = TestEnv::new();
     let holder = tempfile::tempdir().unwrap();

@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::link::{GitTree, holds_records, project_of_tree, refuse_moved};
+use crate::link::{GitTree, holds_records, project_of_tree, records_moved};
 use crate::output::{Output, WhereOut, WhereProject};
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Kind, Project};
@@ -38,7 +38,8 @@ pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
             };
             let project = match walked {
                 Some(project) => {
-                    let authority = crate::scope::config_dir(&registry, &project.prefix);
+                    let prefix = registry.canonical_prefix(&project.prefix).to_owned();
+                    let authority = crate::scope::config_dir(&registry, &prefix);
                     let corresponding = main.as_ref().and_then(|main| {
                         project
                             .records
@@ -47,18 +48,25 @@ pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
                             .map(|rel| main.join(rel))
                     });
                     let registered_root = registry
-                        .project_root(&project.prefix)
+                        .project_root(&prefix)
                         .map(crate::rename::root_identity)
                         .transpose()?;
                     let is_registered_tree =
                         corresponding.is_some() && corresponding == registered_root;
-                    if is_registered_tree {
-                        refuse_moved(&registry, &project)?;
+                    if is_registered_tree
+                        && project.kind == Kind::InTree
+                        && let Some(records) = registry.records_dir(&prefix)
+                        && records != project.records
+                    {
+                        return Err(records_moved(&project.prefix, records));
                     }
                     let registered = authority
                         .as_deref()
                         .filter(|root| *root == project.records || is_registered_tree);
-                    Some(shown(project, registered))
+                    Some(shown(
+                        project,
+                        registered.map(|root| (root, prefix.as_str())),
+                    ))
                 }
                 None => {
                     let project = match project_of_tree(&registry, &tree)? {
@@ -67,7 +75,8 @@ pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
                     };
                     project.map(|project| {
                         let registered = project.records.clone();
-                        shown(project, Some(&registered))
+                        let prefix = project.prefix.clone();
+                        shown(project, Some((&registered, &prefix)))
                     })
                 }
             };
@@ -105,22 +114,23 @@ fn walk(dir: &Path, stop: Option<&Path>) -> Result<Option<Project>> {
     Ok(None)
 }
 
-fn shown(project: Project, registered: Option<&Path>) -> WhereProject {
+fn shown(project: Project, registered: Option<(&Path, &str)>) -> WhereProject {
     let mut retired = project.retired.is_some();
     // Project routing still describes the invoking worktree. Policy uses the
     // registered config even when this worktree predates a declaration change.
     let stage = match registered {
-        Some(root) if root != project.records => Project::open(root).and_then(|authority| {
-            if authority.prefix != project.prefix {
-                return Err(crate::error::Error::Config(format!(
-                    "{}: expected registered prefix {}",
-                    root.join(CONFIG_REL).display(),
-                    project.prefix
-                )));
-            }
-            retired = authority.retired.is_some();
-            authority.declared_stage()
-        }),
+        Some((root, prefix)) if root != project.records => {
+            Project::open(root).and_then(|authority| {
+                if authority.prefix != prefix {
+                    return Err(crate::error::Error::Config(format!(
+                        "{}: expected registered prefix {prefix}",
+                        root.join(CONFIG_REL).display()
+                    )));
+                }
+                retired = authority.retired.is_some();
+                authority.declared_stage()
+            })
+        }
         _ => project.declared_stage(),
     };
     let (stage, stage_error) = stage.map_or_else(
