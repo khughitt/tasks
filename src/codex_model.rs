@@ -341,7 +341,7 @@ mod tests {
         if let Some(home) = std::env::var_os(PROBE_HOME) {
             assert_eq!(run_relay(TIMEOUT, STDOUT_CAP), Run::Timeout);
             fs::write(Path::new(&home).join("resolved"), "yes").unwrap();
-            std::io::stdin().read(&mut [0]).unwrap();
+            assert_eq!(std::io::stdin().read(&mut [0]).unwrap(), 0);
             return;
         }
 
