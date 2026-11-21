@@ -1,8 +1,9 @@
 use serde_json::Value;
 use std::ffi::OsStr;
-use std::io::Read;
-use std::process::{Command, Stdio};
-use std::sync::{OnceLock, mpsc};
+use std::io::{ErrorKind, Read};
+use std::os::fd::AsRawFd;
+use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(2);
@@ -97,42 +98,50 @@ pub(crate) fn run_relay(timeout: Duration, cap: usize) -> Run {
         Err(_) => return Run::Failed,
     };
 
-    let Some(stdout) = child.stdout.take() else {
+    let result = collect_relay(&mut child, deadline, cap);
+    if !matches!(result, Run::Exited { .. }) {
         let _ = child.kill();
         let _ = child.wait();
+    }
+    result
+}
+
+fn collect_relay(child: &mut Child, deadline: Instant, cap: usize) -> Run {
+    let Some(mut pipe) = child.stdout.take() else {
         return Run::Failed;
     };
+    let fd = pipe.as_raw_fd();
+    // Keep stdout on the deadline owner's thread so timeout closes it immediately.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Run::Failed;
+    }
 
-    let limit = (cap as u64).saturating_add(1);
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let res = stdout.take(limit).read_to_end(&mut buf).map(|_| buf);
-        let _ = tx.send(res);
-    });
-
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let stdout = match rx.recv_timeout(remaining) {
-        Ok(Ok(buf)) if buf.len() > cap => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Run::Failed;
-        }
-        Ok(Ok(buf)) => buf,
-        Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Run::Failed;
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            drop(rx);
+    let mut stdout = Vec::new();
+    let mut buffer = [0; 4096];
+    loop {
+        if Instant::now() >= deadline {
             return Run::Timeout;
         }
-    };
+        let limit = (cap - stdout.len()).saturating_add(1).min(buffer.len());
+        match pipe.read(&mut buffer[..limit]) {
+            Ok(0) => break,
+            Ok(count) => {
+                stdout.extend_from_slice(&buffer[..count]);
+                if stdout.len() > cap {
+                    return Run::Failed;
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                pause_until_relay_check(deadline)
+            }
+            Err(_) => return Run::Failed,
+        }
+    }
+    drop(pipe);
 
-    loop {
+    while Instant::now() < deadline {
         match child.try_wait() {
             Ok(Some(status)) => {
                 return Run::Exited {
@@ -140,23 +149,19 @@ pub(crate) fn run_relay(timeout: Duration, cap: usize) -> Run {
                     stdout,
                 };
             }
-            Ok(None) => {
-                let now = Instant::now();
-                if now >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Run::Timeout;
-                }
-                let sleep_for = (deadline - now).min(Duration::from_millis(10));
-                std::thread::sleep(sleep_for);
-            }
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Run::Failed;
-            }
+            Ok(None) => pause_until_relay_check(deadline),
+            Err(_) => return Run::Failed,
         }
     }
+    Run::Timeout
+}
+
+fn pause_until_relay_check(deadline: Instant) {
+    std::thread::sleep(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_millis(5)),
+    );
 }
 
 fn valid_model(model: &str) -> bool {
@@ -277,9 +282,8 @@ pub(crate) fn classify(run: Run, tasks_agent: Option<&OsStr>) -> Outcome {
             nearest: Some(harness),
         }) => {
             let matches_env = tasks_agent
-                .and_then(OsStr::to_str)
-                .and_then(|value| value.split('/').next())
-                .is_some_and(|prefix| prefix == harness.as_str());
+                .and_then(|value| value.as_encoded_bytes().split(|&byte| byte == b'/').next())
+                .is_some_and(|prefix| prefix == harness.as_str().as_bytes());
             if matches_env {
                 Outcome::Environment
             } else {
@@ -324,6 +328,73 @@ mod tests {
 
     const VERIFIED_WITH_EFFORT: &[u8] = br#"{"verified":true,"harness":"codex","agent":"codex/mock-model@low","model":"mock-model","effort":"low","reason":null,"source":{"nearest":"codex"}}"#;
     const VERIFIED_WITHOUT_EFFORT: &[u8] = br#"{"verified":true,"harness":"codex","agent":"codex/mock-model","model":"mock-model","effort":null,"reason":null,"source":{"nearest":"codex"}}"#;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn timeout_closes_stdout_while_caller_stays_alive() {
+        use std::fs::{self, OpenOptions};
+        use std::io::{ErrorKind, Write};
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::Path;
+
+        const PROBE_HOME: &str = "TASKS_TEST_RESOLVER_PIPE_HOME";
+        if let Some(home) = std::env::var_os(PROBE_HOME) {
+            assert_eq!(run_relay(TIMEOUT, STDOUT_CAP), Run::Timeout);
+            fs::write(Path::new(&home).join("resolved"), "yes").unwrap();
+            std::io::stdin().read(&mut [0]).unwrap();
+            return;
+        }
+
+        let home = tempfile::tempdir().unwrap();
+        let relay = home.path().join("relay");
+        fs::write(
+            &relay,
+            "#!/bin/sh\necho \"$$\" > \"$HOME/pid\"\nexec sleep 10\n",
+        )
+        .unwrap();
+        fs::set_permissions(&relay, fs::Permissions::from_mode(0o755)).unwrap();
+        let host_path = std::env::var_os("PATH").unwrap();
+        let path = std::env::join_paths(
+            std::iter::once(home.path().to_path_buf()).chain(std::env::split_paths(&host_path)),
+        )
+        .unwrap();
+        let mut probe = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "codex_model::tests::timeout_closes_stdout_while_caller_stays_alive",
+            ])
+            .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", path)
+            .env(PROBE_HOME, home.path())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let wait_for = |name: &str| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Ok(value) = fs::read_to_string(home.path().join(name))
+                    && !value.is_empty()
+                {
+                    break value;
+                }
+                assert!(Instant::now() < deadline, "probe did not publish {name}");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let pid = wait_for("pid");
+        // Keep a writer open after the direct resolver child is killed.
+        let mut writer = OpenOptions::new()
+            .write(true)
+            .open(format!("/proc/{}/fd/1", pid.trim()))
+            .unwrap();
+        wait_for("resolved");
+        let late_write = writer.write_all(b"late resolver output");
+        drop(writer);
+        assert!(probe.wait().unwrap().success());
+        assert_eq!(late_write.unwrap_err().kind(), ErrorKind::BrokenPipe);
+    }
 
     #[test]
     fn triggered_checks_nonempty_codex_thread_id() {

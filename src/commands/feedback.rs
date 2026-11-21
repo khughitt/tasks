@@ -423,18 +423,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let project = Project::init(dir.path(), "tst", None).unwrap();
         let registry = Registry::default();
-        let mut seed = create(
-            &project,
-            &registry,
-            "seed".into(),
-            String::new(),
-            "gap",
-            "from:tst",
-            &super::super::Stamp::default(),
-            Attribution::default(),
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let mut seed =
+            super::super::add::blank(&project, "seed".into(), Status::Idea, None).unwrap();
+        super::super::create(&project, &registry, &mut seed, |_| Ok(())).unwrap();
+        assert!(seed.agent.is_none());
         let id = seed.id.clone();
 
         let always = |_: &Task| Ok(());

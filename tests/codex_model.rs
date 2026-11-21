@@ -325,6 +325,42 @@ fn other_harness_matching() {
 }
 
 #[test]
+fn other_harness_matching_with_non_unicode_agent_suffix() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    install_canned_relay(
+        &env,
+        r#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"claude-code"}}"#,
+        0,
+    );
+    let agent = OsStr::from_bytes(b"claude-code/\xff");
+    let seed = env.json(&dir, &["add", "Seed"]);
+    let id = seed["id"].as_str().unwrap();
+
+    let mut done = codex_cmd(&env, &dir, false);
+    done.env("TASKS_AGENT", agent)
+        .env("TASKS_MODEL", "claude-x")
+        .args(["done", id, "landed"]);
+    let (closed, _, _) = run_json(done);
+    assert_eq!(closed["warnings"], serde_json::json!([]));
+    assert_eq!(env.json(&dir, &["show", id])["task"]["model"], "claude-x");
+
+    let mut add = codex_cmd(&env, &dir, false);
+    let output = add
+        .env("TASKS_AGENT", agent)
+        .args(["add", "Malformed agent"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let failure: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(failure["error"]["kind"], "validation");
+    assert_eq!(
+        failure["error"]["detail"],
+        "TASKS_AGENT is not valid Unicode"
+    );
+}
+
+#[test]
 fn other_harness_absent() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
