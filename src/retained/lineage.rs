@@ -771,7 +771,7 @@ pub fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
     if project.retention_lineage.is_empty() {
         return validate(project);
     }
-    let scoped = super::read::start(project)?;
+    let scoped = super::read::start_lineage_check(project)?;
     let project = &scoped;
     validate(project)?;
     for task in tasks {

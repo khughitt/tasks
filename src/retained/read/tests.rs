@@ -396,6 +396,57 @@ fn validation_read_budget_falls_back_to_reads() {
     }
 }
 #[test]
+fn lineage_check_reuses_history_when_bulk_reads_fill_the_cache() {
+    if isolated(
+        "retained::read::tests::lineage_check_reuses_history_when_bulk_reads_fill_the_cache",
+    ) {
+        return;
+    }
+    let (_dir, project) = fixture();
+    let project = start_lineage_check(&project).unwrap();
+    let session = project.retention_reads.as_ref().unwrap();
+    session.lock().unwrap().max_entries = 8;
+    let head = basis::resolve(&project, "HEAD").unwrap();
+    for n in 0..8 {
+        run(
+            &project,
+            &["ls-tree", "-z", &head, "--", &format!("path-{n}")],
+        )
+        .unwrap();
+    }
+
+    let log_before = starts("log");
+    let ancestry_before = starts("merge-base");
+    for _ in 0..2 {
+        let history = run(
+            &project,
+            &[
+                "log",
+                "--first-parent",
+                "--reverse",
+                "--format=%H",
+                &head,
+                "--",
+                "tasks/.config.toml",
+            ],
+        )
+        .unwrap();
+        assert_eq!(text(history.output.stdout).unwrap().trim(), head);
+        assert!(ancestor(&project, &head, &head).unwrap());
+    }
+    assert_eq!(
+        starts("log") - log_before,
+        1,
+        "reuse the immutable path history"
+    );
+    assert_eq!(
+        starts("merge-base") - ancestry_before,
+        1,
+        "reuse the immutable ancestry result"
+    );
+}
+
+#[test]
 fn validation_read_separates_repositories() {
     if isolated("retained::read::tests::validation_read_separates_repositories") {
         return;

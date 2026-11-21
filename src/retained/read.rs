@@ -36,6 +36,7 @@ struct SessionState {
     max_entries: usize,
     max_bytes: usize,
     used_bytes: usize,
+    reserve_history: bool,
     queries: BTreeMap<QueryKey, Output>,
     tasks: BTreeMap<TaskKey, Task>,
 }
@@ -52,13 +53,23 @@ impl Default for SessionState {
             max_entries: 2048,
             max_bytes: 32 * 1024 * 1024,
             used_bytes: 0,
+            reserve_history: false,
         }
     }
 }
 impl SessionState {
-    fn admit(&mut self, charge: usize) -> Result<bool> {
+    fn admit(&mut self, charge: usize, history_query: bool) -> Result<bool> {
+        // Broad lineage checks read many one-off blobs before replaying retained proofs.
+        let (max_entries, max_bytes) = if self.reserve_history && !history_query {
+            (
+                self.max_entries - self.max_entries / 4,
+                self.max_bytes - self.max_bytes / 4,
+            )
+        } else {
+            (self.max_entries, self.max_bytes)
+        };
         if self.queries.len() + self.tasks.len() + self.lineages.len() + self.memo_entries
-            >= self.max_entries
+            >= max_entries
         {
             super::test_observer::event("cache_saturated", "entries_or_bytes")?;
             return Ok(false);
@@ -67,7 +78,7 @@ impl SessionState {
             super::test_observer::event("cache_saturated", "entries_or_bytes")?;
             return Ok(false);
         };
-        if total > self.max_bytes {
+        if total > max_bytes {
             super::test_observer::event("cache_saturated", "entries_or_bytes")?;
             return Ok(false);
         }
@@ -411,12 +422,21 @@ impl Snapshot {
     }
 }
 pub(crate) fn start(project: &Project) -> Result<Project> {
+    start_pinned(project, Session::default())
+}
+pub(crate) fn start_lineage_check(project: &Project) -> Result<Project> {
+    let session = Session::default();
+    {
+        let mut state = session.lock()?;
+        state.max_entries = 4096;
+        state.reserve_history = true;
+    }
+    start_pinned(project, session)
+}
+fn start_pinned(project: &Project, session: Session) -> Result<Project> {
     let mut p = project.clone();
-    p.retention_reads = Some(Session::default());
-    p.retention_reads
-        .as_ref()
-        .expect("installed session")
-        .snapshot(&p.records)?;
+    session.snapshot(&p.records)?;
+    p.retention_reads = Some(session);
     Ok(p)
 }
 pub(crate) fn start_live(project: &Project) -> Result<Project> {
@@ -480,7 +500,7 @@ pub(crate) fn reserve_memo(project: &Project, bytes: usize) -> Result<Option<Mem
         return Ok(None);
     };
     let mut state = session.lock()?;
-    if !state.admit(charge)? {
+    if !state.admit(charge, false)? {
         return Ok(None);
     }
     state.memo_entries += 1;
@@ -536,7 +556,7 @@ fn remember_validation(p: &Project, name: &str) -> Result<()> {
         let Some(charge) = key.len().checked_add(64) else {
             return Ok(());
         };
-        if !state.lineages.contains_key(&key) && state.admit(charge)? {
+        if !state.lineages.contains_key(&key) && state.admit(charge, false)? {
             state.lineages.insert(key, charge);
         }
     }
@@ -618,6 +638,7 @@ impl Session {
                 || args.starts_with(&["diff", "--quiet"]))
                 && output.status.code() == Some(1));
         if allowed && complete {
+            let history_query = matches!(args, ["log", ..] | ["merge-base", ..]);
             let charge = serde_json::to_vec(&key)
                 .map_err(invalid)?
                 .len()
@@ -627,7 +648,7 @@ impl Session {
             let mut state = self.lock()?;
             if !state.queries.contains_key(&key)
                 && match charge {
-                    Some(n) => state.admit(n)?,
+                    Some(n) => state.admit(n, history_query)?,
                     None => false,
                 }
             {
@@ -677,7 +698,7 @@ pub(crate) fn remember_task(
     let mut state = session.lock()?;
     if !state.tasks.contains_key(&key)
         && match charge {
-            Some(n) => state.admit(n)?,
+            Some(n) => state.admit(n, false)?,
             None => false,
         }
     {

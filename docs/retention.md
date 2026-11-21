@@ -38,12 +38,11 @@ bounded cache. Concurrent ref changes alone do not introduce a stale-basis failu
 the next invocation captures fresh refs. Live storage and protected attachment byte
 checks still run, and malformed or missing history still fails validation.
 
-The cache is discarded on return, including errors. It admits at most 2,048 optional
-entries and 32 MiB of accounted payload/key bytes, without eviction; after admission
-fills, new reads remain uncached. These limits bound retained cache inputs rather
-than exact process RSS. This optimization does not change the standalone retained
-commands' metrics, lifecycle mutation freshness rules, historical ref acceptance,
-locator rules, schemas, or `check` JSON shapes.
+The cache is discarded on return, including errors. The lineage check admits up to
+4,096 entries and 32 MiB of accounted payload and keys without eviction. It reserves
+the last quarter of each budget for path history and ancestry queries. Reads beyond
+their admission limits run uncached. The standalone retained commands keep their
+2,048-entry and 32 MiB limits.
 
 ## Retention records and manifests
 
