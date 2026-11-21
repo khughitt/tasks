@@ -160,10 +160,20 @@ pub fn start(
             .into_iter()
             .find(|result| result.paths.contains(&binding.record))
         {
-            Some(result) if ctx.warnings.is_empty() => Publication::Committed {
-                binding,
-                commit: result.commit,
-            },
+            Some(result)
+                if ctx.warnings.is_empty()
+                    && crate::claims::fence::matches_authored_record(
+                        &result,
+                        &binding,
+                        &ctx.project,
+                        &task,
+                    ) =>
+            {
+                Publication::Committed {
+                    binding,
+                    commit: result.commit,
+                }
+            }
             _ => Publication::Unknown { binding },
         }
     });

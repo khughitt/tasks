@@ -79,3 +79,34 @@ pub enum Publication {
     Committed { binding: Binding, commit: String },
     Unknown { binding: Binding },
 }
+
+/// Compare raw Git blob contents with the deterministic serialization of the
+/// task that save just published. Git clean filters can change the staged blob.
+pub fn matches_authored_record(
+    result: &crate::record_commit::Committed,
+    binding: &Binding,
+    project: &crate::repo::Project,
+    task: &crate::model::Task,
+) -> bool {
+    let Ok(path) = binding.record.strip_prefix(&result.toplevel) else {
+        return false;
+    };
+    let Ok(physical) = project.physical_for_save(task) else {
+        return false;
+    };
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+    crate::git::at(&result.toplevel)
+        .args([
+            "--no-replace-objects",
+            "cat-file",
+            "blob",
+            &format!("{}:{path}", result.commit),
+        ])
+        .output()
+        .is_ok_and(|out| {
+            out.status.success()
+                && out.stdout == crate::format::serialize_physical(&physical).as_bytes()
+        })
+}

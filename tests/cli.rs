@@ -30356,6 +30356,20 @@ fn fenced_start_validates_handoff_and_reports_only_confirmed_publication() {
             .unwrap()
             .contains(lock_path.to_str().unwrap())
     );
+    let filtered = add();
+    std::fs::write(root.join(".gitattributes"), "tasks/*.md filter=fixture\n").unwrap();
+    git(
+        &root,
+        &[
+            "config",
+            "filter.fixture.clean",
+            "sed s/doing/changed-by-filter/g",
+        ],
+    );
+    let transformed = run(&filtered, &binding(&filtered));
+    assert!(transformed.status.success(), "{transformed:?}");
+    assert_eq!(receipt(&transformed.stdout)["outcome"], "unknown");
+    std::fs::remove_file(root.join(".gitattributes")).unwrap();
     let third = add();
     std::fs::write(hook, "#!/bin/sh\nexit 1\n").unwrap();
     let failed = run(&third, &binding(&third));
