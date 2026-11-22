@@ -1,5 +1,6 @@
 mod common;
 use common::{TestEnv, git};
+use sha2::Digest;
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -1662,4 +1663,127 @@ fn an_inventory_without_the_attachments_baseline_fails_to_load() {
         stderr.contains("\"config\"") && stderr.contains("attachments"),
         "{stderr}"
     );
+}
+
+#[test]
+fn task_revision_guards_attachment_sources_and_atomic_notes() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "Guarded attachment"]));
+    let snapshot = env.json(&dir, &["show", &id]);
+    let revision = snapshot["task_revision"]
+        .as_str()
+        .expect("show supplies the task revision");
+    let raw = std::fs::read(dir.join("tasks").join(format!("{id}.md"))).unwrap();
+    assert_eq!(revision, format!("{:x}", sha2::Sha256::digest(&raw)));
+    env.json(&dir, &["note", &id, "An independent impl writer"]);
+    let after_writer = env.json(&dir, &["show", &id]);
+    let fresh = after_writer["task_revision"].as_str().unwrap();
+    assert_ne!(fresh, revision);
+
+    let refusal = env
+        .cmd(&dir)
+        .args([
+            "attach",
+            &id,
+            "missing.txt",
+            "--note",
+            "must not land",
+            "--expect-task-revision",
+            revision,
+        ])
+        .output()
+        .unwrap();
+    assert!(!refusal.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&refusal.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "task_revision_mismatch");
+    assert_eq!(env.json(&dir, &["show", &id]), after_writer);
+
+    write(&dir.join("result.txt"), b"Published bytes");
+    env.cmd(&dir)
+        .args([
+            "attach",
+            &id,
+            "result.txt",
+            "--expect-task-revision",
+            "invalid",
+        ])
+        .assert()
+        .failure();
+    assert_eq!(env.json(&dir, &["show", &id]), after_writer);
+    env.json(
+        &dir,
+        &[
+            "attach",
+            &id,
+            "result.txt",
+            "--note",
+            "published",
+            "--expect-task-revision",
+            fresh,
+        ],
+    );
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, "result.txt")).unwrap(),
+        b"Published bytes"
+    );
+    assert_eq!(
+        notes(&env, &dir, &id).last().map(String::as_str),
+        Some("published")
+    );
+    assert_ne!(env.json(&dir, &["show", &id])["task_revision"], fresh);
+}
+
+#[test]
+fn task_revision_guards_note_and_preserves_the_competing_writer() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "Guarded note"]));
+    let snapshot = env.json(&dir, &["show", &id]);
+    let revision = snapshot["task_revision"]
+        .as_str()
+        .expect("show supplies the task revision");
+    env.json(&dir, &["note", &id, "An independent impl writer"]);
+    let after_writer = env.json(&dir, &["show", &id]);
+    let refusal = env
+        .cmd(&dir)
+        .args([
+            "note",
+            &id,
+            "gate: verified",
+            "--expect-task-revision",
+            revision,
+        ])
+        .output()
+        .unwrap();
+    assert!(!refusal.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&refusal.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "task_revision_mismatch");
+    env.cmd(&dir)
+        .args([
+            "note",
+            &id,
+            "must not land",
+            "--expect-task-revision",
+            "invalid",
+        ])
+        .assert()
+        .failure();
+    assert_eq!(env.json(&dir, &["show", &id]), after_writer);
+    let fresh = after_writer["task_revision"].as_str().unwrap();
+    env.json(
+        &dir,
+        &[
+            "note",
+            &id,
+            "Checked after refreshing",
+            "--expect-task-revision",
+            fresh,
+        ],
+    );
+    assert_eq!(
+        notes(&env, &dir, &id),
+        ["An independent impl writer", "Checked after refreshing"]
+    );
+    assert_ne!(env.json(&dir, &["show", &id])["task_revision"], fresh);
 }

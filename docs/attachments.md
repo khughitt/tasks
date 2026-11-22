@@ -222,3 +222,15 @@ still apply, with no multipart/compression/off-tree bypass for note segments.
 Body-dominant records may still warn; preserve exact body bytes before editing.
 Multipart published/local and removal reuse verdicts must be read independently.
 Local atomic writes and rollback do not establish cross-host transactions.
+
+### Guarding a publication with the task revision
+
+`tasks show TASK --json` includes `task_revision`, the SHA-256 digest of the
+physical task record read for that view. A caller can pass it to
+`tasks attach` or `tasks note` with `--expect-task-revision SHA256`.
+The command compares the digest under the existing project mutation lock
+before reading its input or changing the task. On mismatch it returns
+`task_revision_mismatch` and the guarded write has no effect. Read a fresh
+view and reevaluate the decision before retrying. The revision refers to the
+task file, including its attachment ledger and note archive references. It
+does not fence edits that bypass the Tasks mutation lock.

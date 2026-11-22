@@ -50,6 +50,17 @@ pub struct Cli {
     pub command: Command,
 }
 
+fn parse_task_revision(value: &str) -> Result<String, String> {
+    if value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Ok(value.to_owned());
+    }
+    Err("task revision must be a lowercase SHA-256 digest".into())
+}
+
 #[derive(Args, Debug)]
 pub(crate) struct AttachArgs {
     /// The files to copy, or a single `-` for stdin (which needs --name).
@@ -70,6 +81,9 @@ pub(crate) struct AttachArgs {
     /// Append one note after the attachment ledger entries. Repeat to append more in order.
     #[arg(long = "note", value_name = "TEXT")]
     pub(crate) notes: Vec<String>,
+    /// Write only if the task revision from show --json still matches.
+    #[arg(long, value_name = "SHA256", value_parser = parse_task_revision)]
+    pub(crate) expect_task_revision: Option<String>,
     /// Stamp each caller note with this session's harness provenance.
     #[arg(long)]
     pub(crate) stamp: bool,
@@ -841,6 +855,9 @@ pub enum Command {
         /// Read one note per line; validate all lines before saving once.
         #[arg(long)]
         stdin: bool,
+        /// Write only if the task revision from show --json still matches.
+        #[arg(long, value_name = "SHA256", value_parser = parse_task_revision)]
+        expect_task_revision: Option<String>,
         /// Stamp the note with this session's harness provenance, as lifecycle notes are.
         #[arg(long)]
         stamp: bool,

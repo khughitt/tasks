@@ -141,11 +141,12 @@ pub fn describe(
     fetch: Fetch,
     host: &crate::config::HostConfig,
 ) -> Result<ShowFields> {
-    let (task, (attached, problems)) = {
+    let (task, task_revision, (attached, problems)) = {
         let _guard = crate::attachments::transaction::read_guard(project, |owner| owner == id)?;
-        let task = project.read_task(id)?;
+        let (task, raw) = project.read_task_with_raw(id)?;
+        let task_revision = crate::multipart::content::sha256_hex(raw.as_bytes());
         let files = crate::attachments::audit_task(project, &task)?;
-        (task, files)
+        (task, task_revision, files)
     };
     let mut resolver = Resolver::new(project, registry, host);
     let deps = crate::review::Deps::of_scan(std::slice::from_ref(&task), |id| {
@@ -390,6 +391,7 @@ pub fn describe(
         .filter_map(|(prefix, color)| color.map(|color| (prefix, color)))
         .collect();
     Ok(ShowFields {
+        task_revision,
         needs_review: review_reason.is_some(),
         review_reason,
         project_colors,

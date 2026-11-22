@@ -10,12 +10,23 @@ use std::path::Path;
 /// (docs/project-operations.md). Every write command loads through this or `load_with_raw`, under the mutation lock
 /// and before it reads any other input, so a refusal consumes nothing and creates nothing.
 pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
-    load_for_writer(ctx, id, Writer::Command)
+    load_at_revision(ctx, id, Writer::Command, None)
 }
 
-pub fn load_for_writer(ctx: &mut Ctx, id: &str, writer: Writer<'_>) -> Result<Task> {
+pub fn load_at_revision(
+    ctx: &mut Ctx,
+    id: &str,
+    writer: Writer<'_>,
+    expected: Option<&str>,
+) -> Result<Task> {
     let id = parse_id(&ctx.registry, &ctx.shorthand, id)?;
-    load_with_raw_for(ctx, &id, writer).map(|(task, _)| task)
+    let (task, raw) = load_with_raw_for(ctx, &id, writer)?;
+    if let Some(expected) = expected
+        && crate::multipart::content::sha256_hex(raw.as_bytes()) != expected
+    {
+        return Err(Error::TaskRevisionMismatch(id.to_string()));
+    }
+    Ok(task)
 }
 
 /// The editor also needs the original bytes for its unlocked editing window.

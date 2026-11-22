@@ -1,4 +1,4 @@
-use super::{Ctx, append_note, load, owner_name, save};
+use super::{Ctx, Writer, append_note, load, load_at_revision, owner_name, save};
 use crate::attachments::{self, EntryState, Ledger};
 use crate::error::{Error, Result};
 use crate::multipart::{
@@ -65,9 +65,15 @@ pub fn attach(mut ctx: Ctx, id: String, args: crate::cli::AttachArgs) -> Result<
         caption,
         notes,
         stamp,
+        expect_task_revision,
     } = args;
     let source = Source::from_args(source, clipboard)?;
-    let mut task = load(&mut ctx, &id)?;
+    let mut task = load_at_revision(
+        &mut ctx,
+        &id,
+        Writer::Command,
+        expect_task_revision.as_deref(),
+    )?;
     let owner = owner_name(&ctx.project)?;
     let max = if multipart {
         ctx.project

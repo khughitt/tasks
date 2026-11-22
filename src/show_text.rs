@@ -859,6 +859,7 @@ mod tests {
     fn fields() -> ShowFields {
         ShowFields {
             task: crate::history::fixture(BARE, "x").unwrap(),
+            task_revision: "0".repeat(64),
             needs_review: false,
             review_reason: None,
             project_colors: Default::default(),

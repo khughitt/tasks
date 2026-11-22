@@ -321,10 +321,12 @@ pub fn note(
     id: String,
     read_texts: impl FnOnce() -> Result<Vec<String>>,
     stamp: bool,
+    expect_task_revision: Option<&str>,
     review: crate::review::Review,
     awaiting: crate::review::Awaiting,
 ) -> Result<Output> {
-    let mut task = super::load_for_writer(&mut ctx, &id, super::Writer::Note)?;
+    let mut task =
+        super::load_at_revision(&mut ctx, &id, super::Writer::Note, expect_task_revision)?;
     let texts = read_texts()?;
     crate::review::apply(&mut task, review, awaiting, &mut ctx.warnings)?;
     let owner = owner_name(&ctx.project)?;

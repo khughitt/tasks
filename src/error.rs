@@ -46,6 +46,8 @@ pub enum Error {
     Parse { file: String, detail: String },
     #[error("{0}")]
     Validation(String),
+    #[error("task {0} changed since it was read; refresh with tasks show --json")]
+    TaskRevisionMismatch(String),
     #[error("{0}")]
     ClaimFenceRefused(String),
     #[error("{0} has open dependencies: {1}")]
@@ -192,6 +194,7 @@ impl Error {
             },
             Error::ClaimFenceRefused(detail) => Error::ClaimFenceRefused(detail + suffix),
             Error::Validation(detail) => Error::Validation(detail + suffix),
+            error @ Error::TaskRevisionMismatch(_) => error,
             Error::RetainedOwnership(detail) => Error::RetainedOwnership(detail + suffix),
             Error::RetainedInput(detail) => Error::RetainedInput(detail + suffix),
             Error::RetainedPublicationUnsupported(detail) => {
@@ -301,6 +304,7 @@ impl Error {
             Error::Parse { .. } => "parse",
             Error::ClaimFenceRefused(_) => "claim_fence_refused",
             Error::Validation(_) => "validation",
+            Error::TaskRevisionMismatch(_) => "task_revision_mismatch",
             Error::RetainedOwnership(_) => "retained_ownership",
             Error::RetainedInput(_) => "retained_input",
             Error::RetainedPublicationUnsupported(_) => "retained_publication_unsupported",

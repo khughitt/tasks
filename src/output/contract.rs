@@ -545,6 +545,8 @@ pub struct MultipartRefOut {
 #[derive(Serialize)]
 pub struct ShowFields {
     pub task: Task,
+    /// SHA-256 of the physical task record read for this view.
+    pub task_revision: String,
     pub needs_review: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_reason: Option<crate::review::ReviewReason>,
