@@ -488,7 +488,14 @@ fn squash(text: &str) -> String {
 
 fn line_of<'a>(text: &'a str, id: &str) -> &'a str {
     text.lines()
-        .find(|line| line.split_whitespace().next() == Some(id))
+        .find(|line| {
+            let mut fields = line.split_whitespace();
+            let row_id = match fields.next() {
+                Some("◆" | "≡") => fields.next(),
+                first => first,
+            };
+            row_id == Some(id)
+        })
         .unwrap_or_else(|| panic!("no line for {id}: {text}"))
 }
 

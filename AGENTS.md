@@ -26,9 +26,13 @@ the locked Cargo dependencies; safe to rerun.
 
 Tests: `just test-one <name>` for a test-name filter, or `just test-one --test cli <name>`
 for one integration test; runner arguments are forwarded intact and at least one is
-required. This is the local inner loop; run focused tests and mandatory hygiene before
-committing. `.tt.toml` disables automatic local `test`, `test-fast`, and `check-code`
-execution. Their policy skips have null outcomes and are not passing checks.
+required. Run focused tests and mandatory hygiene before committing. A valid
+`.tt.toml` at the checkout's Git top level overrides the registered stage. Without
+an override, experimental and pre-release projects skip automatic local `test`,
+`test-fast`, and `check-code`. This project is registered as pre-release.
+Supported projects and unregistered checkouts run broad checks by default.
+Invalid overrides fail. When stage policy applies, an active registered
+project must declare a valid stage. A skip records a null outcome.
 `test-fast` selects the fixed non-ignored suite; `test` includes the slow `#[ignore]`d
 exhaustive enumeration. `just test-full` is the untimed alias for `TT_FORCE=1 just test`;
 `TT_FORCE=1 just check-code` deliberately runs broad Rust checks locally.
@@ -57,7 +61,6 @@ Cargo metadata and requires zero failures, zero ignored tests, and a matching fo
 timing record. Covered branch pushes (`refs/heads/*` on `origin`) run mandatory
 local hygiene while the hosted workflow carries broad checks and the full suite.
 Pushes outside that coverage warn; policy still controls local broad execution.
-`tools/tt` reads `.tt.toml` only at the invoking code checkout's Git top level.
 `just test-one` and mandatory hygiene always run; `TT_FORCE=1` explicitly forces
 broad checks, including nested recipes. A hosted would-be skip without force fails.
 

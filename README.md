@@ -140,10 +140,11 @@ For development run `just setup`, then focused checks through
 `just test-one <name>` or `just test-one --test cli <name>`, and
 `just check-hygiene` before committing. `just ci-check-hygiene` is the portable
 subset for a public clone. Never invoke cargo test directly: recipes isolate
-Git fixtures and record timing. The checked `.tt.toml` disables automatic broad
-local runs; `just test-full` deliberately forces the full suite. Branch pushes
-run forced broad checks/full tests in CI; no push or CI result is implied by a
-local policy skip. [AGENTS.md](AGENTS.md) has the full contributor gate policy.
+Git fixtures and record timing. A registered pre-release checkout skips routine
+broad runs by default. A valid `.tt.toml` at the checkout's Git top level overrides
+stage policy. Unregistered clones run broad checks by default. Use
+`just test-full` to force the full suite. Hosted CI forces broad checks and the
+full suite on each branch push. [AGENTS.md](AGENTS.md) has the contributor gate policy.
 
 ## License
 
