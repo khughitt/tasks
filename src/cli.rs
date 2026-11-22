@@ -1021,7 +1021,7 @@ pub enum Command {
     #[command(
         long_about = "Rank unmet prerequisites by observed downstream impact.\n\n\
 Rows are root blockers: open prerequisites that wait on no other ranked row. A blocker \
-that waits on a ranked row counts through it; JSON lists it after the roots with \
+in scope that waits on a ranked row counts through it; JSON lists it after the roots with \
 counted_through, and pretty output leaves it out.\n\n\
 Order: committed work waiting at any depth (todo, doing, blocked; ideas are counted \
 apart), committed work it alone still holds (clears), the highest priority waiting, its \

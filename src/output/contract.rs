@@ -1233,8 +1233,8 @@ pub struct BlockerRow {
     pub top_waiting_priority: Option<u8>,
     pub unmet_dependency_count: usize,
     pub unresolved_dependency_count: usize,
-    /// Rows this one waits on, whose counts already include its impact; absent on a root
-    /// blocker.
+    /// Rows this in-scope row waits on, whose counts already include its impact; absent
+    /// on a root blocker, a cycle member and an out-of-scope row.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub counted_through: Vec<TaskId>,
     pub attention: Attention,

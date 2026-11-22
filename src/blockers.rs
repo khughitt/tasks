@@ -133,8 +133,8 @@ pub struct Impact {
     pub unmet_dependency_count: usize,
     pub unresolved_dependency_count: usize,
     /// Open dependencies that are themselves rows: every dependent of this row also
-    /// reaches them, so its impact counts through them. Empty for a root blocker and for
-    /// a cycle member, which is never folded.
+    /// reaches them, so its impact counts through them. Empty for a root blocker, a cycle
+    /// member and an out-of-scope row, none of which is folded.
     pub counted_through: Vec<TaskId>,
     /// Up to three direct dependents, by canonical id.
     pub direct_examples: Vec<TaskId>,
@@ -310,7 +310,9 @@ pub fn build(
             top_waiting_priority: None,
             unmet_dependency_count: own.unmet(id),
             unresolved_dependency_count: own.unresolved.len(),
-            counted_through: if in_cycle.contains(id) {
+            // Only a scanned row's dependencies are edges, so only its dependents reach
+            // the rows it waits on; a boundary row stays listed.
+            counted_through: if in_cycle.contains(id) || !scanned.contains_key(id) {
                 Vec::new()
             } else {
                 own.open
@@ -689,11 +691,9 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
         assert_eq!(counts(row(&analysis, "aa-000001")), [3, 4, 0, 0, 2, 0, 0]);
         assert_eq!(counts(row(&analysis, "aa-000002")), [1, 1, 0, 0, 0, 1, 0]);
         assert_eq!(row(&analysis, "aa-000001").goal, None);
-        // A boundary row waiting on another row folds into it like any other.
-        assert_eq!(
-            row(&analysis, "aa-000002").counted_through,
-            ids(&["aa-000001"])
-        );
+        // A boundary row's dependencies are no edges, so B's counts need not include
+        // its dependents: it stays listed, waiting, even though B is a row.
+        assert!(row(&analysis, "aa-000002").counted_through.is_empty());
 
         // aa scope: L is work, G a goal; only L clears.
         let local = world.analyse(&["aa"]);

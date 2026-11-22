@@ -642,10 +642,11 @@ fn blockers_pretty_contract_and_existing_reads() {
                 "{text}"
             );
             for footer in [
-                "1 of 1 root blockers, ranked by work",
+                "1 of 1 root blocker, ranked by work",
                 "clears: those it alone still holds",
                 "dependents in sci; coverage complete",
                 "parks and claims from",
+                "time blocked not measured yet",
             ] {
                 assert!(text.contains(footer), "{footer}: {text}");
             }
@@ -743,7 +744,7 @@ fn blockers_pretty_contract_and_existing_reads() {
     assert!(!text.contains(&chained), "{text}");
     assert_eq!(out["folded"], 1);
     assert!(
-        text.contains("root blockers, ranked by work; 1 more wait on one of these"),
+        text.contains("root blockers, ranked by work; 1 more waits on a root blocker"),
         "{text}"
     );
     assert!(text.contains("cycles (1):"), "{text}");
@@ -762,7 +763,7 @@ fn blockers_pretty_contract_and_existing_reads() {
     add(&env, &sci, "Waits on foreign", &["--depends", &foreign]);
     let (text, stderr) = run(&["--color", "never", "-n", "0"], Some("120"));
     assert!(
-        text.contains("partial, so counts are lower bounds: 1 paths leave it"),
+        text.contains("partial, so counts are lower bounds: 1 path leaves it"),
         "{text}"
     );
     assert!(!stderr.contains("not followed"), "{stderr}");

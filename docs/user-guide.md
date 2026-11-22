@@ -279,8 +279,9 @@ the next occurrence; early runs are permitted. `last_done` survives reopening an
 ## Blockers and coverage
 
 `blockers` answers which open prerequisites to tackle for the most downstream
-impact (default limit 20). Its rows are root blockers: a blocker that waits on another
-ranked row counts through it, since every task waiting on it also waits on that row.
+impact (default limit 20). Its rows are root blockers: an in-scope blocker that waits on
+another ranked row counts through it, since every task waiting on it also waits on that
+row. A row from outside the scope stays listed: its own dependencies are not followed.
 JSON lists such rows after the roots with `counted_through`; pretty output leaves them
 out and counts them in its footer. A cycle member is never folded. Rows rank by
 committed work waiting at any depth (`todo`, `doing`, `blocked`; ideas are counted

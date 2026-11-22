@@ -448,7 +448,6 @@ fn trim_visible_end(text: &str) -> String {
     trimmed
 }
 
-/// Display columns of `text`, skipping ANSI escape sequences.
 /// Chrome text wrapped to the layout's width, one line when the width is unknown.
 pub fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
     render(
@@ -463,6 +462,7 @@ pub fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
     )
 }
 
+/// Display columns of `text`, skipping ANSI escape sequences.
 pub fn visible_width(text: &str) -> usize {
     let mut count = 0;
     let mut chars = text.chars();

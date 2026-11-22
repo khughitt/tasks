@@ -21,8 +21,10 @@ const COLUMNS: [Column; 9] = [
     Column::fixed("top"),
     Column::fixed("title"),
 ];
-/// A title never takes more display cells than this, even on a wide terminal.
+/// A title never takes more display cells than this, even on a wide terminal, nor fewer
+/// than the floor, which a very narrow terminal overflows rather than show only `…`.
 const TITLE_CAP: usize = 80;
+const TITLE_FLOOR: usize = 8;
 const GAP: usize = 2;
 
 /// Headers always show: the count columns do not explain themselves.
@@ -53,7 +55,7 @@ pub fn render(out: &BlockersOut, painter: &Painter, layout: &Layout) -> String {
                     + GAP
             })
             .sum();
-        width.saturating_sub(fixed).clamp(1, TITLE_CAP)
+        width.saturating_sub(fixed).clamp(TITLE_FLOOR, TITLE_CAP)
     });
     let rows: Vec<Row> = roots
         .iter()
@@ -196,11 +198,14 @@ fn state(row: &BlockerRow) -> State {
 
 /// What the table holds, what its columns mean, and what the scan covered.
 fn footer(out: &BlockersOut, shown: usize) -> Vec<String> {
-    let mut count = format!("{shown} of {} root blockers, ranked by work", out.roots);
+    let mut count = format!(
+        "{shown} of {}, ranked by work",
+        counted(out.roots, "root blocker", "root blockers")
+    );
     if out.folded > 0 {
         count.push_str(&format!(
-            "; {} more wait on one of these and count through it",
-            out.folded
+            "; {} on a root blocker and count through it",
+            counted(out.folded, "more waits", "more wait")
         ));
     }
     let coverage = &out.coverage;
@@ -216,18 +221,25 @@ fn footer(out: &BlockersOut, shown: usize) -> Vec<String> {
         let mut gaps = Vec::new();
         if !coverage.unfollowed_targets.is_empty() {
             gaps.push(format!(
-                "{} paths leave it (--all-projects follows them)",
-                coverage.unfollowed_targets.len()
+                "{} it (--all-projects follows them)",
+                counted(
+                    coverage.unfollowed_targets.len(),
+                    "path leaves",
+                    "paths leave"
+                )
             ));
         }
         if !coverage.unreachable_projects.is_empty() {
             gaps.push(format!(
-                "{} projects unreachable",
-                coverage.unreachable_projects.len()
+                "{} unreachable",
+                counted(coverage.unreachable_projects.len(), "project", "projects")
             ));
         }
         if !out.unresolved.is_empty() {
-            gaps.push(format!("{} references unresolved", out.unresolved.len()));
+            gaps.push(format!(
+                "{} unresolved",
+                counted(out.unresolved.len(), "reference", "references")
+            ));
         }
         format!("partial, so counts are lower bounds: {}", gaps.join(", "))
     };
@@ -237,8 +249,14 @@ fn footer(out: &BlockersOut, shown: usize) -> Vec<String> {
          still holds · top: highest priority waiting"
             .into(),
         format!(
-            "dependents in {scope}; {reach} · parks and claims from {}",
+            "dependents in {scope}; {reach} · parks and claims from {} · time blocked not \
+             measured yet",
             out.park_evidence.host
         ),
     ]
+}
+
+/// `n` with the word that agrees with it.
+fn counted(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
