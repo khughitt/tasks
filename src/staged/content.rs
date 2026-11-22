@@ -6,6 +6,7 @@
 
 use super::snapshot::INDEX_ENV;
 use crate::error::{Error, Result};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct Content {
@@ -26,7 +27,8 @@ impl Content {
                 std::process::id(),
                 fastrand::u64(..)
             ));
-            match std::fs::create_dir(&candidate) {
+            // Private to this user: the copy holds the project's records.
+            match std::fs::DirBuilder::new().mode(0o700).create(&candidate) {
                 Ok(()) => break candidate,
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(failed(format!("{}: {error}", candidate.display()))),

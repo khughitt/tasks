@@ -107,16 +107,20 @@ fn binary_identity() -> Result<String> {
 }
 
 impl Slot {
-    /// The slot for `prefix` in the repository whose common Git directory is `common`.
-    pub(crate) fn open(common: &Path, prefix: &str) -> Result<Slot> {
-        let location = digest(format!("{}\0{prefix}", common.display()).as_bytes());
+    /// The slot for `prefix` at `records` in the repository whose common Git directory is
+    /// `common`. The records path is part of it because relative `[checkout]` paths
+    /// resolve against it: two worktrees of one repository keep separate slots.
+    pub(crate) fn open(common: &Path, records: &Path, prefix: &str) -> Result<Slot> {
+        let location =
+            digest(format!("{}\0{}\0{prefix}", common.display(), records.display()).as_bytes());
         let binary = binary_identity()?;
         let registry = digest(&bytes_or_absent(&crate::registry::Registry::path()?)?);
         let host = digest(&bytes_or_absent(&crate::config::HostConfig::path()?)?);
         let key = digest(
             format!(
-                "staged-check v{VERSION}\0{}\0{prefix}\0{binary}\0{registry}\0{host}",
-                common.display()
+                "staged-check v{VERSION}\0{}\0{}\0{prefix}\0{binary}\0{registry}\0{host}",
+                common.display(),
+                records.display()
             )
             .as_bytes(),
         );
@@ -126,10 +130,19 @@ impl Slot {
         })
     }
 
-    /// The passing trees recorded under this slot's key, newest first.
+    /// The passing trees recorded under this slot's key, newest first. A record another
+    /// version wrote, or one under another key, holds none of ours: the next passing check
+    /// replaces it. A record this version cannot read is an error naming the file.
     pub(crate) fn passed(&self) -> Result<Vec<Passed>> {
-        Ok(match STORE.load_from(&self.path)? {
-            Some(record) if record.key == self.key => record.passed,
+        let loaded = STORE.load_from_with(&self.path, |record, path| {
+            if record.version == VERSION {
+                record.validate(path)
+            } else {
+                Ok(())
+            }
+        })?;
+        Ok(match loaded {
+            Some(record) if record.version == VERSION && record.key == self.key => record.passed,
             _ => Vec::new(),
         })
     }

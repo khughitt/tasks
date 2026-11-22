@@ -489,3 +489,94 @@ fn a_staged_check_outside_a_hook_reads_the_repository_index() {
         "{report}"
     );
 }
+
+#[test]
+fn the_hook_keeps_its_layout_rules() {
+    let fx = Fx::new();
+    fx.add("kept", &[]);
+    // Removing only the config leaves records no project owns.
+    fx.git(&[
+        "rm",
+        "-q",
+        "--cached",
+        &format!("{PREFIX}/tasks/.config.toml"),
+    ]);
+    let refused = fx.commit(&[]).unwrap_err();
+    assert!(refused.contains("no tasks/.config.toml"), "{refused}");
+    fx.git(&["reset", "-q"]);
+    // Removing the whole project directory leaves nothing to check.
+    fx.git(&["rm", "-q", "-r", "--cached", PREFIX]);
+    fx.commit(&[]).unwrap();
+}
+
+#[test]
+fn a_staged_document_removal_is_judged_although_the_working_copy_keeps_it() {
+    let fx = Fx::new();
+    let spec = fx.project.join("docs/specs/design.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "# Design\n").unwrap();
+    fx.git(&["add", "-A"]);
+    fx.commit(&[]).unwrap();
+    fx.add("linked", &["--spec", "docs/specs/design.md"]);
+    fx.git(&[
+        "rm",
+        "-q",
+        "--cached",
+        &format!("{PREFIX}/docs/specs/design.md"),
+    ]);
+    assert!(spec.is_file());
+    let refused = fx.commit(&[]).unwrap_err();
+    assert!(refused.contains("doc_missing"), "{refused}");
+}
+
+#[test]
+fn a_commit_spanning_two_projects_checks_each_staged_tree() {
+    let fx = Fx::new();
+    let code = fx._base.path().canonicalize().unwrap().join("code2");
+    repo(fx.env.home.path(), &code);
+    let out = fx
+        .env
+        .cmd(&code)
+        .args(["init", "--prefix", "su", "--records"])
+        .arg(&fx.records)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "init: {out:?}");
+    fx.git(&["add", "-A"]);
+    fx.commit(&[]).unwrap();
+    let other = fx.records.join("su");
+    let a = fx.add("a", &[]);
+    let b = common::id_of(fx.env.json(&other, &["add", "b"]));
+    let b_record = other.join(format!("tasks/{b}.md"));
+    let b_valid = std::fs::read_to_string(&b_record).unwrap();
+    // A malformed staged record in the second project refuses the whole commit, though
+    // its working copy is valid and the first project's change is fine.
+    fx.append_note(&a, "fine");
+    std::fs::write(&b_record, "not a task record\n").unwrap();
+    fx.git(&["add", "-A"]);
+    std::fs::write(&b_record, &b_valid).unwrap();
+    let refused = fx.commit(&[]).unwrap_err();
+    assert!(refused.contains("tasks check failed for su"), "{refused}");
+    // Valid staged changes in both are accepted.
+    fx.git(&["add", "-A"]);
+    fx.commit(&[]).unwrap();
+}
+
+#[test]
+fn a_record_from_another_version_is_replaced_not_refused() {
+    let fx = Fx::new();
+    let id = fx.add("noted", &[]);
+    let dir = fx.env.home.path().join(".local/state/tasks/staged-checks");
+    let files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    std::fs::write(&files[0], "version = 99\nkey = \"future\"\npassed = []\n").unwrap();
+    fx.append_note(&id, "after a newer binary wrote the record");
+    fx.git(&["add", "-A"]);
+    fx.commit(&[]).unwrap();
+    assert!(fx.full_audit_ran());
+    let text = std::fs::read_to_string(&files[0]).unwrap();
+    assert!(text.starts_with("version = 1\n"), "{text}");
+}

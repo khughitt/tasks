@@ -345,7 +345,12 @@ Two routes give the verdict, and the exit status and findings follow `check`:
   `git checkout-index` and runs every rule of `check` with records content (task files,
   note archives, attachments and records documents) read from that copy. Unstaged
   edits neither hide nor block what the commit publishes. Findings name the records
-  directory, not the copy.
+  directory, not the copy; paths a record names are still compared with the records
+  directory. Other projects' records, including another project staged in the same
+  commit, are read as they stand in their registered checkouts: the hook checks each
+  staged project, but a cross-project dependency or cycle is judged against the other
+  project's working tree. An interrupted check can leave its copy, a private
+  `tasks-staged-<pid>-*` directory under the temporary directory, behind.
 - The ordinary-note route accepts, without the full audit, a commit whose only change
   to the project is plain notes appended to one existing record. It requires that
   HEAD's records tree is one a staged check on this host already accepted, checked
@@ -359,9 +364,11 @@ Two routes give the verdict, and the exit status and findings follow `check`:
   audit.
 
 Each passing staged check records its HEAD, HEAD's records tree and the accepted tree
-under `$XDG_STATE_HOME/tasks/staged-checks/`, keyed by repository and project and by the
-running binary (version and file identity), the project registry and the host
-configuration; a change to any of them starts again from a full audit. The note route
+under `$XDG_STATE_HOME/tasks/staged-checks/`, keyed by repository, records path and
+project and by the running binary (version and file identity), the project registry and
+the host configuration; a change to any of them starts again from a full audit. A record
+written by another version is replaced; one this version cannot read refuses the check
+and names the file to remove. The note route
 does not revisit what lies outside the staged tree and may have changed since the
 accepted check: other projects' records, the code checkout, external documents and Git
 refs. The next full staged audit, or a plain `tasks check`, reports those.

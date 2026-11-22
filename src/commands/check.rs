@@ -220,7 +220,7 @@ pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
         )));
     }
     project.worktree = ctx.project.worktree.clone();
-    let slot = validated::Slot::open(&snap.common, &project.prefix)?;
+    let slot = validated::Slot::open(&snap.common, &project.records, &project.prefix)?;
     let accepted = validated::Passed {
         head: snap.head.as_ref().map(|head| head.commit.clone()),
         head_tree: snap.head.as_ref().and_then(|head| head.tree.clone()),
@@ -239,13 +239,22 @@ pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
     let content = Content::materialize(&snap.top, &snap.tree)?;
     project.content = Some(content.root().to_path_buf());
     ctx.project = project;
-    let Output::Check(mut out) = run(ctx, false)? else {
-        unreachable!("check returns a check report")
-    };
     // Findings name the records directory, not the private copy they were read from.
     let copy = content.root().display().to_string();
     let records = snap.top.join(&snap.subdir);
     let records = records.display().to_string();
+    let out = run(ctx, false).map_err(|error| {
+        if error.to_string().contains(&copy) {
+            error.with_suffix(&format!(
+                " (paths under {copy} name the staged copy of {records})"
+            ))
+        } else {
+            error
+        }
+    })?;
+    let Output::Check(mut out) = out else {
+        unreachable!("check returns a check report")
+    };
     for finding in out.errors.iter_mut().chain(out.warnings.iter_mut()) {
         finding.file = finding.file.replace(&copy, &records);
         finding.detail = finding.detail.replace(&copy, &records);
