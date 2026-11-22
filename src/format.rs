@@ -85,6 +85,23 @@ impl PhysicalTask {
         &self.metadata.body
     }
 
+    /// The notes `newer` appends to this record when appending them is its only change
+    /// besides `updated`: the same fields and body, the same note archives, and inline
+    /// notes that extend these. `None` for any other difference, or none at all.
+    pub(crate) fn appended_notes<'a>(&self, newer: &'a PhysicalTask) -> Option<&'a [Note]> {
+        if self.archives != newer.archives {
+            return None;
+        }
+        let mut metadata = self.metadata.clone();
+        metadata.updated.clone_from(&newer.metadata.updated);
+        if metadata != newer.metadata {
+            return None;
+        }
+        let old = &self.inline_notes;
+        (newer.inline_notes.len() > old.len() && newer.inline_notes.starts_with(old))
+            .then(|| &newer.inline_notes[old.len()..])
+    }
+
     pub(crate) fn assemble(mut self, notes: Vec<Note>) -> Task {
         self.metadata.notes = notes;
         self.metadata.note_archives = self.archives;

@@ -446,8 +446,13 @@ fn dispatch(
             blockers::run(open_read_ctx(dir, &args.scope, host.clone())?, args)
         }
         Command::Graph { format, all } => graph::run(open_ctx(dir, host.clone())?, format, all),
-        Command::Check { growth } => {
-            check::run(context::open_check_ctx(dir, host.clone())?, growth)
+        Command::Check { growth, staged } => {
+            let ctx = context::open_check_ctx(dir, host.clone())?;
+            if staged {
+                check::run_staged(ctx)
+            } else {
+                check::run(ctx, growth)
+            }
         }
         Command::Commit {
             targets,

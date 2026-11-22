@@ -2288,3 +2288,101 @@ fn detached_rename_preserves_and_verifies_multipart_retained_manifests() {
         "{solo_err}"
     );
 }
+
+/// Installs the candidate records hook (`tests/fixtures/records-pre-commit`) in the
+/// detached records repository, with this test binary as the hook's `tasks`; returns the
+/// repository root and the Trace2 file each hooked commit writes.
+fn staged_hook(f: &RetainedEnv) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let root = f.records.parent().unwrap().to_path_buf();
+    let hooks = f.dir.join("staged-hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-commit");
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/records-pre-commit"),
+        &hook,
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let bin = f.env.fake_bin().join("tasks");
+    if !bin.exists() {
+        std::os::unix::fs::symlink(assert_cmd::cargo::cargo_bin("tasks"), bin).unwrap();
+    }
+    git(
+        &root,
+        &["config", "core.hooksPath", hooks.to_str().unwrap()],
+    );
+    (root, f.dir.join("trace2.json"))
+}
+
+/// Commits the index of `root` through the hook; whether it was accepted, and whether
+/// the hook ran the full staged audit (which materializes the tree with checkout-index).
+fn hooked_commit(
+    f: &RetainedEnv,
+    root: &std::path::Path,
+    trace: &std::path::Path,
+) -> (bool, bool, String) {
+    let _ = std::fs::remove_file(trace);
+    let out = common::git_fixture::command(f.env.home.path(), root)
+        .env("GIT_TRACE2_EVENT", trace)
+        .args(["commit", "-qm", "staged"])
+        .output()
+        .unwrap();
+    let full = std::fs::read_to_string(trace)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .any(|event| {
+            event["event"] == "start"
+                && event["argv"]
+                    .as_array()
+                    .is_some_and(|argv| argv.iter().any(|a| a == "checkout-index"))
+        });
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    (out.status.success(), full, report)
+}
+
+#[test]
+fn retention_rename_staged_hook_judges_protected_history_as_staged() {
+    let mut f = observed("detached");
+    let (root, trace) = staged_hook(&f);
+    renamed_live(&mut f, "new");
+    commit_rename(&f, "sci");
+    let record = f.records.join(format!("tasks/{}.md", f.id));
+    let rel = format!("new/tasks/{}.md", f.id);
+    let original = std::fs::read_to_string(&record).unwrap();
+    assert!(original.contains("): created\n"), "{original}");
+
+    // A rewritten rename-source note is refused although the working copy is restored.
+    std::fs::write(
+        &record,
+        original.replacen("): created\n", "): recreated\n", 1),
+    )
+    .unwrap();
+    git(&root, &["add", &rel]);
+    std::fs::write(&record, &original).unwrap();
+    let (accepted, full, report) = hooked_commit(&f, &root, &trace);
+    assert!(!accepted, "rewritten protected history was committed");
+    assert!(full);
+    assert!(report.contains("retention_lineage"), "{report}");
+    git(&root, &["reset", "-q", "--hard"]);
+
+    // Ordinary notes after the rename: the first takes the full audit (the rename commit
+    // was checked before HEAD held the new project), the next the note route.
+    for (note, expect_full) in [("first plain note", true), ("second plain note", false)] {
+        let raw = std::fs::read_to_string(&record).unwrap();
+        std::fs::write(
+            &record,
+            format!("{raw}- 2026-11-21T00:00:00Z (main): {note}\n"),
+        )
+        .unwrap();
+        git(&root, &["add", &rel]);
+        let (accepted, full, report) = hooked_commit(&f, &root, &trace);
+        assert!(accepted, "{note} was refused: {report}");
+        assert_eq!(full, expect_full, "{note}");
+    }
+}

@@ -181,6 +181,11 @@ pub struct Project {
     /// its `[checkout]` link; `None` otherwise. Claims and parks record it (ops
     /// linked-checkouts , "record location and resume location are separate").
     pub worktree: Option<PathBuf>,
+    /// Where records content (task files, archives, attachments, records documents) is
+    /// read from when it is not `records`: a private copy of the staged tree during
+    /// `check --staged`. `records` stays the project's path for everything else: relative
+    /// paths, registry comparisons and Git. `None` reads `records` itself.
+    pub(crate) content: Option<PathBuf>,
 }
 
 /// One `git worktree list` record, with this project's root inside it.
@@ -977,6 +982,7 @@ impl Project {
             kind,
             checkout,
             worktree: None,
+            content: None,
             commit_records,
             prefix: config.prefix,
             retention_lineage: config.retention_lineage,
@@ -1102,13 +1108,18 @@ impl Project {
             .unwrap_or_else(|| (self.attachments_max_bytes / 4).clamp(1, 65536))
     }
 
+    /// The directory records content is read from: `content` when set, else `records`.
+    pub(crate) fn content_root(&self) -> &Path {
+        self.content.as_deref().unwrap_or(&self.records)
+    }
+
     pub fn tasks_dir(&self) -> PathBuf {
-        self.records.join("tasks")
+        self.content_root().join("tasks")
     }
 
     /// A path under the records directory, such as a spec, plan or `--ref` document.
     pub fn doc_path(&self, rel: &str) -> PathBuf {
-        self.records.join(rel)
+        self.content_root().join(rel)
     }
 
     pub fn task_path(&self, id: &TaskId) -> PathBuf {
@@ -1131,7 +1142,12 @@ impl Project {
         id: &TaskId,
         archive: &crate::history::ArchiveDescriptor,
     ) -> Result<Vec<u8>> {
-        crate::history::read_archive_at(&self.records, id, archive, self.attachments_max_bytes)
+        crate::history::read_archive_at(
+            self.content_root(),
+            id,
+            archive,
+            self.attachments_max_bytes,
+        )
     }
 
     pub(crate) fn physical_for_save(&self, task: &Task) -> Result<crate::format::PhysicalTask> {

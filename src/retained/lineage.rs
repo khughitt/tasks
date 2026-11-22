@@ -793,12 +793,34 @@ pub fn check_live(project: &Project, tasks: &[Task]) -> Result<()> {
             }
             protected_bytes(project, &pinned)?;
         }
-        let path = task_path(&subdir(project)?, &task.id);
-        if !basis::git(project, &["ls-tree", "-z", "HEAD", "--", &path])?.is_empty() {
-            let pinned = basis::read(project, &task.id, Some("HEAD"))?;
-            super::proof::validate_history(project, &pinned, None)?;
-            super::reconcile::validate_terminal_history(project, &pinned)?;
-        }
+        head_history(project, &task.id)?;
+    }
+    Ok(())
+}
+
+/// The retention history of `id` as HEAD records it, when HEAD holds the record.
+fn head_history(project: &Project, id: &TaskId) -> Result<()> {
+    let path = task_path(&subdir(project)?, id);
+    if !basis::git(project, &["ls-tree", "-z", "HEAD", "--", &path])?.is_empty() {
+        let pinned = basis::read(project, id, Some("HEAD"))?;
+        super::proof::validate_history(project, &pinned, None)?;
+        super::reconcile::validate_terminal_history(project, &pinned)?;
+    }
+    Ok(())
+}
+
+/// The part of [`check_live`] that depends on HEAD and the lineage refs rather than on
+/// live records: the lineage itself, and the HEAD retention history of `ids`. The staged
+/// note route runs it for the records HEAD changed since its validated base.
+pub(crate) fn check_head(project: &Project, ids: &[TaskId]) -> Result<()> {
+    if project.retention_lineage.is_empty() {
+        return validate(project);
+    }
+    let scoped = super::read::start_lineage_check(project)?;
+    let project = &scoped;
+    validate(project)?;
+    for id in ids {
+        head_history(project, id)?;
     }
     Ok(())
 }

@@ -154,6 +154,8 @@ pub enum Error {
     ClipboardNoImage(String),
     #[error("{0}")]
     ArchiveUnverified(String),
+    #[error("{0}")]
+    StagedSnapshot(String),
     #[error("io: {0}")]
     Io(String),
 }
@@ -262,6 +264,7 @@ impl Error {
             Error::ClipboardUnavailable(detail) => Error::ClipboardUnavailable(detail + suffix),
             Error::ClipboardNoImage(detail) => Error::ClipboardNoImage(detail + suffix),
             Error::ArchiveUnverified(detail) => Error::ArchiveUnverified(detail + suffix),
+            Error::StagedSnapshot(detail) => Error::StagedSnapshot(detail + suffix),
             Error::CheckoutMissing(detail) => Error::CheckoutMissing(detail + suffix),
             Error::WorktreeOrphaned(detail) => Error::WorktreeOrphaned(detail + suffix),
             Error::Io(detail) => Error::Io(detail + suffix),
@@ -355,6 +358,7 @@ impl Error {
             Error::ClipboardUnavailable(_) => "clipboard_unavailable",
             Error::ClipboardNoImage(_) => "clipboard_no_image",
             Error::ArchiveUnverified(_) => "archive_unverified",
+            Error::StagedSnapshot(_) => "staged_snapshot",
             Error::Io(_) => "io",
         }
     }

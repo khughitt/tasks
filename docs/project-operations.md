@@ -327,6 +327,50 @@ nonfatal and never enter JSON warnings or prevent a record commit; no holder
 sidecar or timeout is introduced. Same-prefix writers remain serialized for the
 whole operation, including retained payload inspection.
 
+## Staged checks
+
+`tasks check --staged` audits a project's records as the index Git will publish them,
+for a records repository's pre-commit hook. It reads the index Git names in
+`GIT_INDEX_FILE` (a temporary index for a pathspec commit; relative to the working
+directory, as Git sets it for hooks), or the repository's own index outside a hook. It
+writes the staged tree of the records directory with `git write-tree --prefix` and opens
+the project from that tree's config at its real records path, so relative checkout
+paths, registry comparisons and Git reads are those of the project itself. A staged
+config whose prefix differs from the working copy's is refused. Plain `tasks check`
+remains the full audit of the working tree.
+
+Two routes give the verdict, and the exit status and findings follow `check`:
+
+- The full staged audit copies the staged tree to a private temporary directory with
+  `git checkout-index` and runs every rule of `check` with records content (task files,
+  note archives, attachments and records documents) read from that copy. Unstaged
+  edits neither hide nor block what the commit publishes. Findings name the records
+  directory, not the copy.
+- The ordinary-note route accepts, without the full audit, a commit whose only change
+  to the project is plain notes appended to one existing record. It requires that
+  HEAD's records tree is one a staged check on this host already accepted, checked
+  against that HEAD or an ancestor; that the staged tree differ from HEAD's only in
+  that record, modified in place; that both versions parse with the same fields
+  (besides `updated`), body and note archives; and that no appended note is a ledger,
+  multipart, retention, archive or move note. It then validates the lineage and the
+  HEAD retention history of the records HEAD changed since the accepted check. The
+  route never refuses: anything it cannot establish goes to the full staged audit, and
+  it reports no warnings. Projects declaring retention recovery always take the full
+  audit.
+
+Each passing staged check records its HEAD, HEAD's records tree and the accepted tree
+under `$XDG_STATE_HOME/tasks/staged-checks/`, keyed by repository and project and by the
+running binary (version and file identity), the project registry and the host
+configuration; a change to any of them starts again from a full audit. The note route
+does not revisit what lies outside the staged tree and may have changed since the
+accepted check: other projects' records, the code checkout, external documents and Git
+refs. The next full staged audit, or a plain `tasks check`, reports those.
+
+The records repository's hook selects the projects with staged paths, refuses a project
+directory whose index holds files but no config, skips a directory removed whole, and
+runs `tasks check --staged -C <project>` with an absolute `GIT_INDEX_FILE`. Every host
+writing the repository needs a `tasks` that knows `--staged` before the hook calls it.
+
 ## Move tasks and resume
 
 `tasks move <id> --to <prefix> --explain` diagnoses without locks/writes. Fresh

@@ -242,6 +242,7 @@ mod tests {
             predecessor: None,
             checkout: PathBuf::new(),
             worktree: None,
+            content: None,
             commit_records: false,
         };
         let target = task("000002");
@@ -286,6 +287,7 @@ mod tests {
             predecessor: None,
             checkout: PathBuf::new(),
             worktree: None,
+            content: None,
             commit_records: false,
         };
         let mut halt = task("000001");

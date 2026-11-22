@@ -183,6 +183,79 @@ fn lifecycle_findings(
     Ok(())
 }
 
+/// `check --staged`: audit the project's records as the index Git will publish them.
+///
+/// The index is the one Git hands a pre-commit hook in `GIT_INDEX_FILE`, else the
+/// repository's own. The project is opened from the staged config at its real records
+/// path, so relative paths, registry comparisons and Git reads are unchanged; records
+/// content is read from a private copy of the staged tree. An ordinary appended note on a
+/// tree this host already accepted takes the note route (`crate::staged::note_route`);
+/// every other commit gets the full audit. A passing check records the staged tree.
+pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
+    use crate::staged::{content::Content, note_route, snapshot, validated};
+    let index = snapshot::index_file(&ctx.project.records, std::env::var_os(snapshot::INDEX_ENV))?;
+    let snap = snapshot::read(&ctx.project.records, &index)?;
+    let config = snapshot::tree_entry(&snap.top, &snap.tree, crate::repo::CONFIG_REL)?
+        .filter(|entry| matches!(entry.mode.as_str(), "100644" | "100755"))
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "the staged records hold no regular {}",
+                crate::repo::CONFIG_REL
+            ))
+        })?;
+    let text = String::from_utf8(snapshot::blob(&snap.top, &config.oid)?).map_err(|_| {
+        Error::Config(format!(
+            "the staged {} is not UTF-8",
+            crate::repo::CONFIG_REL
+        ))
+    })?;
+    let mut project = crate::repo::Project::from_config(ctx.project.records.clone(), &text)?;
+    if project.prefix != ctx.project.prefix {
+        return Err(Error::Config(format!(
+            "the staged {} names prefix {:?} but the working copy names {:?}; stage or \
+             restore the config so they agree",
+            crate::repo::CONFIG_REL,
+            project.prefix,
+            ctx.project.prefix
+        )));
+    }
+    project.worktree = ctx.project.worktree.clone();
+    let slot = validated::Slot::open(&snap.common, &project.prefix)?;
+    let accepted = validated::Passed {
+        head: snap.head.as_ref().map(|head| head.commit.clone()),
+        head_tree: snap.head.as_ref().and_then(|head| head.tree.clone()),
+        tree: snap.tree.clone(),
+    };
+    if let Ok(qualified) = note_route::qualify(&project, &snap, &slot.passed()?)?
+        && note_route::check(&project, &qualified).is_ok()
+    {
+        slot.record(accepted)?;
+        return Ok(Output::Check(CheckOut {
+            growth: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        }));
+    }
+    let content = Content::materialize(&snap.top, &snap.tree)?;
+    project.content = Some(content.root().to_path_buf());
+    ctx.project = project;
+    let Output::Check(mut out) = run(ctx, false)? else {
+        unreachable!("check returns a check report")
+    };
+    // Findings name the records directory, not the private copy they were read from.
+    let copy = content.root().display().to_string();
+    let records = snap.top.join(&snap.subdir);
+    let records = records.display().to_string();
+    for finding in out.errors.iter_mut().chain(out.warnings.iter_mut()) {
+        finding.file = finding.file.replace(&copy, &records);
+        finding.detail = finding.detail.replace(&copy, &records);
+    }
+    if out.errors.is_empty() {
+        slot.record(accepted)?;
+    }
+    Ok(Output::Check(out))
+}
+
 pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     // A code tree whose index still holds the config is on the pre-move side of the
     // migration: the walk missed it only because the working tree lost it.

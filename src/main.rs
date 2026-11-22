@@ -64,6 +64,7 @@ mod scope;
 mod shorthand;
 mod show_text;
 mod similarity;
+mod staged;
 mod stale;
 mod state_store;
 mod style;
