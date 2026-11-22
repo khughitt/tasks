@@ -222,6 +222,7 @@ fn attach_transaction_recovers_at_every_write_on_the_first_show_or_attach() {
     for (boundary, committed) in [
         ("staged:1", false),
         ("staged:2", false),
+        ("probed", false),
         ("saved", true),
         ("published:1", true),
         ("published:2", true),
@@ -336,6 +337,104 @@ fn attach_transaction_eligibility_recovers_before_reading_paths() {
     );
     let out = env.json(&dir, &["attachments", &path]);
     assert_eq!(out["attachments"][0]["eligible"], true, "{out}");
+    assert_eq!(std::fs::read(dir.join(path)).unwrap(), b"report");
+}
+
+#[test]
+fn attach_snapshot_in_flight_show_keeps_its_ledger_and_files_together() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    common::configure_color(&dir);
+    let docs = common::docs::DocFixture::new(&env, "### Task 1: review\n");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--plan",
+            "stub:plan",
+            "--step",
+            "Task 1: review",
+        ],
+    ));
+    write(&dir.join("round.json"), b"round");
+    // show fetches the plan step after loading the task. Commit a real attachment
+    // during that fetch, before returning the provider's normal response.
+    let provider = std::fs::read_to_string(&docs.script).unwrap();
+    let publish = r#"if [ ! -f "$HOME/published.json" ]; then
+    "$TEST_TASKS" attach "$TEST_ID" round.json --note "review complete" > "$HOME/published.json" || exit 1
+fi
+"#;
+    std::fs::write(&docs.script, publish.to_owned() + &provider).unwrap();
+    let out = env
+        .cmd(&dir)
+        .env("TEST_TASKS", env!("CARGO_BIN_EXE_tasks"))
+        .env("TEST_ID", &id)
+        .args(["show", &id])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let shown: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(shown["step_found"], true, "{shown}");
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, "round.json")).unwrap(),
+        b"round"
+    );
+    let note_texts = shown["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["text"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let expected = if shown.get("files").is_some() {
+        assert_eq!(shown["files"][0]["name"], "round.json");
+        vec![
+            "created",
+            "attached: round.json (5 bytes)",
+            "review complete",
+        ]
+    } else {
+        vec!["created"]
+    };
+    assert_eq!(note_texts, expected, "{shown}");
+    assert_eq!(shown["warnings"], serde_json::json!([]), "{shown}");
+}
+
+#[cfg(all(unix, debug_assertions))]
+#[test]
+fn attach_snapshot_eligibility_refuses_pending_publication_with_symlink_owner() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write(&dir.join("report.md"), b"report");
+    env.cmd(&dir)
+        .env("TASKS_ATTACH_STOP_AFTER", "saved")
+        .args(["attach", &id, "report.md"])
+        .assert()
+        .code(86);
+    let record = dir.join(format!("tasks/{id}.md"));
+    let original = dir.join("original.md");
+    std::fs::rename(&record, &original).unwrap();
+    std::os::unix::fs::symlink(&original, &record).unwrap();
+    let path = format!("tasks/files/{id}/report.md");
+    let out = env.cmd(&dir).args(["attachments", &path]).output().unwrap();
+    if out.status.success() {
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let row = &result["attachments"][0];
+        assert_eq!(row["eligible"], false);
+        assert_eq!(row["problems"][0]["kind"], "attachment_unsafe");
+    } else {
+        assert_eq!(common::err_kind(&out), "attachment_unsafe");
+    }
+    assert!(
+        !dir.join(&path).exists(),
+        "unsafe owner allowed publication"
+    );
+    std::fs::remove_file(&record).unwrap();
+    std::fs::rename(&original, &record).unwrap();
+    let result = env.json(&dir, &["attachments", &path]);
+    assert_eq!(result["attachments"][0]["eligible"], true);
     assert_eq!(std::fs::read(dir.join(path)).unwrap(), b"report");
 }
 

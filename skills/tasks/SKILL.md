@@ -1057,8 +1057,9 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   the keys. Install the merged CLI before activating its shared skill/config.
 - A checker needing an exact local attachment verdict uses
   `tasks -C <project> attachments tasks/files/<id>/<name>...` (1–128 unique paths).
-  This read-only query uses only the explicit project's local configuration,
-  requested owners and entries, never registry, checkout fallback or providers.
+  The query finishes any interrupted local attach for a requested owner before
+  taking the snapshot. Otherwise it only reads the explicit project's local
+  configuration, requested owners and entries, without registry or provider lookup.
   JSON version 1 binds eligible rows to configuration/record/file SHA-256; negative
   rows carry audit problems and no record/file digests. Exit 0 includes negative
   verdicts; invalid input, unreadable/malformed state and observed read instability

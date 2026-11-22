@@ -11,6 +11,8 @@ use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
+const LINK_PROBE: &str = ".link-probe";
+
 #[derive(Serialize, Deserialize)]
 struct Journal {
     task: String,
@@ -61,7 +63,7 @@ impl Journal {
             ));
         }
         super::check_storage(project, id)?;
-        let current = digest(&fs::read(project.task_path(id))?);
+        let current = digest(&super::eligibility::read_regular(&project.task_path(id))?);
         let committed = current == self.after;
         if !committed && current != self.before {
             return Err(Error::Io(format!(
@@ -83,7 +85,7 @@ impl Journal {
                 match entry_state(&dest)? {
                     EntryState::Absent => {
                         if !matches!(entry_state(&src)?, EntryState::File(_))
-                            || digest(&fs::read(&src)?) != *expected
+                            || digest(&super::eligibility::read_regular(&src)?) != *expected
                         {
                             return Err(Error::Io(format!(
                                 "staged bytes for {id}/{name} missing or changed"
@@ -91,7 +93,8 @@ impl Journal {
                         }
                         fs::hard_link(&src, &dest)?;
                     }
-                    EntryState::File(_) if digest(&fs::read(&dest)?) == *expected => {}
+                    EntryState::File(_)
+                        if digest(&super::eligibility::read_regular(&dest)?) == *expected => {}
                     _ => {
                         return Err(Error::AttachmentUnsafe(format!(
                             "cannot recover {id}/{name}: destination changed"
@@ -101,6 +104,13 @@ impl Journal {
                 stop(&format!("published:{}", index + 1));
             }
             match fs::remove_file(&src) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if !committed {
+            match fs::remove_file(stage.join(LINK_PROBE)) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(e.into()),
@@ -127,21 +137,43 @@ impl Journal {
     }
 }
 
-pub(crate) fn recover(project: &Project, requested: impl Fn(&TaskId) -> bool) -> Result<()> {
-    let Some(path) = journal_path(project) else {
-        return Ok(());
-    };
-    if !path.try_exists()? {
-        return Ok(());
+// Keep the snapshot lock only while reading the record and its files. Providers
+// and Git hooks may themselves call tasks and must run outside the lock.
+pub(crate) fn read_guard(project: &Project, requested: impl Fn(&TaskId) -> bool) -> Result<File> {
+    let dir = File::open(project.tasks_dir())?;
+    dir.lock_shared()?;
+    if let Some(path) = journal_path(project)
+        && path.try_exists()?
+    {
+        dir.unlock()?;
+        dir.lock()?;
+        recover_locked(project, &path, requested)?;
     }
-    let _guard = lock(project)?;
-    match fs::read(&path) {
+    Ok(dir)
+}
+
+pub(crate) fn recover(project: &Project) -> Result<()> {
+    if let Some(path) = journal_path(project)
+        && path.try_exists()?
+    {
+        let _guard = lock(project)?;
+        recover_locked(project, &path, |_| true)?;
+    }
+    Ok(())
+}
+
+fn recover_locked(
+    project: &Project,
+    path: &Path,
+    requested: impl Fn(&TaskId) -> bool,
+) -> Result<()> {
+    match fs::read(path) {
         Ok(bytes) => {
             let journal: Journal = serde_json::from_slice(&bytes)
                 .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
             let id = TaskId::parse(&journal.task)?;
             if requested(&id) {
-                journal.finish(project, &id, &path)?;
+                journal.finish(project, &id, path)?;
             }
             Ok(())
         }
@@ -157,19 +189,19 @@ pub(crate) fn publish(
     raw: &[u8],
     files: &[(String, Vec<u8>)],
 ) -> Result<()> {
+    let _guard = lock(project)?;
     if files.is_empty() {
         return atomic_write(record, raw);
     }
     let path = journal_path(project)
         .ok_or_else(|| Error::Config("neither XDG_STATE_HOME nor HOME is set".into()))?;
-    let _guard = lock(project)?;
     if path.try_exists()? {
         return Err(Error::Io("attach recovery is pending".into()));
     }
     let journal = Journal {
         task: id.to_string(),
         nonce: fastrand::u64(..),
-        before: digest(&fs::read(record)?),
+        before: digest(&super::eligibility::read_regular(record)?),
         after: digest(raw),
         created_task_dir: !super::check_storage(project, id)?,
         files: files
@@ -201,6 +233,11 @@ pub(crate) fn publish(
             file.sync_all()?;
             stop(&format!("staged:{}", index + 1));
         }
+        // Recovery must be able to hard-link staged files before the record can claim them.
+        let probe = stage.join(LINK_PROBE);
+        fs::hard_link(stage.join(&files[0].0), &probe)?;
+        stop("probed");
+        fs::remove_file(probe)?;
         atomic_write(record, raw)?;
         stop("saved");
         Ok(())

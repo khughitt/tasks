@@ -285,6 +285,14 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         .into_iter()
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
         .collect();
+    let snapshot = if ctx.project.content.is_none() {
+        Some(crate::attachments::transaction::read_guard(
+            &ctx.project,
+            |_| true,
+        )?)
+    } else {
+        None // The staged tree is already an immutable snapshot.
+    };
     let (records, parse_errors) = ctx.project.scan_lenient_with_raw();
     let mut growth_rows: Vec<_> = records
         .iter()
@@ -302,6 +310,8 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             .then_with(|| left.id.cmp(&right.id))
     });
     let tasks: Vec<_> = records.into_iter().map(|(task, _)| task).collect();
+    let attachment_problems = crate::attachments::audit(&ctx.project, &tasks)?;
+    drop(snapshot);
     let mut errors = Vec::new();
     // A worktree made before the retirement holds no `[retired]` until a merge; the
     // registered checkout's declaration covers it, as it does for writes. One that cannot
@@ -1213,7 +1223,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
             error.to_string(),
         ));
     }
-    for problem in crate::attachments::audit(&ctx.project, &tasks)? {
+    for problem in attachment_problems {
         let finding = Finding {
             id: problem.id.map(|id| id.to_string()),
             file: problem.file,

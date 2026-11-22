@@ -915,7 +915,7 @@ impl Project {
         let records = dir.canonicalize()?;
         let text = std::fs::read_to_string(records.join(CONFIG_REL))?;
         let project = Self::from_config(records, &text)?;
-        crate::attachments::transaction::recover(&project, |_| true)?;
+        crate::attachments::transaction::recover(&project)?;
         Ok(project)
     }
 

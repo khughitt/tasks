@@ -97,6 +97,10 @@ impl Snapshot {
     }
 }
 
+pub(super) fn read_regular(path: &Path) -> Result<Vec<u8>> {
+    Snapshot::take(path)?.read(None)
+}
+
 pub(crate) fn local_query(dir: &Path, paths: &[String]) -> Result<AttachmentEligibilityOut> {
     let records = crate::repo::canonical_start(dir)?;
     let tasks = Snapshot::take(&records.join("tasks"))?;
@@ -154,7 +158,7 @@ pub fn eligibility(project: &Project, paths: &[String]) -> Result<Vec<Eligibilit
     }
     // A previous attach may have committed the owner record just before it died.
     // Finish its authorized publication before hashing any of the requested paths.
-    super::transaction::recover(project, |owner| {
+    let _guard = super::transaction::read_guard(project, |owner| {
         requests.iter().any(|(_, id, _)| id == owner)
     })?;
     let mut snapshots = Vec::new();

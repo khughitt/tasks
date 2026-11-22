@@ -21,7 +21,7 @@ pub fn run(mut ctx: Ctx, id: String, fetch: Fetch, all_projects: bool) -> Result
     let fields = describe(
         project,
         &ctx.registry,
-        task,
+        &task.id,
         &all,
         Some(&claims),
         &mut ctx.warnings,
@@ -133,7 +133,7 @@ pub(super) fn recorded_elsewhere<'a>(
 pub fn describe(
     project: &Project,
     registry: &Registry,
-    task: Task,
+    id: &TaskId,
     all: &[Task],
     claims: Option<&crate::claims::ClaimSnapshot>,
     warnings: &mut Vec<String>,
@@ -141,6 +141,12 @@ pub fn describe(
     fetch: Fetch,
     host: &crate::config::HostConfig,
 ) -> Result<ShowFields> {
+    let (task, (attached, problems)) = {
+        let _guard = crate::attachments::transaction::read_guard(project, |owner| owner == id)?;
+        let task = project.read_task(id)?;
+        let files = crate::attachments::audit_task(project, &task)?;
+        (task, files)
+    };
     let mut resolver = Resolver::new(project, registry, host);
     let deps = crate::review::Deps::of_scan(std::slice::from_ref(&task), |id| {
         crate::dependency::resolve(registry, id, |id| {
@@ -320,7 +326,6 @@ pub fn describe(
     let mut kids = crate::hierarchy::children(all, &task.id, registry);
     kids.sort_by(|a, b| crate::query::ready_order(a, b));
     let children = kids.into_iter().map(related).collect();
-    let (attached, problems) = crate::attachments::audit_task(project, &task)?;
     warnings.extend(problems.iter().map(crate::attachments::Problem::line));
     let spec_path = match &task.spec {
         Some(path) => Some(resolver.abs(DocKind::Spec, path)?),

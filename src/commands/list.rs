@@ -740,7 +740,7 @@ pub fn next(
             let fields = super::show::describe(
                 project,
                 &ctx.registry,
-                task,
+                &task.id,
                 &all,
                 Some(&claims),
                 &mut warnings,

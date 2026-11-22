@@ -25,13 +25,20 @@ pub fn run(
         .as_deref()
         .map(|at| Revision::resolve(&ctx.project.records, at))
         .transpose()?;
-    let task = match &revision {
-        Some(revision) => revision
-            .task_at(&ctx.project, &id)?
-            .ok_or_else(|| Error::TaskNotFound(id.to_string()))?,
-        None => ctx.project.read_task(&id)?,
+    let bytes = match &revision {
+        Some(revision) => {
+            let task = revision
+                .task_at(&ctx.project, &id)?
+                .ok_or_else(|| Error::TaskNotFound(id.to_string()))?;
+            audit::rebuild(&ctx.project, &task, &name, Some(revision))?
+        }
+        None => {
+            let _guard =
+                crate::attachments::transaction::read_guard(&ctx.project, |owner| owner == &id)?;
+            let task = ctx.project.read_task(&id)?;
+            audit::rebuild(&ctx.project, &task, &name, None)?
+        }
     };
-    let bytes = audit::rebuild(&ctx.project, &task, &name, revision.as_ref())?;
     let validation: Option<Validation> = if matches!(target, ExportTarget::Verify) {
         Some(publication::validate(&ctx.project, &name, &bytes)?)
     } else {
