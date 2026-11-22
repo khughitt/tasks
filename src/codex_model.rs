@@ -358,7 +358,7 @@ mod tests {
             std::iter::once(home.path().to_path_buf()).chain(std::env::split_paths(&host_path)),
         )
         .unwrap();
-        let mut probe = Command::new(std::env::current_exe().unwrap())
+        let probe = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "codex_model::tests::timeout_closes_stdout_while_caller_stays_alive",
@@ -368,6 +368,9 @@ mod tests {
             .env("PATH", path)
             .env(PROBE_HOME, home.path())
             .stdin(Stdio::piped())
+            // Keep the nested harness summary out of the outer Cargo transcript.
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
 
@@ -392,7 +395,8 @@ mod tests {
         wait_for("resolved");
         let late_write = writer.write_all(b"late resolver output");
         drop(writer);
-        assert!(probe.wait().unwrap().success());
+        let output = probe.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
         assert_eq!(late_write.unwrap_err().kind(), ErrorKind::BrokenPipe);
     }
 
