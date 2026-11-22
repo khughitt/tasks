@@ -848,8 +848,11 @@ checkpoint artifacts, or forge machine operation/checkpoint notes through
 
 Prefix and records commit-lock waits print stderr notices after 2 seconds and
 then at most every 30 seconds, identifying the scope, known records location and
-lock path. Linux holder PIDs are advisory `/proc/locks` snapshots; unavailable
-observations grant no permission to steal a lock or kill its holder. One acquired
+lock path. Linux holder PIDs are advisory `/proc/locks` snapshots, followed by the
+holder's command (`cmd=`), the deepest single-chain descendant it is running
+(`running=`, the phase, such as a pre-commit check) and the count of blocked
+writers including this one (`waiters=`; not a queue position, since flock is not
+FIFO). Unavailable observations grant no permission to steal a lock or kill its holder. One acquired
 line follows a displayed wait notice. Diagnostic failure never enters JSON
 warnings or blocks publication. Prefix locks still span the operation, including
 payload inspection, so same-prefix writers remain serialized.

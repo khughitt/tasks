@@ -1310,6 +1310,14 @@ fn lock_wait_prefix_and_commit() {
                 || notice.contains("holder unavailable"),
             "{notice}"
         );
+        if notice.contains("holder PID") {
+            // This test process holds the lock; only the spawned note waits on it.
+            assert!(
+                notice.contains(" cmd=\"") && notice.contains("record_commit"),
+                "{notice}"
+            );
+            assert!(notice.trim_end().ends_with(" waiters=1"), "{notice}");
+        }
         assert!(notice.contains(root.to_str().unwrap()), "{notice}");
         drop(held);
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
