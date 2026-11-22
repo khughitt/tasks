@@ -90,6 +90,16 @@ pub fn task_dir(project: &Project, id: &TaskId) -> PathBuf {
     files_root(project).join(id.to_string())
 }
 
+/// Where `id`'s attachments live under the project's records path, for comparing with a
+/// path a record names. Unlike [`task_dir`], never the private copy a staged check reads.
+pub fn recorded_task_dir(project: &Project, id: &TaskId) -> PathBuf {
+    project
+        .records
+        .join("tasks")
+        .join(FILES_DIR)
+        .join(id.to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirState {
     Absent,

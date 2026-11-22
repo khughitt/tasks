@@ -809,6 +809,7 @@ verb = "check"
 summary = "Validate every task file. Prints nothing when there is nothing to report"
 options = [
   { names = ["--growth"], value = "none" },
+  { names = ["--staged"], value = "none" },
 ]
 
 [[cli.tasks.commands]]

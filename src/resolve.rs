@@ -212,7 +212,7 @@ impl<'a> Resolver<'a> {
         &self,
         mut probe: impl FnMut(&Base, &Path) -> Result<Option<T>>,
     ) -> Result<Option<(Base, T)>> {
-        if let Some(found) = probe(&Base::Here, &self.project.records)? {
+        if let Some(found) = probe(&Base::Here, self.project.content_root())? {
             return Ok(Some((Base::Here, found)));
         }
         let mut later = Vec::new();

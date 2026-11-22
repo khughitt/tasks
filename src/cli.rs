@@ -1039,8 +1039,12 @@ pub enum Command {
     /// Validate every task file. Prints nothing when there is nothing to report.
     Check {
         /// Include byte and note counts for every successfully parsed record.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "staged")]
         growth: bool,
+        /// Check the records as the index Git will publish them (GIT_INDEX_FILE in a
+        /// pre-commit hook, else the repository's index), not the working tree.
+        #[arg(long)]
+        staged: bool,
     },
     /// Report eligibility for exact local task attachment paths
     Attachments {

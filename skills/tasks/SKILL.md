@@ -341,6 +341,8 @@ mean those documents were verified.
    before closing its next occurrence. Early runs are allowed. `list --periodic` shows
    what is coming up; `edit --no-every` stops recurrence and clears its anchor.
 7. `tasks check` before committing. A failing check means a task and its plan/spec drifted apart; fix both.
+   A records repository's pre-commit hook runs `tasks check --staged`, which judges what the
+   commit publishes (the index), not the working tree; see [staged checks](../../docs/project-operations.md#staged-checks).
    A clean check prints nothing and exits 0; findings print as JSON, and errors exit 1.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.

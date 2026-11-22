@@ -517,3 +517,17 @@ fn migration_missing_payload_remains_accounted_unknown() {
     ));
     assert_eq!(record["manifest"], serde_json::json!(expected));
 }
+#[test]
+fn migration_staged_check_keeps_own_attachment_manifests() {
+    // A post-cutover retained note naming a manifest in the task's own attachment
+    // directory is accepted; the staged audit compares it with the real records path,
+    // not the private copy it reads from.
+    let mut f = migration_fixture(HistoricalScenario::CheckpointDirectory);
+    f.bind_manifests();
+    manual_manifest(&f.f, false);
+    let plain = f.f.cmd().args(["check"]).output().unwrap();
+    assert!(plain.status.success(), "{plain:?}");
+    f.git(&f.destination, &["add", "-A"]);
+    let staged = f.f.cmd().args(["check", "--staged"]).output().unwrap();
+    assert!(staged.status.success(), "{staged:?}");
+}

@@ -306,7 +306,7 @@ pub(crate) fn validate_boundary(
                 .file_name()
                 .ok_or_else(|| invalid("suffix manifest filename"))?;
             if original.ends_with(std::path::Path::new("tasks/files").join(task).join(name))
-                && original != crate::attachments::task_dir(project, &id).join(name)
+                && original != crate::attachments::recorded_task_dir(project, &id).join(name)
             {
                 return Err(invalid(
                     "post-cutover source-style manifest has no supported recovery binding",
@@ -498,12 +498,13 @@ pub(crate) fn manifest_path(
         .and_then(|n| n.to_str())
         .ok_or_else(|| invalid("manifest source filename"))?;
     let local = crate::attachments::task_dir(project, id).join(name);
+    let recorded = crate::attachments::recorded_task_dir(project, id).join(name);
     let binding = d
         .manifest_bindings
         .iter()
         .find(|b| b.task == id.to_string() && b.ordinal == source.ordinal);
     let Some(binding) = binding else {
-        if original != local && original.ends_with(format!("tasks/files/{id}/{name}")) {
+        if original != recorded && original.ends_with(format!("tasks/files/{id}/{name}")) {
             return Err(invalid(
                 "migrated manifest source has no explicit recovery binding",
             ));

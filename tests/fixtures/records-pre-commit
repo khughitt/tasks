@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Run `tasks check --staged` for every project directory with staged files.
+
+Installed by `git config core.hooksPath .githooks`. The check reads the index this commit
+publishes (Git names it in GIT_INDEX_FILE, a temporary index for a pathspec commit), so
+unstaged edits neither hide nor block what is committed. Each top-level directory not
+starting with a dot is one project's records, named by its prefix; files at the top
+level and under dot-directories belong to the repository. The index decides: a staged
+directory with nothing left in the index was removed whole (a rename moves it), so
+nothing is left to check; one whose index holds files but no tasks/.config.toml is
+refused, since it is not a project's records. Paths are read NUL-delimited and decoded
+strictly; any failure stops the commit.
+Design: tasks docs/specs/2026-10-22-records-home-design.md §3.4.
+"""
+import os
+import subprocess
+import sys
+
+top = subprocess.run(["git", "rev-parse", "--show-toplevel"], check=True,
+                     stdout=subprocess.PIPE, text=True).stdout.strip()
+out = subprocess.run(["git", "diff", "--cached", "--name-only", "--no-renames", "-z"],
+                     check=True, stdout=subprocess.PIPE).stdout
+names = [n.decode("utf-8") for n in out.split(b"\0") if n]
+prefixes = sorted({n.split("/", 1)[0] for n in names if "/" in n and not n.startswith(".")})
+
+
+def indexed(path):
+    return subprocess.run(["git", "ls-files", "--cached", "-z", "--", path], check=True,
+                          stdout=subprocess.PIPE).stdout != b""
+
+
+# Git resolves a relative GIT_INDEX_FILE against the hook's working directory; hand the
+# check an absolute one so it names the same index wherever it runs.
+env = dict(os.environ)
+if env.get("GIT_INDEX_FILE"):
+    env["GIT_INDEX_FILE"] = os.path.abspath(env["GIT_INDEX_FILE"])
+
+failed = []
+for prefix in prefixes:
+    directory = os.path.join(top, prefix)
+    if not indexed(f"{prefix}/"):
+        continue
+    if not indexed(f"{prefix}/tasks/.config.toml"):
+        print(f"pre-commit: {prefix}/ has staged files but no tasks/.config.toml; "
+              "top-level directories hold one project's records each", file=sys.stderr)
+        failed.append(prefix)
+        continue
+    if subprocess.run(["tasks", "check", "--staged", "-C", directory], env=env).returncode != 0:
+        print(f"pre-commit: tasks check failed for {prefix}", file=sys.stderr)
+        failed.append(prefix)
+
+sys.exit(1 if failed else 0)
