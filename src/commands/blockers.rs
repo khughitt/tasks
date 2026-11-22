@@ -19,6 +19,12 @@ use time::OffsetDateTime;
 pub const HISTORY_UNAVAILABLE: &str = "history metrics (blocking since, confirmed scope passes) \
      are unavailable; this report ranks observed downstream impact only";
 
+/// The rank's keys, in order: root blockers ahead of folded rows, then committed
+/// transitive work, committed work cleared, the most urgent waiting priority, the row's own
+/// priority, creation and id.
+pub const RANKING: &str = "root,transitive_committed,committed_cleared,top_waiting_priority,\
+     priority,created,id";
+
 pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;
@@ -57,6 +63,11 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
     let claims = ClaimSnapshot::load(prefixes.into_iter())?;
 
     let total = analysis.rows.len();
+    let roots = analysis
+        .rows
+        .iter()
+        .filter(|row| row.counted_through.is_empty())
+        .count();
     let blockers: Vec<BlockerRow> = analysis
         .rows
         .iter()
@@ -65,11 +76,13 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
         .map(|(at, impact)| row(at + 1, impact, &claims, now))
         .collect();
 
-    let mut warnings = std::mem::take(&mut ctx.warnings);
-    warnings.push(HISTORY_UNAVAILABLE.into());
+    // Pretty output states the history gap and a cut scope in its footer, so only the
+    // other warnings reach its warnings section.
+    let scope_warnings = std::mem::take(&mut ctx.warnings);
+    let mut restated = vec![HISTORY_UNAVAILABLE.to_string()];
     let coverage = analysis.coverage;
     if !coverage.complete {
-        warnings.push(
+        restated.push(
             "coverage is partial: counts are lower bounds within the requested projects, and \
              ranks are observed ranks that may change when missing coverage returns"
                 .into(),
@@ -81,18 +94,28 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
             .iter()
             .map(ToString::to_string)
             .collect();
-        warnings.push(format!(
+        restated.push(format!(
             "dependency paths through out-of-scope targets were not followed: {}; in-scope \
              impact or rows may be missing; rerun with --all-projects to follow them",
             ids.join(", ")
         ));
     }
-    if !analysis.unresolved.is_empty() {
-        warnings.push(format!(
+    let unresolved = (!analysis.unresolved.is_empty()).then(|| {
+        format!(
             "{} dependency reference(s) could not be resolved; see unresolved",
             analysis.unresolved.len()
-        ));
-    }
+        )
+    });
+    let pretty_warnings: Vec<String> = scope_warnings
+        .iter()
+        .cloned()
+        .chain(unresolved.clone())
+        .collect();
+    let warnings: Vec<String> = scope_warnings
+        .into_iter()
+        .chain(restated)
+        .chain(unresolved)
+        .collect();
 
     let colors = ctx.project_colors();
     let mut out = Output::Blockers(Box::new(BlockersOut {
@@ -103,8 +126,10 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
             scope: "host_local",
         },
         goal_detection: "structural_only",
-        ranking: "transitive_work,direct_work,priority,created,id",
+        ranking: RANKING,
         total,
+        roots,
+        folded: total - roots,
         shown: blockers.len(),
         omitted: total - blockers.len(),
         limit: args.limit,
@@ -112,6 +137,7 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
         unresolved: analysis.unresolved,
         cycles: analysis.cycles,
         warnings,
+        pretty_warnings,
     }));
     let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&colors);
@@ -148,8 +174,12 @@ fn row(rank: usize, impact: &Impact, claims: &ClaimSnapshot, now: OffsetDateTime
         direct_work_by_status: impact.direct_work_by_status,
         transitive_work_by_status: impact.transitive_work_by_status,
         dependencies_cleared_direct_count: impact.dependencies_cleared_direct_count,
+        transitive_committed_count: impact.transitive_work_by_status.committed(),
+        committed_cleared_count: impact.committed_cleared_count,
+        top_waiting_priority: impact.top_waiting_priority,
         unmet_dependency_count: impact.unmet_dependency_count,
         unresolved_dependency_count: impact.unresolved_dependency_count,
+        counted_through: impact.counted_through.clone(),
         attention,
         awaiting_user: task.awaiting_user,
         task_needs: task.needs.clone(),

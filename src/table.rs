@@ -448,6 +448,20 @@ fn trim_visible_end(text: &str) -> String {
     trimmed
 }
 
+/// Chrome text wrapped to the layout's width, one line when the width is unknown.
+pub fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
+    render(
+        &[Column::wrap("", 1, None)],
+        &[Row::new(vec![painter.paint(Style::Chrome, text)])],
+        &Layout {
+            headers: false,
+            ..*layout
+        },
+        None,
+        painter,
+    )
+}
+
 /// Display columns of `text`, skipping ANSI escape sequences.
 pub fn visible_width(text: &str) -> usize {
     let mut count = 0;

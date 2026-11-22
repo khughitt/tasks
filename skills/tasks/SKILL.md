@@ -113,12 +113,15 @@ mean those documents were verified.
    closed in the last 14 days in a final section, ordered by closure date within the
    selected mode; the intro names that date distinction. When filing a goal the
    user described, set `--origin user` (or `mixed`) so it appears there.
-   `tasks blockers` ranks open prerequisites by the open work that depends on them,
-   directly and transitively (`-n` defaults to 20; `--project`, `--group` or
-   `--all-projects` widen the dependents counted). It is a report, not a picker, and
-   `ready`/`next` keep their order. Read `coverage.complete` first: a partial scan
-   (unfollowed out-of-scope paths, unresolved references, unreachable projects) gives
-   lower-bound counts and observed ranks. `dependencies_cleared_direct_count` is never
+   `tasks blockers` ranks root blockers, the open prerequisites waiting on no other
+   ranked row, by the committed work (todo, doing, blocked) that depends on them,
+   directly or transitively, then by what each alone clears (`-n` defaults to 20;
+   `--project`, `--group` or `--all-projects` widen the dependents counted). A blocker
+   waiting on a ranked row counts through it: JSON lists it after the roots with
+   `counted_through`. It is a report, not a picker, and `ready`/`next` keep their order.
+   Read `coverage.complete` first: a partial scan (unfollowed out-of-scope paths,
+   unresolved references, unreachable projects) gives lower-bound counts and observed
+   ranks. `dependencies_cleared_direct_count` and `committed_cleared_count` are never
    readiness or permission. Goals are structural only (lanes, records with children,
    and records that declare pieces); a childless cross-project hub without declared
    pieces counts as work. Park and claim evidence is this host's. `attention: user` needs a

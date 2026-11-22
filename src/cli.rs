@@ -1031,7 +1031,21 @@ pub enum Command {
     },
     /// Rank unmet prerequisites by observed downstream impact.
     #[command(
-        long_about = "Rank unmet prerequisites by observed downstream impact.\n\nHistory metrics (blocking since, confirmed scope passes) are unavailable; this report ranks observed downstream impact only."
+        long_about = "Rank unmet prerequisites by observed downstream impact.\n\n\
+Rows are root blockers: open prerequisites that wait on no other ranked row. A blocker \
+in scope that waits on a ranked row counts through it; JSON lists it after the roots with \
+counted_through, and pretty output leaves it out.\n\n\
+Order: committed work waiting at any depth (todo, doing, blocked; ideas are counted \
+apart), committed work it alone still holds (clears), the highest priority waiting, its \
+own priority, creation and id. Cleared counts dependency sets only; it does not mean \
+ready or authorized.\n\n\
+goals: structural only (lanes, records with children, and records that declare pieces); \
+a childless cross-project hub without declared pieces counts as work, and a goal's \
+impact is not attributed to its children without an explicit dependency.\n\n\
+Parks and claims are this host's evidence; absence is unknown, not free or authorized. \
+History metrics (blocking since, confirmed scope passes) are unavailable; this report \
+ranks observed downstream impact only.\n\n\
+Pretty output always labels its columns, whatever --headers or --no-headers says."
     )]
     Blockers(BlockersArgs),
     /// Dependency graph as mermaid or dot.
