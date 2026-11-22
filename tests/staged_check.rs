@@ -291,7 +291,8 @@ fn anything_but_an_ordinary_appended_note_takes_the_full_audit() {
     let fx = Fx::new();
     let a = fx.add("a", &[]);
     let b = fx.add("b", &[]);
-    let cases: Vec<(&str, Box<dyn Fn()>)> = vec![
+    type Change<'a> = Box<dyn Fn() + 'a>;
+    let cases: Vec<(&str, Change)> = vec![
         (
             "ledger note",
             Box::new(|| fx.append_note(&a, "detached: gone.txt: no longer needed")),
