@@ -115,6 +115,11 @@ const WHITE: Rgb = Rgb {
     b: 255,
 };
 
+/// The truecolor shade used for task IDs of a project with an identity color.
+pub(crate) fn id_color(color: Rgb) -> Rgb {
+    color.mix(WHITE, ID_TOWARD_WHITE)
+}
+
 /// Days beyond which every date looks the same.
 const HORIZON_DAYS: f64 = 730.0;
 
@@ -293,9 +298,7 @@ impl TreeScale {
         let clamped = depth.clamp(1, TREE_DEPTH_CAP);
         let step = (clamped - 1) as f64 / (TREE_DEPTH_CAP - 1) as f64;
         let start = match project {
-            Some(color) => color
-                .mix(WHITE, ID_TOWARD_WHITE)
-                .mix(self.bg, TREE_START_MUTE),
+            Some(color) => id_color(color).mix(self.bg, TREE_START_MUTE),
             None => self.target.mix(self.bg, TREE_START_MUTE),
         };
         self.repair(start.mix(self.target, step))
@@ -381,11 +384,11 @@ impl Painter {
             }
             Style::Project(color) => format!("38;2;{};{};{}", color.r, color.g, color.b),
             Style::Id(color) => {
-                let shade = color.mix(WHITE, ID_TOWARD_WHITE);
+                let shade = id_color(color);
                 format!("38;2;{};{};{}", shade.r, shade.g, shade.b)
             }
             Style::GoalId(Some(color)) => {
-                let shade = color.mix(WHITE, ID_TOWARD_WHITE);
+                let shade = id_color(color);
                 format!("1;38;2;{};{};{}", shade.r, shade.g, shade.b)
             }
             Style::GoalId(None) => "1".into(),

@@ -55,6 +55,7 @@ pub fn run(
                     }
                 }
                 result.color_256 = result.color.map(crate::palette::Rgb::terminal_index);
+                result.id_color = result.color.map(crate::style::id_color);
                 result
             }
             Err((input, detail)) => invalid_row(input, "invalid", detail),
@@ -105,6 +106,7 @@ fn entry_row(project: &Project, with_freshness: bool, warnings: &mut Vec<String>
         stage_error,
         color: project.color,
         color_256: project.color.map(crate::palette::Rgb::terminal_index),
+        id_color: project.color.map(crate::style::id_color),
         retired: project.retired.clone(),
         feedback: project.feedback.clone(),
         freshness,

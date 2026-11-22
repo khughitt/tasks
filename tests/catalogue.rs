@@ -118,7 +118,7 @@ fn unregistered_entry_appears_in_resolve_all_and_by_prefix() {
             "records": layout.store.join("bb"), "checkout": layout.code.join("bb"),
             "kind": "detached", "name": "Catalogue", "aliases": [],
             "purpose": "Keeps identities", "snapshot": {"source":"seeded","refreshed":"2026-11-09T16:00:00Z"},
-            "shorthand": ["cat"], "profile":"personal", "stage":null, "color":"#123456", "color_256":242
+            "shorthand": ["cat"], "profile":"personal", "stage":null, "color":"#123456", "color_256":242, "id_color":"#546c87"
         })
     );
     assert_eq!(resolve(&env, &layout.code, &["bb"])["results"][0], *bb);

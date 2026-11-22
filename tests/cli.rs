@@ -8991,7 +8991,9 @@ fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
             for row in json["projects"].as_array_mut().unwrap() {
                 let color = row.as_object_mut().unwrap().remove("color");
                 let index = row.as_object_mut().unwrap().remove("color_256");
+                let id_color = row.as_object_mut().unwrap().remove("id_color");
                 assert_eq!(index.is_some(), color.is_some());
+                assert_eq!(id_color.is_some(), color.is_some());
                 let expected = match row["prefix"].as_str().unwrap() {
                     "sci" => Some(serde_json::json!("#123456")),
                     "dots" => Some(serde_json::json!("#abcdef")),
@@ -9108,7 +9110,9 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
         if args[0] == "where" {
             // where already reports the color; nothing else moves
             let color = json["project"].as_object_mut().unwrap().remove("color");
+            let id_color = json["project"].as_object_mut().unwrap().remove("id_color");
             assert_eq!(color.is_some(), *dir == sci.as_path(), "{json}");
+            assert_eq!(id_color.is_some(), color.is_some());
         }
         assert_eq!(json, before, "{args:?}");
     }

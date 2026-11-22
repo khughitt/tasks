@@ -283,6 +283,13 @@ An absent predecessor registration does not remove the reservation or redirect a
 old ID into the current project. See the
 [two-step handoff and its current limits](project-operations.md#reclaiming-a-retired-predecessors-prefix).
 
+### Task ID colour in JSON
+
+Whenever a `projects`, `where`, `resolve` (including its nested `entry`), or
+`goals` row contains `color`, it also contains `id_color`. This lowercase
+`#rrggbb` value is the truecolor shade used by pretty output when it paints
+that project's task IDs in colour. Consumers that paint IDs can use it directly.
+
 ### Terminal project-colour stand-in
 
 `resolve` rows (including their `entry`) and `projects` rows expose `color_256`

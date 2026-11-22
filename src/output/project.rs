@@ -160,10 +160,10 @@ impl Output {
                 .tasks
                 .iter_mut()
                 .for_each(|row| row.project_color = color_of(colors, &row.id)),
-            Output::Goals(o) => o
-                .goals
-                .iter_mut()
-                .for_each(|row| row.project_color = color_of(colors, &row.id)),
+            Output::Goals(o) => o.goals.iter_mut().for_each(|row| {
+                row.project_color = color_of(colors, &row.id);
+                row.id_color = row.project_color.map(crate::style::id_color);
+            }),
             Output::Tree(o) => paint_tree(colors, &mut o.nodes),
             Output::Blockers(o) => o
                 .blockers

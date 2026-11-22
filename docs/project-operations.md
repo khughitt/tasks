@@ -62,8 +62,8 @@ with positional inputs and `--stdin`. Registered projects retain their existing
 resolution statuses and fields; discovered-only prefixes stay `unregistered`.
 Enumeration keeps literal catalogue keys; explicit inputs still follow rename aliases.
 Each readable records entry adds `entry`: config, records and declared checkout
-paths, layout kind, shorthand, stage and optional profile, color, derived `color_256`, retirement and feedback
-scope. A snapshot adds name, public aliases, purpose and source/refreshed metadata
+paths, layout kind, shorthand, stage and optional profile, `color`, derived
+`color_256` and `id_color`, retirement and feedback scope. A snapshot adds name, public aliases, purpose and source/refreshed metadata
 (plus commit/blob for a HEAD snapshot). Unset optional fields are omitted.
 An unreadable or malformed entry adds `entry_error` and a warning while other rows
 continue. Path rows within a known records store add its root as `records_store`,

@@ -215,6 +215,9 @@ pub struct WhereProject {
     pub stage_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
+    /// The truecolor shade for task IDs, present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_color: Option<crate::palette::Rgb>,
 }
 
 #[derive(Serialize)]
@@ -274,6 +277,9 @@ pub struct ResolveRow {
     /// Derived xterm-256 stand-in; present exactly when color is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_256: Option<u8>,
+    /// The truecolor shade for task IDs, present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_color: Option<crate::palette::Rgb>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via: Option<crate::locations::Via>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -313,6 +319,9 @@ pub struct EntryRow {
     /// Derived xterm-256 stand-in; present exactly when color is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_256: Option<u8>,
+    /// The truecolor shade for task IDs, present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_color: Option<crate::palette::Rgb>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retired: Option<crate::repo::Retirement>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -344,6 +353,9 @@ pub struct ProjectRow {
     /// Derived xterm-256 stand-in; present exactly when color is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_256: Option<u8>,
+    /// The truecolor shade for task IDs, present exactly when color is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_color: Option<crate::palette::Rgb>,
     pub root: String,
     /// The registry's records pairing, else the root. Always present.
     pub records: String,

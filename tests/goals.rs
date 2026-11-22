@@ -154,6 +154,7 @@ fn goals_activity_mapping_distinguishes_scores_with_fixed_ids() {
     let json = goals(&env, &dir, &["--closed"]);
     for id in [&hot, &cold, &closed] {
         assert_eq!(row(&json, id)["color"], "#123456");
+        assert_eq!(row(&json, id)["id_color"], "#546c87");
         assert!(row(&json, id).get("activity").is_none());
     }
 }

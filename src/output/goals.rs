@@ -450,6 +450,7 @@ mod tests {
                 priority: 1,
                 lane: false,
                 project_color: crate::palette::Rgb::parse_hex("#aa8c0e"),
+                id_color: None,
                 activity: None,
                 last_activity: "2026-11-08T10:00:00Z".into(),
                 pieces: Pieces { done, total, ideas },

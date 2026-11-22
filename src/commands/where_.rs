@@ -149,5 +149,6 @@ fn shown(project: Project, registered: Option<(&Path, &str)>) -> WhereProject {
         stage,
         stage_error,
         color: project.color,
+        id_color: project.color.map(crate::style::id_color),
     }
 }

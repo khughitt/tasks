@@ -97,6 +97,7 @@ pub fn run(
             purpose: identity.map(|snapshot| snapshot.purpose),
             color,
             color_256: color.map(crate::palette::Rgb::terminal_index),
+            id_color: color.map(crate::style::id_color),
             root: root.display().to_string(),
             records: registry
                 .records_dir(prefix)
@@ -133,6 +134,7 @@ mod tests {
             purpose: None,
             color: None,
             color_256: None,
+            id_color: None,
             root: format!("/tmp/{prefix}"),
             records: format!("/tmp/{prefix}"),
             kind: None,
