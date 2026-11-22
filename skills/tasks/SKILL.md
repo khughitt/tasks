@@ -997,33 +997,25 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   record bytes), preserve exact body bytes before shortening it with `tasks edit
   <id> --body`. Archival reduces active rewrite cost, not total evidence or
   full-read cost; existing cap/layout limits remain in force.
-- Screenshots or files for a task: `tasks attach <id> <path> <path>...`, with
-  `--caption "<what they show>"` applied to each file. The batch validates all names,
-  per-file caps, collisions and storage safety before writing, then records one
-  `attached:` note per file in one save/commit. A write/save failure removes all
-  files that call wrote. `--name`, `-` (stdin) and `--clipboard` require one source.
-  JSON returns `files: [{name, path, bytes}, ...]` even for one source, replacing
-  the old `file` object. `tasks show <id>` prints each
-  file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
-  removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
-  ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
-  After interrupted attachment publication, first check whether the live ledger
-  already records the present file:
-  - Present file with no live `attached:` ledger entry and identical bytes: retry
-    the same name and bytes through `tasks attach` to adopt the payload and write
-    and publish the ledger entry.
-  - Present file already recorded by a matching live ledger entry (or an adopted
-    file left untracked by an older build): do not retry `tasks attach` (which
-    refuses a live name with `attachment_exists`); instead inspect the pending
-    `tasks/` sweep, resolve unrelated writes, and run `tasks commit` when
-    publication is missing.
-  - Conflicting bytes, incomplete evidence, or unsafe storage: `tasks attach`
-    refuses fail-closed (`attachment_exists` or `attachment_unsafe`); resolve the
-    conflict or detach/rename explicitly rather than overwriting bytes.
-  In every recovery case, verify both the live ledger and the exact committed
-  payload bytes with `git show <basis>:<attachment-path>` in the records
-  repository. A successful audit or exit 0 alone does not establish committed
-  evidence.
+- Attach screenshots or files with `tasks attach <id> <path>...`. Use `--caption`
+  for text shared by all file ledger entries and repeat `--note "<text>"` for
+  notes to append in the same write. Caller notes follow the ledger entries
+  and any multipart declaration in the order given. They follow `note --stdin`
+  single-line rules. Add `--stamp` to stamp just the caller notes. An invalid
+  note or a name the ledger already records as attached refuses the whole batch.
+  `--name`, stdin `-` and `--clipboard` require one source. JSON returns
+  `files: [{name, path, bytes}, ...]`. Read each file at the path in
+  `tasks show <id>`. Remove a file with `tasks detach <id> <name> "<why>"`.
+  Keep file writes under `tasks attach` so `tasks check` can verify the ledger.
+  Feedback takes no attachments.
+  After a process interruption, run `tasks show <id>` on the same host. If the
+  batch is absent, retry it. If the batch landed, retrying refuses the recorded
+  name with `attachment_exists`. Verify the exact committed record and payload
+  bytes when publication matters. For a batch present only in the working tree,
+  resolve the publication failure and use `tasks commit <id>`.
+  An unrecorded file from an older writer can still be adopted by attaching the
+  same name with identical bytes. Resolve differing bytes or unsafe storage
+  explicitly before retrying.
 - Oversized text evidence: `tasks attach <id> <path> --multipart`, or pipe the
   whole document into `tasks attach <id> - --name <name> --multipart`. This accepts
   one UTF-8 source, preserves exact bytes and validates `.json` syntax; clipboard,

@@ -345,21 +345,9 @@ fn dispatch(
             crate::review::Review::from_flags(reviewed, no_reviewed),
             crate::review::Awaiting::from_flags(awaiting_user, false),
         ),
-        Command::Attach {
-            id,
-            source,
-            clipboard,
-            multipart,
-            name,
-            caption,
-        } => attach::attach(
-            open_id_write_ctx(dir, &id, host.clone())?,
-            id,
-            attach::Source::from_args(source, clipboard)?,
-            multipart,
-            name,
-            caption,
-        ),
+        Command::Attach { id, args } => {
+            attach::attach(open_id_write_ctx(dir, &id, host.clone())?, id, args)
+        }
         Command::ArchiveNotes { id, expect } => {
             let ctx = if expect.is_some() {
                 open_id_write_ctx(dir, &id, host.clone())?

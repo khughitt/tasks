@@ -16,26 +16,38 @@ Names are 1–128 ASCII bytes of letters, digits, dot, underscore or hyphen, wit
 leading dot. Ordinary files default to a 2 MiB cap; [configuration](configuration.md)
 defines overrides and multipart admission limits.
 
-`tasks attach <id> <path>...` stores each file separately, with a ledger note
-`attached: <name> (<n> bytes)` and optional caption. All names, per-file sizes,
-duplicate basenames, collisions and unsafe storage are checked before any write.
-One batch saves/commits once. Caption applies to every source. --name, stdin `-`
-and --clipboard require a single source; clipboard uses the host clipboard tool.
-JSON always has `files: [{name,path,bytes}, ...]`; pretty prints paths in input order.
-There is no singular file object contract.
+`tasks attach <id> <path>... [--note <text>]... [--stamp]` stores each file
+separately with a ledger note `attached: <name> (<n> bytes)`. `--caption`
+adds the same caption to every ledger entry. After the ledger entries and any
+multipart declaration, the task records each `--note` in argument order.
+Each value follows the single-line validation and normalization of `note --stdin`.
+`--stamp` applies session provenance to the caller's notes only.
+
+The batch checks names, per-file sizes, duplicate basenames, collisions and
+storage safety. An invalid note or a name already recorded as attached refuses
+the whole batch. A recorded name remains occupied even if its file is missing.
+`--name`, stdin `-` and `--clipboard` require a single source.
+JSON returns `files: [{name,path,bytes}, ...]`. Pretty output lists paths in input order.
+
+After a process interruption, the next task command on the same host sees all
+of the new files and notes or none. Inspect `tasks show <id>` before retrying.
+If the batch is absent, retry it. If it landed, a retry returns
+`attachment_exists` and adds no notes. When Git publication is required, verify
+the files and record at the intended commit. If the batch landed only in the
+working tree, resolve the publication failure and run `tasks commit <id>`.
 
 `detach <id> <name> "<why>"` records `detached: <name>: <why>` and removes the file.
-The latest matching task ledger event establishes ownership. Show lists attached
-files; feedback does not carry attachments. Write/save failure rolls back files
-created by that ordinary attach, preserving pre-existing files. After a process
-interruption an unnoted file can be adopted by the same-byte attach with --name,
-or explicitly detached. Retry interrupted ordinary detach to finish it.
+The latest matching task ledger event establishes ownership. An unrecorded file
+left by an older writer can still be adopted by attaching the same name and bytes
+or removed explicitly with `detach`. Retry interrupted ordinary detach to finish it.
 
 ## Eligibility and audit
 
-`tasks -C <project> attachments <path>...` is a read-only protocol for 1–128 unique
-literal paths `tasks/files/<id>/<name>`. It consults only that directory's config,
-requested owner records and files: no registry search, other checkout or provider.
+`tasks -C <project> attachments <path>...` inspects 1–128 unique
+literal paths `tasks/files/<id>/<name>`. Before taking its snapshot, it finishes
+any interrupted same-host attach for a requested owner. Otherwise the query is
+read-only. It checks the local config, requested owner records and files
+without a registry search, another checkout or a provider.
 Closed tasks and retired projects can own eligible evidence. No claims are written.
 
 Version-1 JSON reports canonical records directory, prefix, configuration SHA256

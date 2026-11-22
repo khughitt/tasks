@@ -914,7 +914,9 @@ impl Project {
     pub fn open(dir: &Path) -> Result<Project> {
         let records = dir.canonicalize()?;
         let text = std::fs::read_to_string(records.join(CONFIG_REL))?;
-        Self::from_config(records, &text)
+        let project = Self::from_config(records, &text)?;
+        crate::attachments::transaction::recover(&project, |_| true)?;
+        Ok(project)
     }
 
     /// Historical config metadata must not resolve a checkout path that may have moved.
@@ -1377,6 +1379,19 @@ impl Project {
         before_write: impl FnOnce() -> Result<()>,
         permission: crate::retained::publish::WritePermission,
     ) -> Result<()> {
+        self.publish_validated_task(registry, task, permission, |path, raw| {
+            before_write()?;
+            atomic_write(path, raw)
+        })
+    }
+
+    pub(crate) fn publish_validated_task(
+        &self,
+        registry: &Registry,
+        task: &Task,
+        permission: crate::retained::publish::WritePermission,
+        publish: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
         if self.task_path(&task.id).exists() {
             let old = self.read_task(&task.id)?;
             crate::retained::publish::check_write(self, registry, &old, task, permission)?;
@@ -1384,8 +1399,7 @@ impl Project {
 
         let path = self.task_path(&task.id);
         let raw = serialize_physical(&self.physical_for_save(task)?);
-        before_write()?;
-        atomic_write(&path, raw.as_bytes())?;
+        publish(&path, raw.as_bytes())?;
         self.record_task_written(task);
         Ok(())
     }

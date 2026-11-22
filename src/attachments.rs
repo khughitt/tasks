@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 mod eligibility;
+pub(crate) mod transaction;
 pub(crate) use eligibility::local_query;
 pub use eligibility::{EligibilityRow, eligibility};
 

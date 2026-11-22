@@ -679,6 +679,8 @@ options = [
   { names = ["--clipboard"], value = "none" },
   { names = ["--name"], value = "string" },
   { names = ["--multipart"], value = "none" },
+  { names = ["--note"], value = "string", repeatable = true },
+  { names = ["--stamp"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -1652,6 +1654,28 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["heads"]
+summary = "Read the world head, chain tips and pending registrations"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--resolve", "--no-resolve"], value = "none" },
+]
+
+[[cli.science.commands]]
+path = ["log"]
+summary = "Read a bounded interval of a configured chain"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--chain"], value = "string", required = true },
+  { names = ["--after"], value = "string", required = true },
+  { names = ["--through"], value = "string" },
+]
+
+[[cli.science.commands]]
 path = ["dataset"]
 summary = "Hold a local file or directory in the store and mint the dataset record under its content address"
 options = [
@@ -2103,18 +2127,19 @@ options = [
 
 [[cli.science.commands]]
 path = ["serve"]
-summary = "Serve the world over HTTP"
+summary = "Serve an attended session or launch a supervised run"
 protocol = "server on stdio or a socket"
 options = [
   { shared = "config", value = "path" },
+  { names = ["--run"], value = "path" },
   { shared = "project", role = "select", value = "string", repeatable = false },
 ]
 
 [[cli.science.commands]]
 path = ["mcp"]
-summary = "Serve the world over MCP on stdio"
+summary = "Serve commands over MCP on stdio or bridge to a run endpoint"
 protocol = "server on stdio or a socket"
-args = [{ name = "mode", value = "enum", values = ["serve"], required = true }]
+args = [{ name = "mode", value = "enum", values = ["serve", "bridge"], required = true }]
 options = [
   { shared = "config", value = "path" },
   { shared = "project", role = "select", value = "string", repeatable = false },

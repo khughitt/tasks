@@ -50,6 +50,31 @@ pub struct Cli {
     pub command: Command,
 }
 
+#[derive(Args, Debug)]
+pub(crate) struct AttachArgs {
+    /// The files to copy, or a single `-` for stdin (which needs --name).
+    #[arg(required_unless_present = "clipboard", conflicts_with = "clipboard")]
+    pub(crate) source: Vec<String>,
+    /// Read an image from the Wayland clipboard through wl-paste.
+    #[arg(long)]
+    pub(crate) clipboard: bool,
+    /// Store one UTF-8 text source as bounded parts and a catalog.
+    #[arg(long, conflicts_with = "clipboard")]
+    pub(crate) multipart: bool,
+    /// Single source only: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
+    #[arg(long)]
+    pub(crate) name: Option<String>,
+    /// One line saying what the file shows, kept in the ledger note.
+    #[arg(long)]
+    pub(crate) caption: Option<String>,
+    /// Append one note after the attachment ledger entries. Repeat to append more in order.
+    #[arg(long = "note", value_name = "TEXT")]
+    pub(crate) notes: Vec<String>,
+    /// Stamp each caller note with this session's harness provenance.
+    #[arg(long)]
+    pub(crate) stamp: bool,
+}
+
 /// The four read scopes: the current project (no flag), one named registered project,
 /// the members of a project group, or every reachable one. `--project` opens the registered root through the
 /// same path `add --project` uses, so a worktree of that prefix does not displace it.
@@ -836,21 +861,8 @@ pub enum Command {
     Attach {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        /// The files to copy, or a single `-` for stdin (which needs --name).
-        #[arg(required_unless_present = "clipboard", conflicts_with = "clipboard")]
-        source: Vec<String>,
-        /// Read an image from the Wayland clipboard through wl-paste.
-        #[arg(long)]
-        clipboard: bool,
-        /// Store one UTF-8 text source as bounded parts and a catalog.
-        #[arg(long, conflicts_with = "clipboard")]
-        multipart: bool,
-        /// Single source only: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
-        #[arg(long)]
-        name: Option<String>,
-        /// One line saying what the file shows, kept in the ledger note.
-        #[arg(long)]
-        caption: Option<String>,
+        #[command(flatten)]
+        args: AttachArgs,
     },
     /// Read-only note archive preview; --expect applies the verified source hash.
     ArchiveNotes {

@@ -116,6 +116,266 @@ fn attach_batch_copies_each_file_with_its_own_ledger_note() {
 }
 
 #[test]
+fn attach_transaction_stamps_only_caller_notes_and_preserves_order() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write(&dir.join("z.txt"), b"z");
+    write(&dir.join("a.txt"), b"aa");
+    env.cmd(&dir)
+        .env("CODEX_THREAD_ID", "review-session")
+        .args([
+            "attach",
+            &id,
+            "z.txt",
+            "a.txt",
+            "--note",
+            "  first: café\t ",
+            "--note",
+            "second",
+            "--stamp",
+        ])
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &id]);
+    let added = &shown["task"]["notes"].as_array().unwrap()[1..];
+    assert_eq!(
+        added
+            .iter()
+            .map(|n| n["text"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "attached: z.txt (1 bytes)",
+            "attached: a.txt (2 bytes)",
+            "  first: café",
+            "second"
+        ]
+    );
+    for ledger in &added[..2] {
+        assert!(ledger.get("harness_session").is_none());
+    }
+    for caller in &added[2..] {
+        assert_eq!(caller["harness_session"], "codex:review-session");
+        assert_eq!(caller["harness_session_source"], "CODEX_THREAD_ID");
+    }
+}
+
+#[test]
+fn attach_transaction_rejects_an_invalid_later_note_before_writing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write(&dir.join("a.txt"), b"abc");
+    let record = dir.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    for (text, error) in [
+        (" \t", "validation"),
+        ("line one\nline two", "validation"),
+        ("retained: ordinary prose", "retained_input"),
+    ] {
+        assert_eq!(
+            env.fail(
+                &dir,
+                &["attach", &id, "a.txt", "--note", "valid", "--note", text]
+            ),
+            error
+        );
+        assert_eq!(std::fs::read(&record).unwrap(), before);
+        assert!(!stored(&dir, &id, "a.txt").exists());
+    }
+}
+
+#[test]
+fn attach_transaction_refuses_a_recorded_name_even_when_the_file_is_missing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write(&dir.join("reserved.json"), b"one");
+    env.json(&dir, &["attach", &id, "reserved.json"]);
+    std::fs::remove_file(stored(&dir, &id, "reserved.json")).unwrap();
+    write(&dir.join("report.md"), b"two");
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                "report.md",
+                "reserved.json",
+                "--note",
+                "retry"
+            ]
+        ),
+        "attachment_exists"
+    );
+    assert_eq!(
+        notes(&env, &dir, &id),
+        ["attached: reserved.json (3 bytes)"]
+    );
+    assert!(!stored(&dir, &id, "report.md").exists());
+    assert!(!stored(&dir, &id, "reserved.json").exists());
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn attach_transaction_recovers_at_every_write_on_the_first_show_or_attach() {
+    for (boundary, committed) in [
+        ("staged:1", false),
+        ("staged:2", false),
+        ("saved", true),
+        ("published:1", true),
+        ("published:2", true),
+    ] {
+        for first in ["show", "attach"] {
+            let mut env = TestEnv::new();
+            let dir = env.init("dot");
+            common::configure_color(&dir);
+            let id = id_of(env.json(&dir, &["add", "T"]));
+            write(&dir.join("marker.json"), b"old");
+            write(&dir.join("report.md"), b"old report");
+            env.cmd(&dir)
+                .env("TASKS_ATTACH_STOP_AFTER", boundary)
+                .args([
+                    "attach",
+                    &id,
+                    "marker.json",
+                    "report.md",
+                    "--note",
+                    "original",
+                ])
+                .assert()
+                .code(86);
+            if !committed {
+                assert!(!stored(&dir, &id, "marker.json").exists(), "{boundary}");
+                assert!(!stored(&dir, &id, "report.md").exists(), "{boundary}");
+            }
+            // No tasks command may repair the state before the designated first observer.
+            write(&dir.join("marker.json"), b"new");
+            write(&dir.join("report.md"), b"new report");
+            let retry = ["attach", &id, "marker.json", "report.md", "--note", "retry"];
+            let (marker, report, note) = if committed {
+                (b"old", b"old report", "original")
+            } else {
+                (b"new", b"new report", "retry")
+            };
+            let first_show = if first == "show" {
+                Some(env.json(&dir, &["show", &id]))
+            } else {
+                if committed {
+                    assert_eq!(env.fail(&dir, &retry), "attachment_exists", "{boundary}");
+                } else {
+                    env.json(&dir, &retry);
+                }
+                None
+            };
+            // A second show could otherwise conceal an attach that skipped recovery.
+            if committed || first == "attach" {
+                assert_eq!(
+                    std::fs::read(stored(&dir, &id, "marker.json")).unwrap(),
+                    marker
+                );
+                assert_eq!(
+                    std::fs::read(stored(&dir, &id, "report.md")).unwrap(),
+                    report
+                );
+            }
+            let shown = first_show.unwrap_or_else(|| env.json(&dir, &["show", &id]));
+            assert_eq!(
+                shown["warnings"],
+                serde_json::json!([]),
+                "{boundary} {first}: {shown}"
+            );
+            let texts: Vec<_> = shown["task"]["notes"].as_array().unwrap()[1..]
+                .iter()
+                .map(|n| n["text"].as_str().unwrap())
+                .collect();
+            if !committed && first == "show" {
+                assert!(texts.is_empty(), "{boundary}: {texts:?}");
+                assert!(shown.get("files").is_none(), "{boundary}: {shown}");
+                assert!(!stored(&dir, &id, "marker.json").exists());
+                assert!(!stored(&dir, &id, "report.md").exists());
+                continue;
+            }
+            assert_eq!(
+                texts,
+                [
+                    "attached: marker.json (3 bytes)",
+                    "attached: report.md (10 bytes)",
+                    note
+                ],
+                "{boundary} {first}"
+            );
+            assert_eq!(shown["files"].as_array().unwrap().len(), 2);
+            assert_eq!(shown["files"][0]["name"], "marker.json");
+            assert_eq!(shown["files"][1]["name"], "report.md");
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn attach_transaction_eligibility_recovers_before_reading_paths() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    let other = id_of(env.json(&dir, &["add", "Other"]));
+    write(&dir.join("report.md"), b"report");
+    env.cmd(&dir)
+        .env("TASKS_ATTACH_STOP_AFTER", "saved")
+        .args(["attach", &id, "report.md"])
+        .assert()
+        .code(86);
+    let path = format!("tasks/files/{id}/report.md");
+    env.json(
+        &dir,
+        &["attachments", &format!("tasks/files/{other}/receipt")],
+    );
+    assert!(
+        !dir.join(&path).exists(),
+        "querying another owner recovered this task"
+    );
+    let out = env.json(&dir, &["attachments", &path]);
+    assert_eq!(out["attachments"][0]["eligible"], true, "{out}");
+    assert_eq!(std::fs::read(dir.join(path)).unwrap(), b"report");
+}
+
+#[test]
+fn attach_transaction_concurrent_round_writers_record_only_the_winner() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    let lock = common::hold_project_lock(&env, "dot");
+    let writers = ["alice", "brian"].map(|writer| {
+        let marker = write(&dir.join(writer).join("round.json"), writer.as_bytes());
+        let child = env
+            .raw(&dir)
+            .args(["attach", &id, marker.to_str().unwrap(), "--note", writer])
+            .spawn()
+            .unwrap();
+        (writer, child)
+    });
+    drop(lock);
+    let mut winners = Vec::new();
+    for (writer, child) in writers {
+        let result = common::reap(child, common::REAP).expect("attach must finish");
+        if result.status.success() {
+            winners.push(writer);
+        } else {
+            assert_eq!(common::err_kind(&result), "attachment_exists");
+        }
+    }
+    assert_eq!(winners.len(), 1);
+    assert_eq!(
+        std::fs::read(stored(&dir, &id, "round.json")).unwrap(),
+        winners[0].as_bytes()
+    );
+    assert_eq!(
+        notes(&env, &dir, &id),
+        ["attached: round.json (5 bytes)", winners[0]]
+    );
+}
+
+#[test]
 fn attach_batch_preflights_every_source_before_writing() {
     for (case, expected) in [
         ("duplicate", "attachment_exists"),

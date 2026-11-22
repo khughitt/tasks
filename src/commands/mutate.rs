@@ -648,6 +648,16 @@ fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
 /// claim with no file update makes an idle task look busy and self-heals when the session
 /// dies, while a file update with no claim is the invisibility bug this exists to remove.
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
+    save_with(ctx, task, |ctx, task| {
+        ctx.project.write_validated_task(&ctx.registry, task)
+    })
+}
+
+pub(super) fn save_with(
+    ctx: &mut Ctx,
+    task: &mut Task,
+    ordinary_write: impl FnOnce(&Ctx, &Task) -> Result<()>,
+) -> Result<()> {
     task.updated = crate::time::after(&task.updated)?;
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
@@ -851,7 +861,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
         None => {
             // Resolve the store before writing so a corrupt store cannot hide a landed edit.
             ctx.claims_mut()?;
-            ctx.project.write_validated_task(&ctx.registry, task)?;
+            ordinary_write(ctx, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             if let Err(error) = store.save() {

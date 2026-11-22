@@ -152,6 +152,11 @@ pub fn eligibility(project: &Project, paths: &[String]) -> Result<Vec<Eligibilit
         }
         requests.push((path, id, parts[3]));
     }
+    // A previous attach may have committed the owner record just before it died.
+    // Finish its authorized publication before hashing any of the requested paths.
+    super::transaction::recover(project, |owner| {
+        requests.iter().any(|(_, id, _)| id == owner)
+    })?;
     let mut snapshots = Vec::new();
     let mut owners = BTreeMap::new();
     let mut rows = Vec::new();

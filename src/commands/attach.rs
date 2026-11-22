@@ -12,14 +12,14 @@ use crate::multipart::{
 use crate::output::{AttachOut, DetachOut, FileInfo, MultipartOut, Output};
 use std::path::{Path, PathBuf};
 
-pub enum Source {
+enum Source {
     Paths(Vec<PathBuf>),
     Stdin,
     Clipboard,
 }
 
 impl Source {
-    pub fn from_args(sources: Vec<String>, clipboard: bool) -> Result<Source> {
+    fn from_args(sources: Vec<String>, clipboard: bool) -> Result<Source> {
         match (sources.as_slice(), clipboard) {
             ([], true) => Ok(Source::Clipboard),
             ([source], false) if source == "-" => Ok(Source::Stdin),
@@ -56,16 +56,17 @@ fn basename(path: &Path) -> Result<String> {
         })
 }
 
-/// Spec, "attach": the file is written before the ledger, and a rerun with the same
-/// bytes under the same name finishes an interrupted attach.
-pub fn attach(
-    mut ctx: Ctx,
-    id: String,
-    source: Source,
-    multipart: bool,
-    name: Option<String>,
-    caption: Option<String>,
-) -> Result<Output> {
+pub fn attach(mut ctx: Ctx, id: String, args: crate::cli::AttachArgs) -> Result<Output> {
+    let crate::cli::AttachArgs {
+        source,
+        clipboard,
+        multipart,
+        name,
+        caption,
+        notes,
+        stamp,
+    } = args;
+    let source = Source::from_args(source, clipboard)?;
     let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     let max = if multipart {
@@ -99,6 +100,13 @@ pub fn attach(
     if let Some(caption) = &caption {
         validate_caption(caption)?;
     }
+    let notes = notes
+        .iter()
+        .enumerate()
+        .map(|(index, note)| {
+            super::status::validate_note_line(note, &format!("--note {}", index + 1))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let sources = match source {
         Source::Paths(paths) => {
             if paths.len() > 1 && name.is_some() {
@@ -267,14 +275,13 @@ pub fn attach(
         crate::format::validate_note_text(&note)?;
         let target = attachments::task_dir(&ctx.project, &task.id).join(&name);
         let live = ledger.get(&name) == Some(&Ledger::Attached);
-        let state = attachments::entry_state(&target)?;
-        if live && (multipart || state != EntryState::Absent) {
+        if live {
             return Err(Error::AttachmentExists(format!(
                 "{} already has {name}",
                 task.id
             )));
         }
-        let write = match state {
+        let write = match attachments::entry_state(&target)? {
             EntryState::Absent => true,
             EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
             EntryState::File(size) => {
@@ -284,16 +291,19 @@ pub fn attach(
                         task.id
                     )));
                 }
-                false // an interrupted attach left these bytes; add only the note
+                false // Matching unrecorded bytes from an earlier writer are already in place.
             }
         };
+        let size = bytes.len() as u64;
+        if write {
+            pending.push((name.clone(), bytes));
+        }
         files.push(FileInfo {
             name,
             path: target.display().to_string(),
-            bytes: bytes.len() as u64,
+            bytes: size,
             member_of: None,
         });
-        pending.push((target, bytes, write));
         append_note(&mut task, &owner, &note)?;
     }
 
@@ -301,45 +311,24 @@ pub fn attach(
         append_note(&mut task, &owner, &declaration.note())?;
         crate::refs::refuse_members(&ctx.project, &task)?;
     }
+    if !notes.is_empty() {
+        super::status::append_caller_notes(&mut ctx, &mut task, &owner, &notes, stamp)?;
+    }
     // Identity and the claim store resolve before any write, as for `note`.
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
-    let mut written = Vec::new();
-    let mut created_dir = false;
-    let result = (|| {
-        for (target, bytes, write) in &pending {
-            if *write {
-                if written.is_empty() {
-                    created_dir = attachments::ensure_task_dir(&ctx.project, &task.id)?;
-                }
-                attachments::write_new(target, bytes)?;
-                written.push(target);
-            }
-        }
-        save(&mut ctx, &mut task)
-    })();
-    if let Err(mut error) = result {
-        for target in written.iter().rev() {
-            if let Err(cleanup) = std::fs::remove_file(target) {
-                error = error.with_suffix(&format!(
-                    "; also could not remove {}: {cleanup}",
-                    target.display()
-                ));
-            }
-        }
-        if created_dir {
-            let dir = attachments::task_dir(&ctx.project, &task.id);
-            if let Err(cleanup) = std::fs::remove_dir(&dir) {
-                error = error.with_suffix(&format!(
-                    "; also could not remove {}: {cleanup}",
-                    dir.display()
-                ));
-            }
-        }
-        return Err(error);
-    }
-    for (target, _, _) in &pending {
-        crate::written::record(&ctx.project.records, target);
+    super::save_with(&mut ctx, &mut task, |ctx, task| {
+        ctx.project.publish_validated_task(
+            &ctx.registry,
+            task,
+            crate::retained::publish::WritePermission::Ordinary,
+            |path, raw| {
+                attachments::transaction::publish(&ctx.project, &task.id, path, raw, &pending)
+            },
+        )
+    })?;
+    for file in &files {
+        crate::written::record(&ctx.project.records, Path::new(&file.path));
     }
     super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachments landed");
     let publication = if let Some(declaration) = &declaration {
