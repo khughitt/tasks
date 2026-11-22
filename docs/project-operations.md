@@ -315,7 +315,13 @@ identifying the project or records repository, lock path and elapsed seconds.
 Known records/common-directory labels are bounded and control characters escaped.
 Linux holder PIDs come from a device-and-inode match in `/proc/locks`; a PID is a
 kernel snapshot, while unavailable, malformed or mismatching observations stay
-explicitly unavailable. Neither is permission to steal, unlink or kill a holder.
+explicitly unavailable. With a PID the notice adds the holder's `cmd=` (its argv,
+quoted and cut at 160 characters), `running=` for the deepest process down its
+single-child descendant chain (such as the check a pre-commit hook started;
+omitted when the holder runs none), and `waiters=`, the count of blocked `->`
+entries on the same lock, this process included. Flock grants are not FIFO, so
+the count is not a queue position. Each part reads `unavailable (<reason>)` when
+its `/proc` read fails. Neither is permission to steal, unlink or kill a holder.
 One acquired-after-wait line follows a displayed notice. Diagnostic failures are
 nonfatal and never enter JSON warnings or prevent a record commit; no holder
 sidecar or timeout is introduced. Same-prefix writers remain serialized for the
