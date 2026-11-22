@@ -3483,7 +3483,7 @@
     "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
     "notice": "in-tree-without-config",
     "expected": [
-      "empty",
+      "context",
       "context"
     ],
     "classification": "halt-authority",
@@ -3524,7 +3524,7 @@
     "native": "{\"session_id\": \"actor\", \"cwd\": \"$CWD\", \"hook_event_name\": \"SessionStart\"}",
     "notice": "in-tree-without-config",
     "expected": [
-      "empty",
+      "context",
       "context"
     ],
     "classification": "halt-authority",
@@ -3565,7 +3565,7 @@
     "native": "{\"conversationId\": \"actor\", \"workspacePaths\": [\"$CWD\"]}",
     "notice": "in-tree-without-config",
     "expected": [
-      "empty",
+      "context",
       "context"
     ],
     "classification": "halt-authority",

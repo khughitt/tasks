@@ -532,7 +532,10 @@ sys.stdout.write('test result: ok. 2 passed; 0 failed; 0 ignored;\n')
         String::from_utf8(out.stdout).unwrap(),
         "Running unittests src/main.rs (target/debug/deps/tasks-123)\ntest result: ok. 2 passed; 0 failed; 0 ignored;\n"
     );
-    assert!(out.stderr.is_empty(), "{:?}", out.stderr);
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "tt: test running (stage policy unavailable outside a registered project)\n"
+    );
     assert_eq!(fixture.rows("runs.jsonl")[0]["tests"], 2);
 }
 
@@ -1217,12 +1220,12 @@ fn repo_policy_contract(root: &Path) -> bool {
         true
     };
     let refs = evaluate("ci_suite_refs");
-    if enabled {
-        refs.is_empty()
+    let workflow = root.join(".github/workflows/ci.yml");
+    if refs.is_empty() {
+        enabled && !workflow.exists()
     } else {
         refs == "refs/heads/*"
-            && std::fs::read_to_string(root.join(".github/workflows/ci.yml"))
-                .is_ok_and(|s| s.contains("TT_FORCE: \"1\""))
+            && std::fs::read_to_string(workflow).is_ok_and(|s| s.contains("TT_FORCE: \"1\""))
     }
 }
 
@@ -1233,22 +1236,18 @@ fn front_door_live_repo_policy_and_ci_coverage_contract() {
         let fixture = FrontDoorFixture::new(policy);
         let root = fixture.dir.path();
         set_variable(root, "ci_suite_refs", "\"\"");
+        assert_eq!(repo_policy_contract(root), policy != Some(false));
+        set_variable(root, "ci_suite_refs", "\"refs/heads/*\"");
+        assert!(!repo_policy_contract(root));
+        std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        std::fs::write(root.join(".github/workflows/ci.yml"), workflow()).unwrap();
+        assert!(repo_policy_contract(root));
         if policy == Some(false) {
-            assert!(!repo_policy_contract(root));
-            set_variable(root, "ci_suite_refs", "\"refs/heads/*\"");
-            assert!(!repo_policy_contract(root));
-            std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
-            std::fs::write(root.join(".github/workflows/ci.yml"), workflow()).unwrap();
-            assert!(repo_policy_contract(root));
             std::fs::write(
                 root.join(".tt.toml"),
                 "automatic_broad = false\nbroad_targets = [\"test\"]\n",
             )
             .unwrap();
-            assert!(!repo_policy_contract(root));
-        } else {
-            assert!(repo_policy_contract(root));
-            set_variable(root, "ci_suite_refs", "\"refs/heads/*\"");
             assert!(!repo_policy_contract(root));
         }
     }

@@ -90,6 +90,10 @@ ownership/encoding/overflow; private-Fact uncertainty and strict input; agy safe
 integer normalization (including 1.0 retry and above-safe-range refusal); Codex
 worker Stop; displaced hq policy; and registered halt authority/uncertainty.
 Every differing decision remains visible in the paired rows.
+Both policies use the current Tasks binary for CLI lookups. At a registered
+in-tree root, `where` can resolve a worktree with no local configuration, so both
+routes emit the halt notice. The nested-project cases still distinguish the
+routes.
 
 The frozen relay projection is fixture-tested. It is not a live-route qualification.
 The adapted agy bridge remains pending under hq-a83688; native route qualification

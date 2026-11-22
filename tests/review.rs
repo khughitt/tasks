@@ -742,13 +742,16 @@ fn parked_rows_carry_needs_review_and_filter_on_it() {
     assert_eq!(filtered, [unreviewed]);
 }
 
-/// The first two characters of each pretty row that names `id`.
-fn prefix_of(pretty: &str, id: &str) -> String {
-    let line = pretty
+fn row_of<'a>(pretty: &'a str, id: &str) -> &'a str {
+    pretty
         .lines()
         .find(|l| l.contains(id))
-        .unwrap_or_else(|| panic!("{id} not in:\n{pretty}"));
-    line.chars().take(2).collect()
+        .unwrap_or_else(|| panic!("{id} not in:\n{pretty}"))
+}
+
+/// The first two characters of rows without a leading type column.
+fn prefix_of(pretty: &str, id: &str) -> String {
+    row_of(pretty, id).chars().take(2).collect()
 }
 
 #[test]
@@ -765,7 +768,10 @@ fn pretty_list_marks_exactly_the_rows_json_marks() {
     let ready = env.pretty(&dir, &["ready"]);
     assert_eq!(prefix_of(&ready, &marked[1]), "* ");
     let tree = env.pretty(&dir, &["tree"]);
-    assert_eq!(prefix_of(&tree, &marked[0]), "* ");
+    assert!(
+        row_of(&tree, &marked[0]).starts_with(&format!("   * {}", marked[0])),
+        "{tree}"
+    );
 }
 
 #[test]
@@ -784,13 +790,13 @@ fn the_mark_stays_left_of_a_tree_indent() {
     let goal = id_of(env.json(&dir, &["add", "Goal"]));
     let child = id_of(env.json(&dir, &["add", "Child", "--parent", &goal]));
     let tree = env.pretty(&dir, &["tree"]);
-    let line = tree.lines().find(|l| l.contains(&child)).unwrap();
-    assert!(line.starts_with(&format!("* └─ {child}")), "{tree}");
     assert!(
-        tree.lines()
-            .find(|l| l.contains(&goal))
-            .unwrap()
-            .starts_with(&format!("  {goal}"))
+        row_of(&tree, &child).starts_with(&format!("   * └─ {child}")),
+        "{tree}"
+    );
+    assert!(
+        row_of(&tree, &goal).starts_with(&format!("◆    {goal}")),
+        "{tree}"
     );
 }
 

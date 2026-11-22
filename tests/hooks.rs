@@ -533,7 +533,15 @@ fn hooks_halt_without_local_config_uses_registered_authority() {
         common::git_fixture::assert_worktree(env.home.path(), &main, &wt);
         let cwd = if nested { wt.join("nested") } else { wt };
         std::fs::remove_dir_all(cwd.join("tasks")).unwrap();
-        assert!(env.json(&cwd, &["where"])["project"].is_null());
+        let location = env.json(&cwd, &["where"]);
+        let resolved = &location["project"];
+        if nested {
+            assert!(resolved.is_null(), "{location}");
+        } else {
+            assert_eq!(resolved["prefix"], "sci");
+            assert_eq!(resolved["registered"], true);
+            assert_eq!(resolved["records"], json!(project));
+        }
         let reply = notice(&env, &main, &cwd);
         if !reply["context"].as_str().is_some_and(|s| s.contains(&halt)) {
             failures.push((nested, reply));
