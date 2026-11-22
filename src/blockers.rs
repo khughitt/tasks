@@ -79,6 +79,16 @@ impl WorkByStatus {
             }
         }
     }
+
+    /// Work someone has taken on: todo, doing and blocked. Ideas and shelves are not.
+    pub fn committed(&self) -> usize {
+        self.todo + self.doing + self.blocked
+    }
+}
+
+/// Whether an open record is committed work (see [`WorkByStatus::committed`]).
+fn is_committed(status: Status) -> bool {
+    matches!(status, Status::Todo | Status::Doing | Status::Blocked)
 }
 
 /// A stored dependency no record answers for: missing, unregistered or a move loop.
@@ -116,8 +126,16 @@ pub struct Impact {
     pub direct_work_by_status: WorkByStatus,
     pub transitive_work_by_status: WorkByStatus,
     pub dependencies_cleared_direct_count: usize,
+    /// Of those, the committed ones: what finishing this row alone frees.
+    pub committed_cleared_count: usize,
+    /// The most urgent (lowest) priority among committed transitive dependents.
+    pub top_waiting_priority: Option<u8>,
     pub unmet_dependency_count: usize,
     pub unresolved_dependency_count: usize,
+    /// Open dependencies that are themselves rows: every dependent of this row also
+    /// reaches them, so its impact counts through them. Empty for a root blocker, a cycle
+    /// member and an out-of-scope row, none of which is folded.
+    pub counted_through: Vec<TaskId>,
     /// Up to three direct dependents, by canonical id.
     pub direct_examples: Vec<TaskId>,
 }
@@ -288,8 +306,21 @@ pub fn build(
             direct_work_by_status: WorkByStatus::default(),
             transitive_work_by_status: WorkByStatus::default(),
             dependencies_cleared_direct_count: 0,
+            committed_cleared_count: 0,
+            top_waiting_priority: None,
             unmet_dependency_count: own.unmet(id),
             unresolved_dependency_count: own.unresolved.len(),
+            // Only a scanned row's dependencies are edges, so only its dependents reach
+            // the rows it waits on; a boundary row stays listed.
+            counted_through: if in_cycle.contains(id) || !scanned.contains_key(id) {
+                Vec::new()
+            } else {
+                own.open
+                    .iter()
+                    .filter(|target| *target != id && dependents.contains_key(*target))
+                    .cloned()
+                    .collect()
+            },
             direct_examples: sorted(direct.iter().cloned()).into_iter().take(3).collect(),
         };
         for dependent in direct {
@@ -302,23 +333,35 @@ pub fn build(
             let verdicts = &judged[dependent];
             if verdicts.unmet(id) == 0 && verdicts.unresolved.is_empty() {
                 row.dependencies_cleared_direct_count += 1;
+                if is_committed(scanned[dependent].status) {
+                    row.committed_cleared_count += 1;
+                }
             }
         }
         for dependent in reach(&dependents, id) {
             if goal(&dependent) {
                 row.transitive_goal_count += 1;
             } else {
+                let waiting = scanned[&dependent];
                 row.transitive_work_count += 1;
-                row.transitive_work_by_status
-                    .add(scanned[&dependent].status);
+                row.transitive_work_by_status.add(waiting.status);
+                if is_committed(waiting.status) {
+                    row.top_waiting_priority = Some(
+                        row.top_waiting_priority
+                            .map_or(waiting.priority, |top| top.min(waiting.priority)),
+                    );
+                }
             }
         }
         rows.push(row);
     }
+    // Root blockers first: a folded row's impact is already inside the row it waits on.
     rows.sort_by_cached_key(|row| {
         (
-            Reverse(row.transitive_work_count),
-            Reverse(row.direct_work_count),
+            !row.counted_through.is_empty(),
+            Reverse(row.transitive_work_by_status.committed()),
+            Reverse(row.committed_cleared_count),
+            row.top_waiting_priority.unwrap_or(u8::MAX),
             row.task.priority,
             crate::time::parse(&row.task.created).expect("record stamps are validated at parse"),
             row.task.id.to_string(),
@@ -596,12 +639,22 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
     fn blockers_diamond_counts_and_ranking() {
         let world = World::new(diamond());
         let analysis = world.analyse(&["aa", "bb"]);
+        // Roots B and X first; R and L wait on B and count through it, ranked after.
         assert_eq!(
             ranked(&analysis),
-            ["aa-000001", "bb-000003", "aa-000006", "aa-000002"]
+            ["aa-000001", "aa-000006", "bb-000003", "aa-000002"]
         );
         let b = row(&analysis, "aa-000001");
         assert_eq!(counts(b), [4, 5, 1, 1, 3, 0, 0]);
+        assert_eq!(b.committed_cleared_count, 3);
+        assert_eq!(b.top_waiting_priority, Some(0));
+        assert!(b.counted_through.is_empty());
+        assert!(row(&analysis, "aa-000006").counted_through.is_empty());
+        assert_eq!(row(&analysis, "aa-000006").top_waiting_priority, Some(2));
+        for folded in ["bb-000003", "aa-000002"] {
+            assert_eq!(row(&analysis, folded).counted_through, ids(&["aa-000001"]));
+            assert_eq!(row(&analysis, folded).top_waiting_priority, Some(1));
+        }
         assert_eq!(counts(row(&analysis, "bb-000003")), [1, 1, 0, 0, 0, 1, 0]);
         assert_eq!(counts(row(&analysis, "aa-000006")), [1, 1, 0, 0, 0, 0, 0]);
         assert_eq!(counts(row(&analysis, "aa-000002")), [1, 1, 0, 0, 0, 1, 0]);
@@ -638,6 +691,9 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
         assert_eq!(counts(row(&analysis, "aa-000001")), [3, 4, 0, 0, 2, 0, 0]);
         assert_eq!(counts(row(&analysis, "aa-000002")), [1, 1, 0, 0, 0, 1, 0]);
         assert_eq!(row(&analysis, "aa-000001").goal, None);
+        // A boundary row's dependencies are no edges, so B's counts need not include
+        // its dependents: it stays listed, waiting, even though B is a row.
+        assert!(row(&analysis, "aa-000002").counted_through.is_empty());
 
         // aa scope: L is work, G a goal; only L clears.
         let local = world.analyse(&["aa"]);
@@ -665,6 +721,8 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
         let f = row(&local, "bb-000011");
         assert_eq!(counts(f), [1, 1, 0, 0, 1, 1, 0]);
         assert_eq!(f.goal, None);
+        // Its open dependency is no row, so it stays listed with that dependency counted.
+        assert!(f.counted_through.is_empty());
         assert_eq!(local.coverage.unfollowed_targets, ids(&["bb-000011"]));
         assert!(!local.coverage.complete);
         let all = world.analyse(&["aa", "bb"]);
@@ -926,7 +984,13 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
         assert_eq!(ranked(&analysis), ["aa-000001", "aa-000002"]);
         assert_eq!(counts(row(&analysis, "aa-000001")), [2, 2, 0, 0, 2, 1, 0]);
         assert_eq!(counts(row(&analysis, "aa-000002")), [1, 2, 0, 0, 1, 1, 0]);
-        assert!(analysis.rows.iter().all(|row| row.cycle));
+        // Cycle members wait on each other but are never folded away.
+        assert!(
+            analysis
+                .rows
+                .iter()
+                .all(|row| row.cycle && row.counted_through.is_empty())
+        );
 
         // Goals: G (a lane) receives A's impact through an explicit edge, its open child
         // none; K reaches only a goal and ranks after every work row.
@@ -942,7 +1006,8 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
         assert_eq!(row(&analysis, "aa-000010").goal, Some(true));
         assert_eq!(counts(row(&analysis, "aa-000013")), [0, 0, 1, 1, 0, 0, 0]);
 
-        // Ten idea/shelved dependents outrank three todo/doing ones; the maps explain both.
+        // Three todo/doing dependents outrank ten idea/shelved ones, which clear nothing
+        // committed; the maps explain both.
         let mut records = vec![
             todo_on("aa-000020", &[]),
             todo_on("aa-000021", &[]),
@@ -961,7 +1026,10 @@ created: {created}\nupdated: {created}\ndepends: [{}]\ntags: []\n{extra}{closed}
             ));
         }
         let analysis = World::new(records).analyse(&["aa"]);
-        assert_eq!(ranked(&analysis), ["aa-000020", "aa-000021"]);
+        assert_eq!(ranked(&analysis), ["aa-000021", "aa-000020"]);
+        assert_eq!(row(&analysis, "aa-000020").committed_cleared_count, 0);
+        assert_eq!(row(&analysis, "aa-000020").top_waiting_priority, None);
+        assert_eq!(row(&analysis, "aa-000021").committed_cleared_count, 3);
         let wide = WorkByStatus {
             idea: 6,
             shelved: 4,
