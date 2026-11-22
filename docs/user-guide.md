@@ -278,10 +278,25 @@ the next occurrence; early runs are permitted. `last_done` survives reopening an
 
 ## Blockers and coverage
 
-`blockers` ranks open tasks by transitive impact, direct impact, priority, creation
-and id (default limit 20). It follows dependencies inside scope; foreign boundary
-edges are reported without expanding another project implicitly. Removing a
-dependency obstruction does not prove the dependent is otherwise ready.
+`blockers` answers which open prerequisites to tackle for the most downstream
+impact (default limit 20). Its rows are root blockers: a blocker that waits on another
+ranked row counts through it, since every task waiting on it also waits on that row.
+JSON lists such rows after the roots with `counted_through`; pretty output leaves them
+out and counts them in its footer. A cycle member is never folded. Rows rank by
+committed work waiting at any depth (`todo`, `doing`, `blocked`; ideas are counted
+apart), then the committed work it alone still holds (`clears`), the highest priority
+waiting, its own priority, creation and id. It follows dependencies inside scope;
+foreign boundary edges are reported without expanding another project implicitly.
+Removing a dependency obstruction does not prove the dependent is otherwise ready.
+
+Pretty output is one labelled line per root, whatever `--headers` says: `state` names
+what stands between the row and someone finishing it, most pressing first (`cycle`,
+`user`, `shelved`, `idea`, `deferred`, `waits` on its own open or unresolved
+dependencies, `blocked`, `claimed`, `parked`, then `doing` or `todo`). Titles clip to a
+known terminal width and stay whole when piped. The footer counts the roots and folded
+rows, explains the columns and states the scope and coverage; warnings it restates
+(history, a cut scope) stay in JSON and out of the pretty warnings section. Park step
+text and claims are in `show`.
 
 Read `coverage.complete` and warnings before trusting ranks or counts. Partial
 scans yield lower bounds and possibly different ordering; unresolved edges never

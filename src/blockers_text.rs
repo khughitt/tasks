@@ -1,72 +1,72 @@
-//! Pretty `tasks blockers`: a heading naming the dependent scope and coverage verdict, the
-//! ranked table with continuation lines, the diagnostics, and a footer stating the
-//! report's limits (blocker-ranking spec, initial output contract).
+//! Pretty `tasks blockers`: the root blockers as one table with labelled columns, then a
+//! footer that counts, explains the columns and states the scope, then the diagnostics.
+//! Folded rows, park steps and claims stay in JSON and `show` (docs/user-guide.md).
 
-use crate::blockers::{CoverageMode, WorkByStatus};
+use crate::blockers::CoverageMode;
+use crate::ellipsis::{Measure, clip};
+use crate::model::Status;
 use crate::output::{Attention, BlockerRow, BlockersOut};
 use crate::present;
 use crate::style::{Painter, Style};
-use crate::table::{Column, Detail, Layout, Row};
+use crate::table::{Column, Layout, Row, paragraph, visible_width};
 
-const COLUMNS: [Column; 8] = [
-    Column::right("rank"),
+const COLUMNS: [Column; 9] = [
+    Column::right("#"),
     Column::fixed("id"),
     Column::fixed("P"),
-    Column::fixed("status"),
-    Column::right("trans"),
-    Column::right("direct"),
-    Column::fixed("own"),
-    Column::wrap("title", 20, None),
+    Column::fixed("state"),
+    Column::right("work"),
+    Column::right("clears"),
+    Column::right("ideas"),
+    Column::fixed("top"),
+    Column::fixed("title"),
 ];
+/// A title never takes more display cells than this, even on a wide terminal.
+const TITLE_CAP: usize = 80;
+const GAP: usize = 2;
 
+/// Headers always show: the count columns do not explain themselves.
 pub fn render(out: &BlockersOut, painter: &Painter, layout: &Layout) -> String {
-    let coverage = &out.coverage;
-    let scope = match coverage.mode {
-        CoverageMode::Local => "local",
-        CoverageMode::Project => "project",
-        CoverageMode::Group => "group",
-        CoverageMode::AllProjects => "all projects",
+    let layout = Layout {
+        headers: true,
+        ..*layout
     };
-    let verdict = if coverage.complete {
-        "coverage complete"
-    } else {
-        "coverage partial"
-    };
-    let mut text = format!(
-        "{}; {}\n",
-        present::heading(
-            &format!(
-                "blockers: dependents in {scope} ({})",
-                coverage.requested_projects.join(", ")
-            ),
-            None
-        )
-        .paint(painter),
-        painter.paint(
-            if coverage.complete {
-                Style::Ok
-            } else {
-                Style::Error
-            },
-            verdict
-        )
-    );
-    text.push_str(&painter.paint(
-        Style::Chrome,
-        &format!(
-            "{} of {} by transitive work, direct work, priority, created, id; observed {}",
-            out.shown, out.total, out.observed_at
-        ),
-    ));
-    text.push('\n');
-    let rows: Vec<Row> = out
+    let roots: Vec<&BlockerRow> = out
         .blockers
         .iter()
-        .map(|row| table_row(row, painter))
+        .filter(|row| row.counted_through.is_empty())
         .collect();
-    text.push_str(&crate::table::render(
-        &COLUMNS, &rows, layout, None, painter,
-    ));
+    let plain: Vec<[String; 8]> = roots
+        .iter()
+        .enumerate()
+        .map(|(at, row)| cells(at + 1, row))
+        .collect();
+    let title_budget = layout.width.map(|width| {
+        let fixed: usize = (0..8)
+            .map(|at| {
+                plain
+                    .iter()
+                    .map(|cells| visible_width(&cells[at]))
+                    .chain([COLUMNS[at].header.len()])
+                    .max()
+                    .unwrap_or(0)
+                    + GAP
+            })
+            .sum();
+        width.saturating_sub(fixed).clamp(1, TITLE_CAP)
+    });
+    let rows: Vec<Row> = roots
+        .iter()
+        .zip(&plain)
+        .map(|(row, cells)| painted(row, cells, title_budget, painter))
+        .collect();
+    let mut text = crate::table::render(&COLUMNS, &rows, &layout, None, painter);
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    for line in footer(out, roots.len()) {
+        text.push_str(&paragraph(&line, painter, &layout));
+    }
 
     if !out.unresolved.is_empty() {
         text.push_str(&format!("\nunresolved ({}):\n", out.unresolved.len()));
@@ -89,138 +89,156 @@ pub fn render(out: &BlockersOut, painter: &Painter, layout: &Layout) -> String {
             text.push_str(&format!("  {}\n", ids.join(", ")));
         }
     }
-
-    let mut footer = vec![
-        // Two lines so the footer stays inside a 120-column terminal.
-        "goals: structural only (lanes, records with children, and records that declare pieces)"
-            .to_string(),
-        "a childless cross-project hub without declared pieces counts as work".to_string(),
-        "a goal's impact is not attributed to a goal's children without an explicit dependency"
-            .to_string(),
-        format!(
-            "parks and claims: host-local evidence from {}; absence is unknown, not free or \
-             authorized",
-            out.park_evidence.host
-        ),
-        "history: blocking since and confirmed scope passes are unknown".to_string(),
-        "cleared counts dependency sets only; it does not mean ready or authorized".to_string(),
-    ];
-    if !coverage.complete {
-        footer.push(
-            "partial: counts are lower bounds and ranks may change when missing coverage \
-             returns; see warnings"
-                .to_string(),
-        );
-    }
-    text.push('\n');
-    for line in footer {
-        text.push_str(&painter.paint(Style::Chrome, &line));
-        text.push('\n');
-    }
     text
 }
 
-fn table_row(row: &BlockerRow, painter: &Painter) -> Row {
-    let mut built = Row::new(vec![
-        row.rank.to_string(),
-        present::id(&row.id, row.project_color).paint(painter),
-        present::priority(row.priority).paint(painter),
-        present::status(row.status).paint(painter),
-        row.transitive_work_count.to_string(),
-        row.direct_work_count.to_string(),
-        format!(
-            "{}/{}",
-            row.unmet_dependency_count, row.unresolved_dependency_count
-        ),
-        present::title(&row.title, row.project_color, row.activity).paint(painter),
-    ]);
-    let attention = match row.attention {
-        Attention::User => "user",
-        Attention::Unknown => "unknown",
-    };
-    built.details.push((
-        "impact",
-        Detail::Wrap(format!(
-            "cleared {}; goals {}/{}; attention {attention}; direct {}; transitive {}",
-            row.dependencies_cleared_direct_count,
-            row.direct_goal_count,
-            row.transitive_goal_count,
-            breakdown(&row.direct_work_by_status),
-            breakdown(&row.transitive_work_by_status),
-        )),
-    ));
-    if row.cycle {
-        built
-            .details
-            .push(("cycle", Detail::Wrap("investigate cycle".into())));
-    }
-    match &row.park {
-        Some(park) if row.attention == Attention::User => {
-            let why = park.reason.map_or("waiting", crate::claims::Reason::as_str);
-            built
-                .details
-                .push(("user", Detail::Wrap(format!("{why}: {}", park.next_step))));
+/// The unpainted cells before the title: #, id, P, state, work, clears, ideas, top.
+fn cells(rank: usize, row: &BlockerRow) -> [String; 8] {
+    let count = |n: usize| {
+        if n == 0 {
+            "-".to_string()
+        } else {
+            n.to_string()
         }
-        Some(park) => built.details.push((
-            "park",
-            Detail::Wrap(format!(
-                "waiting on {}: {}",
-                park.waiting_on.as_str(),
-                park.next_step
-            )),
-        )),
-        None if row.attention == Attention::User => built.details.push((
-            "user",
-            Detail::Wrap("reviewed idea awaiting the user".into()),
-        )),
-        None => {}
-    }
-    if let Some(needs) = row.park.as_ref().and_then(|park| park.needs) {
-        built.details.push((
-            "host",
-            Detail::Wrap(format!("park host requirement {}", needs.as_str())),
-        ));
-    }
-    if !row.task_needs.is_empty() {
-        built
-            .details
-            .push(("needs", Detail::Wrap(row.task_needs.join(", "))));
-    }
-    if let Some(claim) = &row.claim {
-        let state = claim
-            .unverified
-            .as_ref()
-            .map(|why| format!(" (unverifiable: {why})"))
-            .unwrap_or_default();
-        built.details.push((
-            "claim",
-            Detail::Wrap(format!("{} on {}{state}", claim.owner, claim.host)),
-        ));
-    }
-    if let Some(defer) = &row.defer {
-        built
-            .details
-            .push(("defer", Detail::Wrap(format!("deferred until {defer}"))));
-    }
-    built
+    };
+    [
+        rank.to_string(),
+        row.id.clone(),
+        format!("P{}", row.priority),
+        state(row).text().to_string(),
+        count(row.transitive_committed_count),
+        count(row.committed_cleared_count),
+        count(row.transitive_work_by_status.idea),
+        row.top_waiting_priority
+            .map_or("-".to_string(), |p| format!("P{p}")),
+    ]
 }
 
-/// Nonzero statuses only, in status order; `none` when every count is zero.
-fn breakdown(counts: &WorkByStatus) -> String {
-    let parts: Vec<String> = [
-        ("idea", counts.idea),
-        ("todo", counts.todo),
-        ("doing", counts.doing),
-        ("blocked", counts.blocked),
-        ("shelved", counts.shelved),
-    ]
-    .into_iter()
-    .filter(|(_, n)| *n > 0)
-    .map(|(status, n)| format!("{status} {n}"))
-    .collect();
-    if parts.is_empty() {
-        "none".into()
-    } else {
-        parts.join(", ")
+fn painted(
+    row: &BlockerRow,
+    plain: &[String; 8],
+    title_budget: Option<usize>,
+    painter: &Painter,
+) -> Row {
+    let quiet = |text: &str| {
+        if text == "-" {
+            painter.paint(Style::Chrome, text)
+        } else {
+            text.to_string()
+        }
+    };
+    let title = title_budget.map_or_else(
+        || row.title.clone(),
+        |budget| clip(&row.title, budget, Measure::DisplayCells),
+    );
+    Row::new(vec![
+        plain[0].clone(),
+        present::id(&row.id, row.project_color).paint(painter),
+        present::priority(row.priority).paint(painter),
+        state(row).paint(painter),
+        quiet(&plain[4]),
+        quiet(&plain[5]),
+        quiet(&plain[6]),
+        row.top_waiting_priority
+            .map_or_else(|| quiet("-"), |p| present::priority(p).paint(painter)),
+        present::title(&title, row.project_color, row.activity).paint(painter),
+    ])
+}
+
+/// One word for what stands between a row and someone finishing it: a word of this view,
+/// or the record's own status painted as status everywhere.
+enum State {
+    Word(&'static str, Style),
+    Status(Status),
+}
+
+impl State {
+    fn text(&self) -> &'static str {
+        match self {
+            State::Word(word, _) => word,
+            State::Status(status) => status.as_str(),
+        }
     }
+
+    fn paint(&self, painter: &Painter) -> String {
+        match self {
+            State::Word(word, style) => painter.paint(*style, word),
+            State::Status(status) => present::status(*status).paint(painter),
+        }
+    }
+}
+
+/// Most pressing first: a cycle, the user, a shelf or idea, a deferral, its own open
+/// dependencies, then what this host knows of who holds it.
+fn state(row: &BlockerRow) -> State {
+    if row.cycle {
+        State::Word("cycle", Style::Error)
+    } else if row.attention == Attention::User {
+        State::Word("user", Style::Warning)
+    } else if row.status == Status::Shelved {
+        State::Word("shelved", Style::Chrome)
+    } else if row.status == Status::Idea {
+        State::Status(Status::Idea)
+    } else if row.defer.is_some() {
+        State::Word("deferred", Style::Chrome)
+    } else if row.unmet_dependency_count > 0 || row.unresolved_dependency_count > 0 {
+        State::Word("waits", Style::Chrome)
+    } else if row.status == Status::Blocked {
+        State::Status(Status::Blocked)
+    } else if row.claim.is_some() {
+        State::Word("claimed", Style::Emphasis)
+    } else if row.park.is_some() {
+        State::Word("parked", Style::Chrome)
+    } else {
+        State::Status(row.status)
+    }
+}
+
+/// What the table holds, what its columns mean, and what the scan covered.
+fn footer(out: &BlockersOut, shown: usize) -> Vec<String> {
+    let mut count = format!("{shown} of {} root blockers, ranked by work", out.roots);
+    if out.folded > 0 {
+        count.push_str(&format!(
+            "; {} more wait on one of these and count through it",
+            out.folded
+        ));
+    }
+    let coverage = &out.coverage;
+    let projects = coverage.requested_projects.len();
+    let scope = match coverage.mode {
+        CoverageMode::Local | CoverageMode::Project => coverage.requested_projects.join(", "),
+        CoverageMode::Group => format!("a group of {projects} projects"),
+        CoverageMode::AllProjects => format!("all {projects} projects"),
+    };
+    let reach = if coverage.complete {
+        "coverage complete".to_string()
+    } else {
+        let mut gaps = Vec::new();
+        if !coverage.unfollowed_targets.is_empty() {
+            gaps.push(format!(
+                "{} paths leave it (--all-projects follows them)",
+                coverage.unfollowed_targets.len()
+            ));
+        }
+        if !coverage.unreachable_projects.is_empty() {
+            gaps.push(format!(
+                "{} projects unreachable",
+                coverage.unreachable_projects.len()
+            ));
+        }
+        if !out.unresolved.is_empty() {
+            gaps.push(format!("{} references unresolved", out.unresolved.len()));
+        }
+        format!("partial, so counts are lower bounds: {}", gaps.join(", "))
+    };
+    vec![
+        count,
+        "work: todo/doing/blocked tasks waiting on it, at any depth · clears: those it alone \
+         still holds · top: highest priority waiting"
+            .into(),
+        format!(
+            "dependents in {scope}; {reach} · parks and claims from {}",
+            out.park_evidence.host
+        ),
+    ]
 }

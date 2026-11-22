@@ -103,8 +103,9 @@ Rollups and orders follow the structure of each relation:
   and `parent`, whose cycles writers reject and `check` reports); lexicographic
   total ranking orders (`ready_order`: `priority`, assessed `size` ahead of
   `None`, `created`, canonical `id`; `list_order`: `priority`, `updated`
-  descending, `id`; `blockers`: `transitive_work_count` descending,
-  `direct_work_count` descending, `priority`, `created`, `id`); and coarse
+  descending, `id`; `blockers`: root rows (empty `counted_through`) first, then
+  `transitive_committed_count` descending, `committed_cleared_count` descending,
+  `top_waiting_priority` (none last), `priority`, `created`, `id`); and coarse
   whole-second UTC timestamps versus append-only note list order.
 
 ## Worked example

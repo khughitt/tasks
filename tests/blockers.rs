@@ -56,6 +56,22 @@ fn pretty_row(text: &str, id: &str) -> String {
         .join("\n")
 }
 
+/// `--pretty blockers` stdout and stderr, at `COLUMNS` when given.
+fn pretty_run(env: &TestEnv, dir: &Path, args: &[&str], columns: Option<&str>) -> (String, String) {
+    let mut all = vec!["--pretty", "blockers"];
+    all.extend_from_slice(args);
+    let mut cmd = env.cmd(dir);
+    if let Some(columns) = columns {
+        cmd.env("COLUMNS", columns);
+    }
+    let out = cmd.args(&all).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    (
+        String::from_utf8(out.stdout).unwrap(),
+        String::from_utf8(out.stderr).unwrap(),
+    )
+}
+
 fn strings(value: &Value) -> Vec<String> {
     value
         .as_array()
@@ -497,9 +513,14 @@ fn blockers_pretty_contract_and_existing_reads() {
     assert_eq!(env.json(&sci, &["ready"]), ready);
     assert_eq!(env.json(&sci, &["next"]), next);
 
-    // Relief counts all four, though none of them is ready.
+    // Relief counts all four, though none of them is ready; the committed counts leave
+    // the shelf out.
     let top = row(&out, &blocker);
     assert_eq!(counts(top), [4, 4, 0, 0, 4, 0, 0]);
+    assert_eq!(top["transitive_committed_count"], 3);
+    assert_eq!(top["committed_cleared_count"], 3);
+    assert_eq!(top["top_waiting_priority"], 2);
+    assert!(top.get("counted_through").is_none());
     let ready_ids: Vec<&str> = ready["tasks"]
         .as_array()
         .unwrap()
@@ -525,12 +546,14 @@ fn blockers_pretty_contract_and_existing_reads() {
             "blockers",
             "coverage",
             "cycles",
+            "folded",
             "goal_detection",
             "limit",
             "observed_at",
             "omitted",
             "park_evidence",
             "ranking",
+            "roots",
             "shown",
             "total",
             "unresolved",
@@ -540,8 +563,9 @@ fn blockers_pretty_contract_and_existing_reads() {
     assert_eq!(out["goal_detection"], "structural_only");
     assert_eq!(
         out["ranking"],
-        "transitive_work,direct_work,priority,created,id"
+        "root,transitive_committed,committed_cleared,top_waiting_priority,priority,created,id"
     );
+    assert_eq!((&out["roots"], &out["folded"]), (&1.into(), &0.into()));
     let mut row_keys: Vec<&str> = top
         .as_object()
         .unwrap()
@@ -554,6 +578,7 @@ fn blockers_pretty_contract_and_existing_reads() {
         [
             "attention",
             "awaiting_user",
+            "committed_cleared_count",
             "cycle",
             "dependencies_cleared_direct_count",
             "direct_examples",
@@ -567,6 +592,8 @@ fn blockers_pretty_contract_and_existing_reads() {
             "status",
             "task_needs",
             "title",
+            "top_waiting_priority",
+            "transitive_committed_count",
             "transitive_goal_count",
             "transitive_work_by_status",
             "transitive_work_count",
@@ -579,65 +606,67 @@ fn blockers_pretty_contract_and_existing_reads() {
     assert_eq!(strings(&top["direct_examples"]), examples[..3]);
     assert!(warns(&out, "history"), "{out}");
 
-    // Pretty: complete IDs and counts at every width, wrapped titles, every label.
-    let pretty = |args: &[&str], columns: &str| -> String {
-        let mut all = vec!["--pretty"];
-        all.extend_from_slice(args);
-        all.push("blockers");
-        let out = env
-            .cmd(&sci)
-            .env("COLUMNS", columns)
-            .args(&all)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{out:?}");
-        String::from_utf8(out.stdout).unwrap()
-    };
+    // Pretty: one line per root with complete IDs and counts at every width, titles
+    // clipped to the terminal, labelled columns whatever --headers says, and a footer that
+    // counts, explains and scopes the table.
+    let run = |args: &[&str], columns: Option<&str>| pretty_run(&env, &sci, args, columns);
+    let pretty = |args: &[&str], columns: &str| pretty_run(&env, &sci, args, Some(columns)).0;
     for columns in ["120", "60"] {
-        for headers in [&["--headers"][..], &[]] {
+        for headers in [&["--headers"][..], &["--no-headers"], &[]] {
             let mut args = headers.to_vec();
             args.extend(["--color", "never"]);
             let text = pretty(&args, columns);
-            assert!(text.contains(&blocker), "{text}");
-            assert!(text.contains("Ünïcode"), "{text}");
-            assert!(text.contains("coverage complete"), "{text}");
-            let block = pretty_row(&text, &blocker);
-            for label in [
-                "cleared 4",
-                "goals 0/0",
-                "attention unknown",
-                "todo 3",
-                "shelved 1",
-            ] {
-                assert!(block.contains(label), "{label}: {block}");
-            }
-            for footer in [
-                "structural only",
-                "not attributed to a goal's children",
-                "host-local",
-                "history: blocking since",
-                "does not mean ready",
-            ] {
-                assert!(text.contains(footer), "{footer}: {text}");
-            }
-            if columns == "120" {
-                assert!(
-                    text.lines().all(|line| line.chars().count() <= 120),
-                    "{text}"
-                );
+            let line = pretty_row(&text, &blocker);
+            assert_eq!(line.lines().count(), 1, "{text}");
+            let cells: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(
+                cells[..8],
+                ["1", blocker.as_str(), "P1", "todo", "3", "3", "-", "P2"],
+                "{text}"
+            );
+            assert!(line.contains("Ünïcode"), "{text}");
+            if columns == "60" {
+                assert!(line.ends_with('…'), "{text}");
             }
             let header = text
                 .lines()
-                .any(|line| line.trim_start().starts_with("rank") && line.contains("title"));
-            assert_eq!(header, !headers.is_empty(), "{text}");
+                .next()
+                .unwrap()
+                .split_whitespace()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                header,
+                [
+                    "#", "id", "P", "state", "work", "clears", "ideas", "top", "title"
+                ],
+                "{text}"
+            );
+            for footer in [
+                "1 of 1 root blockers, ranked by work",
+                "clears: those it alone still holds",
+                "dependents in sci; coverage complete",
+                "parks and claims from",
+            ] {
+                assert!(text.contains(footer), "{footer}: {text}");
+            }
+            let width: usize = columns.parse().unwrap();
+            assert!(
+                text.lines().all(|line| line.chars().count() <= width),
+                "{text}"
+            );
         }
     }
     assert!(pretty(&["--color", "always"], "120").contains("\u{1b}["));
     assert!(!pretty(&["--color", "never"], "120").contains("\u{1b}["));
+    // Piped without a width, a title stays whole for line-oriented tools.
+    let (piped, stderr) = run(&["--color", "never"], None);
+    assert!(piped.contains(title), "{piped}");
+    // The footer restates the history gap; pretty warnings do not repeat it, JSON keeps it.
+    assert!(!stderr.contains("history"), "{stderr}");
 
-    // Every continuation label on a ranked row: a user park's reason and step, its host
-    // requirement beside the task's needs, an agent park, a reviewed idea awaiting the
-    // user, a hand-seeded cycle (the CLI refuses one) and a future deferral.
+    // One state word per row, most pressing first: a user park, an agent park, a reviewed
+    // idea awaiting the user, a hand-seeded cycle (the CLI refuses one), a future deferral,
+    // a held claim; a chained blocker folds into the root it waits on.
     let mut text = std::fs::read_to_string(&config).unwrap();
     text.push_str("\n[needs.paid-calls]\nmeaning = \"spends money on a provider\"\n");
     std::fs::write(&config, text).unwrap();
@@ -689,54 +718,65 @@ fn blockers_pretty_contract_and_existing_reads() {
         .unwrap()
         .replace("depends: []", &format!("depends: [{second}]"));
     std::fs::write(&record, seeded).unwrap();
+    let claimed = add(&env, &sci, "Held blocker", &[]);
+    add(&env, &sci, "Waits on held", &["--depends", &claimed]);
+    write_claim_in_view(&env, "sci", &claimed, "far-session", "0:1");
+    let chained = blocker_of("Chained", &["--depends", &handed]);
     let text = pretty(&["--color", "never"], "120");
-    for (id, line) in [
-        (&quiet, "user:   quiet: run it overnight"),
-        (&quiet, "host:   park host requirement headless"),
-        (&quiet, "needs:  paid-calls"),
-        (&handed, "park:   waiting on agent: pick it up"),
-        (&idea, "user:   reviewed idea awaiting the user"),
-        (&first, "cycle:  investigate cycle"),
-        (&second, "cycle:  investigate cycle"),
-        (&later, "defer:  deferred until "),
+    for (id, state) in [
+        (&quiet, "user"),
+        (&handed, "parked"),
+        (&idea, "user"),
+        (&first, "cycle"),
+        (&second, "cycle"),
+        (&later, "deferred"),
+        (&claimed, "claimed"),
     ] {
-        let block = pretty_row(&text, id);
-        assert!(block.contains(line), "{line}: {block}");
+        let line = pretty_row(&text, id);
+        assert_eq!(line.split_whitespace().nth(3), Some(state), "{text}");
     }
+    let out = blockers(&env, &sci, &[]);
+    assert_eq!(
+        strings(&row(&out, &chained)["counted_through"]),
+        std::slice::from_ref(&handed)
+    );
+    assert!(!text.contains(&chained), "{text}");
+    assert_eq!(out["folded"], 1);
+    assert!(
+        text.contains("root blockers, ranked by work; 1 more wait on one of these"),
+        "{text}"
+    );
     assert!(text.contains("cycles (1):"), "{text}");
     assert!(
         text.lines().all(|line| line.chars().count() <= 120),
         "{text}"
     );
 
-    // A claim shows its holder; a cut path makes the heading partial even at -n 0.
-    let claimed = add(&env, &sci, "Held blocker", &[]);
-    add(&env, &sci, "Waits on held", &["--depends", &claimed]);
-    write_claim_in_view(&env, "sci", &claimed, "far-session", "0:1");
-    let text = pretty(&["--color", "never"], "120");
-    let block = pretty_row(&text, &claimed);
-    assert!(
-        block.contains("claim:") && block.contains("someone") && block.contains("unverifiable"),
-        "{block}"
-    );
-    assert!(
-        text.lines().all(|line| line.chars().count() <= 120),
-        "{text}"
-    );
+    // A cut path is partial even at -n 0: the footer says why, and the long list of cut
+    // paths stays in JSON warnings, out of the pretty warnings section.
     let other = env.init("fam");
+    let run = |args: &[&str], columns: Option<&str>| pretty_run(&env, &sci, args, columns);
+    let pretty = |args: &[&str], columns: &str| pretty_run(&env, &sci, args, Some(columns)).0;
     let foreign_dep = add(&env, &other, "Foreign dependency", &[]);
     let foreign = add(&env, &other, "Foreign", &["--depends", &foreign_dep]);
     add(&env, &sci, "Waits on foreign", &["--depends", &foreign]);
-    let out = env
-        .cmd(&sci)
-        .args(["--pretty", "--color", "never", "blockers", "-n", "0"])
-        .output()
-        .unwrap();
-    let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("coverage partial"), "{text}");
-    assert!(text.contains("ranks may change"), "{text}");
+    let (text, stderr) = run(&["--color", "never", "-n", "0"], Some("120"));
+    assert!(
+        text.contains("partial, so counts are lower bounds: 1 paths leave it"),
+        "{text}"
+    );
+    assert!(!stderr.contains("not followed"), "{stderr}");
+    let out = blockers(&env, &sci, &["-n", "0"]);
+    assert_eq!(out["coverage"]["complete"], false);
+    assert!(
+        warns(&out, "not followed") && warns(&out, "history"),
+        "{out}"
+    );
+    // Shown with its own unfollowed dependency, the foreign row reads `waits`.
+    let text = pretty(&["--color", "never", "-n", "50"], "120");
     assert_eq!(
-        blockers(&env, &sci, &["-n", "0"])["coverage"]["complete"],
-        false
+        pretty_row(&text, &foreign).split_whitespace().nth(3),
+        Some("waits"),
+        "{text}"
     );
 }

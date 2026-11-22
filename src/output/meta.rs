@@ -72,7 +72,7 @@ impl Output {
             Output::Claims(_) => OutputMeta::plain(&[]),
             Output::Prime(o) => OutputMeta::priority(&o.warnings),
             Output::Lanes(o) => OutputMeta::priority(&o.warnings),
-            Output::Blockers(o) => OutputMeta::priority(&o.warnings),
+            Output::Blockers(o) => OutputMeta::priority(&o.pretty_warnings),
             Output::Graph(o) => OutputMeta::plain(&o.warnings),
             Output::Check(o) => OutputMeta {
                 needs_theme: false,

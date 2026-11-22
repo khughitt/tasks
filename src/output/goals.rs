@@ -4,7 +4,7 @@ use crate::ellipsis::{Measure, clip};
 use crate::goals::{GoalRow, GoalSort};
 use crate::present;
 use crate::style::{Painter, Style};
-use crate::table::{self, Column, Detail, Layout, Row};
+use crate::table::{self, Column, Detail, Layout, Row, paragraph};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Field {
@@ -151,19 +151,6 @@ fn cells(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Vec<Str
             attention(row, painter, now),
         ]
     }
-}
-
-fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
-    table::render(
-        &[Column::wrap("", 1, None)],
-        &[Row::new(vec![painter.paint(Style::Chrome, text)])],
-        &Layout {
-            headers: false,
-            ..*layout
-        },
-        None,
-        painter,
-    )
 }
 
 pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> String {

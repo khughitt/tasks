@@ -1224,8 +1224,19 @@ pub struct BlockerRow {
     pub direct_work_by_status: crate::blockers::WorkByStatus,
     pub transitive_work_by_status: crate::blockers::WorkByStatus,
     pub dependencies_cleared_direct_count: usize,
+    /// Committed (todo, doing, blocked) transitive work: the rank's first impact key.
+    pub transitive_committed_count: usize,
+    /// Committed direct dependents whose dependency set this row alone still holds open.
+    pub committed_cleared_count: usize,
+    /// The most urgent priority among the committed work waiting on this row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_waiting_priority: Option<u8>,
     pub unmet_dependency_count: usize,
     pub unresolved_dependency_count: usize,
+    /// Rows this one waits on, whose counts already include its impact; absent on a root
+    /// blocker.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub counted_through: Vec<TaskId>,
     pub attention: Attention,
     pub awaiting_user: bool,
     /// The task's declared resource needs; never the park's host requirement.
@@ -1249,6 +1260,10 @@ pub struct BlockersOut {
     pub goal_detection: &'static str,
     pub ranking: &'static str,
     pub total: usize,
+    /// Rows that wait on no other row; they rank ahead of every folded row.
+    pub roots: usize,
+    /// Rows that count through another row (`counted_through`).
+    pub folded: usize,
     pub shown: usize,
     pub omitted: usize,
     pub limit: usize,
@@ -1256,6 +1271,9 @@ pub struct BlockersOut {
     pub unresolved: Vec<crate::blockers::UnresolvedDependency>,
     pub cycles: Vec<Vec<TaskId>>,
     pub warnings: Vec<String>,
+    /// The warnings pretty output prints: `warnings` less those its footer restates.
+    #[serde(skip)]
+    pub pretty_warnings: Vec<String>,
 }
 
 #[derive(Serialize)]

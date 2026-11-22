@@ -419,13 +419,19 @@ fn pieces_reader_blockers_classify_hub_as_goal() {
     assert_eq!(piece["direct_work_count"], 0, "{piece}");
     assert_eq!(piece["direct_goal_count"], 1, "{piece}");
 
-    let text = env.pretty(&aa, &["blockers", "--all-projects"]);
-    // The plan's one footer sentence, split at its semicolon to fit 120 columns.
-    for line in [
-        "goals: structural only (lanes, records with children, and records that declare pieces)\n",
-        "\na childless cross-project hub without declared pieces counts as work\n",
+    // The plan's goal-detection sentence is a standing caveat: help states it.
+    let help = env.cmd(&aa).args(["blockers", "--help"]).output().unwrap();
+    assert!(help.status.success(), "{help:?}");
+    let help = String::from_utf8(help.stdout)
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for sentence in [
+        "goals: structural only (lanes, records with children, and records that declare pieces)",
+        "a childless cross-project hub without declared pieces counts as work",
     ] {
-        assert!(text.contains(line), "{line}: {text}");
+        assert!(help.contains(sentence), "{sentence}: {help}");
     }
 }
 
