@@ -1229,6 +1229,29 @@ impl Project {
         Ok(false)
     }
 
+    /// Digest the direct-child records from the same project scan used by show.
+    /// Callers doing a checked write hold the project mutation lock.
+    pub(crate) fn children_revision(&self, id: &TaskId, registry: &Registry) -> Result<String> {
+        use sha2::{Digest, Sha256};
+
+        let id = registry.canonical_id(id);
+        let mut lines = Vec::new();
+        for child_id in self.task_files()? {
+            let (child, raw) = self.read_task_with_raw(&child_id)?;
+            if crate::hierarchy::is_direct_child(&child, &id, registry) {
+                let canonical = registry.canonical_id(&child.id);
+                let revision = crate::multipart::content::sha256_hex(raw.as_bytes());
+                lines.push(format!("{canonical} {revision}\n"));
+            }
+        }
+        lines.sort_unstable();
+        let mut digest = Sha256::new();
+        for line in lines {
+            digest.update(line.as_bytes());
+        }
+        Ok(format!("{:x}", digest.finalize()))
+    }
+
     pub fn scan(&self) -> Result<Vec<Task>> {
         self.task_files()?
             .into_iter()

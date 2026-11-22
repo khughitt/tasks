@@ -81,12 +81,22 @@ pub(crate) struct AttachArgs {
     /// Append one note after the attachment ledger entries. Repeat to append more in order.
     #[arg(long = "note", value_name = "TEXT")]
     pub(crate) notes: Vec<String>,
-    /// Write only if the task revision from show --json still matches.
-    #[arg(long, value_name = "SHA256", value_parser = parse_task_revision)]
-    pub(crate) expect_task_revision: Option<String>,
+    #[command(flatten)]
+    pub(crate) revisions: WriteRevisions,
     /// Stamp each caller note with this session's harness provenance.
     #[arg(long)]
     pub(crate) stamp: bool,
+}
+
+/// Optimistic preconditions for a guarded publication.
+#[derive(clap::Args, Debug, Default)]
+pub struct WriteRevisions {
+    /// Write only if the task revision from show --json still matches.
+    #[arg(long, value_name = "SHA256", value_parser = parse_task_revision)]
+    pub(crate) expect_task_revision: Option<String>,
+    /// Also require the same set and revisions of direct child records.
+    #[arg(long, value_name = "SHA256", value_parser = parse_task_revision, requires = "expect_task_revision")]
+    pub(crate) expect_task_children_revision: Option<String>,
 }
 
 /// The four read scopes: the current project (no flag), one named registered project,
@@ -855,9 +865,8 @@ pub enum Command {
         /// Read one note per line; validate all lines before saving once.
         #[arg(long)]
         stdin: bool,
-        /// Write only if the task revision from show --json still matches.
-        #[arg(long, value_name = "SHA256", value_parser = parse_task_revision)]
-        expect_task_revision: Option<String>,
+        #[command(flatten)]
+        revisions: WriteRevisions,
         /// Stamp the note with this session's harness provenance, as lifecycle notes are.
         #[arg(long)]
         stamp: bool,

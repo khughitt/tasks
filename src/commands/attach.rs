@@ -65,15 +65,10 @@ pub fn attach(mut ctx: Ctx, id: String, args: crate::cli::AttachArgs) -> Result<
         caption,
         notes,
         stamp,
-        expect_task_revision,
+        revisions,
     } = args;
     let source = Source::from_args(source, clipboard)?;
-    let mut task = load_at_revision(
-        &mut ctx,
-        &id,
-        Writer::Command,
-        expect_task_revision.as_deref(),
-    )?;
+    let mut task = load_at_revision(&mut ctx, &id, Writer::Command, &revisions)?;
     let owner = owner_name(&ctx.project)?;
     let max = if multipart {
         ctx.project

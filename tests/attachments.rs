@@ -1787,3 +1787,117 @@ fn task_revision_guards_note_and_preserves_the_competing_writer() {
     );
     assert_ne!(env.json(&dir, &["show", &id])["task_revision"], fresh);
 }
+
+fn children_revision(env: &TestEnv, dir: &Path, children: &[&str]) -> String {
+    let mut lines: Vec<_> = children
+        .iter()
+        .map(|id| {
+            let view = env.json(dir, &["show", id]);
+            format!("{id} {}\n", view["task_revision"].as_str().unwrap())
+        })
+        .collect();
+    lines.sort();
+    format!("{:x}", sha2::Sha256::digest(lines.concat().as_bytes()))
+}
+
+#[test]
+fn task_revision_guards_empty_and_changed_child_inputs() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let parent = id_of(env.json(&dir, &["add", "Guarded parent"]));
+    let other = id_of(env.json(&dir, &["add", "Other parent"]));
+    let view = env.json(&dir, &["show", &parent]);
+    let target = view["task_revision"].as_str().unwrap();
+    let empty = children_revision(&env, &dir, &[]);
+    env.cmd(&dir)
+        .args([
+            "note",
+            &parent,
+            "missing target",
+            "--expect-task-children-revision",
+            &empty,
+        ])
+        .assert()
+        .failure();
+
+    let child = id_of(env.json(&dir, &["add", "New child", "--parent", &parent]));
+    let initial_child = children_revision(&env, &dir, &[&child]);
+    for (verb, expected) in [
+        ("note", &empty),
+        ("attach", &empty),
+        ("attach", &initial_child),
+    ] {
+        if expected == &initial_child {
+            env.json(&dir, &["note", &child, "Competing child note"]);
+        }
+        let before = env.json(&dir, &["show", &parent]);
+        assert_eq!(before["task_revision"], target);
+        let out = env
+            .cmd(&dir)
+            .args([
+                verb,
+                &parent,
+                "missing.txt",
+                "--expect-task-revision",
+                target,
+                "--expect-task-children-revision",
+                expected,
+            ])
+            .output()
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert!(!out.status.success());
+        assert_eq!(error["error"]["kind"], "task_children_revision_mismatch");
+        assert_eq!(env.json(&dir, &["show", &parent]), before);
+    }
+
+    let changed_child = children_revision(&env, &dir, &[&child]);
+    env.json(&dir, &["edit", &child, "--parent", &other]);
+    let out = env
+        .cmd(&dir)
+        .args([
+            "note",
+            &parent,
+            "stale children",
+            "--expect-task-revision",
+            target,
+            "--expect-task-children-revision",
+            &changed_child,
+        ])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(!out.status.success());
+    assert_eq!(error["error"]["kind"], "task_children_revision_mismatch");
+    assert!(notes(&env, &dir, &parent).is_empty());
+
+    let extra = id_of(env.json(&dir, &["add", "Second child", "--parent", &other]));
+    let other_view = env.json(&dir, &["show", &other]);
+    let both = children_revision(&env, &dir, &[&extra, &child]);
+    write(&dir.join("result.txt"), b"Published bytes");
+    env.json(
+        &dir,
+        &[
+            "attach",
+            &other,
+            "result.txt",
+            "--expect-task-revision",
+            other_view["task_revision"].as_str().unwrap(),
+            "--expect-task-children-revision",
+            &both,
+        ],
+    );
+    env.json(
+        &dir,
+        &[
+            "note",
+            &parent,
+            "empty set verified",
+            "--expect-task-revision",
+            target,
+            "--expect-task-children-revision",
+            &empty,
+        ],
+    );
+    assert_eq!(notes(&env, &dir, &parent), ["empty set verified"]);
+}

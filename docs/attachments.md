@@ -234,3 +234,11 @@ before reading its input or changing the task. On mismatch it returns
 view and reevaluate the decision before retrying. The revision refers to the
 task file, including its attachment ledger and note archive references. It
 does not fence edits that bypass the Tasks mutation lock.
+
+When the decision also uses direct children, pass
+`--expect-task-children-revision SHA256` together with `--expect-task-revision`.
+Hash the sorted ASCII lines `<canonical-child-id> <task-revision>\n` for the
+direct children from the same project. Each revision comes from that child's
+`tasks show --json` view. Hash zero bytes for a task with no children.
+The command checks membership and revisions under the same mutation lock.
+It returns `task_children_revision_mismatch` before writing if either changed.

@@ -636,12 +636,14 @@ pub fn children<'a>(tasks: &'a [Task], id: &TaskId, registry: &Registry) -> Vec<
     let id = registry.canonical_id(id);
     tasks
         .iter()
-        .filter(|task| {
-            task.parent
-                .as_ref()
-                .is_some_and(|parent| registry.canonical_id(parent) == id)
-        })
+        .filter(|task| is_direct_child(task, &id, registry))
         .collect()
+}
+
+pub(crate) fn is_direct_child(task: &Task, parent_id: &TaskId, registry: &Registry) -> bool {
+    task.parent
+        .as_ref()
+        .is_some_and(|parent| registry.canonical_id(parent) == *parent_id)
 }
 
 /// Every task below `id`, depth first. A visited set makes a corrupt loop terminate.

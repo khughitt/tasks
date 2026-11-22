@@ -328,7 +328,7 @@ fn dispatch(
             text,
             stdin,
             stamp,
-            expect_task_revision,
+            revisions,
             reviewed,
             no_reviewed,
             awaiting_user,
@@ -343,7 +343,7 @@ fn dispatch(
                 }
             },
             stamp,
-            expect_task_revision.as_deref(),
+            &revisions,
             crate::review::Review::from_flags(reviewed, no_reviewed),
             crate::review::Awaiting::from_flags(awaiting_user, false),
         ),
