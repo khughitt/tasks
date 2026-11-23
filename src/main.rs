@@ -347,9 +347,12 @@ fn main() {
             // A clean `check` says nothing in JSON mode: it ends every project's pre-commit
             // hook, the exit status carries the verdict, and nothing parses an empty
             // report. Pretty mode still prints `ok` for a person at a terminal.
-            let silent = format == Format::Json
+            // A host with nothing to take up gets no notice in either mode: the
+            // SessionStart hook relays whatever `notices` prints.
+            let silent = (format == Format::Json
                 && matches!(&out, output::Output::Check(check)
-                    if check.errors.is_empty() && check.warnings.is_empty() && check.growth.is_none());
+                    if check.errors.is_empty() && check.warnings.is_empty() && check.growth.is_none()))
+                || matches!(&out, output::Output::Notices(n) if n.notices.is_empty());
             let meta = out.meta();
             let mut theme_warning = None;
             let stdout_painter = if stdout_painter.enabled() && meta.needs_theme {
@@ -448,6 +451,11 @@ fn main() {
             to_stderr(&warnings);
             if let output::Output::Check(check) = &out
                 && !check.errors.is_empty()
+            {
+                std::process::exit(1);
+            }
+            if let output::Output::Register(register) = &out
+                && register.results.iter().any(|row| row.outcome == "error")
             {
                 std::process::exit(1);
             }

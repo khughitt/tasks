@@ -352,6 +352,25 @@ fn predecessor(env: &TestEnv, current: &Path, old: &str, suffixes: &[&str]) {
     env.json(current, &["init", "--prefix", "forge", "--force"]);
 }
 
+/// The commands `tasks notices` prints for this host; none when it prints nothing.
+fn notice_commands(env: &TestEnv, dir: &Path) -> Vec<String> {
+    let out = env.cmd(dir).arg("notices").output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    if out.stdout.is_empty() {
+        return Vec::new();
+    }
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    value["notices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            assert_eq!(row["kind"], "unadopted_rename", "{value}");
+            row["command"].as_str().unwrap().to_string()
+        })
+        .collect()
+}
+
 fn write_task(root: &Path, id: &str, extra: &str) {
     std::fs::write(root.join(format!("tasks/{id}.md")), format!("---\nid: {id}\ntitle: fixture\nstatus: done\npriority: 2\ncreated: 2026-11-01T00:00:00Z\nupdated: 2026-11-01T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n")).unwrap();
 }
@@ -1147,6 +1166,21 @@ fn multi_host_succession_rehearsal_primary_secondary_and_fresh_init() {
         );
         eprintln!("checking primary");
         assert_handoff_routing(&a, &old, &archived);
+        // Host b's notices name the adoptions it owes, predecessor first.
+        let mut owed = vec![("forge", "forge1", &archived), ("forge2", "forge", &old)];
+        if early_adoption {
+            owed.remove(0);
+        }
+        let expected: Vec<String> = owed
+            .iter()
+            .map(|(from, to, dir)| {
+                format!(
+                    "tasks -C {} rename {from} {to} --adopt",
+                    dir.canonicalize().unwrap().display()
+                )
+            })
+            .collect();
+        assert_eq!(notice_commands(&b, &old), expected);
         assert_eq!(
             a.json(&archived, &["show", &carried])["task"]["status"],
             "moved"
@@ -1178,6 +1212,7 @@ fn multi_host_succession_rehearsal_primary_secondary_and_fresh_init() {
         );
         eprintln!("checking secondary");
         assert_handoff_routing(&b, &old, &archived);
+        assert_eq!(notice_commands(&b, &old), Vec::<String>::new());
         if early_adoption {
             continue;
         }

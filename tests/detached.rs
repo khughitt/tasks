@@ -353,7 +353,7 @@ pub fn register_by_hand(env: &TestEnv, l: &Layout, prefix: &str) {
     std::fs::write(
         project.join("tasks/.config.toml"),
         format!(
-            "prefix = \"{prefix}\"\n\n[git]\ncommit = true\n\n[checkout]\npath = \"../../code\"\nkind = \"detached\"\n"
+            "prefix = \"{prefix}\"\nstage = \"experimental\"\n\n[git]\ncommit = true\n\n[checkout]\npath = \"../../code\"\nkind = \"detached\"\n"
         ),
     )
     .unwrap();

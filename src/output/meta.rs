@@ -56,6 +56,8 @@ impl Output {
             Output::Root(o) => OutputMeta::plain(&o.warnings),
             Output::Where(o) => OutputMeta::plain(&o.warnings),
             Output::Resolve(o) => OutputMeta::plain(&o.warnings),
+            Output::Register(o) => OutputMeta::plain(&o.warnings),
+            Output::Notices(_) => OutputMeta::plain(&[]),
             Output::IdentityRefresh(o) => OutputMeta::plain(&o.warnings),
             Output::Group(o) => OutputMeta::plain(&o.warnings),
             Output::Groups(o) => OutputMeta::plain(&o.warnings),
@@ -111,6 +113,7 @@ pub fn defers_width_error(command: &Command) -> bool {
         | Command::Root { .. }
         | Command::Where { .. }
         | Command::Resolve { .. }
+        | Command::Notices
         | Command::Show { .. }
         | Command::Doc { .. }
         | Command::Docs { .. }
@@ -132,6 +135,7 @@ pub fn defers_width_error(command: &Command) -> bool {
         | Command::Claims { .. } => true,
         Command::Retained { .. }
         | Command::Init { .. }
+        | Command::Register { .. }
         | Command::Identity { .. }
         | Command::Rename { .. }
         | Command::Move { .. }

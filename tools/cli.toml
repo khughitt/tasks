@@ -332,6 +332,16 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["register"]
+summary = "Register every discovered records entry whose checkout is on this host, through init"
+args = [{ name = "prefixes", value = "string", required = false, variadic = true }]
+options = [{ names = ["--explain"], value = "none" }]
+
+[[cli.tasks.commands]]
+path = ["notices"]
+summary = "What this host must run to take up its synced records; prints nothing when nothing"
+
+[[cli.tasks.commands]]
 path = ["unregister"]
 summary = "Remove a prefix from the registry. Project files are left untouched"
 args = [{ name = "prefix", value = "string", required = true }]

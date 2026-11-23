@@ -265,6 +265,117 @@ pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
     Ok(Output::Check(out))
 }
 
+enum EffectiveStage {
+    Declared(crate::repo::ProjectStage),
+    Missing,
+    /// This copy declares none and the registered copy did not open; the
+    /// `retirement_unknown` finding already reports that open.
+    Unknown,
+}
+
+/// The stage this copy declares, else its registered copy's when it is another copy (a
+/// worktree branch cut before the declaration), as `where` reports policy and
+/// `effective_retirement` reads retirement. An invalid value in this copy is an error
+/// here; an invalid registered value is the registered checkout's own finding.
+fn effective_stage(ctx: &Ctx) -> Result<EffectiveStage> {
+    if let Some(stage) = ctx.project.declared_stage()? {
+        return Ok(EffectiveStage::Declared(stage));
+    }
+    match crate::scope::config_dir(&ctx.registry, &ctx.project.prefix) {
+        Some(dir) if dir != ctx.project.records => {
+            let registered = crate::scope::open_registered(
+                &ctx.registry,
+                &ctx.project.prefix,
+                crate::scope::Origin::Prefix,
+            );
+            Ok(match registered.map(|project| project.declared_stage()) {
+                Ok(Ok(Some(stage))) => EffectiveStage::Declared(stage),
+                Ok(Ok(None)) => EffectiveStage::Missing,
+                Ok(Err(_)) | Err(_) => EffectiveStage::Unknown,
+            })
+        }
+        _ => Ok(EffectiveStage::Missing),
+    }
+}
+
+/// The stage this project declares, and what it shares with the other catalogued entries:
+/// one stage per Git repository among registered active projects, and the words that name
+/// it (docs/configuration.md). A collision is a warning: it is a fact about two entries,
+/// and an error would block every commit of a project that did not introduce it.
+fn catalogue_findings(
+    ctx: &Ctx,
+    retired: bool,
+    errors: &mut Vec<Finding>,
+    warnings: &mut Vec<Finding>,
+) -> Result<()> {
+    let config = crate::repo::CONFIG_REL;
+    let catalogue = crate::catalogue::discovery::Catalogue::build(&ctx.registry);
+    match effective_stage(ctx) {
+        Err(error) => errors.push(finding(
+            None,
+            config.into(),
+            "stage_invalid",
+            error.to_string(),
+        )),
+        Ok(EffectiveStage::Missing) if !retired => errors.push(finding(
+            None,
+            config.into(),
+            "stage_missing",
+            format!(
+                "project {:?} declares no stage; set stage = \"experimental\", \"pre-release\" \
+                 or \"supported\" in its tracker config",
+                ctx.project.prefix
+            ),
+        )),
+        Ok(EffectiveStage::Missing | EffectiveStage::Unknown) => {}
+        Ok(EffectiveStage::Declared(stage)) if !retired => {
+            use crate::catalogue::stages::{conflicts, name};
+            for conflict in conflicts(&ctx.registry, &catalogue, &ctx.project, stage)? {
+                errors.push(finding(
+                    None,
+                    config.into(),
+                    "stage_conflict",
+                    format!(
+                        "{} and {} share the Git repository {} but declare different stages \
+                         ({} and {}); one Git root means one shared test policy, so declare \
+                         one stage",
+                        ctx.project.prefix,
+                        conflict.prefix,
+                        conflict.repository.display(),
+                        name(stage),
+                        name(conflict.stage)
+                    ),
+                ));
+            }
+        }
+        Ok(EffectiveStage::Declared(_)) => {}
+    }
+    let live = ctx.registry.canonical_prefix(&ctx.project.prefix);
+    let others = catalogue
+        .entries
+        .iter()
+        .filter_map(|(prefix, state)| match state {
+            crate::catalogue::discovery::EntryState::Read(project) if prefix != live => {
+                Some(project.as_ref())
+            }
+            _ => None,
+        });
+    for collision in crate::catalogue::words::collisions(
+        &ctx.registry,
+        others.chain(std::iter::once(&ctx.project)),
+    ) {
+        if collision.involves(&ctx.project.prefix) {
+            warnings.push(finding(
+                None,
+                config.into(),
+                "word_collision",
+                collision.detail(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     // A code tree whose index still holds the config is on the pre-move side of the
     // migration: the walk missed it only because the working tree lost it.
@@ -351,6 +462,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         ));
     }
     lifecycle_findings(&ctx, &tasks, &mut errors, &mut warnings)?;
+    catalogue_findings(&ctx, retired, &mut errors, &mut warnings)?;
     let threshold = ctx.project.growth_warn_bytes();
     for row in &growth_rows {
         if row.record_bytes > threshold {

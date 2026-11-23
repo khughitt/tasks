@@ -451,6 +451,16 @@ and symlinked ancestors. Resolve reads no task records and never writes or locks
 git runs only for requested freshness or the existing
 unregistered-path fallback.
 
+`tasks notices` prints what this host must run to take up its records stores: one
+row per unregistered entry whose checkout is here (`kind: unregistered`, with the exact
+`tasks init`) and per rename another host made (`kind: unadopted_rename`, with the
+exact `rename <old> <new> --adopt`); it prints nothing when there is nothing.
+`tasks register [PREFIX...] [--explain]` runs those inits; see
+[taking up synced records](../../docs/project-operations.md#taking-up-synced-records).
+`check` errors `stage_missing`, `stage_invalid` or `stage_conflict` (registered projects
+sharing a Git repository with different stages) and warns `word_collision` when another
+entry claims one of the project's words.
+
 Use `tasks where [PATH]` to find the project a path opens, including from a code
 worktree with no `tasks/.config.toml`. Its `project` object names three locations:
 

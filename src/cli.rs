@@ -599,6 +599,17 @@ pub enum Command {
         #[arg(long)]
         explain: bool,
     },
+    /// Register every discovered records entry whose checkout is on this host, through init.
+    Register {
+        /// Only these unregistered entries; every registerable one when omitted.
+        #[arg(value_name = "PREFIX")]
+        prefixes: Vec<String>,
+        /// List the init each entry would run, without locks or writes.
+        #[arg(long)]
+        explain: bool,
+    },
+    /// What this host must run to take up its synced records; prints nothing when nothing.
+    Notices,
     /// Remove a prefix from the registry. Project files are left untouched.
     Unregister {
         #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]
