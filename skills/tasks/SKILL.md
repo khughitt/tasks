@@ -47,6 +47,8 @@ mean those documents were verified.
    which means resume its scoping, never implement it.
    `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
    `--sort created` for the most recently touched or added first (`--reverse` flips it).
+   `-n/--limit <N>` keeps only the first N rows, after every filter and the chosen
+   order, in every list mode and in `search`.
    `list` and `ready` also take `-p/--priority`, `--size`, `--complexity`, and `--process`,
    each repeatable: repeats of one of these widen (any of them), and different flags
    narrow (all of them). `--size`, `--complexity`, and `--process` accept `none` for an

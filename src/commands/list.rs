@@ -101,13 +101,22 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
         waiting_on,
         periodic,
         deferred,
+        limit,
         scope: _,
     } = args;
     let sort = SortKey::parse(&sort)?;
     let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
         let waiting_on = waiting_on.as_deref().map(WaitingOn::parse).transpose()?;
-        return list_parked(ctx, filter, waiting_on, text.as_ref(), plan, reference);
+        return list_parked(
+            ctx,
+            filter,
+            waiting_on,
+            text.as_ref(),
+            plan,
+            reference,
+            limit,
+        );
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -163,6 +172,10 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             tasks.reverse();
         }
     }
+    // After filtering and the full order, so the rows kept are the first the mode shows.
+    if let Some(limit) = limit {
+        tasks.truncate(limit);
+    }
     let colors = ctx.project_colors();
     let mut out = Output::List(ListOut {
         tasks: tasks
@@ -190,6 +203,7 @@ fn list_parked(
     text: Option<&TextQuery>,
     plan: Option<String>,
     reference: Option<String>,
+    limit: Option<usize>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -205,7 +219,7 @@ fn list_parked(
         })
     })?;
     filter.resolve_under(&hierarchy, &ctx.registry)?;
-    let tasks = rows
+    let mut tasks: Vec<ParkedRow> = rows
         .into_iter()
         .filter(|(_, task)| {
             plan.as_deref().is_none_or(|wanted| {
@@ -237,6 +251,10 @@ fn list_parked(
             }
         })
         .collect();
+    // The rows are most recently parked first, so the limit keeps the newest parks.
+    if let Some(limit) = limit {
+        tasks.truncate(limit);
+    }
     let mut out = Output::Parked(ParkedOut { tasks, warnings });
     let activity = crate::activity::ActivityIndex::of_scan(&all, &ctx.registry, now);
     out.paint_projects(&ctx.project_colors());
