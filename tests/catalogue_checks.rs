@@ -94,6 +94,66 @@ fn an_active_project_must_declare_a_valid_stage() {
     );
 }
 
+/// An in-tree project's code worktree on a branch cut before its stage was declared:
+/// the registered checkout's declaration is the project's stage, as `where` reports it.
+#[test]
+fn a_worktree_branch_older_than_the_stage_declaration_takes_the_registered_stage() {
+    let env = TestEnv::new();
+    let temp = tempfile::tempdir().unwrap();
+    let main = temp.path().canonicalize().unwrap().join("main");
+    fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    env.json(&main, &["init", "--prefix", "wt"]);
+    set_stage(&main, "");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "before stage"]);
+    let worktree = temp.path().canonicalize().unwrap().join("old");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "old",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        !fs::read_to_string(config(&worktree))
+            .unwrap()
+            .contains("stage")
+    );
+
+    // Neither copy declares one yet.
+    assert_eq!(
+        kinds(&check_findings(&env, &worktree).1, "errors"),
+        ["stage_missing"]
+    );
+
+    set_stage(&main, "stage = \"pre-release\"");
+    git(&main, &["commit", "-qam", "declare stage"]);
+    assert_eq!(
+        env.json(&worktree, &["where"])["project"]["stage"],
+        "pre-release"
+    );
+    let (code, findings) = check_findings(&env, &worktree);
+    assert_eq!(code, 0, "{findings}");
+    assert!(
+        !kinds(&findings, "errors")
+            .iter()
+            .any(|k| k.starts_with("stage")),
+        "{findings}"
+    );
+
+    // The worktree's own copy is still held to a valid value when it declares one.
+    set_stage(&worktree, "stage = \"preview\"");
+    assert_eq!(
+        kinds(&check_findings(&env, &worktree).1, "errors"),
+        ["stage_invalid"]
+    );
+}
+
 #[test]
 fn a_malformed_retired_table_fails_check() {
     let mut env = TestEnv::new();

@@ -102,11 +102,40 @@ fn notices(env: &TestEnv, dir: &Path) -> Vec<Value> {
     value["notices"].as_array().unwrap().clone()
 }
 
+/// Splits a printed command as a POSIX shell would for the quoting the commands use:
+/// bare words and single-quoted spans, with `'\''` for a quote inside one.
+fn shell_split(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut chars = command.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' => words.extend(word.take()),
+            '\'' => {
+                let word = word.get_or_insert_with(String::new);
+                for quoted in chars.by_ref() {
+                    if quoted == '\'' {
+                        break;
+                    }
+                    word.push(quoted);
+                }
+            }
+            '\\' => word
+                .get_or_insert_with(String::new)
+                .push(chars.next().expect("escaped character")),
+            other => word.get_or_insert_with(String::new).push(other),
+        }
+    }
+    words.extend(word);
+    words
+}
+
 /// Runs a notice's or row's command word by word, as a person pasting it would.
 fn run_command(env: &TestEnv, command: &str) -> Value {
-    let words: Vec<&str> = command.split(' ').collect();
+    let words = shell_split(command);
     assert_eq!(words[0], "tasks", "{command}");
-    env.json(Path::new("/"), &words[1..])
+    let args: Vec<&str> = words[1..].iter().map(String::as_str).collect();
+    env.json(Path::new("/"), &args)
 }
 
 #[test]
@@ -317,4 +346,98 @@ fn notices_name_an_in_tree_rename_another_host_made() {
     assert_eq!(rows[0]["command"], command);
     run_command(&b, &command);
     assert_eq!(notices(&b, &dir), Vec::<Value>::new());
+}
+
+#[test]
+fn shell_split_reads_the_quoting_the_commands_print() {
+    assert_eq!(
+        shell_split("tasks -C '/a b/it'\\''s' init"),
+        ["tasks", "-C", "/a b/it's", "init"]
+    );
+}
+
+/// A linked entry, its checkout under a path with a space, and an in-tree entry, both in
+/// an overlay store this host knows through one linked project.
+#[test]
+fn notices_and_register_cover_linked_and_in_tree_entries_and_quote_paths() {
+    let a = TestEnv::new();
+    let b = TestEnv::new();
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path().canonicalize().unwrap();
+    let overlay = repo(&base.join("overlay"));
+    let linked = |host: &TestEnv, prefix: &str| {
+        let code = base.join("code dir").join(prefix);
+        if !code.exists() {
+            repo(&code);
+        }
+        let dir = overlay.join(prefix);
+        fs::create_dir_all(&dir).unwrap();
+        host.json(
+            &dir,
+            &[
+                "init",
+                "--prefix",
+                prefix,
+                "--checkout",
+                code.to_str().unwrap(),
+            ],
+        );
+        (dir, code)
+    };
+    let (anchor, _) = linked(&a, "an");
+    let (ln, ln_code) = linked(&a, "ln");
+    let it = overlay.join("it");
+    fs::create_dir_all(&it).unwrap();
+    a.json(&it, &["init", "--prefix", "it"]);
+    linked(&b, "an");
+
+    let rows = notices(&b, &anchor);
+    let commands: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row["prefix"].as_str().unwrap(),
+                row["command"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    let ln_command = format!(
+        "tasks -C {} init --prefix ln --checkout '{}'",
+        ln.display(),
+        ln_code.display()
+    );
+    let it_command = format!("tasks -C {} init --prefix it", it.display());
+    assert_eq!(
+        commands,
+        [("it", it_command.as_str()), ("ln", ln_command.as_str())]
+    );
+    let explained = b.json(&anchor, &["register", "--explain"]);
+    let kinds: Vec<_> = explained["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["in-tree", "linked"]);
+
+    // The quoted command registers the linked entry; register takes the in-tree one.
+    run_command(&b, &ln_command);
+    let registered = b.json(&anchor, &["register"]);
+    assert_eq!(registered["results"][0]["prefix"], "it");
+    assert_eq!(registered["results"][0]["outcome"], "registered");
+    assert_eq!(notices(&b, &anchor), Vec::<Value>::new());
+    let resolved = b.json(&anchor, &["resolve", "ln", "it"]);
+    for (row, kind) in resolved["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(["linked", "in-tree"])
+    {
+        assert_eq!(row["status"], "resolved", "{resolved}");
+        assert_eq!(row["entry"]["kind"], kind, "{resolved}");
+    }
+    assert_eq!(
+        resolved["results"][0]["entry"]["checkout"],
+        ln_code.to_str().unwrap()
+    );
 }
