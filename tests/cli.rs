@@ -1278,6 +1278,7 @@ fn list_help_shows_sort_values_and_examples() {
     assert!(text.contains("[default: priority]"), "{text}");
     assert!(text.contains("Examples:"), "{text}");
     assert!(text.contains("tasks list --sort updated"), "{text}");
+    assert!(text.contains("tasks list -n 5 --sort updated"), "{text}");
     assert!(
         text.contains("tasks list --status todo --tag cli"),
         "{text}"
@@ -4255,6 +4256,9 @@ fn list_all_projects_walks_registry() {
         .collect();
     titles.sort();
     assert_eq!(titles, ["F", "S"]);
+    // The limit applies after the cross-project scan and its order.
+    let v = env.json(&sci, &["list", "--all-projects", "-n", "1"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -13797,6 +13801,57 @@ fn list_sorts_by_priority_updated_or_created_and_prints_the_date() {
 }
 
 #[test]
+fn list_limit_truncates_after_sorting_in_every_mode() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = id_of(env.json(&dir, &["add", "A", "-p", "1"]));
+    let b = id_of(env.json(&dir, &["add", "B", "-p", "2"]));
+    let c = id_of(env.json(&dir, &["add", "C", "-p", "3"]));
+    let (a, b, c) = (a.as_str(), b.as_str(), c.as_str());
+    // priority order is A B C; updated desc is C A B; reversed priority is C B A
+    stamp(&dir, a, "2026-01-01T00:00:00Z", "2026-02-02T00:00:00Z");
+    stamp(&dir, b, "2026-03-03T00:00:00Z", "2026-01-01T00:00:00Z");
+    stamp(&dir, c, "2026-02-02T00:00:00Z", "2026-03-03T00:00:00Z");
+    let ids = |v: serde_json::Value| -> Vec<String> {
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // No limit keeps the whole list; the JSON shape is unchanged.
+    assert_eq!(ids(env.json(&dir, &["list"])), [a, b, c]);
+    // The limit applies after filtering and sorting, and after --reverse.
+    assert_eq!(ids(env.json(&dir, &["list", "-n", "2"])), [a, b]);
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--limit", "2", "--sort", "updated"])),
+        [c, a]
+    );
+    assert_eq!(ids(env.json(&dir, &["list", "--reverse", "-n", "1"])), [c]);
+    // A limit past the end keeps everything; 0 keeps nothing.
+    assert_eq!(ids(env.json(&dir, &["list", "-n", "10"])), [a, b, c]);
+    assert_eq!(ids(env.json(&dir, &["list", "-n", "0"])).len(), 0);
+
+    // The parked mode keeps its own order (most recent park first) under a limit.
+    as_agent(&env, &dir, "agent-a")
+        .args(["park", a, "first"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    as_agent(&env, &dir, "agent-a")
+        .args(["park", b, "second"])
+        .assert()
+        .success();
+    assert_eq!(ids(env.json(&dir, &["list", "--parked"])), [b, a]);
+    assert_eq!(ids(env.json(&dir, &["list", "--parked", "-n", "1"])), [b]);
+
+    // `search` takes every list option, so it takes the limit too.
+    assert_eq!(ids(env.json(&dir, &["search", "A", "-n", "1"])), [a]);
+}
+
+#[test]
 fn write_commands_follow_the_id_prefix_across_projects() {
     let mut env = TestEnv::new();
     let ops = env.init("ops");
@@ -16197,6 +16252,16 @@ fn list_periodic_shows_the_series_in_due_order() {
     // It bypasses the default open-status filter: most of a healthy series is closed.
     assert_eq!(rows["tasks"][1]["status"], "done");
 
+    // The limit applies after the due order.
+    let limited = env.json(&sci, &["list", "--periodic", "-n", "2"]);
+    let ids: Vec<&str> = limited["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![overdue.as_str(), soon.as_str()]);
+
     let text = env.pretty(&sci, &["list", "--periodic"]);
     assert!(
         text.contains("now"),
@@ -18562,6 +18627,10 @@ fn list_deferred_orders_by_date_with_due_first_and_conflicts_with_orderings() {
         vec![due.as_str(), soon.as_str(), later.as_str()],
         "{v}"
     );
+    // The limit applies after the due order, due ones leading.
+    let v = env.json(&sci, &["list", "--deferred", "-n", "1"]);
+    assert_eq!(v["tasks"][0]["id"].as_str().unwrap(), due.as_str(), "{v}");
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
     let v = env.json(&sci, &["list", "--deferred", "--tag", "x"]);
     let ids: Vec<&str> = v["tasks"]
         .as_array()

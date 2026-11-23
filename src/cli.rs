@@ -187,6 +187,9 @@ pub struct ListArgs {
     /// Only deferred tasks, soonest date first; due ones lead.
     #[arg(long, conflicts_with_all = ["sort", "reverse", "parked", "periodic"])]
     pub deferred: bool,
+    /// At most this many, after every filter and the chosen order.
+    #[arg(short = 'n', long, value_name = "N")]
+    pub limit: Option<usize>,
 
     #[command(flatten)]
     pub scope: ScopeArgs,
@@ -774,7 +777,7 @@ pub enum Command {
     },
     /// List tasks (open by default).
     #[command(
-        after_help = "Examples:\n  tasks list --sort updated\n  tasks list --status todo --tag cli\n  tasks list -p 0 -p 1 --size s --size xs"
+        after_help = "Examples:\n  tasks list --sort updated\n  tasks list -n 5 --sort updated\n  tasks list --status todo --tag cli\n  tasks list -p 0 -p 1 --size s --size xs"
     )]
     List {
         #[command(flatten)]

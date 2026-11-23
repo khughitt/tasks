@@ -77,6 +77,7 @@ process field decides whether design and planning run.
 ```sh
 tasks add "Emit rows" -p 1 --size s --complexity low --process direct
 tasks prime                      # session context and available work
+tasks list --sort updated -n 10  # the ten most recently touched open tasks
 tasks ready                      # actionable todo leaves
 tasks tree                       # containment hierarchy
 tasks goals                      # user/mixed goals across projects, counting declared pieces (--project/--group narrow)

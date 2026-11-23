@@ -513,6 +513,7 @@ options = [
   { names = ["--waiting-on"], value = "enum", values = ["agent", "user"] },
   { names = ["--periodic"], value = "none" },
   { names = ["--deferred"], value = "none" },
+  { shared = "limit", value = "int" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
@@ -545,6 +546,7 @@ options = [
   { names = ["--waiting-on"], value = "enum", values = ["agent", "user"] },
   { names = ["--periodic"], value = "none" },
   { names = ["--deferred"], value = "none" },
+  { shared = "limit", value = "int" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
@@ -1268,6 +1270,31 @@ options = [
 ]
 
 [[cli.obs.commands]]
+path = ["eval"]
+summary = "check eval cases, record verdicts and list them"
+
+[[cli.obs.commands]]
+path = ["eval", "check"]
+verb = "check"
+summary = "validate eval case files; print nothing when every file is clean"
+args = [{ name = "paths", value = "path", required = true, variadic = true }]
+
+[[cli.obs.commands]]
+path = ["eval", "record"]
+summary = "record eval verdicts from a JSONL file"
+options = [{ names = ["--input"], value = "path", required = true }]
+
+[[cli.obs.commands]]
+path = ["eval", "list"]
+verb = "list"
+summary = "list eval verdicts by case and subject"
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { names = ["--case"], value = "string" },
+  { names = ["--subject"], value = "string" },
+]
+
+[[cli.obs.commands]]
 path = ["index-state"]
 output = "json"
 summary = "print each indexed file's retention readiness and indexed-byte evidence"
@@ -1695,12 +1722,73 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["acquire"]
+summary = "Retrieve and accept static acquisition sets"
+
+[[cli.science.commands]]
+path = ["acquire", "start"]
+summary = "Retrieve a static acquisition plan into a new resumable set"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--plan"], value = "path", required = true },
+  { names = ["--max-response-bytes"], value = "int" },
+  { names = ["--max-total-bytes"], value = "int" },
+  { names = ["--max-requests"], value = "int" },
+  { names = ["--attempts"], value = "int" },
+  { names = ["--min-interval-ms"], value = "int" },
+  { names = ["--backoff-ms"], value = "int" },
+]
+
+[[cli.science.commands]]
+path = ["acquire", "resume"]
+summary = "Continue retrieval from a set journal"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--set"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["acquire", "status"]
+summary = "Show request states and accepted dataset references"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--set"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["acquire", "seal"]
+summary = "Accept the retrieved members as a governed dataset"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--accept-partial", "--no-accept-partial"], value = "none" },
+  { names = ["--set"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["acquire", "import"]
+summary = "Accept a converted log, member files and original journals"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--accept-partial", "--no-accept-partial"], value = "none" },
+  { names = ["--log"], value = "string", required = true },
+  { names = ["--members"], value = "string", required = true },
+  { names = ["--journals"], value = "string", required = true },
+  { names = ["--title"], value = "string", required = true },
+  { names = ["--locator"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
 path = ["dataset"]
 summary = "Hold a local file or directory in the store and mint the dataset record under its content address"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
+  { names = ["--tree", "--no-tree"], value = "none" },
   { names = ["--path"], value = "string", required = true },
   { names = ["--title"], value = "string", required = true },
   { names = ["--resources"], value = "string", repeatable = true },
@@ -3457,35 +3545,6 @@ path = ["model"]
 summary = "The model and effort of a Codex or agy tool call, read from the harness's own record"
 options = [
   { shared = "harness", role = "select", value = "enum", values = ["codex", "agy"], required = true, repeatable = false },
-]
-
-# Minimal adoption surface; existing ops-projects commands remain outside this inventory.
-[cli.ops-projects]
-project = "ops"
-tier = "automation"
-default_output = "pretty"
-env = "OPS-PROJECTS"
-protocol = "link progress and refusal diagnostics"
-
-[[cli.ops-projects.commands]]
-path = []
-
-[[cli.ops-projects.commands]]
-path = ["link"]
-summary = "Keep project records in the profile overlay and link its checkout"
-args = [{name = "checkout", value = "path", required = true}]
-options = [
-  {names = ["--prefix"], value = "string", required = true},
-  {names = ["--purpose"], value = "string", required = true},
-  {names = ["--name"], value = "string"},
-  {names = ["--explain"], value = "none"},
-]
-
-[[cli.ops-projects.commands]]
-path = ["atlas"]
-summary = "Render the cross-project document of purposes, abstracts, subsystems and goal status"
-options = [
-  {names = ["--out"], value = "path"},
 ]
 
 # Minimal adoption surface; existing doc-review options remain outside this inventory.
