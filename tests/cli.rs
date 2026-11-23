@@ -1561,7 +1561,7 @@ fn local_read_prefers_no_project_to_a_malformed_registry() {
 }
 
 fn write_dictionary(dir: &std::path::Path, prefix: &str, entries: &[(&str, &str)]) {
-    let mut text = format!("prefix = \"{prefix}\"\n\n[tags]\n");
+    let mut text = format!("prefix = \"{prefix}\"\nstage = \"experimental\"\n\n[tags]\n");
     for (tag, meaning) in entries {
         text.push_str(&format!("{tag} = \"{meaning}\"\n"));
     }
@@ -3759,7 +3759,7 @@ fn configured_doc_roots_replace_the_defaults() {
     let dir = env.init("sci");
     std::fs::write(
         dir.join("tasks/.config.toml"),
-        "prefix = \"sci\"\nspec_dirs = [\"design/\", \"rfcs\"]\nplan_dirs = [\"planning\"]\n",
+        "prefix = \"sci\"\nstage = \"experimental\"\nspec_dirs = [\"design/\", \"rfcs\"]\nplan_dirs = [\"planning\"]\n",
     )
     .unwrap();
     write_doc(&dir, "design/2026-09-03-ledger-design.md", "# Design\n");
@@ -3881,7 +3881,7 @@ fn check_reports_links_outside_the_configured_roots() {
         .to_string();
     std::fs::write(
         dir.join("tasks/.config.toml"),
-        "prefix = \"sci\"\nspec_dirs = [\"design\"]\n",
+        "prefix = \"sci\"\nstage = \"experimental\"\nspec_dirs = [\"design\"]\n",
     )
     .unwrap();
     let out = env.cmd(&dir).args(["check"]).output().unwrap();
@@ -22829,7 +22829,11 @@ fn needs_flags_a_need_dropped_from_the_vocabulary_still_lists_but_fails_check() 
     let sci = env.init("sci");
     declare_needs(&sci, &[("quiet", "an idle host", true)]);
     let id = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
-    std::fs::write(sci.join("tasks/.config.toml"), "prefix = \"sci\"\n").unwrap();
+    std::fs::write(
+        sci.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nstage = \"experimental\"\n",
+    )
+    .unwrap();
 
     let listed = env.json(&sci, &["list"]);
     assert_eq!(listed["tasks"][0]["needs"], serde_json::json!(["quiet"]));

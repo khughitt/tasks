@@ -79,6 +79,47 @@ registry metadata only: it never reads task records, writes or takes mutation
 locks. Without `--freshness`, it runs no git except the existing fallback for an
 unregistered path.
 
+## Taking up synced records
+
+The registry is per host; the records stores are shared. Two commands bring a host
+up to date with what other hosts put in a store it already knows (the parent of a
+registered records entry; see `resolve --all`).
+
+`notices` prints what this host must run, one row per item, and prints nothing,
+in either format, when there is nothing; it exits 0 whenever it ran (a malformed
+registry is an ordinary error, exit 1). It reads what `resolve --all` reads and
+runs no git, so it suits a session-start hook. Rows are:
+
+- `unregistered`: a discovered records entry that is not retired, is not the new
+  name of a rename below, and whose checkout exists on this host. `command` is the
+  exact init: `tasks -C <checkout> init --prefix <p> --records <store>` for a
+  detached entry, `tasks -C <records> init --prefix <p> --checkout <code>` for a
+  linked one, `tasks -C <records> init --prefix <p>` for an in-tree one.
+- `unadopted_rename`: another host renamed a prefix this host still registers.
+  `old` is the registered prefix, `prefix` the new one, and `command` is
+  `tasks -C <checkout> rename <old> <new> --adopt`. It is found when a registered
+  prefix no longer opens and an entry under another prefix sits at its registered
+  root (a detached records directory moved, or an in-tree or linked config renamed
+  in place), and for a [prefix handoff](#reclaiming-a-retired-predecessors-prefix)
+  whose predecessor table this host has not imported while it still registers the
+  successor's former prefix; the predecessor's rename is listed first.
+
+JSON is `{"notices":[{"kind","prefix","old"?,"command","detail"}]}`. `--pretty`
+prints one line per row: ``tasks: <detail>; run `<command>` ``. Entries that
+cannot be read, retired entries and entries whose checkout is elsewhere are not
+notices; `resolve --all` shows them.
+
+`register [PREFIX...]` runs that init for every `unregistered` row, or only for the
+named prefixes, each of which must be one: a named prefix that is registered,
+retired, a rename's new name, absent from every known store, or whose checkout is
+not here refuses with `validation` before anything is registered. `--explain`
+lists the rows without locks or writes. JSON is
+`{"explain","results":[{"prefix","kind","records","checkout","command","outcome","detail"?}],"warnings"}`
+with outcome `would_register`, `registered` or `error`; every row is attempted, an
+`error` row carries the init failure as `detail`, and any `error` row exits 1.
+Init warnings are carried with the prefix in front. A retired entry is registered
+only by its explicit init, and renames only by their `--adopt` commands.
+
 ## Missing record files
 
 `show` and `doc` read a local task first, then the checkout named by that

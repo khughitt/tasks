@@ -220,6 +220,49 @@ pub struct WhereProject {
     pub id_color: Option<crate::palette::Rgb>,
 }
 
+/// `tasks register`: one row per discovered entry it registered, or with `--explain`
+/// would register.
+#[derive(Serialize)]
+pub struct RegisterOut {
+    pub explain: bool,
+    pub results: Vec<RegisterRow>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct RegisterRow {
+    pub prefix: String,
+    /// `in-tree`, `detached` or `linked`.
+    pub kind: &'static str,
+    pub records: String,
+    pub checkout: String,
+    /// The `tasks init` this row runs, as a person would type it.
+    pub command: String,
+    /// `would_register` (explain), `registered`, or `error`.
+    pub outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `tasks notices`: what this host must run to take up its synced records.
+#[derive(Serialize)]
+pub struct NoticesOut {
+    pub notices: Vec<NoticeRow>,
+}
+
+#[derive(Serialize)]
+pub struct NoticeRow {
+    /// `unregistered` or `unadopted_rename`.
+    pub kind: &'static str,
+    /// The entry's prefix; for a rename, the new one.
+    pub prefix: String,
+    /// The prefix this host still registers, for a rename.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old: Option<String>,
+    pub command: String,
+    pub detail: String,
+}
+
 #[derive(Serialize)]
 pub struct ResolveOut {
     pub results: Vec<ResolveRow>,
@@ -1317,6 +1360,8 @@ pub enum Output {
     Root(RootOut),
     Where(WhereOut),
     Resolve(ResolveOut),
+    Register(RegisterOut),
+    Notices(NoticesOut),
     IdentityRefresh(IdentityRefreshOut),
     Projects(ProjectsOut),
     Group(GroupOut),

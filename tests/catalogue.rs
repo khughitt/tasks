@@ -38,7 +38,7 @@ fn store_env(env: &TestEnv, entries: &[(&str, EntrySpec)]) -> StoreLayout {
         fs::write(
             entry.join("tasks/.config.toml"),
             format!(
-                "prefix = {prefix:?}\n{}\n[checkout]\npath = {:?}\nkind = 'detached'\n",
+                "prefix = {prefix:?}\nstage = 'experimental'\n{}\n[checkout]\npath = {:?}\nkind = 'detached'\n",
                 spec.extra,
                 root.to_str().unwrap()
             ),
@@ -118,7 +118,7 @@ fn unregistered_entry_appears_in_resolve_all_and_by_prefix() {
             "records": layout.store.join("bb"), "checkout": layout.code.join("bb"),
             "kind": "detached", "name": "Catalogue", "aliases": [],
             "purpose": "Keeps identities", "snapshot": {"source":"seeded","refreshed":"2026-11-09T16:00:00Z"},
-            "shorthand": ["cat"], "profile":"personal", "stage":null, "color":"#123456", "color_256":242, "id_color":"#546c87"
+            "shorthand": ["cat"], "profile":"personal", "stage":"experimental", "color":"#123456", "color_256":242, "id_color":"#546c87"
         })
     );
     assert_eq!(resolve(&env, &layout.code, &["bb"])["results"][0], *bb);
@@ -462,7 +462,7 @@ fn linked_snapshot(env: &TestEnv, layout: &StoreLayout) {
     let commit = git_text(env, &overlay, &["rev-parse", "HEAD"]);
     let blob = git_text(env, &overlay, &["rev-parse", "HEAD:./identity.toml"]);
     fs::write(overlay.join("tasks/.config.toml"), format!(
-        "prefix = 'aa'\n[identity]\nname = 'Overlay'\npurpose = 'Owns records'\nsource = 'head'\ncommit = {commit:?}\nblob = {blob:?}\nrefreshed = '2026-11-09T16:00:00Z'\n[checkout]\npath = {:?}\n", checkout.to_str().unwrap()
+        "prefix = 'aa'\nstage = 'experimental'\n[identity]\nname = 'Overlay'\npurpose = 'Owns records'\nsource = 'head'\ncommit = {commit:?}\nblob = {blob:?}\nrefreshed = '2026-11-09T16:00:00Z'\n[checkout]\npath = {:?}\n", checkout.to_str().unwrap()
     )).unwrap();
     let registry_path = env.home.path().join(".config/tasks/projects.toml");
     let mut registry: toml::Value =

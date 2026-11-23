@@ -265,6 +265,84 @@ pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
     Ok(Output::Check(out))
 }
 
+/// The stage this project declares, and what it shares with the other catalogued entries:
+/// one stage per Git repository among registered active projects, and the words that name
+/// it (docs/configuration.md). A collision is a warning: it is a fact about two entries,
+/// and an error would block every commit of a project that did not introduce it.
+fn catalogue_findings(
+    ctx: &Ctx,
+    retired: bool,
+    errors: &mut Vec<Finding>,
+    warnings: &mut Vec<Finding>,
+) -> Result<()> {
+    let config = crate::repo::CONFIG_REL;
+    let catalogue = crate::catalogue::discovery::Catalogue::build(&ctx.registry);
+    match ctx.project.declared_stage() {
+        Err(error) => errors.push(finding(
+            None,
+            config.into(),
+            "stage_invalid",
+            error.to_string(),
+        )),
+        Ok(None) if !retired => errors.push(finding(
+            None,
+            config.into(),
+            "stage_missing",
+            format!(
+                "project {:?} declares no stage; set stage = \"experimental\", \"pre-release\" \
+                 or \"supported\" in its tracker config",
+                ctx.project.prefix
+            ),
+        )),
+        Ok(None) => {}
+        Ok(Some(stage)) if !retired => {
+            use crate::catalogue::stages::{conflicts, name};
+            for conflict in conflicts(&ctx.registry, &catalogue, &ctx.project, stage)? {
+                errors.push(finding(
+                    None,
+                    config.into(),
+                    "stage_conflict",
+                    format!(
+                        "{} and {} share the Git repository {} but declare different stages \
+                         ({} and {}); one Git root means one shared test policy, so declare \
+                         one stage",
+                        ctx.project.prefix,
+                        conflict.prefix,
+                        conflict.repository.display(),
+                        name(stage),
+                        name(conflict.stage)
+                    ),
+                ));
+            }
+        }
+        Ok(Some(_)) => {}
+    }
+    let live = ctx.registry.canonical_prefix(&ctx.project.prefix);
+    let others = catalogue
+        .entries
+        .iter()
+        .filter_map(|(prefix, state)| match state {
+            crate::catalogue::discovery::EntryState::Read(project) if prefix != live => {
+                Some(project.as_ref())
+            }
+            _ => None,
+        });
+    for collision in crate::catalogue::words::collisions(
+        &ctx.registry,
+        others.chain(std::iter::once(&ctx.project)),
+    ) {
+        if collision.involves(&ctx.project.prefix) {
+            warnings.push(finding(
+                None,
+                config.into(),
+                "word_collision",
+                collision.detail(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     // A code tree whose index still holds the config is on the pre-move side of the
     // migration: the walk missed it only because the working tree lost it.
@@ -351,6 +429,7 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         ));
     }
     lifecycle_findings(&ctx, &tasks, &mut errors, &mut warnings)?;
+    catalogue_findings(&ctx, retired, &mut errors, &mut warnings)?;
     let threshold = ctx.project.growth_warn_bytes();
     for row in &growth_rows {
         if row.record_bytes > threshold {

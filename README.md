@@ -56,7 +56,11 @@ tasks init --prefix demo
 A prefix is a letter followed by one to seven lowercase letters/digits. Init
 creates task records and document roots and registers the project on this host.
 For existing records, custom roots, linked or detached storage, read
-[project adoption](docs/project-operations.md#layout-and-adoption) first.
+[project adoption](docs/project-operations.md#layout-and-adoption) first. On a
+new host whose records stores other hosts already filled, `tasks notices` lists
+each entry still to register (and each rename still to adopt) with its exact
+command, and `tasks register` registers them all
+([taking up synced records](docs/project-operations.md#taking-up-synced-records)).
 
 ### 3. Tell the project's agents
 

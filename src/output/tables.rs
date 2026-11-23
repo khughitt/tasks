@@ -322,6 +322,28 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             }
         },
 
+        Output::Register(o) if o.results.is_empty() => {
+            "nothing to register: every discovered entry whose checkout is on this host is registered"
+                .into()
+        }
+        Output::Register(o) => o
+            .results
+            .iter()
+            .map(|row| {
+                let mut line = format!("{}  {}  {}", row.prefix, row.outcome, row.command);
+                if let Some(detail) = &row.detail {
+                    line.push_str(&format!("\n  {detail}"));
+                }
+                line
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Output::Notices(o) => o
+            .notices
+            .iter()
+            .map(|notice| format!("tasks: {}; run `{}`", notice.detail, notice.command))
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::IdentityRefresh(o) => o
             .results
             .iter()

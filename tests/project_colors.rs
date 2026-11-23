@@ -21,7 +21,11 @@ fn check_warns_without_assigning_a_project_color() {
     assert_eq!(warning["file"], "tasks/.config.toml");
     assert!(warning["detail"].as_str().unwrap().contains("plain"));
     assert_eq!(std::fs::read(&config).unwrap(), before);
-    std::fs::write(&config, "prefix = \"plain\"\ncolor = \"#2f9fb1\"\n").unwrap();
+    std::fs::write(
+        &config,
+        "prefix = \"plain\"\nstage = \"experimental\"\ncolor = \"#2f9fb1\"\n",
+    )
+    .unwrap();
     let out = env.cmd(&dir).arg("check").output().unwrap();
     assert!(out.status.success(), "{out:?}");
     assert!(out.stdout.is_empty(), "{out:?}");
@@ -85,7 +89,11 @@ fn resolver_color_is_config_only_and_absent_when_unset() {
     assert!(row.get("id_color").is_none());
     assert!(row["entry"].get("id_color").is_none());
     assert_eq!(std::fs::read(&config).unwrap(), before);
-    std::fs::write(&config, "prefix = \"plain\"\ncolor = \"#2f9fb1\"\n").unwrap();
+    std::fs::write(
+        &config,
+        "prefix = \"plain\"\nstage = \"experimental\"\ncolor = \"#2f9fb1\"\n",
+    )
+    .unwrap();
     let before = std::fs::read(&config).unwrap();
     let resolved = env.json(&dir, &["resolve", "--all"]);
     assert_eq!(resolved["results"][0]["color_256"], 67);

@@ -18,7 +18,7 @@ fn record(root: &Path, id: &str, status: &str, body: &str, notes: &[&str]) -> us
 fn config(root: &Path, extra: &str) {
     std::fs::write(
         root.join("tasks/.config.toml"),
-        format!("prefix = \"dot\"\n{extra}"),
+        format!("prefix = \"dot\"\nstage = \"experimental\"\n{extra}"),
     )
     .unwrap();
 }

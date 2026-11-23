@@ -31,6 +31,7 @@ pub mod parked;
 pub mod projects;
 pub mod quiet;
 mod recovery;
+pub mod register;
 pub mod release;
 pub mod rename;
 mod resolver;
@@ -104,6 +105,8 @@ fn dispatch(
             draft,
             explain,
         } => migrate::run(dir, list, to, draft, explain, host.clone()),
+        Command::Register { prefixes, explain } => register::run(prefixes, explain),
+        Command::Notices => register::notices(),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Retire { successor, reason } => {
             let project = open_ctx(dir, host.clone())?.project;
