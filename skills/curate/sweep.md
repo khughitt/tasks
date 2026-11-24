@@ -321,20 +321,23 @@ A sweep never scopes: it does not promote, brief or mark an idea reviewed.
   with verdict `unwritten`, no write, and a line in the report. Any later note answers a
   pending proposal, so a stray sweep note would also silently clear a decision the user
   still owes.
-- **Pending proposal.** Use the fresh show's `answer` item with
-  `subject.source: latest_note`. The ledger's `action_evidence` preserves the
-  snapshot's source and note index. Read `task.notes[subject.note_index]` in
-  the fresh show to verify and relay the current proposal, including whether it
-  names this sweep. Apply the checks below to that proposal. The sampler's
-  `sample_recent` reason alone does not affect the sweep's pool or verdicts.
+- **Pending proposal.** Use the fresh show's `answer` items with
+  `subject.source: decision` (format 2) or `subject.source: latest_note` (format 1).
+  The ledger's `action_evidence` preserves the snapshot's action evidence. For a named
+  decision, inspect its matching object in `decisions` (keyed by `subject.entry`); for a
+  legacy format-1 note, read `task.notes[subject.note_index]` in the fresh show to verify
+  and relay the current proposal, including whether it names this sweep. Apply the checks
+  below to that proposal. The sampler's `sample_recent` reason alone does not affect the
+  sweep's pool or verdicts.
   - If the proposal is to drop it as stale or duplicate, re-check the evidence; when it
     holds and no guard applies, carry it out (verdict `stale` or `duplicate`, action
     `closed`).
   - Otherwise write nothing to the task: verdict `pending`, and the proposal is relayed
     in the report.
-  - A proposal note that names this sweep's id is this sweep's own work, from a session
-    that stopped: it is a verdict (`decision`, `decompose`, or a guarded `stale` or
-    `duplicate`, action `proposed`), not a pending row.
+  - A named decision (`origin: curate`) or legacy proposal note that names this sweep's
+    id is this sweep's own work, from a session that stopped: it is a verdict
+    (`decision`, `decompose`, or a guarded `stale` or `duplicate`, action `proposed`),
+    not a pending row.
 
 ## Rows that left the pool
 
@@ -409,8 +412,9 @@ its notes:
   the drop message's evidence, and an `undo:` record built from the row's snapshot
   columns (`status`, `reviewed`, `awaiting_user`, `deferred_until`), since the drop
   cleared those fields on the record;
-- a proposal whose fresh `answer` subject locates the latest note naming this
-  sweep: its verdict (`decision`, `decompose`, or a guarded `stale` or `duplicate`)
+- a named open decision (`decisions` entry with `data.origin == "curate"` naming this
+  sweep) or a legacy proposal whose fresh `answer` subject locates the latest note naming
+  this sweep: its verdict (`decision`, `decompose`, or a guarded `stale` or `duplicate`)
   with action `proposed`;
 - anything else: no verdict yet. A half-finished duplicate closure leaves nothing on
   the closing task, and a `refined` edit leaves no note, so these rows go back to the

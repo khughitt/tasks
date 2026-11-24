@@ -1060,4 +1060,35 @@ fn sweep_signals_action_evidence() {
             assert_eq!(curate["available"], true);
         }
     }
+
+    // Format-2 named drop decision surfaces decision_open and answer(source=decision) in action_evidence.
+    let named = add(&env, &dir, "Named format-2 drop", "details");
+    let opened = env.json(
+        &dir,
+        &[
+            "decision",
+            "open",
+            &named,
+            "--kind",
+            "drop",
+            "--origin",
+            "scope",
+            "--text",
+            "Drop named",
+        ],
+    );
+    let dec_id = opened["decision"]["id"].as_str().unwrap();
+    backdate(&dir, &named);
+    let (code, rows, stderr) = ledger(&env, &dir);
+    assert_eq!(code, 0, "{stderr}");
+    let actions: Value = serde_json::from_str(&row(&rows, &named)["action_evidence"]).unwrap();
+    let ans = actions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["action"] == "answer")
+        .expect("named decision produces answer action");
+    assert_eq!(ans["subject"]["source"], "decision");
+    assert_eq!(ans["subject"]["entry"], dec_id);
+    assert_eq!(ans["subject"]["kind"], "drop");
 }

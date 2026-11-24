@@ -44,6 +44,7 @@ UNREADABLE_FOREIGN_KINDS = {
     "not_registered_checkout",
     "records_unpaired",
     "records_moved",
+    "unsupported_record_version",
 }
 
 

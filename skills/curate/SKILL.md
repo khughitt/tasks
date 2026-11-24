@@ -137,12 +137,17 @@ retained reference document may resolve in the code tree instead.
 
    - A closed `stale` or `duplicate` task's evidence is its drop message; a survivor gets
      one absorb note (see [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks)).
-   - `decision`, `decompose`, and a `stale` or `duplicate` task a guard keeps open get
-     the proposal note, which is how a pending decision is found:
+   - `decision`, `decompose`, and a `stale` or `duplicate` task a guard keeps open (other
+     than `doing`, claimed or parked tasks, which stay in the ledger/summary only with no
+     write to the task) open a named decision instead of a legacy `proposal:` note:
 
-         tasks note <id> "curate: <verdict>; <pass>; <what changed, or guard: <which>>; proposal: <text>"
+         tasks -C <root> decision open <id> --kind <drop|suggestion> --origin curate --text "<verdict>; <pass>; <what changed, or guard: <which>>; <proposal>"
 
-   No other note or drop message contains the text `proposal:`.
+     Use `--kind drop` for a guarded drop proposal (`stale` premise gone, guarded duplicate)
+     and `--kind suggestion` for `decision`, `decompose`, or a "close as delivered"
+     suggestion. Reuse the same `--id <uuid>` on retry.
+
+   No ordinary note or drop message contains a dedicated `proposal:` segment.
 
 ## Closing stale and duplicate tasks
 
@@ -232,8 +237,9 @@ dependents, the absorb note, and the drop last:
   retained transfer, which a curation pass does not do;
 - closing a duplicate would need a write to a survivor or open dependent that is
   `doing`, live-claimed or parked, or to an open dependent in another project, or to a
-  survivor that is itself held: its latest note is a pending proposal, or it is an
-  idea waiting on the user. The absorb note would silently answer that proposal;
+  survivor that is itself held: it has an open named decision (`decisions` with
+  `state: "open"`), its latest format-1 note is a pending proposal, or it is an idea
+  waiting on the user. The absorb note would interfere with that pending decision;
 - both tasks of a duplicate pair carry attachments;
 - the verdict is *premise gone* and the task has open dependents. A dropped dependency
   counts as satisfied, so the drop would offer agents work whose prerequisite will
@@ -249,7 +255,8 @@ dependents, the absorb note, and the drop last:
 
 Where the proposal is recorded: for a task that is `doing`, claimed or parked, in the
 sweep's ledger or the pass's summary only, and nothing is written to the task. For
-every other guard, in the proposal note on the task (§3 step 6), with `guard: <which>`.
+every other guard, open a named decision on the task (§3 step 6) with `guard: <which>`
+in its text.
 
 **Undo.** A closed task reopens only to `todo`, and any status change clears its review
 and deferral fields. The summary, or a sweep's report, prints for each closed task the
@@ -285,14 +292,17 @@ For each project whose records the pass edited:
 
 ## Pending proposals
 
-`sample` never draws a task whose most recent note is a `curate:` or `scope:` note carrying a
-`proposal:` segment; it reports the task as `pending` with the proposal text instead.
-Relay those lines in the summary and move on. Any later note clears it: the human records
-the decision with `tasks note <id> "<decision>"` whether they acted on the proposal or
-declined it; on an idea, a declined proposal is answered with `--no-reviewed` so scope looks again.
-A `refined` edit moves the task out of the pool for the age window, as any write does. A
-kept task is unwritten and can be drawn again before the age window passes; reviewing it
-again is the maintenance.
+`sample` never draws a task with an open named decision (format 2) or a format-1 task
+whose most recent note is a `curate:` or `scope:` note carrying a dedicated `proposal:`
+segment; it reports the task as `pending` with the proposal text instead. `tasks list
+--pending` lists the full queue of named decisions and legacy waits. Relay those lines
+in the summary and move on. Named decisions survive incidental notes and attachments and
+are answered with `tasks decision answer <id> <uuid> --accept|--decline ...` (with
+`--seen-scope <token>` for drop acceptance) or withdrawn with `tasks decision withdraw`.
+On legacy format-1 records, any later note clears a latest-note proposal (`--no-reviewed`
+on an idea so scope looks again). A `refined` edit moves the task out of the pool for
+the age window, as any write does. A kept task is unwritten and can be drawn again
+before the age window passes; reviewing it again is the maintenance.
 
 A curate note does not readmit an idea for scope: only `tasks note <id> --no-reviewed`
 does, so write that form only when the note is new evidence that warrants another

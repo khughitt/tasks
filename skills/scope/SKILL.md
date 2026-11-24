@@ -38,9 +38,10 @@ within that tier:
 A goal whose pieces live in other projects holds them as `depends`; rate its leaf
 closeout, usually `--process direct`.
 
-Reviewed ideas stay out while they wait on an open/unresolved dependency, pending
-proposal, synced `awaiting_user`, or future deferral. Incidental notes change none of
-those waits. Todo/blocked rows leave after a re-scope sets process. Explicit ids bypass
+Reviewed ideas and unassessed todo/blocked leaves stay out while they wait on an open
+`drop` decision (or legacy format-1 `proposal:` note, open/unresolved dependency, synced
+`awaiting_user`, or future deferral). Incidental notes and attachments never clear named
+decisions or those waits. Todo/blocked rows leave after a re-scope sets process. Explicit ids bypass
 review-queue exclusion only: they must remain unclaimed ideas, shelves, or todo/blocked
 re-scope members at revalidation. Keep the three-document ceiling.
 
@@ -247,23 +248,30 @@ host, the owner's judgement), record it with `--need <name>` on the task you sco
 create. Never invent a name: an undeclared one is refused. Propose the vocabulary entry in
 the handoff brief instead.
 
-Every successfully processed member receives exactly one audit note. For `briefed`,
-`question` and `drop` it sets the flag in the same write:
+Every successfully processed member receives exactly one audit note. For `drop`, open a
+named decision and record the stamped scope verdict in one atomic write (generate one
+random lowercase UUIDv4 and reuse it on retry):
 
-    tasks -C <root> note <id> --reviewed --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>][; brief: <path>][; proposal: <text>]"
+    tasks -C <root> decision open <id> --id <uuid> --kind drop --origin scope --text "<proposal text>" --scope-verdict "scope: drop; <what changed>[; origin: <stage outcomes>]"
+
+This marks an `idea` reviewed and leaves a `todo` or `blocked` leaf's status and process
+intact; incidental notes or attachments never clear the named decision. For `briefed` and
+`question`, set the review flag in the same write:
+
+    tasks -C <root> note <id> --reviewed --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>][; brief: <path>]"
 
 `question` adds `--awaiting-user` to that command. Write every scope and brief note with
 `--stamp`, so a later agent can find the session behind a requirement edit. For a woken
 or stranded idea, gather the closed follow-ups' outcomes as evidence (§2) before
 choosing; the new audit note re-stamps the review, so edges closed earlier stop counting
-as new. Whoever answers a question or declines a proposal records it with
-`tasks note <id> --no-reviewed "<answer>"`, which readmits the idea with the answer.
+as new. Whoever answers a named drop runs `tasks decision answer <id> <uuid> --accept "<text>" --seen-scope <token>` (dropping the task atomically) or `--decline "<text>"` (re-evaluating remaining holds); whoever answers a legacy format-1 question or proposal records it with `tasks note <id> --no-reviewed "<answer>"`, which readmits the idea with the answer.
 
 `scoped` and `shelved` change the status first, which clears the flag; their audit note
 is a `tasks note --stamp` without `--reviewed` (refused on a non-idea).
 
-Use `proposal:` only for `drop`. A shelf also retains the separate note written by
-`shelve`. Never execute `tasks drop` or add `--parallel`.
+Never write a legacy `proposal:` note for a new drop: use `tasks decision open --kind drop`
+instead. A shelf also retains the separate note written by `shelve`. Never execute `tasks
+drop` or add `--parallel`.
 
 ### Re-scope a scoped task
 
@@ -278,17 +286,17 @@ test the premises, not to do the task. Choose one verdict:
 | `confirmed` | Premises hold and nothing narrows | No body edit; set `--process` if it is missing |
 | `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply, including the `--reviewed` audit note |
 | `shelved` | As for an idea | As for an idea; `unshelve` returns it as an idea, so the wake condition says it was scoped |
-| `drop` | As for an idea | Status unchanged; proposal in a `--stamp` note |
+| `drop` | As for an idea | Status and process unchanged; open a named drop decision with `tasks -C <root> decision open <id> --id <uuid> --kind drop --origin scope --text "<proposal>" --scope-verdict "scope: drop; <what changed>[; origin: <stage outcomes>]"` |
 
 When the evidence answers the whole task (common for research), the verdict is still
 `rescoped`: record the finding in the body and narrow the remaining work to recording the
 result and running its `Ideas it wakes` notes, so the task closes through `done`.
 
-The audit note for every verdict except `briefed` and `question` is
-`tasks -C <root> note <id> --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>][; proposal: <text>]"`
+The audit note for `rescoped`, `confirmed` and `shelved` is
+`tasks -C <root> note <id> --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>]"`
 without `--reviewed` (refused on a non-idea), naming the evidence (versions, commits) the
-premises were checked against. A re-scoped task's priority changes only with the user's
-say.
+premises were checked against. `drop` writes its stamped verdict through `--scope-verdict`
+on `decision open` above. A re-scoped task's priority changes only with the user's say.
 
 ## 4. Write the handoff
 
