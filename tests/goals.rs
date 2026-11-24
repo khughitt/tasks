@@ -935,7 +935,18 @@ fn doing_goal_waiting_on_user_park_is_not_stalled() {
         &env,
         &aa,
         &leaf,
-        &["--waiting-on", "user", "--reason", "review"],
+        &[
+            "--waiting-on",
+            "user",
+            "--reason",
+            "review",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Review needed?",
+        ],
     );
     let stamp = ago(4);
     set_park_at(&env, "aa", &leaf, &stamp);
@@ -1334,7 +1345,18 @@ fn stale_doing_sibling_still_flagged_beside_named_wait() {
         &env,
         &aa,
         &waiting,
-        &["--waiting-on", "user", "--reason", "review"],
+        &[
+            "--waiting-on",
+            "user",
+            "--reason",
+            "review",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Review needed?",
+        ],
     );
     let stamp = ago(4);
     set_park_at(&env, "aa", &waiting, &stamp);

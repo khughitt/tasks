@@ -124,6 +124,96 @@ pub struct ScopeArgs {
     pub group: Option<String>,
 }
 
+/// `park`: set a task down with its next step, waiting party, reason, and optional linked decision.
+#[derive(Args, Debug)]
+pub struct ParkArgs {
+    #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+    pub id: String,
+    /// The one concrete next step, on one line.
+    pub next_step: String,
+    /// Who the task waits on: user or agent.
+    #[arg(
+        long,
+        default_value = "agent",
+        value_name = "WHO",
+        add = ArgValueCandidates::new(crate::complete::waiting_on),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub waiting_on: String,
+    /// Why the work stopped: review, decision, approval, environment, dependency,
+    /// session, capability, or quiet. Optional; absent means not recorded.
+    #[arg(
+        long,
+        value_name = "WHY",
+        add = ArgValueCandidates::new(crate::complete::reason),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub reason: Option<String>,
+    /// With --reason capability: the rating the work actually needs. Written to the
+    /// record and, when waiting on the agent, to the shared store as an escalation.
+    #[arg(
+        long,
+        value_name = "LEVEL",
+        add = ArgValueCandidates::new(crate::complete::complexities),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub complexity: Option<String>,
+    /// With --reason quiet: what a free host means for this work, idle (the desktop
+    /// may stay up but nothing else runs; the default) or headless (the ordinary
+    /// desktop session is stopped first).
+    #[arg(
+        long,
+        value_name = "COND",
+        add = ArgValueCandidates::new(crate::complete::needs),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub needs: Option<String>,
+    /// With --reason quiet: expected wall-clock minutes once started, 1 to 1440.
+    /// Required with that reason; refused with any other.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1440))]
+    pub minutes: Option<u32>,
+    /// Linked decision UUIDv4 (required on --waiting-on user --reason review|decision|approval unless opening inline).
+    #[arg(long, value_name = "UUID")]
+    pub decision: Option<String>,
+    /// Inline-open decision kind when parking on a human request.
+    #[arg(
+        long,
+        value_name = "KIND",
+        add = ArgValueCandidates::new(crate::complete::decision_kinds),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub decision_kind: Option<String>,
+    /// Inline-open decision origin when parking on a human request.
+    #[arg(long, value_name = "ORIGIN")]
+    pub decision_origin: Option<String>,
+    /// Inline-open decision text when parking on a human request.
+    #[arg(long, value_name = "TEXT")]
+    pub decision_text: Option<String>,
+    /// Artifact pin repository label for an inline-open or verified decision link.
+    #[arg(long, value_name = "REPO")]
+    pub artifact_repo: Option<String>,
+    /// Artifact pin normalized relative path for an inline-open or verified decision link.
+    #[arg(long, value_name = "RELPATH")]
+    pub artifact_path: Option<String>,
+    /// Artifact pin Git commit hash for an inline-open or verified decision link.
+    #[arg(long, value_name = "COMMIT")]
+    pub artifact_commit: Option<String>,
+    /// Artifact pin SHA-256 digest for an inline-open or verified decision link.
+    #[arg(long, value_name = "SHA256")]
+    pub artifact_sha256: Option<String>,
+    /// Actor attributed to an inline-open decision; defaults to configured owner when direct.
+    #[arg(long, value_name = "ACTOR")]
+    pub by: Option<String>,
+    /// Source citation for a relayed inline-open decision; requires explicit --by.
+    #[arg(long, value_name = "SOURCE")]
+    pub source: Option<String>,
+}
+
 /// `blockers`: the scope it counts dependents in, and how many ranked rows to show.
 #[derive(Args, Debug)]
 pub struct BlockersArgs {
@@ -950,57 +1040,7 @@ pub enum Command {
     },
     /// Set a task down: record the next step, who it waits on, and this session in the
     /// shared store. Status is untouched; `start` resumes it.
-    Park {
-        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
-        id: String,
-        /// The one concrete next step, on one line.
-        next_step: String,
-        /// Who the task waits on: user or agent.
-        #[arg(
-            long,
-            default_value = "agent",
-            value_name = "WHO",
-            add = ArgValueCandidates::new(crate::complete::waiting_on),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        waiting_on: String,
-        /// Why the work stopped: review, decision, approval, environment, dependency,
-        /// session, capability, or quiet. Optional; absent means not recorded.
-        #[arg(
-            long,
-            value_name = "WHY",
-            add = ArgValueCandidates::new(crate::complete::reason),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        reason: Option<String>,
-        /// With --reason capability: the rating the work actually needs. Written to the
-        /// record and, when waiting on the agent, to the shared store as an escalation.
-        #[arg(
-            long,
-            value_name = "LEVEL",
-            add = ArgValueCandidates::new(crate::complete::complexities),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        complexity: Option<String>,
-        /// With --reason quiet: what a free host means for this work, idle (the desktop
-        /// may stay up but nothing else runs; the default) or headless (the ordinary
-        /// desktop session is stopped first).
-        #[arg(
-            long,
-            value_name = "COND",
-            add = ArgValueCandidates::new(crate::complete::needs),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        needs: Option<String>,
-        /// With --reason quiet: expected wall-clock minutes once started, 1 to 1440.
-        /// Required with that reason; refused with any other.
-        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1440))]
-        minutes: Option<u32>,
-    },
+    Park(Box<ParkArgs>),
     /// Close a task as done.
     Done {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
@@ -1396,11 +1436,11 @@ pub enum DecisionAction {
         /// Caller-generated lowercase UUIDv4; omit to generate one.
         #[arg(long, value_name = "UUID")]
         id: Option<String>,
-        /// Decision kind: drop or suggestion.
+        /// Decision kind: drop, suggestion, question, or approval.
         #[arg(
             long,
             value_name = "KIND",
-            add = ArgValueCandidates::new(crate::complete::decision_kinds_stage_a),
+            add = ArgValueCandidates::new(crate::complete::decision_kinds),
             add = ValueSet,
             value_parser = ValueSet
         )]
@@ -1408,12 +1448,27 @@ pub enum DecisionAction {
         /// Workflow or tool opening the decision (e.g. scope, curate, workflow).
         #[arg(long, value_name = "ORIGIN")]
         origin: String,
-        /// Human-facing proposal text.
+        /// Human-facing request text.
         #[arg(long, value_name = "TEXT")]
         text: String,
         /// Append a stamped scope verdict note and update idea review metadata in the same save.
         #[arg(long, value_name = "TEXT")]
         scope_verdict: Option<String>,
+        /// Artifact pin repository label (with --artifact-path and --artifact-commit).
+        #[arg(long, value_name = "REPO")]
+        artifact_repo: Option<String>,
+        /// Artifact pin normalized relative path.
+        #[arg(long, value_name = "RELPATH")]
+        artifact_path: Option<String>,
+        /// Artifact pin Git commit hash (with --artifact-repo and --artifact-path).
+        #[arg(long, value_name = "COMMIT")]
+        artifact_commit: Option<String>,
+        /// Artifact pin SHA-256 digest (with --artifact-path).
+        #[arg(long, value_name = "SHA256")]
+        artifact_sha256: Option<String>,
+        /// Convert a format-1 awaiting_user: true idea into this named question in one save.
+        #[arg(long)]
+        replace_awaiting_user: bool,
         /// Actor opening or attributed to the decision; defaults to configured owner when direct.
         #[arg(long, value_name = "ACTOR")]
         by: Option<String>,
@@ -1428,18 +1483,21 @@ pub enum DecisionAction {
         opening_scope: Option<String>,
     },
     /// Answer an open human decision on a task.
-    #[command(group(clap::ArgGroup::new("answer_outcome").args(["accept", "decline"]).required(true)))]
+    #[command(group(clap::ArgGroup::new("answer_outcome").args(["accept", "decline", "reply"]).required(true)))]
     Answer {
         #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
         task: String,
         #[arg(value_name = "UUID")]
         decision: String,
         /// Accept the decision with the human's answer text.
-        #[arg(long, value_name = "TEXT", conflicts_with = "decline")]
+        #[arg(long, value_name = "TEXT", conflicts_with_all = ["decline", "reply"])]
         accept: Option<String>,
         /// Decline the decision with the human's answer text.
-        #[arg(long, value_name = "TEXT", conflicts_with = "accept")]
+        #[arg(long, value_name = "TEXT", conflicts_with_all = ["accept", "reply"])]
         decline: Option<String>,
+        /// Reply to a question decision with the human's answer text.
+        #[arg(long, value_name = "TEXT", conflicts_with_all = ["accept", "decline"])]
+        reply: Option<String>,
         /// Displayed current scope fingerprint binding drop acceptance to what the human saw.
         #[arg(long, value_name = "TOKEN")]
         seen_scope: Option<String>,
@@ -1484,7 +1542,7 @@ impl Command {
             Command::Note { .. } => "note",
             Command::Dep { .. } => "dep",
             Command::Start { .. } => "start",
-            Command::Park { .. } => "park",
+            Command::Park(_) => "park",
             Command::Done { .. } => "done",
             Command::Drop { .. } => "drop",
             Command::Release { .. } => "release",

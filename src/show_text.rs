@@ -1106,6 +1106,7 @@ mod tests {
             reason: Some(crate::claims::Reason::Review),
             needs: None,
             minutes: None,
+            decision_id: None,
             session: "codex:abc".into(),
             owner: "main".into(),
             host: "h".into(),

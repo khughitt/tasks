@@ -14,8 +14,10 @@ use time::OffsetDateTime;
 pub(super) fn run(mut ctx: Ctx, id: &str, fetch: Fetch, all_projects: bool) -> Result<ShowOut> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, id)?;
     let now = crate::time::parse(&crate::time::now())?;
-    let claims = crate::claims::ClaimSnapshot::load_at(std::iter::once(&ctx.project.prefix), now)?;
+    let mut claims =
+        crate::claims::ClaimSnapshot::load_at(std::iter::once(&ctx.project.prefix), now)?;
     let (recorded, task, mut all) = read_record(&mut ctx, &id, &claims)?;
+    claims.repair_resolved_parks(&all, &mut ctx.warnings);
     let project = recorded.as_ref().unwrap_or(&ctx.project);
     if all_projects {
         widen(&ctx.registry, project, &mut all, &mut ctx.warnings)?;
@@ -178,7 +180,7 @@ pub fn describe(
     fetch: Fetch,
     host: &crate::config::HostConfig,
 ) -> Result<ShowFields> {
-    let (task, task_revision, (attached, problems)) = {
+    let (mut task, task_revision, (attached, problems)) = {
         let _guard = crate::attachments::transaction::read_guard(project, |owner| owner == id)?;
         let (task, raw) = project.read_task_with_raw(id)?;
         let task_revision = crate::multipart::content::sha256_hex(raw.as_bytes());
@@ -438,6 +440,8 @@ pub fn describe(
     } else {
         Vec::new()
     };
+    // Display-only derived compatibility projection for format-2+ records (never written to disk).
+    task.awaiting_user = crate::decisions::effective_awaiting_user(&task);
     Ok(ShowFields {
         actions: None,
         decisions,

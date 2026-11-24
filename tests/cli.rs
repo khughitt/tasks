@@ -2783,6 +2783,12 @@ fn park_reason_rides_the_entry_the_note_and_every_park_view() {
             "user",
             "--reason",
             "review",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Review round-02 sheet?",
         ])
         .assert()
         .success();
@@ -2799,7 +2805,8 @@ fn park_reason_rides_the_entry_the_note_and_every_park_view() {
     );
     let raw = env.read(&sci, &format!("tasks/{id}.md"));
     assert!(
-        raw.contains("parked (waiting on user, review): open the round-02 sheet"),
+        raw.contains("parked (waiting on user, review, decision ")
+            && raw.contains("): open the round-02 sheet"),
         "{raw}"
     );
     let text = env.pretty(&sci, &["show", &id]);
@@ -2851,6 +2858,12 @@ fn park_without_a_reason_records_none_and_re_parking_drops_a_previous_one() {
             "user",
             "--reason",
             "decision",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Which shape?",
         ])
         .assert()
         .success();
@@ -2927,7 +2940,18 @@ fn ordinary_pretty_tables_mark_a_quiet_park_until_it_is_resumed_or_reparked() {
     assert!(row(env.pretty(&sci, &["ready"])).contains("waits on agent, quiet; headless, 50 min"));
 
     // A park for another reason, and a resume, both drop the marker.
-    park(&["--waiting-on", "user", "--reason", "review"]);
+    park(&[
+        "--waiting-on",
+        "user",
+        "--reason",
+        "review",
+        "--decision-kind",
+        "question",
+        "--decision-origin",
+        "workflow",
+        "--decision-text",
+        "Review?",
+    ]);
     let listed = row(env.pretty(&sci, &["list"]));
     assert!(
         !listed.contains("quiet") && !listed.contains("waits on"),
@@ -3020,6 +3044,12 @@ fn a_quiet_park_records_its_recipe_in_the_entry_the_note_and_every_park_view() {
             "user",
             "--reason",
             "review",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Read the sheet?",
         ])
         .assert()
         .success();

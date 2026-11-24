@@ -41,54 +41,10 @@ fn err_json(env: &TestEnv, dir: &Path, args: &[&str]) -> Value {
 }
 
 #[test]
-fn stage_a_cli_rejects_stage_b_syntax_and_pending_conflicts() {
+fn pending_conflicts_and_empty_queue() {
     let mut env = TestEnv::new();
     let dir = env.init("sa");
-    let id = id_of(env.json(&dir, &["add", "Sample task"]));
-
-    // Stage A must reject Stage B kinds, --reply, artifact pins, and park --decision (usage exit 2).
-    for args in [
-        vec![
-            "decision", "open", &id, "--kind", "question", "--origin", "scope", "--text", "Q?",
-        ],
-        vec![
-            "decision", "open", &id, "--kind", "approval", "--origin", "workflow", "--text", "A?",
-        ],
-        vec![
-            "decision",
-            "open",
-            &id,
-            "--kind",
-            "drop",
-            "--origin",
-            "scope",
-            "--text",
-            "D",
-            "--artifact-path",
-            "docs/p.md",
-        ],
-        vec!["decision", "answer", &id, D1, "--reply", "Answer"],
-        vec![
-            "park",
-            &id,
-            "next",
-            "--waiting-on",
-            "user",
-            "--reason",
-            "decision",
-            "--decision",
-            D1,
-        ],
-    ] {
-        let out = env.cmd(&dir).args(&args).output().unwrap();
-        assert_eq!(
-            out.status.code(),
-            Some(2),
-            "Stage A must reject {args:?} as usage error (exit 2), got {:?} stderr={}",
-            out.status.code(),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+    let _id = id_of(env.json(&dir, &["add", "Sample task"]));
 
     // list --pending conflicts with explicit sort, reverse, parked, periodic, deferred, actions.
     for conflict in [

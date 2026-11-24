@@ -228,6 +228,11 @@ pub fn effective_at<'a>(task: &'a Task, claims: &'a ClaimSnapshot) -> &'a str {
     if let Some(park) = claims.park(&task.id) {
         return &park.at;
     }
+    if task.format >= 2
+        && let Some(at) = crate::decisions::earliest_open_decision_at(task)
+    {
+        return at;
+    }
     if task.status == Status::Idea && task.awaiting_user {
         return task.reviewed_at.as_deref().unwrap_or(&task.updated);
     }
@@ -343,7 +348,10 @@ pub fn attention(
         let parked_on_user = claims
             .park(&task.id)
             .is_some_and(|park| park.waiting_on == WaitingOn::User);
-        if parked_on_user || (task.status == Status::Idea && task.awaiting_user) {
+        if parked_on_user
+            || crate::decisions::effective_awaiting_user(task)
+                && (task.format >= 2 || task.status == Status::Idea)
+        {
             you.push(Hit::new(id(), effective_at(task, claims))?);
         }
     }
@@ -519,6 +527,7 @@ mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: id.into(),
         };
         ClaimSnapshot::from_parts(
@@ -580,6 +589,7 @@ mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: "aa-000001".into(),
         };
         let claims = ClaimSnapshot::from_parts(

@@ -225,10 +225,15 @@ summary = "Open a named human decision on a task"
 args = [{ name = "task", value = "ref", required = true }]
 options = [
   { names = ["--id"], value = "string" },
-  { names = ["--kind"], value = "enum", values = ["drop", "suggestion"], required = true },
+  { names = ["--kind"], value = "enum", values = ["drop", "suggestion", "question", "approval"], required = true },
   { names = ["--origin"], value = "string", required = true },
   { names = ["--text"], value = "string", required = true },
   { names = ["--scope-verdict"], value = "string" },
+  { names = ["--artifact-repo"], value = "string" },
+  { names = ["--artifact-path"], value = "string" },
+  { names = ["--artifact-commit"], value = "string" },
+  { names = ["--artifact-sha256"], value = "string" },
+  { names = ["--replace-awaiting-user"], value = "none" },
   { shared = "by", role = "set", value = "string", repeatable = false },
   { names = ["--source"], value = "string" },
   { names = ["--opened-at"], value = "string" },
@@ -242,6 +247,7 @@ args = [{ name = "task", value = "ref", required = true }, { name = "decision", 
 options = [
   { names = ["--accept"], value = "string" },
   { names = ["--decline"], value = "string" },
+  { names = ["--reply"], value = "string" },
   { names = ["--seen-scope"], value = "string" },
   { shared = "by", role = "set", value = "string", repeatable = false },
   { names = ["--source"], value = "string" },
@@ -794,6 +800,16 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
   { names = ["--needs"], value = "enum", values = ["idle", "headless"] },
   { names = ["--minutes"], value = "int" },
+  { names = ["--decision"], value = "string" },
+  { names = ["--decision-kind"], value = "enum", values = ["drop", "suggestion", "question", "approval"] },
+  { names = ["--decision-origin"], value = "string" },
+  { names = ["--decision-text"], value = "string" },
+  { names = ["--artifact-repo"], value = "string" },
+  { names = ["--artifact-path"], value = "string" },
+  { names = ["--artifact-commit"], value = "string" },
+  { names = ["--artifact-sha256"], value = "string" },
+  { shared = "by", role = "set", value = "string", repeatable = false },
+  { names = ["--source"], value = "string" },
 ]
 
 [[cli.tasks.commands]]

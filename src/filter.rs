@@ -485,6 +485,7 @@ mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: "T".into(),
         };
         let row = ParkedRow::unresolved("sci-ffffff", &park);

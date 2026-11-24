@@ -499,6 +499,7 @@ pub(super) mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: "task".into(),
         };
         journal.target_park = Some(park.clone());

@@ -291,6 +291,12 @@ pub fn apply(
     awaiting: Awaiting,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
+    if task.format >= 2 && awaiting != Awaiting::Keep {
+        return Err(Error::Validation(format!(
+            "{} is format {}; awaiting_user is derived from open decisions (use `tasks decision open|answer|withdraw`)",
+            task.id, task.format
+        )));
+    }
     match review {
         Review::Set => {
             if task.status != Status::Idea {

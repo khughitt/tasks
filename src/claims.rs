@@ -361,6 +361,9 @@ pub struct Park {
     pub needs: Option<Needs>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minutes: Option<u32>,
+    /// Linked human decision UUIDv4 for `--waiting-on user --reason review|decision|approval`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
     /// Snapshot at park time, for rows whose task file is unreachable (docs/ownership.md).
     pub title: String,
 }
@@ -471,6 +474,14 @@ impl ClaimStore {
             crate::format::validate_line("next_step", &park.next_step).map_err(|error| {
                 Error::Config(format!("{}: park {id}: {error}", path.display()))
             })?;
+            if let Some(decision_id) = &park.decision_id
+                && !crate::entries::is_valid_uuidv4(decision_id)
+            {
+                return Err(Error::Config(format!(
+                    "{}: park {id} has an invalid decision_id {decision_id:?}",
+                    path.display()
+                )));
+            }
             if claims.contains_key(id) {
                 return Err(Error::Config(format!(
                     "{}: {id} has both a claim and a park; one entry per task",
@@ -763,6 +774,7 @@ pub struct ClaimSnapshot {
     by_id: BTreeMap<String, (Claim, Liveness)>,
     parks: BTreeMap<String, Park>,
     escalations: BTreeMap<String, Escalation>,
+    store_paths: BTreeMap<String, PathBuf>,
 }
 
 impl ClaimSnapshot {
@@ -806,7 +818,11 @@ impl ClaimSnapshot {
         let mut by_id = BTreeMap::new();
         let mut parks = BTreeMap::new();
         let mut escalations = BTreeMap::new();
+        let mut store_paths = BTreeMap::new();
         for path in paths {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                store_paths.insert(stem.to_string(), path.clone());
+            }
             let store = ClaimStore::load_from(&path)?;
             for (id, claim) in store.iter() {
                 by_id.insert(id.clone(), (claim.clone(), observe(claim)));
@@ -822,6 +838,7 @@ impl ClaimSnapshot {
             by_id,
             parks,
             escalations,
+            store_paths,
         })
     }
 
@@ -836,6 +853,96 @@ impl ClaimSnapshot {
             by_id,
             parks,
             escalations,
+            store_paths: BTreeMap::new(),
+        }
+    }
+
+    /// Derive and lazily repair local linked user parks whose durable decision has been resolved
+    /// (including resolutions synced from another host) or whose task is now closed.
+    /// Re-verifies under the project's lock that the store still holds the exact same linked
+    /// `waiting_on == user` park so a newer handoff on another decision is never overwritten.
+    pub fn repair_resolved_parks(
+        &mut self,
+        tasks: &[crate::model::Task],
+        warnings: &mut Vec<String>,
+    ) {
+        enum Repair {
+            Remove,
+            Handoff { at: String },
+        }
+        let mut repairs: Vec<(TaskId, String, Repair)> = Vec::new();
+        for task in tasks {
+            let key = task.id.to_string();
+            let Some(park) = self.parks.get(&key) else {
+                continue;
+            };
+            if park.waiting_on != WaitingOn::User {
+                continue;
+            }
+            let Some(did) = park.decision_id.clone() else {
+                continue;
+            };
+            if !task.status.is_open() {
+                repairs.push((task.id.clone(), did, Repair::Remove));
+            } else if let Some((res_entry, _)) = crate::decisions::find_resolution(task, &did) {
+                repairs.push((
+                    task.id.clone(),
+                    did,
+                    Repair::Handoff {
+                        at: res_entry.at.clone(),
+                    },
+                ));
+            }
+        }
+
+        for (task_id, did, repair) in repairs {
+            let key = task_id.to_string();
+            match &repair {
+                Repair::Remove => {
+                    self.parks.remove(&key);
+                }
+                Repair::Handoff { at } => {
+                    if let Some(park) = self.parks.get_mut(&key) {
+                        park.waiting_on = WaitingOn::Agent;
+                        park.decision_id = None;
+                        park.at = at.clone();
+                    }
+                }
+            }
+            let Some(store_path) = self.store_paths.get(&task_id.prefix).cloned() else {
+                continue;
+            };
+            let lock_path = store_path.with_file_name(format!("{}.lock", task_id.prefix));
+            let result: Result<()> = (|| {
+                let _lock = MutationLock::acquire_at(&lock_path)?;
+                let mut store = ClaimStore::load_from(&store_path)?;
+                let still_matches = store.park(&task_id).is_some_and(|park| {
+                    park.waiting_on == WaitingOn::User
+                        && park.decision_id.as_deref() == Some(did.as_str())
+                });
+                if !still_matches {
+                    return Ok(());
+                }
+                match &repair {
+                    Repair::Remove => {
+                        store.remove_park(&task_id);
+                    }
+                    Repair::Handoff { at } => {
+                        if let Some(mut park) = store.park(&task_id).cloned() {
+                            park.waiting_on = WaitingOn::Agent;
+                            park.decision_id = None;
+                            park.at = at.clone();
+                            store.insert_park(&task_id, park);
+                        }
+                    }
+                }
+                store.save()
+            })();
+            if let Err(err) = result {
+                warnings.push(format!(
+                    "{task_id}: derived linked-park handoff for resolved decision {did}, but local store repair failed ({err})"
+                ));
+            }
         }
     }
 
@@ -2453,6 +2560,7 @@ mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: "T".into(),
         }
     }
@@ -2589,6 +2697,7 @@ mod tests {
                 reason: Some(Reason::Quiet),
                 needs: Some(Needs::Headless),
                 minutes: Some(50),
+                decision_id: None,
                 title: "T".into(),
             },
         );
@@ -2639,6 +2748,7 @@ mod tests {
                 reason: Some(Reason::Review),
                 needs: None,
                 minutes: None,
+                decision_id: None,
                 title: "T".into(),
             },
         );
@@ -2672,6 +2782,7 @@ mod tests {
                 reason: None,
                 needs: None,
                 minutes: None,
+                decision_id: None,
                 title: "T".into(),
             },
         );

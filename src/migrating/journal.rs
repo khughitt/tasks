@@ -514,6 +514,7 @@ mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: "task".into(),
         };
         let mut target_park = park.clone();

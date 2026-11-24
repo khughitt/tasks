@@ -566,7 +566,8 @@ impl ReadCtx {
     pub fn scan_with_claims(&mut self) -> Result<(Vec<Task>, crate::claims::ClaimSnapshot)> {
         let all = self.scan_mixed()?;
         let prefixes = self.scope.prefixes();
-        let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+        let mut claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+        claims.repair_resolved_parks(&all, &mut self.warnings);
         Ok((all, claims))
     }
 

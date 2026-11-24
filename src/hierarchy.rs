@@ -1634,6 +1634,7 @@ pub(crate) mod tests {
             reason: None,
             needs: None,
             minutes: None,
+            decision_id: None,
             title: "Parked".into(),
         };
         let claims = crate::claims::ClaimSnapshot::from_parts(

@@ -1,22 +1,53 @@
 use super::{ClaimIntent, Ctx, append_stamped_note, id_out, load, owner_name, save};
 use crate::claims::{Escalation, Liveness, Needs, Park, Reason, WaitingOn, describe_stop};
+use crate::decisions::{build_artifact_subject, find_resolution};
+use crate::entries::{DecisionKind, parse_uuidv4};
 use crate::error::{Error, Result};
 use crate::model::{Complexity, Status};
 use crate::output::Output;
 
+pub struct ParkRequest {
+    pub id: String,
+    pub next_step: String,
+    pub waiting_on: String,
+    pub reason: Option<String>,
+    pub complexity: Option<String>,
+    pub needs: Option<String>,
+    pub minutes: Option<u32>,
+    pub decision: Option<String>,
+    pub decision_kind: Option<String>,
+    pub decision_origin: Option<String>,
+    pub decision_text: Option<String>,
+    pub artifact_repo: Option<String>,
+    pub artifact_path: Option<String>,
+    pub artifact_commit: Option<String>,
+    pub artifact_sha256: Option<String>,
+    pub by: Option<String>,
+    pub source: Option<String>,
+}
+
 /// Set a task down (docs/ownership.md). Validate everything, refuse a foreign live claim, then let
 /// `save` write the note and the entry in that order.
-#[allow(clippy::too_many_arguments)]
-pub fn run(
-    mut ctx: Ctx,
-    id: String,
-    next_step: String,
-    waiting_on: String,
-    reason: Option<String>,
-    complexity: Option<String>,
-    needs: Option<String>,
-    minutes: Option<u32>,
-) -> Result<Output> {
+pub fn run(mut ctx: Ctx, req: ParkRequest) -> Result<Output> {
+    let ParkRequest {
+        id,
+        next_step,
+        waiting_on,
+        reason,
+        complexity,
+        needs,
+        minutes,
+        decision,
+        decision_kind,
+        decision_origin,
+        decision_text,
+        artifact_repo,
+        artifact_path,
+        artifact_commit,
+        artifact_sha256,
+        by,
+        source,
+    } = req;
     let mut task = load(&mut ctx, &id)?;
     if !task.status.is_open() {
         return Err(Error::InvalidTransition(
@@ -165,19 +196,137 @@ pub fn run(
         }
         (_, None, None) => (None, None),
     };
+
+    // Stage B human-request park linkage:
+    // `--waiting-on user --reason review|decision|approval` must link an open decision on this task
+    // (`--decision <uuid>`) or open one inline (`--decision-kind/--decision-origin/--decision-text`).
+    let is_human_request_park = waiting_on == WaitingOn::User
+        && matches!(
+            reason,
+            Some(Reason::Review | Reason::Decision | Reason::Approval)
+        );
+    let any_decision_flag = decision.is_some()
+        || decision_kind.is_some()
+        || decision_origin.is_some()
+        || decision_text.is_some()
+        || artifact_repo.is_some()
+        || artifact_path.is_some()
+        || artifact_commit.is_some()
+        || artifact_sha256.is_some()
+        || by.is_some()
+        || source.is_some();
+
+    let decision_id = if !is_human_request_park {
+        if any_decision_flag {
+            return Err(Error::Validation(
+                "decision flags on park are only valid with --waiting-on user --reason review|decision|approval".into(),
+            ));
+        }
+        None
+    } else if decision_kind.is_some() || decision_origin.is_some() || decision_text.is_some() {
+        let Some(kind) = decision_kind else {
+            return Err(Error::Validation(
+                "inline decision open on park requires --decision-kind, --decision-origin, and --decision-text".into(),
+            ));
+        };
+        let Some(origin) = decision_origin else {
+            return Err(Error::Validation(
+                "inline decision open on park requires --decision-kind, --decision-origin, and --decision-text".into(),
+            ));
+        };
+        let Some(text) = decision_text else {
+            return Err(Error::Validation(
+                "inline decision open on park requires --decision-kind, --decision-origin, and --decision-text".into(),
+            ));
+        };
+        let opened_id = super::decision::prepare_inline_for_park(
+            &mut ctx,
+            &mut task,
+            super::decision::InlineParkDecision {
+                id: decision,
+                kind,
+                origin,
+                text,
+                artifact_repo,
+                artifact_path,
+                artifact_commit,
+                artifact_sha256,
+                by,
+                source,
+                require_approval: reason == Some(Reason::Approval),
+            },
+        )?;
+        Some(opened_id)
+    } else {
+        let Some(raw_id) = decision else {
+            return Err(Error::Validation(
+                "parking with --waiting-on user --reason review|decision|approval requires --decision <uuid> or inline --decision-kind/--decision-origin/--decision-text".into(),
+            ));
+        };
+        if by.is_some() || source.is_some() {
+            return Err(Error::Validation(
+                "--by and --source on park are only valid when opening a decision inline".into(),
+            ));
+        }
+        let linked_id = parse_uuidv4(&raw_id)?;
+        let expected_pin = build_artifact_subject(
+            artifact_repo.as_deref(),
+            artifact_path.as_deref(),
+            artifact_commit.as_deref(),
+            artifact_sha256.as_deref(),
+        )?;
+        let Some(entry) = task.entries.iter().find(|e| e.id == linked_id) else {
+            return Err(Error::DecisionNotFound(format!(
+                "decision {linked_id} not found on {} (cannot link park to a missing or wrong-task decision)",
+                task.id
+            )));
+        };
+        let Some(data) = entry.as_decision() else {
+            return Err(Error::DecisionConflict(format!(
+                "entry {linked_id} on {} is not a decision",
+                task.id
+            )));
+        };
+        if !task.open_decisions.iter().any(|id| id == &linked_id)
+            || find_resolution(&task, &linked_id).is_some()
+        {
+            return Err(Error::DecisionConflict(format!(
+                "decision {linked_id} on {} is already resolved and cannot be linked to a park",
+                task.id
+            )));
+        }
+        if reason == Some(Reason::Approval) && data.kind != DecisionKind::Approval {
+            return Err(Error::Validation(format!(
+                "--reason approval requires linking an approval decision, got {}",
+                data.kind.as_str()
+            )));
+        }
+        if let Some(pin) = expected_pin
+            && entry.subject != pin
+        {
+            return Err(Error::Validation(format!(
+                "decision {linked_id} on {} does not match the supplied artifact pin",
+                task.id
+            )));
+        }
+        Some(linked_id)
+    };
+
     if let Some(level) = complexity {
         task.complexity = Some(level);
     }
 
-    append_stamped_note(
-        &mut ctx,
-        &mut task,
-        &owner,
-        &format!(
+    let stop_summary = match &decision_id {
+        Some(did) => format!(
+            "parked (waiting on {}, decision {did}): {next_step}",
+            describe_stop(waiting_on, reason, needs, minutes)
+        ),
+        None => format!(
             "parked (waiting on {}): {next_step}",
             describe_stop(waiting_on, reason, needs, minutes)
         ),
-    )?;
+    };
+    append_stamped_note(&mut ctx, &mut task, &owner, &stop_summary)?;
     let resolver = crate::resolve::Resolver::new(&ctx.project, &ctx.registry, &ctx.host);
     let cited =
         crate::related::new_citations(&ctx.registry, Some(&task.body), &task.body, &[&next_step]);
@@ -202,6 +351,7 @@ pub fn run(
         reason,
         needs,
         minutes,
+        decision_id,
         title: task.title.clone(),
     };
     ctx.pending_claim = Some((task.id.clone(), ClaimIntent::Park { park, escalation }));

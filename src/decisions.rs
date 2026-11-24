@@ -1,7 +1,11 @@
 //! Named human decisions: scope fingerprint v1, unified per-kind hold predicates,
 //! cross-registry open-dependent observation, and logical decision projection.
 
-use crate::entries::{DecisionData, DecisionKind, Entry, EntryPayload, ResolutionData, Subject};
+use crate::entries::{
+    CommitPinSubject, DecisionData, DecisionKind, DigestPinSubject, Entry, EntryPayload,
+    ResolutionData, Subject, is_git_commit_hex, is_sha256_hex,
+};
+use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::output::{LogicalDecision, LogicalResolution, OpenDependentRow, OpenDependentsOut};
 use crate::registry::Registry;
@@ -74,6 +78,96 @@ pub fn actionable_open_decisions(task: &Task) -> Vec<(&Entry, &DecisionData)> {
             entry.as_decision().map(|data| (entry, data))
         })
         .collect()
+}
+
+/// Derived compatibility read projection for `awaiting_user`:
+/// - Format 2+: true iff the task has any actionable open decision.
+/// - Format 1: stored `task.awaiting_user`.
+pub fn effective_awaiting_user(task: &Task) -> bool {
+    if task.format >= 2 {
+        !actionable_open_decisions(task).is_empty()
+    } else {
+        task.awaiting_user
+    }
+}
+
+/// Earliest `at` timestamp among actionable open decisions, if any.
+pub fn earliest_open_decision_at(task: &Task) -> Option<&str> {
+    actionable_open_decisions(task)
+        .into_iter()
+        .map(|(entry, _)| entry.at.as_str())
+        .min()
+}
+
+/// Parse and validate optional artifact pin CLI flags into an exact commit-pin or digest-pin subject.
+/// Returns `Ok(None)` when no pin flags were given, and `Err(Error::Validation)` on partial or mixed pins.
+pub fn build_artifact_subject(
+    repo: Option<&str>,
+    path: Option<&str>,
+    commit: Option<&str>,
+    sha256: Option<&str>,
+) -> Result<Option<Subject>> {
+    if repo.is_none() && path.is_none() && commit.is_none() && sha256.is_none() {
+        return Ok(None);
+    }
+    let has_commit_side = repo.is_some() || commit.is_some();
+    let has_digest_side = sha256.is_some();
+    if has_commit_side && has_digest_side {
+        return Err(Error::Validation(
+            "artifact pin must use either (--artifact-repo, --artifact-path, --artifact-commit) or (--artifact-path, --artifact-sha256), not both".into(),
+        ));
+    }
+    let Some(path) = path else {
+        return Err(Error::Validation(
+            "artifact pin requires --artifact-path".into(),
+        ));
+    };
+    crate::format::validate_line("artifact path", path)?;
+    if path.trim().is_empty() || path.starts_with('/') || !crate::format::normalized_rel(path) {
+        return Err(Error::Validation(format!(
+            "--artifact-path {path:?} must be a normalized relative path"
+        )));
+    }
+    if has_commit_side {
+        let Some(repo) = repo else {
+            return Err(Error::Validation(
+                "commit-pinned artifact requires --artifact-repo, --artifact-path, and --artifact-commit".into(),
+            ));
+        };
+        let Some(commit) = commit else {
+            return Err(Error::Validation(
+                "commit-pinned artifact requires --artifact-repo, --artifact-path, and --artifact-commit".into(),
+            ));
+        };
+        crate::format::validate_line("artifact repo", repo)?;
+        if repo.trim().is_empty() {
+            return Err(Error::Validation("--artifact-repo cannot be empty".into()));
+        }
+        if !is_git_commit_hex(commit) {
+            return Err(Error::Validation(format!(
+                "--artifact-commit must be a 40- or 64-character lowercase hex commit id, got {commit:?}"
+            )));
+        }
+        Ok(Some(Subject::CommitPin(CommitPinSubject {
+            repo: repo.to_string(),
+            path: path.to_string(),
+            commit: commit.to_string(),
+        })))
+    } else if let Some(sha256) = sha256 {
+        if !is_sha256_hex(sha256) {
+            return Err(Error::Validation(format!(
+                "--artifact-sha256 must be a 64-character lowercase hex digest, got {sha256:?}"
+            )));
+        }
+        Ok(Some(Subject::DigestPin(DigestPinSubject {
+            path: path.to_string(),
+            sha256: sha256.to_string(),
+        })))
+    } else {
+        Err(Error::Validation(
+            "--artifact-path requires either (--artifact-repo and --artifact-commit) or --artifact-sha256".into(),
+        ))
+    }
 }
 
 /// Open `drop` decision holding execution (`pick_up`, `resume`, and every `start` / `edit --status doing`).

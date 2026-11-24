@@ -159,9 +159,12 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
 fn row(rank: usize, impact: &Impact, claims: &ClaimSnapshot, now: OffsetDateTime) -> BlockerRow {
     let task = &impact.task;
     let park = claims.park(&task.id);
+    let awaiting_user = crate::decisions::effective_awaiting_user(task);
     let attention = match park {
         Some(park) if park.waiting_on == WaitingOn::User => Attention::User,
-        None if task.status == Status::Idea && task.reviewed && task.awaiting_user => {
+        None if awaiting_user
+            && (task.format >= 2 || (task.status == Status::Idea && task.reviewed)) =>
+        {
             Attention::User
         }
         _ => Attention::Unknown,
@@ -190,7 +193,7 @@ fn row(rank: usize, impact: &Impact, claims: &ClaimSnapshot, now: OffsetDateTime
         unresolved_dependency_count: impact.unresolved_dependency_count,
         counted_through: impact.counted_through.clone(),
         attention,
-        awaiting_user: task.awaiting_user,
+        awaiting_user,
         task_needs: task.needs.clone(),
         defer: task
             .defer

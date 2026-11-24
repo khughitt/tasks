@@ -238,7 +238,8 @@ fn scan_for_listing(
     if actions {
         let scan = ctx.scan_mixed()?;
         let now = crate::time::parse(&crate::time::now())?;
-        let claims = crate::claims::ClaimSnapshot::load_at(ctx.scope.prefixes().iter(), now)?;
+        let mut claims = crate::claims::ClaimSnapshot::load_at(ctx.scope.prefixes().iter(), now)?;
+        claims.repair_resolved_parks(&scan, &mut ctx.warnings);
         Ok((scan, claims, now))
     } else {
         let (scan, claims) = ctx.scan_with_claims()?;
@@ -269,7 +270,8 @@ fn list_pending(
     let now = crate::time::parse(&crate::time::now())?;
     let observed_at = crate::time::format(now);
     let prefixes = ctx.scope.prefixes();
-    let claims = crate::claims::ClaimSnapshot::load_at(prefixes.iter(), now)?;
+    let mut claims = crate::claims::ClaimSnapshot::load_at(prefixes.iter(), now)?;
+    claims.repair_resolved_parks(&all, &mut ctx.warnings);
     let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     check_parent(&filter, &all, |_| false)?;
     filter.resolve_under(&hierarchy, &ctx.registry)?;
@@ -367,9 +369,10 @@ fn list_pending(
             });
         }
 
-        // 4. Unlinked user request parks (review, decision, approval).
+        // 4. Unlinked legacy user request parks (review, decision, approval).
         if let Some(park) = claims.park(&task.id)
             && park.waiting_on == WaitingOn::User
+            && park.decision_id.is_none()
             && let Some(reason) = park.reason
             && matches!(
                 reason,

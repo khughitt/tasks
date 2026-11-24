@@ -1032,6 +1032,8 @@ pub struct ParkInfo {
     pub needs: Option<crate::claims::Needs>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minutes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
     pub session: String,
     pub owner: String,
     pub host: String,

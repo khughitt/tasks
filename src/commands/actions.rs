@@ -142,11 +142,12 @@ impl<'a> Actions<'a> {
                     note_index: task.notes.len() - 1,
                 }));
             }
-            if task.awaiting_user {
+            if task.format == 1 && task.awaiting_user {
                 actions.push(answer(AnswerSubject::AwaitingUser { task: id.clone() }));
             }
             if let Some(park) = park.filter(|park| {
                 park.waiting_on == WaitingOn::User
+                    && park.decision_id.is_none()
                     && matches!(
                         park.reason,
                         Some(Reason::Decision | Reason::Review | Reason::Approval)
@@ -417,7 +418,7 @@ impl<'a> Actions<'a> {
             if task.status == Status::Idea {
                 reasons.extend(self.dependency_reasons(&task.depends));
                 reasons.extend(self.deferred(task));
-                if task.awaiting_user {
+                if task.format == 1 && task.awaiting_user {
                     reasons.push(evidence(
                         "decision_open",
                         json!({"source":"awaiting_user", "task":id}),

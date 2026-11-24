@@ -160,22 +160,20 @@ fn actions_preserve_independent_park_and_dependency_evidence() {
         2,
         "depends: [aa-000001, zz-000001]\n",
     );
-    env.cmd(&dir)
-        .env("TASKS_SESSION", "test:park")
-        .args([
-            "park",
-            "aa-000002",
-            "Choose the scope",
-            "--waiting-on",
-            "user",
-            "--reason",
-            "decision",
-        ])
-        .assert()
-        .success();
+    // Seed a pre-Stage-B unlinked user decision park directly into the host-local store
+    // (Stage B refuses creating new unlinked user decision parks while preserving legacy reads).
+    let store = env.claim_store("aa");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(
+        &store,
+        format!(
+            "[parks.\"aa-000002\"]\nowner = \"tester\"\nsession = \"test:park\"\nhost = \"testhost\"\nworktree = {:?}\nat = \"2026-10-17T00:00:00Z\"\nnext_step = \"Choose the scope\"\nwaiting_on = \"user\"\nreason = \"decision\"\ntitle = \"Task aa-000002\"\n",
+            dir.display().to_string()
+        ),
+    )
+    .unwrap();
     let path = dir.join("tasks/aa-000002.md");
     let task_bytes = std::fs::read(&path).unwrap();
-    let store = env.claim_store("aa");
     let store_bytes = std::fs::read(&store).unwrap();
 
     let show = env.json(&dir, &["show", "aa-000002", "--no-fetch"]);

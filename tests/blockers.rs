@@ -377,11 +377,22 @@ fn blockers_attention_claims_and_resources() {
             "user",
             "--reason",
             "approval",
+            "--decision-kind",
+            "approval",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Authorize prepared bounded calls?",
+            "--artifact-path",
+            "docs/plans/calls.md",
+            "--artifact-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ],
     );
     let after = blockers(&env, &sci, &[]);
     let parked = row(&after, &gate);
     assert_eq!(parked["attention"], "user");
+    assert_eq!(parked["awaiting_user"], true);
     assert_eq!(parked["park"]["waiting_on"], "user");
     assert_eq!(parked["park"]["reason"], "approval");
     assert_eq!(parked["park"]["next_step"], step);
@@ -394,7 +405,7 @@ fn blockers_attention_claims_and_resources() {
     );
     assert_eq!(after["park_evidence"]["scope"], "host_local");
 
-    // Another host's store has no park: unknown again.
+    // Another host's store has no park, while the linked durable approval keeps attention = user.
     let elsewhere = tempfile::tempdir().unwrap();
     let out = env
         .cmd(&sci)
@@ -404,7 +415,8 @@ fn blockers_attention_claims_and_resources() {
         .unwrap();
     assert!(out.status.success(), "{out:?}");
     let other: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(row(&other, &gate)["attention"], "unknown");
+    assert_eq!(row(&other, &gate)["attention"], "user");
+    assert_eq!(row(&other, &gate)["awaiting_user"], true);
     assert!(row(&other, &gate).get("park").is_none());
 
     // A declared need names a resource, not an approval; a park's host requirement is a

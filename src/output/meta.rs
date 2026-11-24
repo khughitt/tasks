@@ -154,7 +154,7 @@ pub fn defers_width_error(command: &Command) -> bool {
         | Command::ArchiveNotes { .. }
         | Command::Detach { .. }
         | Command::Start { .. }
-        | Command::Park { .. }
+        | Command::Park(_)
         | Command::Done { .. }
         | Command::Drop { .. }
         | Command::Release { .. }
