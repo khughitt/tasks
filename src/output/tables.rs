@@ -236,6 +236,24 @@ fn migrate_review(o: &MigrateOut) -> String {
     text
 }
 
+fn append_actions<'a>(
+    rendered: &mut String,
+    rows: impl Iterator<Item = (&'a str, Option<&'a [super::ActionExplanation]>)>,
+    painter: &Painter,
+    layout: &crate::table::Layout,
+) {
+    for (id, actions) in rows {
+        if let Some(actions) = actions.filter(|actions| !actions.is_empty()) {
+            rendered.push_str(&format!("\n{id}\n"));
+            rendered.push_str(&crate::show_text::action_lines(
+                actions,
+                painter,
+                layout.width,
+            ));
+        }
+    }
+}
+
 pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> String {
     match out {
         Output::RetainedMutation(out) => {
@@ -531,18 +549,26 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                 None => "nothing ready".into(),
             }
         ),
-        Output::List(o) => format!(
-            "{}{}",
-            halt_line(&o.halts),
-            task_table(&o.tasks, o.date, painter, layout)
-        ),
-        Output::Parked(o) => parked_table(
-            &o.tasks,
-            painter,
-            layout,
-            None,
-            o.tasks.iter().any(|row| row.needs_review == Some(true)),
-        ),
+        Output::List(o) => {
+            let mut rendered = format!(
+                "{}{}",
+                halt_line(&o.halts),
+                task_table(&o.tasks, o.date, painter, layout)
+            );
+            append_actions(&mut rendered, o.tasks.iter().map(|row| (row.id.as_str(), row.actions.as_deref())), painter, layout);
+            rendered
+        }
+        Output::Parked(o) => {
+            let mut rendered = parked_table(
+                &o.tasks,
+                painter,
+                layout,
+                None,
+                o.tasks.iter().any(|row| row.needs_review == Some(true)),
+            );
+            append_actions(&mut rendered, o.tasks.iter().map(|row| (row.id.as_str(), row.actions.as_deref())), painter, layout);
+            rendered
+        }
         Output::Quiet(o) => quiet_table(&o.tasks, painter, layout),
         Output::Goals(o) => super::goals::render(o, painter, layout),
         Output::Claims(o) => {
@@ -1455,6 +1481,7 @@ mod tests {
 
     fn row(id: &str, parallel: bool) -> TaskSummary {
         TaskSummary {
+            actions: None,
             id: id.into(),
             title: format!("title {id}"),
             project_color: None,

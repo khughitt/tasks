@@ -12,18 +12,45 @@ pub struct HaltSnapshot {
 }
 
 pub fn snapshot(project: &Project, registry: &Registry, local: &[Task]) -> Result<HaltSnapshot> {
+    authority_snapshot(project, registry, local, false)
+}
+
+/// Projection reads may use the captured scan when it came from the authoritative records.
+pub(crate) fn observed(
+    project: &Project,
+    registry: &Registry,
+    local: &[Task],
+) -> Result<HaltSnapshot> {
+    authority_snapshot(project, registry, local, true)
+}
+
+fn authority_snapshot(
+    project: &Project,
+    registry: &Registry,
+    local: &[Task],
+    captured: bool,
+) -> Result<HaltSnapshot> {
     let authority = match registry.project_root(&project.prefix) {
         Some(_) => scope::open_registered(registry, &project.prefix, Origin::Prefix)?,
         None => project.clone(),
     };
-    let records = if registry.project_root(&project.prefix).is_some() {
-        authority.scan()?
+    let authoritative;
+    let records = if registry.project_root(&project.prefix).is_none()
+        || (captured && authority.records == project.records)
+    {
+        local
     } else {
-        local.to_vec()
+        authoritative = authority.scan()?;
+        &authoritative
     };
     let mut halts: Vec<Task> = records
-        .into_iter()
-        .filter(|task| task.tags.iter().any(|tag| tag == "halt") && task.status.is_open())
+        .iter()
+        .filter(|task| {
+            task.id.prefix == project.prefix
+                && task.tags.iter().any(|tag| tag == "halt")
+                && task.status.is_open()
+        })
+        .cloned()
         .collect();
     halts.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
     let mut allowed = HashSet::new();

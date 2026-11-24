@@ -298,6 +298,7 @@ impl TaskSummary {
         let child_count = hierarchy.child_count(&canonical);
         let review_reason = crate::review::state(task, child_count, deps, now);
         TaskSummary {
+            actions: None,
             id: task.id.to_string(),
             title: task.title.clone(),
             project_color: None,
@@ -355,6 +356,7 @@ impl TaskSummary {
 impl ParkedRow {
     pub fn resolved(summary: TaskSummary, phase: crate::model::Phase) -> ParkedRow {
         ParkedRow {
+            actions: summary.actions,
             id: summary.id,
             title: summary.title,
             project_color: summary.project_color,
@@ -396,6 +398,7 @@ impl ParkedRow {
     }
     pub fn unresolved(id: &str, park: &crate::claims::Park) -> ParkedRow {
         ParkedRow {
+            actions: None,
             id: id.into(),
             title: park.title.clone(),
             project_color: None,

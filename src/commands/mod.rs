@@ -1,3 +1,4 @@
+mod actions;
 pub mod add;
 pub mod archive_notes;
 pub mod attach;

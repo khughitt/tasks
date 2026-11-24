@@ -561,3 +561,44 @@ Compatibility and drift checks separate three change axes:
   live corpus invariants, CI runs every test target without skips, and periodic
   `curate-docs` passes audit commits touching governed modules after this file's
   last revision.
+
+
+## Read-only actions
+
+`show` includes a top-level `actions` array. `list --actions` and
+`search --actions` add it to each task row. Listings without the flag, `next`,
+and `prime` keep their existing JSON shape. An unresolved park has no task
+actions. A move tombstone has an empty array.
+
+Each item has an `action`, an `actor` (`agent` or `human`), an `available`
+boolean, `reasons` that prevent the action, and nonblocking `signals`. Each
+reason or signal has a `code` and an `evidence` object. Evidence identifies the
+task, date, resource or source behind a code. Host observations include a host
+and observation timestamp. Reasons are ordered by code and evidence task ID.
+Several reasons can share a code when they name different evidence.
+
+| Action | Evidence evaluated |
+| --- | --- |
+| `pick_up` | The ordinary picker, including lifecycle, due recurrence, dependencies, lane pause, project halt, claim, park and resource holds |
+| `resume` | An existing handoff or active claim, with the parked candidate's execution checks |
+| `assess` | Scope queue rules for ideas and unassessed committed work |
+| `reconsider` | A shelf's wake targets and checkpoint, including a stranded shelf |
+| `curate` | Eligibility for the sample pool before its random draw |
+| `answer` | One item per current proposal, user-wait marker or explicit user decision, review or approval park |
+| `close_goal` | Closeout checks for effective members and direct prerequisites |
+
+An answer includes a `subject` with `task` and `source`. The source
+`latest_note` adds a zero-based `note_index` in the full logical notes, including
+archived notes. `awaiting_user` uses the task ID alone. `park` adds `host`,
+`at` and `next_step`. These locators describe the read and carry no write
+authority. A curate item includes `window.older_than_days` even when available.
+Show and listing use seven 24-hour days. Zero disables the age filter in
+sampling. Other actions omit `subject` and `window`.
+
+The format-1 projection uses the stored review and process markers, the legacy
+latest-note proposal parser, and parks observed on this host. An incidental note
+can supersede an earlier proposal. An unassessed todo or blocked leaf can still
+be assessed when its proposal keeps it out of the sample pool. An unanswered
+park for a quiet host is evidence about resuming work. The projection reserves
+neither a claim nor a resource and does not change explicit `start` or `--force`
+rules. List filters control which rows are read, independently of their actions.

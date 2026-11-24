@@ -4,7 +4,7 @@
 
 use crate::claims::Escalation;
 use crate::model::{Note, Status};
-use crate::output::{DepInfo, ParkInfo, Related, ShowFields};
+use crate::output::{ActionExplanation, DepInfo, ParkInfo, Related, ShowFields};
 use crate::palette::Rgb;
 use crate::present::{self, Span};
 use crate::style::{Painter, Style};
@@ -128,6 +128,13 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
     if let Some(escalation) = &o.escalation {
         sections.push(escalated(escalation, painter, width));
     }
+    if let Some(actions) = o.actions.as_ref().filter(|actions| !actions.is_empty()) {
+        sections.push(format!(
+            "{}{}",
+            present::rule("actions", painter, width.unwrap_or(MEASURE)),
+            action_lines(actions, painter, width)
+        ));
+    }
     sections.push(description(&o.task.body, painter, width));
     if let Some(links) = links(o, painter, width) {
         sections.push(links);
@@ -142,6 +149,38 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
         sections.push(notes(&o.task.notes, painter, width));
     }
     sections.join("\n")
+}
+
+pub(crate) fn action_lines(
+    actions: &[ActionExplanation],
+    painter: &Painter,
+    width: Option<usize>,
+) -> String {
+    let mut rendered = String::new();
+    for action in actions {
+        let availability = if action.available {
+            "available"
+        } else {
+            "held"
+        };
+        let mut line = format!(
+            "{} ({})  {availability}",
+            action.action.as_str(),
+            action.actor.as_str()
+        );
+        for reason in &action.reasons {
+            line.push_str("  ");
+            line.push_str(reason.code);
+            for key in ["task", "resource", "host", "date", "status"] {
+                if let Some(value) = reason.evidence[key].as_str() {
+                    line.push(' ');
+                    line.push_str(value);
+                }
+            }
+        }
+        rendered.push_str(&block("  ", 2, &[(&line, None)], 4, painter, width));
+    }
+    rendered
 }
 
 /// `pieces` after `lead` (already painted, `lead_width` columns wide), wrapped at
@@ -858,6 +897,7 @@ mod tests {
 
     fn fields() -> ShowFields {
         ShowFields {
+            actions: None,
             task: crate::history::fixture(BARE, "x").unwrap(),
             task_revision: "0".repeat(64),
             needs_review: false,

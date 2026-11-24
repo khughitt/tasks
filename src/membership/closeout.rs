@@ -8,9 +8,9 @@ use std::fmt::Display;
 
 #[derive(Default)]
 pub(crate) struct Closeout {
-    direct: Vec<TaskId>,
-    open: BTreeSet<TaskId>,
-    missing: BTreeSet<(TaskId, TaskId)>,
+    pub(crate) direct: Vec<TaskId>,
+    pub(crate) open: BTreeSet<TaskId>,
+    pub(crate) missing: BTreeSet<(TaskId, TaskId)>,
     has_foreign_hold: bool,
 }
 

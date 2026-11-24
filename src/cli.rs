@@ -138,6 +138,9 @@ pub struct BlockersArgs {
 /// the parked/periodic/deferred modes, and scope.
 #[derive(Args, Debug)]
 pub struct ListArgs {
+    /// Include a read-only explanation of available actions on each task.
+    #[arg(long)]
+    pub actions: bool,
     /// Only tasks with an entry whose stored reference exactly matches this value.
     #[arg(long = "ref")]
     pub reference: Option<String>,

@@ -20,7 +20,7 @@ pub(super) fn run(mut ctx: Ctx, id: &str, fetch: Fetch, all_projects: bool) -> R
         widen(&ctx.registry, project, &mut all, &mut ctx.warnings)?;
     }
     let now = crate::time::parse(&crate::time::now())?;
-    let fields = describe(
+    let mut fields = describe(
         project,
         &ctx.registry,
         &task.id,
@@ -31,6 +31,25 @@ pub(super) fn run(mut ctx: Ctx, id: &str, fetch: Fetch, all_projects: bool) -> R
         fetch,
         &ctx.host,
     )?;
+    let prefixes = all
+        .iter()
+        .map(|task| task.id.prefix.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    let mut actions = super::actions::Actions::new(
+        super::actions::Observation {
+            registry: &ctx.registry,
+            host: &ctx.host,
+            projects: std::slice::from_ref(project),
+            scan: &all,
+            claims: &claims,
+            now,
+        },
+        &hierarchy,
+    );
+    fields.actions = Some(actions.explain(&fields.task, fields.review_reason));
     Ok(ShowOut {
         fields,
         warnings: ctx.warnings,
@@ -394,6 +413,7 @@ pub fn describe(
         .filter_map(|(prefix, color)| color.map(|color| (prefix, color)))
         .collect();
     Ok(ShowFields {
+        actions: None,
         task_revision,
         needs_review: review_reason.is_some(),
         review_reason,

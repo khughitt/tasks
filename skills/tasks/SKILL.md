@@ -19,6 +19,16 @@ Summary and parked rows expose `step` only when set. `check` distinguishes
 external checks unfinished at the shared budget); warning-only exit 0 does not
 mean those documents were verified.
 
+## Read-only action explanations
+
+`tasks show <id>` on a build with action explanations supplies an `actions`
+array with each actor, availability, blocking reasons and signals. Use it to
+explain an action over the current record and this host's observations. On mixed
+host versions, pass `--actions` to list or search only when the installed
+command's help advertises it. Ordinary listings remain available on all hosts
+and omit the projection. Continue selecting work with ready and next, and use
+the ordinary write commands to act.
+
 ## Session protocol
 
 1. `tasks prime` — lanes (the efforts meant to run side by side, each with its guidance

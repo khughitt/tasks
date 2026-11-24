@@ -584,9 +584,96 @@ pub struct MultipartRefOut {
     pub parts: usize,
 }
 
+/// A command-time explanation over the existing task and host observations.
+#[derive(Clone, Serialize)]
+pub struct ActionExplanation {
+    pub action: ActionKind,
+    pub actor: ActionActor,
+    pub available: bool,
+    pub reasons: Vec<ActionEvidence>,
+    pub signals: Vec<ActionEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<AnswerSubject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<CurateWindow>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionKind {
+    PickUp,
+    Resume,
+    Assess,
+    Reconsider,
+    Curate,
+    Answer,
+    CloseGoal,
+}
+
+impl ActionKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::PickUp => "pick_up",
+            Self::Resume => "resume",
+            Self::Assess => "assess",
+            Self::Reconsider => "reconsider",
+            Self::Curate => "curate",
+            Self::Answer => "answer",
+            Self::CloseGoal => "close_goal",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionActor {
+    Agent,
+    Human,
+}
+
+impl ActionActor {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Human => "human",
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub struct ActionEvidence {
+    pub code: &'static str,
+    pub evidence: serde_json::Value,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum AnswerSubject {
+    LatestNote {
+        task: TaskId,
+        note_index: usize,
+    },
+    AwaitingUser {
+        task: TaskId,
+    },
+    Park {
+        task: TaskId,
+        host: String,
+        at: String,
+        next_step: String,
+    },
+}
+
+#[derive(Clone, Serialize)]
+pub struct CurateWindow {
+    pub older_than_days: i64,
+}
+
 /// Everything `show` says about one task, without the warnings, so `next` can embed it.
 #[derive(Serialize)]
 pub struct ShowFields {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Vec<ActionExplanation>>,
     pub task: Task,
     /// SHA-256 of the physical task record read for this view.
     pub task_revision: String,
@@ -703,6 +790,8 @@ pub struct GoalWork {
 
 #[derive(Serialize, Clone)]
 pub struct TaskSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Vec<ActionExplanation>>,
     pub id: String,
     pub title: String,
     #[serde(skip)]
@@ -944,6 +1033,8 @@ pub struct DeferredInfo {
 
 #[derive(Serialize, Clone)]
 pub struct ParkedRow {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Vec<ActionExplanation>>,
     pub id: String,
     pub title: String,
     #[serde(skip)]

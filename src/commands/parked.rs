@@ -1,6 +1,7 @@
 //! Parked read views and `next` candidates.
 
 use super::ReadCtx;
+use super::actions::{Actions, Observation};
 use crate::claims::{ClaimSnapshot, Park, Reason, WaitingOn};
 use crate::error::Result;
 use crate::filter::{Fields, TaskFilter};
@@ -33,6 +34,7 @@ pub fn rows(
         Prefer::Registered,
         None,
         None,
+        false,
     )?
     .into_iter()
     .map(|(row, _)| row)
@@ -49,12 +51,12 @@ pub fn rows_preferring(
 ) -> Result<Vec<ParkedRow>> {
     let prefixes = ctx.scope.prefixes();
     let hierarchy = crate::hierarchy::view_of(all, &prefixes, &ctx.registry);
-    Ok(
-        sourced_rows(ctx, all, &hierarchy, claims, now, prefer, reason, None)?
-            .into_iter()
-            .map(|(row, _)| row)
-            .collect(),
-    )
+    Ok(sourced_rows(
+        ctx, all, &hierarchy, claims, now, prefer, reason, None, false,
+    )?
+    .into_iter()
+    .map(|(row, _)| row)
+    .collect())
 }
 
 /// `rows`, each with the record its row was built from: the registered copy or the one in
@@ -67,6 +69,7 @@ pub fn rows_with_records(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
     waiting_on: Option<WaitingOn>,
+    actions: bool,
 ) -> Result<Vec<(ParkedRow, Option<Task>)>> {
     sourced_rows(
         ctx,
@@ -77,6 +80,7 @@ pub fn rows_with_records(
         Prefer::Registered,
         None,
         waiting_on,
+        actions,
     )
 }
 
@@ -90,6 +94,7 @@ fn sourced_rows(
     prefer: Prefer,
     reason: Option<Reason>,
     waiting_on: Option<WaitingOn>,
+    actions: bool,
 ) -> Result<Vec<(ParkedRow, Option<Task>)>> {
     // Selected from the park entry, before any row is built, so a park left out never
     // reads another checkout or warns.
@@ -102,6 +107,22 @@ fn sourced_rows(
     // The registered rows' view; a row read from its recorded checkout builds that
     // checkout's own in `resolve_recorded` (docs/user-guide.md).
     let deps = super::list::review_deps(ctx, all)?;
+    // The optional projection borrows the original scope while recorded rows add warnings.
+    let registered_inputs = actions.then(|| (ctx.registry.clone(), ctx.scope.projects().to_vec()));
+    let host = ctx.host.clone();
+    let mut projection = registered_inputs.as_ref().map(|(registry, projects)| {
+        Actions::new(
+            Observation {
+                registry,
+                host: &host,
+                projects,
+                scan: all,
+                claims,
+                now,
+            },
+            hierarchy,
+        )
+    });
     let mut rows = Vec::new();
     for (key, park) in entries {
         let id = match TaskId::parse(key) {
@@ -115,10 +136,11 @@ fn sourced_rows(
             }
         };
         let registered = hierarchy.get(&id).map(|task| {
-            (
-                resolved_row(task, hierarchy, &deps, claims, &ctx.registry, now),
-                task.clone(),
-            )
+            let mut row = resolved_row(task, hierarchy, &deps, claims, &ctx.registry, now);
+            if let Some(projection) = &mut projection {
+                row.actions = Some(projection.explain(task, row.review_reason));
+            }
+            (row, task.clone())
         });
         let recorded_is_scanned = ctx
             .scope
@@ -128,9 +150,11 @@ fn sourced_rows(
         let row = match (prefer, registered) {
             (_, Some(row)) if recorded_is_scanned => Some(row),
             (Prefer::Registered, Some(row)) => Some(row),
-            (Prefer::Registered, None) => recorded_or_fallback(ctx, &id, park, claims, now, None),
+            (Prefer::Registered, None) => {
+                recorded_or_fallback(ctx, &id, park, claims, now, None, actions)
+            }
             (Prefer::Recorded, registered) => {
-                recorded_or_fallback(ctx, &id, park, claims, now, registered)
+                recorded_or_fallback(ctx, &id, park, claims, now, registered, actions)
             }
         };
         rows.push(match row {
@@ -162,8 +186,9 @@ fn recorded_or_fallback(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
     fallback: Option<(ParkedRow, Task)>,
+    actions: bool,
 ) -> Option<(ParkedRow, Task)> {
-    match resolve_recorded(ctx, id, park, claims, now) {
+    match resolve_recorded(ctx, id, park, claims, now, actions) {
         Ok(Some(row)) => {
             ctx.warnings.push(format!(
                 "{id} is parked in {}; resume it from that checkout",
@@ -210,6 +235,7 @@ fn resolve_recorded(
     park: &Park,
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
+    actions: bool,
 ) -> Result<Option<(ParkedRow, Task)>> {
     let Some((project, task, scan)) = open_recorded(id, Path::new(&park.worktree))? else {
         return Ok(None);
@@ -227,6 +253,20 @@ fn resolve_recorded(
     );
     summary.activity =
         crate::activity::ActivityIndex::of_scan(&scan, &ctx.registry, now).get(&task.id);
+    if actions {
+        let mut projection = Actions::new(
+            Observation {
+                registry: &ctx.registry,
+                host: &ctx.host,
+                projects: std::slice::from_ref(&project),
+                scan: &scan,
+                claims,
+                now,
+            },
+            &scan_hierarchy,
+        );
+        summary.actions = Some(projection.explain(&task, summary.review_reason));
+    }
     let row = ParkedRow::resolved(summary, Phase::of(&task));
     Ok(Some((row, task)))
 }
@@ -264,6 +304,10 @@ pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Ta
     Ok(Some((project, task, scan)))
 }
 
+pub(super) fn resumable_lifecycle(task: &Task) -> bool {
+    task.status.is_open() && !matches!(task.status, Status::Blocked | Status::Shelved)
+}
+
 /// `deps` is `all`'s dependency view (docs/user-guide.md).
 pub fn candidates(
     ctx: &mut ReadCtx,
@@ -293,8 +337,7 @@ pub fn candidates(
         };
         let canonical = ctx.registry.canonical_id(&task.id);
         if park.waiting_on != WaitingOn::Agent
-            || !task.status.is_open()
-            || matches!(task.status, Status::Blocked | Status::Shelved)
+            || !resumable_lifecycle(task)
             || crate::hierarchy::is_goal(task, hierarchy.child_count(&canonical) > 0)
         {
             continue;

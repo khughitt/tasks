@@ -252,6 +252,13 @@ See [configuration](configuration.md#project-settings).
 
 ## Review, waits and recurring work
 
+`tasks show ID` includes actions for the current record, with who can take each
+action and evidence for any blocker. Use `tasks list --actions` or
+`tasks search QUERY --actions` when you need the same explanation on rows.
+Default listings retain their usual shape. Action explanations use the current
+host's claims and parks, and the seven-day sample window.
+[Read-only actions](task-model.md#read-only-actions) documents the JSON fields.
+
 `reviewed` says an idea has been considered. Derived `needs_review` reasons are
 `unreviewed`, `woken`, `stranded` and `unassessed`. Reviewed ideas with a recorded
 user wait, future deferral, pending proposal, or open/unresolved dependency wait

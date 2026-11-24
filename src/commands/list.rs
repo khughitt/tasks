@@ -1,4 +1,5 @@
 use super::ReadCtx;
+use super::actions::{Actions, Observation};
 use crate::claims::{Liveness, WaitingOn};
 use crate::cli::{FilterArgs, ListArgs};
 use crate::dependency::Verdict;
@@ -91,6 +92,7 @@ pub(super) fn recorded_review_deps(
 /// selection, pools, order, and output.
 pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result<Output> {
     let ListArgs {
+        actions,
         plan,
         reference,
         statuses,
@@ -116,6 +118,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             plan,
             reference,
             limit,
+            actions,
         );
     }
     let (all, claims) = ctx.scan_with_claims()?;
@@ -176,11 +179,31 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     if let Some(limit) = limit {
         tasks.truncate(limit);
     }
+    let mut projection = actions.then(|| {
+        Actions::new(
+            Observation {
+                registry: &ctx.registry,
+                host: &ctx.host,
+                projects: ctx.scope.projects(),
+                scan: &all,
+                claims: &claims,
+                now,
+            },
+            &hierarchy,
+        )
+    });
     let colors = ctx.project_colors();
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now))
+            .map(|task| {
+                let mut row =
+                    TaskSummary::of(task, &hierarchy, &deps, Some(&claims), &ctx.registry, now);
+                if let Some(projection) = &mut projection {
+                    row.actions = Some(projection.explain(task, row.review_reason));
+                }
+                row
+            })
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,
@@ -204,13 +227,15 @@ fn list_parked(
     plan: Option<String>,
     reference: Option<String>,
     limit: Option<usize>,
+    actions: bool,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let prefixes = ctx.scope.prefixes();
     let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
-    let rows =
-        super::parked::rows_with_records(&mut ctx, &all, &hierarchy, &claims, now, waiting_on)?;
+    let rows = super::parked::rows_with_records(
+        &mut ctx, &all, &hierarchy, &claims, now, waiting_on, actions,
+    )?;
     let warnings = std::mem::take(&mut ctx.warnings);
     check_parent(&filter, &all, |parent| {
         rows.iter().any(|(row, _)| {

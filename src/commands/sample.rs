@@ -13,6 +13,30 @@ use crate::error::Result;
 use crate::model::{Status, Task};
 use crate::output::{DateColumn, ListOut, Output, TaskSummary};
 
+pub(super) const DEFAULT_AGE_DAYS: i64 = 7;
+
+pub(super) struct Window {
+    pub days: i64,
+    cutoff: Option<time::OffsetDateTime>,
+}
+
+impl Window {
+    pub(super) fn new(days: i64, now: time::OffsetDateTime) -> Self {
+        // The CLI caps the day count. Zero disables age filtering even with clock skew.
+        Self {
+            days,
+            cutoff: (days > 0).then(|| now - time::Duration::days(days)),
+        }
+    }
+
+    pub(super) fn recent(&self, task: &Task) -> Result<bool> {
+        match self.cutoff {
+            Some(cutoff) => Ok(crate::time::parse(&task.updated)? > cutoff),
+            None => Ok(false),
+        }
+    }
+}
+
 pub fn sample(
     mut ctx: ReadCtx,
     limit: usize,
@@ -21,10 +45,7 @@ pub fn sample(
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    // The age grammar (`defer::parse_age`, at the CLI) caps the count at 36500 days, so
-    // the subtraction stays far inside OffsetDateTime's range. Zero means no age check at
-    // all: a future-dated record from clock skew is still admitted.
-    let cutoff = (older_than > 0).then(|| now - time::Duration::days(older_than));
+    let window = Window::new(older_than, now);
 
     let mut pool: Vec<&Task> = Vec::new();
     for task in &all {
@@ -34,9 +55,7 @@ pub fn sample(
         if crate::defer::is_deferred(task, now) {
             continue;
         }
-        if let Some(cutoff) = cutoff
-            && crate::time::parse(&task.updated)? > cutoff
-        {
+        if window.recent(task)? {
             continue;
         }
         if let Some(claim) = claims.held(&task.id) {
