@@ -253,11 +253,20 @@ See [configuration](configuration.md#project-settings).
 ## Review, waits and recurring work
 
 `tasks show ID` includes actions for the current record, with who can take each
-action and evidence for any blocker. Use `tasks list --actions` or
-`tasks search QUERY --actions` when you need the same explanation on rows.
-Default listings retain their usual shape. Action explanations use the current
-host's claims and parks, and the seven-day sample window.
-[Read-only actions](task-model.md#read-only-actions) documents the JSON fields.
+action and evidence for any blocker, plus `decisions[]` for named human
+decisions. Use `tasks list --pending` or `tasks search QUERY --pending` for the
+canonical oldest-first queue of open named human decisions and legacy waits
+(with explicit `coverage`). Open, answer, or withdraw named decisions with
+`tasks decision open|answer|withdraw`; accepting a `drop` binds to the displayed
+scope via `--seen-scope` and drops the task atomically, `approval` binds to an
+exact commit or SHA-256 artifact pin, and `question` answers via `--reply`.
+Open `drop` decisions hold execution, `assess`, and `curate`; open `question`
+decisions hold `assess` and `curate`; open `suggestion` and `approval` decisions
+hold `curate`. Use `tasks list --actions` or `tasks search QUERY --actions` when
+you need the action explanation on rows. Default listings retain their usual
+shape. Action explanations use the current host's claims and parks, and the
+seven-day sample window. [Read-only actions](task-model.md#read-only-actions)
+documents the JSON fields.
 
 `reviewed` says an idea has been considered. Derived `needs_review` reasons are
 `unreviewed`, `woken`, `stranded` and `unassessed`. Reviewed ideas with a recorded

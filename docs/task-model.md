@@ -162,6 +162,8 @@ optional booleans false, and other optional values absent.
 
 | Field | Value and meaning |
 | --- | --- |
+| `format` | Optional record format integer (`>= 2`); absent means format 1. Format 2 adds `open_decisions` and `## Entries`, forbids physical `awaiting_user`, and is read alongside format-1 records. Future formats (`> 2`) fail direct targeted reads/writes with `unsupported_record_version` and are skipped with warnings during scans. |
+| `open_decisions` | Format-2-only list of open decision entry UUIDv4s (`[]` when none are open); maintained in sync with `## Entries` resolutions. |
 | `id`, `title` | Immutable canonical id; nonempty single-line title. |
 | `status` | `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, `dropped`, `moved`. |
 | `priority` | Integer 0–4, lower is more urgent; creation default 2. |
@@ -188,9 +190,15 @@ optional booleans false, and other optional values absent.
 | `spec`, `plan`, `step` | Working-document paths and optional exact plan heading; step requires plan. |
 | `moved_to`, `moved_from` | Cross-project successor/predecessor ids maintained by task move. |
 
-The body follows the frontmatter. Exact lines `## References` and `## Notes` are
-reserved delimiters and cannot occur in body text. There is at most one of each,
-references precede notes, and reference sections contain only their entry bullets.
+The body follows the frontmatter. Exact lines `## References`, `## Notes` and
+(in format 2+) `## Entries` are reserved delimiters and cannot occur in body
+text. There is at most one of each, in order (`## References`, `## Notes`,
+`## Entries`), references contain only their entry bullets, and `## Entries`
+contains one strict RFC 8259 JSON object per line (no duplicate object keys at
+any depth) for durable `decision` (`drop`, `suggestion`, `question`, `approval`)
+and `resolution` (`accept`, `decline`, `reply`, `withdraw`) entries. Format-2
+records never store physical `awaiting_user`; read projections derive
+`awaiting_user: true` when any open decision exists on an open task.
 The serializer's first structural newline and trailing serialization whitespace
 are not body content; other leading whitespace is retained.
 
@@ -587,18 +595,31 @@ Several reasons can share a code when they name different evidence.
 | `answer` | One item per current proposal, user-wait marker or explicit user decision, review or approval park |
 | `close_goal` | Closeout checks for effective members and direct prerequisites |
 
-An answer includes a `subject` with `task` and `source`. The source
-`latest_note` adds a zero-based `note_index` in the full logical notes, including
-archived notes. `awaiting_user` uses the task ID alone. `park` adds `host`,
-`at` and `next_step`. These locators describe the read and carry no write
+An answer includes a `subject` with `task` and `source`. Named format-2
+decisions emit `source: "decision"` with `entry` (UUIDv4) and `kind` (`drop`,
+`suggestion`, `question`, `approval`); `show` also exposes top-level
+`decisions[]` with logical state (`open`, `resolved`, `overtaken`), scope
+fingerprint v1 `seen_scope`/`scope_changed_since_open`, and cross-registry
+`open_dependents`. Legacy format-1 waits keep `latest_note` (zero-based
+`note_index` in the full logical notes, including archived notes, matching a
+dedicated nonempty `; proposal:` segment only), `awaiting_user` (task ID alone),
+and unlinked `park` (`host`, `at`, `next_step`; linked parks do not emit a
+duplicate park answer). `list --pending` and `search --pending` expose the
+canonical oldest-first queue of open named decisions and legacy waits with
+explicit `coverage`. These locators describe the read and carry no write
 authority. A curate item includes `window.older_than_days` even when available.
 Show and listing use seven 24-hour days. Zero disables the age filter in
 sampling. Other actions omit `subject` and `window`.
 
-The format-1 projection uses the stored review and process markers, the legacy
-latest-note proposal parser, and parks observed on this host. An incidental note
-can supersede an earlier proposal. An unassessed todo or blocked leaf can still
-be assessed when its proposal keeps it out of the sample pool. An unanswered
-park for a quiet host is evidence about resuming work. The projection reserves
-neither a claim nor a resource and does not change explicit `start` or `--force`
-rules. List filters control which rows are read, independently of their actions.
+Named decisions replace ad hoc holds consistently across format-2 records: open
+`drop` decisions hold execution (`pick_up`, `resume`, `start`, `edit --status
+doing`), `assess`, and `curate`; open `question` decisions hold `assess` and
+`curate`; open `suggestion` and `approval` decisions hold `curate`. Incidental
+notes and attachments never clear named decisions. Format-1 records retain the
+stored review and process markers, the legacy latest-note proposal parser, and
+unlinked parks observed on this host. An unassessed todo or blocked leaf can
+still be assessed when its suggestion or legacy proposal keeps it out of the
+sample pool. An unanswered park for a quiet host is evidence about resuming
+work. The projection reserves neither a claim nor a resource and does not change
+explicit `start` or `--force` rules. List filters control which rows are read,
+independently of their actions.

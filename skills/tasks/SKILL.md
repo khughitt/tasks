@@ -22,12 +22,45 @@ mean those documents were verified.
 ## Read-only action explanations
 
 `tasks show <id>` on a build with action explanations supplies an `actions`
-array with each actor, availability, blocking reasons and signals. Use it to
-explain an action over the current record and this host's observations. On mixed
-host versions, pass `--actions` to list or search only when the installed
-command's help advertises it. Ordinary listings remain available on all hosts
-and omit the projection. Continue selecting work with ready and next, and use
-the ordinary write commands to act.
+array with each actor, availability, blocking reasons and signals, and a
+`decisions` array (when present) carrying logical open, resolved and overtaken
+named human decisions. Use it to explain an action over the current record and
+this host's observations. On mixed host versions, pass `--actions` to list or
+search only when the installed command's help advertises it. Ordinary listings
+remain available on all hosts and omit the projection. Continue selecting work
+with ready and next, and use the ordinary write commands to act.
+
+## Pending human decisions
+
+Named human decisions live durably on format-2 task records (`format: 2`,
+`open_decisions`, `## Entries` JSON lines) so every host and queue sees the same
+pending requests and answers. Readers skip intact future-format records (`> 2`)
+with `unsupported_record_version` warnings rather than failing unrelated reads.
+
+- **Open:** `tasks decision open <id> [--id <uuid>] --kind drop|suggestion|question|approval --origin <origin> --text "<text>"`
+  - Pass a caller-generated lowercase UUIDv4 via `--id <uuid>` and reuse it on retry
+    for idempotent replay (`replayed: true`).
+  - `drop` and `suggestion` bind to task scope; `approval` requires an exact revision
+    pin (`--artifact-repo <repo> --artifact-path <relpath> --artifact-commit <hex>`
+    or `--artifact-path <relpath> --artifact-sha256 <hex64>`); `question` accepts
+    either scope or an artifact pin.
+  - `--scope-verdict "<line>"` records a stamped scope verdict note (and idea
+    `reviewed` metadata) in the same atomic save.
+  - `--replace-awaiting-user` (only with `--kind question` on a format-1
+    `awaiting_user: true` idea) atomically converts the legacy flag into a named
+    question. Format-2 records never write `awaiting_user` to disk; read views
+    derive `awaiting_user: true` while any open decision exists.
+- **Answer / Withdraw:**
+  - `tasks decision answer <id> <uuid> --accept "<text>" [--seen-scope <token>]` (accepting a `drop` requires `--seen-scope` from `show` or `list --pending` and atomically drops the task under ordinary claim/descendant guards), `--decline "<text>"` (for `drop`/`suggestion`/`approval`), or `--reply "<text>"` (for `question`).
+  - `tasks decision withdraw <id> <uuid> --reason "<text>"` withdraws an open decision.
+  - Answering or withdrawing a decision linked to a host-local user park automatically hands that park off to `--waiting-on agent` with the same `next_step` (and other hosts repair their local store on read).
+- **Queue & holds:** `tasks list --pending [--all-projects|--project <p>|--group <g>]`
+  and `tasks search "<phrase>" --pending` return the canonical oldest-first human
+  decision queue (`items[]` of `decision` and legacy `legacy_wait` items, plus
+  `coverage`). Open `drop` decisions hold execution (`start`/`ready`/`next`),
+  `assess` (`--needs-review`), and `curate` (`sample`); open `question` decisions
+  hold `assess` and `curate`; open `suggestion` and `approval` decisions hold
+  `curate`. Incidental notes and attachments never clear named decisions.
 
 ## Session protocol
 
@@ -246,7 +279,13 @@ the ordinary write commands to act.
    Use [Artifact placement and retention](#artifact-placement-and-retention) for
    bulky evidence and retention checkpoints; keep required audit and review notes.
 5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a
-   turn that waits on the user, or whenever you set work down. First complete the
+   turn that waits on the user, or whenever you set work down. When parking with
+   `--waiting-on user --reason review|decision|approval`, link an existing open
+   decision (`--decision <uuid>`) or open one inline (`--decision-kind <kind>
+   --decision-origin <origin> --decision-text "<text>"`, adding the artifact pin flags
+   for `approval` or pinned `review`); unlinked user `review`/`decision`/`approval`
+   parks are refused. Non-request handoffs (`environment`, `dependency`, `session`,
+   `capability`, `quiet`) need no linked decision. First complete the
    applicable [retention accounting](#artifact-placement-and-retention). It records the next step
    and this session in the shared store, releases your claim, and leaves status alone;
    `start` resumes it. A host pointer a live test repointed into the task's worktree (a

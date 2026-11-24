@@ -67,7 +67,18 @@ recovery guidance; native route qualification and activation remain separate.
 The owner uses `done`, `drop` or `park` to release. Parking does not change task
 status. Its required next step is an action, with `--waiting-on user|agent` and
 optional fixed-list reason: review, decision, approval, environment, dependency,
-session, capability or quiet. A capability park can escalate complexity. A quiet
+session, capability or quiet. Parking `--waiting-on user` with `--reason review`,
+`decision`, or `approval` requires linking an open named decision (`--decision
+<uuid>`) or opening one inline (`--decision-kind`, `--decision-origin`,
+`--decision-text`, plus artifact pin flags for `approval` or pinned `review`);
+the store records `decision_id` on the park entry. When that linked decision is
+answered or withdrawn on an open task, the answering host hands the park off to
+`waiting_on: agent` with the identical `next_step` and clears `decision_id`;
+other hosts derive and lazily repair the same handoff on read under lock without
+overwriting a newer park linked to a different decision. An accepted `drop`
+clears local claims and parks. Existing pre-Stage-B unlinked user request parks
+continue to appear in `list --pending` and drain normally on `start`/`done`.
+A capability park can escalate complexity. A quiet
 park requires `--minutes` and `--needs idle|headless`. `tasks quiet` reports those
 resume recipes. A quiet attempt records:
 

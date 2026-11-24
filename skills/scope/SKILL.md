@@ -39,7 +39,7 @@ A goal whose pieces live in other projects holds them as `depends`; rate its lea
 closeout, usually `--process direct`.
 
 Reviewed ideas and unassessed todo/blocked leaves stay out while they wait on an open
-`drop` decision (or legacy format-1 `proposal:` note, open/unresolved dependency, synced
+`drop` or `question` decision (or legacy format-1 `proposal:` note, open/unresolved dependency,
 `awaiting_user`, or future deferral). Incidental notes and attachments never clear named
 decisions or those waits. Todo/blocked rows leave after a re-scope sets process. Explicit ids bypass
 review-queue exclusion only: they must remain unclaimed ideas, shelves, or todo/blocked
@@ -212,9 +212,9 @@ overlaps; batch membership does not make the same unanswered question new work.
 |---|---|---|
 | `scoped` | Approach and context are established and correctness has a check | Rewrite the body to say why, done, and where to look; set `todo`, priority, size, complexity, and process by the tasks skill rubrics; decompose into children under that idea if needed |
 | `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed; make it depend on each follow-up that wakes it (§5). A brief that leaves nothing to wait on is not `briefed`: use `question` or `shelved` |
-| `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading; write the audit note with `--reviewed --awaiting-user` |
+| `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading if helpful and open a named `question` decision with `--scope-verdict` (use `--replace-awaiting-user` only when confirming conversion of a legacy format-1 `awaiting_user: true` idea) |
 | `shelved` | Worth keeping, but not worth reviewing now | Run `tasks -C <root> shelve <id> "<wake condition>" --defer 30d [--wake-on <id>]...` |
-| `drop` | It landed, its premise is gone, or another task covers it | Keep status; propose the drop with the supporting commit or id |
+| `drop` | It landed, its premise is gone, or another task covers it | Keep status; open a named `drop` decision with `--scope-verdict` citing the supporting commit or id |
 
 `scoped` is exceptional. Unknowns do not establish priority, make investigation
 automatically low complexity, or justify implementation tasks that disguise unresolved
@@ -226,8 +226,7 @@ from execution `depends`; never copy all execution dependencies into wake target
 If it should return to ordinary idea review, revalidate, then `tasks -C <root> unshelve
 <id>` before the scoped/briefed/question/drop-proposal procedure. This clears date and
 targets and preserves the dependencies and full history; it grants no execution permission.
-A pending user decision becomes an idea with a synced `--reviewed --awaiting-user`
-note. If the condition remains unmet or unknown, keep the full human condition and
+A pending user decision becomes an idea with a named `question` decision (opened with `--scope-verdict`). If the condition remains unmet or unknown, keep the full human condition and
 renew with an explicit future date and only remaining unresolved completion targets.
 Omitted targets are removed (targets dropped from `wake_on` stay linked as `related`);
 remove already-considered closed targets to acknowledge that evidence. For a manual/external
@@ -248,30 +247,36 @@ host, the owner's judgement), record it with `--need <name>` on the task you sco
 create. Never invent a name: an undeclared one is refused. Propose the vocabulary entry in
 the handoff brief instead.
 
-Every successfully processed member receives exactly one audit note. For `drop`, open a
-named decision and record the stamped scope verdict in one atomic write (generate one
-random lowercase UUIDv4 and reuse it on retry):
+Every successfully processed member receives exactly one audit note. For `drop` and
+`question`, open a named decision and record the stamped scope verdict in one atomic
+write (generate one random lowercase UUIDv4 and reuse it on retry):
 
-    tasks -C <root> decision open <id> --id <uuid> --kind drop --origin scope --text "<proposal text>" --scope-verdict "scope: drop; <what changed>[; origin: <stage outcomes>]"
+    tasks -C <root> decision open <id> --id <uuid> --kind drop|question --origin scope --text "<request text>" --scope-verdict "scope: drop|question; <what changed>[; origin: <stage outcomes>]"
 
-This marks an `idea` reviewed and leaves a `todo` or `blocked` leaf's status and process
-intact; incidental notes or attachments never clear the named decision. For `briefed` and
-`question`, set the review flag in the same write:
+Pass `--replace-awaiting-user` with `--kind question` only when confirming conversion of
+a legacy format-1 `awaiting_user: true` idea into a named question. This marks an `idea`
+reviewed and leaves a `todo` or `blocked` leaf's status and process intact; incidental
+notes or attachments never clear the named decision. For `briefed`, set the review flag
+in the same write:
 
-    tasks -C <root> note <id> --reviewed --stamp "scope: <verdict>; <what changed>[; origin: <stage outcomes>][; brief: <path>]"
+    tasks -C <root> note <id> --reviewed --stamp "scope: briefed; <what changed>[; origin: <stage outcomes>][; brief: <path>]"
 
-`question` adds `--awaiting-user` to that command. Write every scope and brief note with
-`--stamp`, so a later agent can find the session behind a requirement edit. For a woken
-or stranded idea, gather the closed follow-ups' outcomes as evidence (§2) before
-choosing; the new audit note re-stamps the review, so edges closed earlier stop counting
-as new. Whoever answers a named drop runs `tasks decision answer <id> <uuid> --accept "<text>" --seen-scope <token>` (dropping the task atomically) or `--decline "<text>"` (re-evaluating remaining holds); whoever answers a legacy format-1 question or proposal records it with `tasks note <id> --no-reviewed "<answer>"`, which readmits the idea with the answer.
+Write every scope and brief note with `--stamp`, so a later agent can find the session
+behind a requirement edit. For a woken or stranded idea, gather the closed follow-ups'
+outcomes as evidence (§2) before choosing; the new audit note re-stamps the review, so
+edges closed earlier stop counting as new. Whoever answers a named drop runs
+`tasks decision answer <id> <uuid> --accept "<text>" --seen-scope <token>` (dropping the
+task atomically) or `--decline "<text>"` (re-evaluating remaining holds); whoever answers
+a named question runs `tasks decision answer <id> <uuid> --reply "<answer>"`; whoever
+answers a legacy format-1 wait records it with `tasks note <id> --no-reviewed "<answer>"`,
+which readmits the idea with the answer.
 
 `scoped` and `shelved` change the status first, which clears the flag; their audit note
 is a `tasks note --stamp` without `--reviewed` (refused on a non-idea).
 
-Never write a legacy `proposal:` note for a new drop: use `tasks decision open --kind drop`
-instead. A shelf also retains the separate note written by `shelve`. Never execute `tasks
-drop` or add `--parallel`.
+Never write a legacy `proposal:` note or `--awaiting-user` flag for a new drop or
+question: use `tasks decision open --kind drop|question` instead. A shelf also retains
+the separate note written by `shelve`. Never execute `tasks drop` or add `--parallel`.
 
 ### Re-scope a scoped task
 
@@ -284,7 +289,7 @@ test the premises, not to do the task. Choose one verdict:
 |---|---|---|
 | `rescoped` | Premises hold, or the evidence establishes the replacement for a failed one, and work remains | Rewrite the body in its existing shape (why/done/where, or §5's five fields for research, `Ideas it wakes` intact): keep every fact, mark what is now established so the next session does not re-derive it, and narrow what remains; re-rate size, complexity and process; status unchanged; decompose as for `scoped` |
 | `confirmed` | Premises hold and nothing narrows | No body edit; set `--process` if it is missing |
-| `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply, including the `--reviewed` audit note |
+| `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply (`briefed` uses `--reviewed`; `question` opens a named `question` decision with `--scope-verdict`) |
 | `shelved` | As for an idea | As for an idea; `unshelve` returns it as an idea, so the wake condition says it was scoped |
 | `drop` | As for an idea | Status and process unchanged; open a named drop decision with `tasks -C <root> decision open <id> --id <uuid> --kind drop --origin scope --text "<proposal>" --scope-verdict "scope: drop; <what changed>[; origin: <stage outcomes>]"` |
 
