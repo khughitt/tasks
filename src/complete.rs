@@ -190,6 +190,11 @@ pub fn doc_kinds() -> Vec<CompletionCandidate> {
     )
 }
 
+/// The decision kinds accepted by Stage A `decision open --kind`.
+pub fn decision_kinds_stage_a() -> Vec<CompletionCandidate> {
+    plain(["drop", "suggestion"])
+}
+
 /// The keys `query::SortKey::parse` accepts.
 pub fn sorts() -> Vec<CompletionCandidate> {
     plain(["priority", "updated", "created"])

@@ -68,6 +68,8 @@ impl Output {
             Output::Export(o) => OutputMeta::plain(&o.warnings),
             Output::Next(o) => OutputMeta::priority(&o.warnings),
             Output::List(o) => OutputMeta::priority(&o.warnings),
+            Output::Pending(o) => OutputMeta::plain(&o.warnings),
+            Output::Decision(o) => OutputMeta::plain(&o.warnings),
             Output::Parked(o) => OutputMeta::themed(&o.warnings),
             Output::Quiet(o) => OutputMeta::priority(&o.warnings),
             Output::Goals(o) => OutputMeta::priority(&o.warnings),
@@ -161,6 +163,7 @@ pub fn defers_width_error(command: &Command) -> bool {
         | Command::Shelve { .. }
         | Command::Unshelve { .. }
         | Command::Dep { .. }
+        | Command::Decision { .. }
         | Command::Commit { .. }
         | Command::Feedback { .. } => false,
     }

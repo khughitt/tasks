@@ -287,7 +287,17 @@ fn actions_show_legacy_scope_and_sample_disagreement() {
         &["note", "aa-000003", "scope: followed proposal::pending"],
     );
     let show = env.json(&dir, &["show", "aa-000003"]);
-    assert_eq!(action(&show, "answer")["subject"]["note_index"], 2);
+    // Increment 2 deliberate delta (tasks-541cb1): an identifier mention like `proposal::pending`
+    // is not a dedicated `proposal:` verdict segment and produces no pending proposal or answer action.
+    assert!(
+        !show["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["action"] == "answer"),
+        "identifier proposal::pending must not produce an answer action: {show}"
+    );
+    assert_eq!(action(&show, "assess")["available"], true);
 }
 
 #[test]

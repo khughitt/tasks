@@ -101,6 +101,7 @@ pub(super) fn recorded_review_deps(
 pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result<Output> {
     let ListArgs {
         actions,
+        pending,
         plan,
         reference,
         statuses,
@@ -116,6 +117,9 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     } = args;
     let sort = SortKey::parse(&sort)?;
     let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
+    if pending {
+        return list_pending(ctx, filter, text.as_ref(), plan, reference, limit);
+    }
     if parked {
         let waiting_on = waiting_on.as_deref().map(WaitingOn::parse).transpose()?;
         return list_parked(
@@ -240,6 +244,204 @@ fn scan_for_listing(
         let (scan, claims) = ctx.scan_with_claims()?;
         Ok((scan, claims, crate::time::parse(&crate::time::now())?))
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn list_pending(
+    mut ctx: ReadCtx,
+    mut filter: TaskFilter,
+    text: Option<&TextQuery>,
+    plan: Option<String>,
+    reference: Option<String>,
+    limit: Option<usize>,
+) -> Result<Output> {
+    let (all, unsupported) = ctx.scope.scan_mixed()?;
+    let mut unavailable_set: BTreeSet<String> =
+        ctx.scope.unavailable_members().into_iter().collect();
+    for future in unsupported {
+        let prefix = ctx.registry.canonical_prefix(&future.id.prefix).to_string();
+        unavailable_set.insert(prefix);
+        let warning = future.warning();
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
+    let now = crate::time::parse(&crate::time::now())?;
+    let observed_at = crate::time::format(now);
+    let prefixes = ctx.scope.prefixes();
+    let claims = crate::claims::ClaimSnapshot::load_at(prefixes.iter(), now)?;
+    let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
+    check_parent(&filter, &all, |_| false)?;
+    filter.resolve_under(&hierarchy, &ctx.registry)?;
+    let deps = review_deps(&mut ctx, &all)?;
+
+    let matched: Vec<&Task> = all
+        .iter()
+        .filter(|task| {
+            task.status.is_open()
+                && plan
+                    .as_deref()
+                    .is_none_or(|wanted| task.plan.as_deref() == Some(wanted))
+                && reference
+                    .as_deref()
+                    .is_none_or(|r| task.refs.iter().any(|e| e.reference == r))
+                && filter.matches(&Fields::of_task(
+                    task,
+                    &hierarchy,
+                    &deps,
+                    &claims,
+                    &ctx.registry,
+                    now,
+                ))
+                && text.as_ref().is_none_or(|text| text.matches(task))
+        })
+        .collect();
+
+    let needs_dependents = matched
+        .iter()
+        .any(|task| !crate::decisions::actionable_open_decisions(task).is_empty());
+    let local_refs: Vec<&Project> = ctx.scope.projects().iter().collect();
+    let dependents = needs_dependents
+        .then(|| crate::decisions::DependentsIndex::build(&ctx.registry, &local_refs));
+
+    let mut items: Vec<crate::output::PendingItem> = Vec::new();
+    for task in matched {
+        let canonical = ctx.registry.canonical_id(&task.id);
+        let task_ref = crate::output::PendingTaskRef {
+            id: canonical.to_string(),
+            title: task.title.clone(),
+            status: task.status,
+            project: canonical.prefix.clone(),
+        };
+
+        // 1. Named open decisions (format 2+).
+        for (entry, data) in crate::decisions::actionable_open_decisions(task) {
+            let dep_idx = dependents
+                .as_ref()
+                .expect("built when open decisions exist");
+            let decision = crate::decisions::logical_decision(
+                task,
+                entry,
+                data,
+                &ctx.registry,
+                dep_idx,
+                &observed_at,
+            );
+            let opened_at = Some(entry.at.clone());
+            let age_seconds = crate::decisions::age_seconds(opened_at.as_deref(), now);
+            items.push(crate::output::PendingItem::Decision {
+                task: task_ref.clone(),
+                opened_at,
+                age_seconds,
+                decision: Box::new(decision),
+            });
+        }
+
+        // 2. Format-1 latest-note proposal segment.
+        if let Some(proposal) = crate::proposal::pending(task) {
+            let opened_at = task.notes.last().map(|n| n.at.clone());
+            let age_seconds = crate::decisions::age_seconds(opened_at.as_deref(), now);
+            items.push(crate::output::PendingItem::LegacyWait {
+                task: task_ref.clone(),
+                opened_at,
+                age_seconds,
+                source: "latest_note",
+                host: None,
+                reason: None,
+                text: Some(proposal.to_string()),
+            });
+        }
+
+        // 3. Format-1 awaiting_user flag.
+        if task.format == 1 && task.awaiting_user {
+            let (opened_at, question_text) = crate::decisions::awaiting_user_evidence(task);
+            let age_seconds = crate::decisions::age_seconds(opened_at.as_deref(), now);
+            items.push(crate::output::PendingItem::LegacyWait {
+                task: task_ref.clone(),
+                opened_at,
+                age_seconds,
+                source: "awaiting_user",
+                host: None,
+                reason: None,
+                text: question_text,
+            });
+        }
+
+        // 4. Unlinked user request parks (review, decision, approval).
+        if let Some(park) = claims.park(&task.id)
+            && park.waiting_on == WaitingOn::User
+            && let Some(reason) = park.reason
+            && matches!(
+                reason,
+                crate::claims::Reason::Review
+                    | crate::claims::Reason::Decision
+                    | crate::claims::Reason::Approval
+            )
+        {
+            let opened_at = Some(park.at.clone());
+            let age_seconds = crate::decisions::age_seconds(opened_at.as_deref(), now);
+            items.push(crate::output::PendingItem::LegacyWait {
+                task: task_ref.clone(),
+                opened_at,
+                age_seconds,
+                source: "park",
+                host: Some(park.host.clone()),
+                reason: Some(reason.as_str().to_string()),
+                text: Some(park.next_step.clone()),
+            });
+        }
+    }
+
+    // Sort oldest first (unknown timestamps last), then task id, discriminator,
+    // and decision UUID or (legacy source, host).
+    fn pending_sort_key(item: &crate::output::PendingItem) -> (bool, &str, &str, u8, &str, &str) {
+        match item {
+            crate::output::PendingItem::Decision {
+                task,
+                opened_at,
+                decision,
+                ..
+            } => (
+                opened_at.is_none(),
+                opened_at.as_deref().unwrap_or(""),
+                task.id.as_str(),
+                0u8,
+                decision.id.as_str(),
+                "",
+            ),
+            crate::output::PendingItem::LegacyWait {
+                task,
+                opened_at,
+                source,
+                host,
+                ..
+            } => (
+                opened_at.is_none(),
+                opened_at.as_deref().unwrap_or(""),
+                task.id.as_str(),
+                1u8,
+                *source,
+                host.as_deref().unwrap_or(""),
+            ),
+        }
+    }
+    items.sort_by(|a, b| pending_sort_key(a).cmp(&pending_sort_key(b)));
+
+    if let Some(limit) = limit {
+        items.truncate(limit);
+    }
+
+    let unavailable_projects: Vec<String> = unavailable_set.into_iter().collect();
+    let complete = unavailable_projects.is_empty();
+    Ok(Output::Pending(crate::output::PendingOut {
+        observed_at,
+        coverage: crate::output::PendingCoverage {
+            complete,
+            unavailable_projects,
+        },
+        items,
+        warnings: ctx.warnings,
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]

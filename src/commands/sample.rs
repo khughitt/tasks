@@ -63,6 +63,18 @@ pub fn sample(
                 .push(super::list::claim_omission(&task.id, claim));
             continue;
         }
+        let held_decisions = crate::decisions::holds_curate(task);
+        if !held_decisions.is_empty() {
+            for (_, data) in held_decisions {
+                let first_line = data.text.lines().next().unwrap_or("");
+                ctx.warnings.push(format!(
+                    "{} pending: [{}] {first_line}",
+                    task.id,
+                    data.kind.as_str()
+                ));
+            }
+            continue;
+        }
         if let Some(proposal) = crate::proposal::pending(task) {
             ctx.warnings
                 .push(format!("{} pending: {proposal}", task.id));

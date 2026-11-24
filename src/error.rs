@@ -59,6 +59,14 @@ pub enum Error {
         format: u32,
     },
     #[error("{0}")]
+    DecisionConflict(String),
+    #[error("{0}")]
+    DecisionHeld(String),
+    #[error("{0}")]
+    StaleScope(String),
+    #[error("{0}")]
+    DecisionNotFound(String),
+    #[error("{0}")]
     Validation(String),
     #[error("task {0} changed since it was read; refresh with tasks show --json")]
     TaskRevisionMismatch(String),
@@ -217,6 +225,10 @@ impl Error {
                     format,
                 }
             }
+            Error::DecisionConflict(detail) => Error::DecisionConflict(detail + suffix),
+            Error::DecisionHeld(detail) => Error::DecisionHeld(detail + suffix),
+            Error::StaleScope(detail) => Error::StaleScope(detail + suffix),
+            Error::DecisionNotFound(detail) => Error::DecisionNotFound(detail + suffix),
             Error::ClaimFenceRefused(detail) => Error::ClaimFenceRefused(detail + suffix),
             Error::Validation(detail) => Error::Validation(detail + suffix),
             error @ (Error::TaskRevisionMismatch(_) | Error::TaskChildrenRevisionMismatch(_)) => {
@@ -341,6 +353,10 @@ impl Error {
             Error::InvalidId(..) => "invalid_id",
             Error::Parse { .. } => "parse",
             Error::UnsupportedRecordVersion { .. } => "unsupported_record_version",
+            Error::DecisionConflict(_) => "decision_conflict",
+            Error::DecisionHeld(_) => "decision_held",
+            Error::StaleScope(_) => "stale_scope",
+            Error::DecisionNotFound(_) => "decision_not_found",
             Error::ClaimFenceRefused(_) => "claim_fence_refused",
             Error::Validation(_) => "validation",
             Error::TaskRevisionMismatch(_) => "task_revision_mismatch",

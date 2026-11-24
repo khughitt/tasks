@@ -11,6 +11,7 @@ mod commands;
 mod complete;
 mod complexity;
 mod config;
+mod decisions;
 mod defer;
 mod dependency;
 mod doc_fetch;

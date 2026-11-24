@@ -649,6 +649,11 @@ pub struct ActionEvidence {
 #[derive(Clone, Serialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum AnswerSubject {
+    Decision {
+        task: TaskId,
+        entry: String,
+        kind: crate::entries::DecisionKind,
+    },
     LatestNote {
         task: TaskId,
         note_index: usize,
@@ -662,6 +667,104 @@ pub enum AnswerSubject {
         at: String,
         next_step: String,
     },
+}
+
+#[derive(Clone, Serialize)]
+pub struct LogicalResolution {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub entry_type: &'static str,
+    pub at: String,
+    pub by: String,
+    pub subject: crate::entries::Subject,
+    pub data: crate::entries::ResolutionData,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::model::HarnessProvenance>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct OpenDependentRow {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct OpenDependentsOut {
+    pub tasks: Vec<OpenDependentRow>,
+    pub complete: bool,
+    pub unavailable_projects: Vec<String>,
+    pub observed_at: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct LogicalDecision {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub entry_type: &'static str,
+    pub at: String,
+    pub by: String,
+    pub subject: crate::entries::Subject,
+    pub data: crate::entries::DecisionData,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::model::HarnessProvenance>,
+    pub state: &'static str,
+    pub resolution: Option<LogicalResolution>,
+    pub seen_scope: Option<String>,
+    pub scope_changed_since_open: Option<bool>,
+    pub open_dependents: OpenDependentsOut,
+}
+
+#[derive(Serialize)]
+pub struct DecisionOut {
+    pub id: String,
+    pub action: &'static str,
+    pub replayed: bool,
+    pub decision: LogicalDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<LogicalResolution>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct PendingCoverage {
+    pub complete: bool,
+    pub unavailable_projects: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct PendingTaskRef {
+    pub id: String,
+    pub title: String,
+    pub status: Status,
+    pub project: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PendingItem {
+    Decision {
+        task: PendingTaskRef,
+        opened_at: Option<String>,
+        age_seconds: Option<u64>,
+        decision: Box<LogicalDecision>,
+    },
+    LegacyWait {
+        task: PendingTaskRef,
+        opened_at: Option<String>,
+        age_seconds: Option<u64>,
+        source: &'static str,
+        host: Option<String>,
+        reason: Option<String>,
+        text: Option<String>,
+    },
+}
+
+#[derive(Serialize)]
+pub struct PendingOut {
+    pub observed_at: String,
+    pub coverage: PendingCoverage,
+    pub items: Vec<PendingItem>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -735,6 +838,8 @@ pub struct ShowFields {
     pub multipart: Vec<MultipartOut>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inventory: Vec<InventoryRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<LogicalDecision>,
 }
 
 #[derive(Serialize)]
@@ -1480,6 +1585,8 @@ pub enum Output {
     Export(ExportOut),
     Next(Box<NextOut>),
     List(ListOut),
+    Pending(PendingOut),
+    Decision(Box<DecisionOut>),
     Parked(ParkedOut),
     Quiet(QuietOut),
     Goals(GoalsOut),

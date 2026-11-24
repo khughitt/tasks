@@ -215,6 +215,48 @@ summary = "Reconcile pending lifecycle operations while preserving custody"
 args = [{ name = "coordinator", value = "ref", required = true }]
 options = [{ names = ["--request"], value = "path", required = true }]
 
+[[cli.tasks.commands]]
+path = ["decision"]
+summary = "Open, answer, or withdraw named human decisions on a task"
+
+[[cli.tasks.commands]]
+path = ["decision", "open"]
+summary = "Open a named human decision on a task"
+args = [{ name = "task", value = "ref", required = true }]
+options = [
+  { names = ["--id"], value = "string" },
+  { names = ["--kind"], value = "enum", values = ["drop", "suggestion"], required = true },
+  { names = ["--origin"], value = "string", required = true },
+  { names = ["--text"], value = "string", required = true },
+  { names = ["--scope-verdict"], value = "string" },
+  { shared = "by", role = "set", value = "string", repeatable = false },
+  { names = ["--source"], value = "string" },
+  { names = ["--opened-at"], value = "string" },
+  { names = ["--opening-scope"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["decision", "answer"]
+summary = "Answer an open human decision on a task"
+args = [{ name = "task", value = "ref", required = true }, { name = "decision", value = "string", required = true }]
+options = [
+  { names = ["--accept"], value = "string" },
+  { names = ["--decline"], value = "string" },
+  { names = ["--seen-scope"], value = "string" },
+  { shared = "by", role = "set", value = "string", repeatable = false },
+  { names = ["--source"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["decision", "withdraw"]
+summary = "Withdraw an open human decision on a task"
+args = [{ name = "task", value = "ref", required = true }, { name = "decision", value = "string", required = true }]
+options = [
+  { names = ["--reason"], value = "string", required = true },
+  { shared = "by", role = "set", value = "string", repeatable = false },
+  { names = ["--source"], value = "string" },
+]
+
 [cli.mindful]
 project = "mind6"
 tier = "typed"
@@ -508,6 +550,7 @@ options = [
   { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { names = ["--needs-review"], value = "none" },
+  { names = ["--pending"], value = "none" },
   { names = ["--actions"], value = "none" },
   { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
   { shared = "reverse", value = "none" },
@@ -542,6 +585,7 @@ options = [
   { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { names = ["--needs-review"], value = "none" },
+  { names = ["--pending"], value = "none" },
   { names = ["--actions"], value = "none" },
   { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
   { shared = "reverse", value = "none" },

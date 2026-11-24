@@ -117,6 +117,25 @@ impl<'a> Actions<'a> {
             _ => {}
         }
         if task.status.is_open() {
+            for (entry, data) in crate::decisions::actionable_open_decisions(task) {
+                let mut signals = Vec::new();
+                if let crate::entries::Subject::Scope(scope) = &entry.subject
+                    && let Some(open_hash) = scope.scope.as_deref()
+                    && open_hash != crate::decisions::task_scope_fingerprint(task)
+                {
+                    signals.push(evidence(
+                        "scope_changed_since_open",
+                        json!({"entry": entry.id, "task": id}),
+                    ));
+                }
+                let mut act = explanation(ActionKind::Answer, vec![], signals);
+                act.subject = Some(AnswerSubject::Decision {
+                    task: id.clone(),
+                    entry: entry.id.clone(),
+                    kind: data.kind,
+                });
+                actions.push(act);
+            }
             if proposal.is_some() {
                 actions.push(answer(AnswerSubject::LatestNote {
                     task: id.clone(),
@@ -255,6 +274,15 @@ impl<'a> Actions<'a> {
         claim: Option<&ActionEvidence>,
     ) -> Vec<ActionEvidence> {
         let mut reasons = self.dependency_reasons(&task.depends);
+        for (entry, _) in crate::decisions::actionable_open_decisions(task)
+            .into_iter()
+            .filter(|(_, data)| data.kind == crate::entries::DecisionKind::Drop)
+        {
+            reasons.push(evidence(
+                "decision_open",
+                json!({"entry": entry.id, "kind": "drop", "task": id}),
+            ));
+        }
         if goal {
             reasons.push(evidence("goal", json!({"task":id})));
         }
@@ -380,6 +408,12 @@ impl<'a> Actions<'a> {
     ) -> ActionExplanation {
         let mut reasons = Vec::new();
         if review.is_none() {
+            for (entry, data) in crate::decisions::holds_assess(task) {
+                reasons.push(evidence(
+                    "decision_open",
+                    json!({"entry": entry.id, "kind": data.kind.as_str(), "task": id}),
+                ));
+            }
             if task.status == Status::Idea {
                 reasons.extend(self.dependency_reasons(&task.depends));
                 reasons.extend(self.deferred(task));
@@ -470,6 +504,12 @@ impl<'a> Actions<'a> {
                 json!({"detail":error.to_string()}),
             )),
         }
+        for (entry, data) in crate::decisions::holds_curate(task) {
+            reasons.push(evidence(
+                "decision_open",
+                json!({"entry": entry.id, "kind": data.kind.as_str(), "task": task.id}),
+            ));
+        }
         if let Some(proposal) = proposal {
             reasons.push(evidence("decision_open", proposal.clone()));
         }
@@ -540,11 +580,18 @@ fn explanation(
 ) -> ActionExplanation {
     for facts in [&mut reasons, &mut signals] {
         facts.sort_by(|a, b| {
-            a.code.cmp(b.code).then_with(|| {
-                a.evidence["task"]
-                    .as_str()
-                    .cmp(&b.evidence["task"].as_str())
-            })
+            a.code
+                .cmp(b.code)
+                .then_with(|| {
+                    a.evidence["entry"]
+                        .as_str()
+                        .cmp(&b.evidence["entry"].as_str())
+                })
+                .then_with(|| {
+                    a.evidence["task"]
+                        .as_str()
+                        .cmp(&b.evidence["task"].as_str())
+                })
         });
         facts.dedup_by(|a, b| a.code == b.code && a.evidence == b.evidence);
     }

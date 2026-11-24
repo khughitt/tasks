@@ -156,7 +156,11 @@ pub fn readiness(
     lookup: &dyn Fn(&TaskId) -> Option<bool>,
     now: OffsetDateTime,
 ) -> Readiness {
-    if !is_candidate(task, now) || goal || !task.depends.iter().all(|d| lookup(d) == Some(true)) {
+    if !is_candidate(task, now)
+        || goal
+        || crate::decisions::holds_execution(task).is_some()
+        || !task.depends.iter().all(|d| lookup(d) == Some(true))
+    {
         Readiness::Not
     } else if is_actionable(task, now) {
         Readiness::Ready

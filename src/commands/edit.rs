@@ -444,6 +444,14 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     }
     if let Some(status) = args.status {
         let to = Status::parse(&status)?;
+        if to == Status::Doing
+            && let Some((entry, _)) = crate::decisions::holds_execution(&task)
+        {
+            return Err(Error::DecisionHeld(format!(
+                "{} has open drop decision {}; answer or withdraw it before starting",
+                task.id, entry.id
+            )));
+        }
         if to == task.status {
             ctx.refuse_foreign_claim(&task.id, to != Status::Doing)?;
             ctx.preserve_claim_store(&task.id);

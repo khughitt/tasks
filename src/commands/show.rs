@@ -431,8 +431,16 @@ pub fn describe(
         .into_iter()
         .filter_map(|(prefix, color)| color.map(|color| (prefix, color)))
         .collect();
+    let decisions = if task.entries.iter().any(|e| e.as_decision().is_some()) {
+        let observed_at = crate::time::format(now);
+        let dependents = crate::decisions::DependentsIndex::build(registry, &[project]);
+        crate::decisions::logical_decisions(&task, registry, &dependents, &observed_at)
+    } else {
+        Vec::new()
+    };
     Ok(ShowFields {
         actions: None,
+        decisions,
         task_revision,
         needs_review: review_reason.is_some(),
         review_reason,

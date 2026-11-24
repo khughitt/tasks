@@ -141,6 +141,9 @@ pub struct ListArgs {
     /// Include a read-only explanation of available actions on each task.
     #[arg(long)]
     pub actions: bool,
+    /// Only pending human decisions and legacy human waits, oldest first.
+    #[arg(long, conflicts_with_all = ["sort", "reverse", "parked", "waiting_on", "periodic", "deferred", "actions"])]
+    pub pending: bool,
     /// Only tasks with an entry whose stored reference exactly matches this value.
     #[arg(long = "ref")]
     pub reference: Option<String>,
@@ -546,6 +549,11 @@ pub enum Command {
     Retained {
         #[command(subcommand)]
         action: RetainedAction,
+    },
+    /// Open, answer, or withdraw named human decisions on a task.
+    Decision {
+        #[command(subcommand)]
+        action: DecisionAction,
     },
     /// Initialize tasks/ in this repository and register it.
     Init {
@@ -1379,6 +1387,87 @@ pub enum RetainedAction {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum DecisionAction {
+    /// Open a named human decision on a task.
+    Open {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        task: String,
+        /// Caller-generated lowercase UUIDv4; omit to generate one.
+        #[arg(long, value_name = "UUID")]
+        id: Option<String>,
+        /// Decision kind: drop or suggestion.
+        #[arg(
+            long,
+            value_name = "KIND",
+            add = ArgValueCandidates::new(crate::complete::decision_kinds_stage_a),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        kind: String,
+        /// Workflow or tool opening the decision (e.g. scope, curate, workflow).
+        #[arg(long, value_name = "ORIGIN")]
+        origin: String,
+        /// Human-facing proposal text.
+        #[arg(long, value_name = "TEXT")]
+        text: String,
+        /// Append a stamped scope verdict note and update idea review metadata in the same save.
+        #[arg(long, value_name = "TEXT")]
+        scope_verdict: Option<String>,
+        /// Actor opening or attributed to the decision; defaults to configured owner when direct.
+        #[arg(long, value_name = "ACTOR")]
+        by: Option<String>,
+        /// Original source citation for relayed or historical opens; requires explicit --by.
+        #[arg(long, value_name = "SOURCE")]
+        source: Option<String>,
+        /// Historical opening timestamp (RFC 3339 UTC); requires both --by and --source.
+        #[arg(long, value_name = "AT")]
+        opened_at: Option<String>,
+        /// Evidenced historical scope digest; only valid with --opened-at.
+        #[arg(long, value_name = "DIGEST")]
+        opening_scope: Option<String>,
+    },
+    /// Answer an open human decision on a task.
+    #[command(group(clap::ArgGroup::new("answer_outcome").args(["accept", "decline"]).required(true)))]
+    Answer {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        task: String,
+        #[arg(value_name = "UUID")]
+        decision: String,
+        /// Accept the decision with the human's answer text.
+        #[arg(long, value_name = "TEXT", conflicts_with = "decline")]
+        accept: Option<String>,
+        /// Decline the decision with the human's answer text.
+        #[arg(long, value_name = "TEXT", conflicts_with = "accept")]
+        decline: Option<String>,
+        /// Displayed current scope fingerprint binding drop acceptance to what the human saw.
+        #[arg(long, value_name = "TOKEN")]
+        seen_scope: Option<String>,
+        /// Respondent; defaults to configured owner when direct.
+        #[arg(long, value_name = "ACTOR")]
+        by: Option<String>,
+        /// Original source citation for relayed answers; requires explicit --by.
+        #[arg(long, value_name = "SOURCE")]
+        source: Option<String>,
+    },
+    /// Withdraw an open human decision on a task.
+    Withdraw {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        task: String,
+        #[arg(value_name = "UUID")]
+        decision: String,
+        /// Reason for withdrawing the decision.
+        #[arg(long, value_name = "TEXT")]
+        reason: String,
+        /// Actor withdrawing the decision; defaults to configured owner when direct.
+        #[arg(long, value_name = "ACTOR")]
+        by: Option<String>,
+        /// Original source citation for relayed withdrawals; requires explicit --by.
+        #[arg(long, value_name = "SOURCE")]
+        source: Option<String>,
+    },
+}
+
 impl Command {
     /// The verb a record commit names for this command, or `None` for a command that never
     /// writes a record (docs/project-operations.md). `init`, `rename`, `retire`, `unretire` and
@@ -1389,6 +1478,7 @@ impl Command {
                 action: RetainedAction::State { .. },
             } => return None,
             Command::Retained { .. } => "retained",
+            Command::Decision { .. } => "decision",
             Command::Add { .. } => "add",
             Command::Edit { .. } => "edit",
             Command::Note { .. } => "note",

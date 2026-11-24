@@ -558,6 +558,106 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             append_actions(&mut rendered, o.tasks.iter().map(|row| (row.id.as_str(), row.actions.as_deref())), painter, layout);
             rendered
         }
+        Output::Pending(o) => {
+            let mut lines = Vec::new();
+            if !o.coverage.complete {
+                let suffix = if o.coverage.unavailable_projects.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (unavailable projects: {})",
+                        o.coverage.unavailable_projects.join(", ")
+                    )
+                };
+                lines.push(format!("coverage incomplete{suffix}"));
+            }
+            if o.items.is_empty() {
+                lines.push("no pending decisions".into());
+            } else {
+                for item in &o.items {
+                    match item {
+                        super::contract::PendingItem::Decision {
+                            task,
+                            opened_at,
+                            decision,
+                            ..
+                        } => {
+                            let when = opened_at.as_deref().unwrap_or("-");
+                            let summary = decision.data.text.lines().next().unwrap_or("");
+                            let mut tags = Vec::new();
+                            if decision.scope_changed_since_open == Some(true) {
+                                tags.push("scope changed".to_string());
+                            }
+                            if !decision.open_dependents.tasks.is_empty() {
+                                tags.push(format!(
+                                    "{} open dep(s)",
+                                    decision.open_dependents.tasks.len()
+                                ));
+                            } else if !decision.open_dependents.complete {
+                                tags.push("deps incomplete".to_string());
+                            }
+                            if let Some(seen) = &decision.seen_scope {
+                                tags.push(format!("scope:{}", &seen[..seen.len().min(12)]));
+                            }
+                            let meta = if tags.is_empty() {
+                                String::new()
+                            } else {
+                                format!("  [{}]", tags.join(", "))
+                            };
+                            lines.push(format!(
+                                "{}  {}  {}  {}{}  {}  {}",
+                                task.id,
+                                decision.data.kind.as_str(),
+                                decision.id,
+                                when,
+                                meta,
+                                task.title,
+                                summary
+                            ));
+                        }
+                        super::contract::PendingItem::LegacyWait {
+                            task,
+                            opened_at,
+                            source,
+                            host,
+                            reason,
+                            text,
+                            ..
+                        } => {
+                            let when = opened_at.as_deref().unwrap_or("-");
+                            let summary = text
+                                .as_deref()
+                                .and_then(|s| s.lines().next())
+                                .unwrap_or("-");
+                            let mut label = format!("legacy:{source}");
+                            if let Some(reason) = reason.as_deref().filter(|r| !r.is_empty()) {
+                                label.push('/');
+                                label.push_str(reason);
+                            }
+                            if let Some(host) = host.as_deref().filter(|h| !h.is_empty()) {
+                                label.push('@');
+                                label.push_str(host);
+                            }
+                            lines.push(format!(
+                                "{}  {}  -  {}  {}  {}",
+                                task.id, label, when, task.title, summary
+                            ));
+                        }
+                    }
+                }
+            }
+            lines.join("\n")
+        }
+        Output::Decision(o) => {
+            let replay = if o.replayed { " (replayed)" } else { "" };
+            format!(
+                "{} {} {} [{}]{replay}",
+                o.action,
+                o.decision.id,
+                o.id,
+                o.decision.data.kind.as_str()
+            )
+        }
         Output::Parked(o) => {
             let mut rendered = parked_table(
                 &o.tasks,

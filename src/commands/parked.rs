@@ -341,6 +341,7 @@ pub fn candidates(
         let canonical = ctx.registry.canonical_id(&task.id);
         if park.waiting_on != WaitingOn::Agent
             || !resumable_lifecycle(task)
+            || crate::decisions::holds_execution(task).is_some()
             || crate::hierarchy::is_goal(task, hierarchy.child_count(&canonical) > 0)
         {
             continue;

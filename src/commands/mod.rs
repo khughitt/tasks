@@ -8,6 +8,7 @@ pub mod check;
 pub mod claims;
 pub mod commit;
 mod context;
+pub mod decision;
 pub mod dep;
 pub mod doc;
 pub mod docs;
@@ -85,6 +86,7 @@ fn dispatch(
             "hook invocation missed protocol entry".into(),
         )),
         Command::Retained { action } => retained::dispatch(dir, action, host.clone()),
+        Command::Decision { action } => decision::dispatch(dir, action, host.clone()),
         Command::Attachments { paths } => attachments::run(dir, paths),
         Command::Init {
             prefix,

@@ -21,6 +21,12 @@ pub fn start(
     } else {
         load(&mut ctx, &id)?
     };
+    if let Some((entry, _)) = crate::decisions::holds_execution(&task) {
+        return Err(Error::DecisionHeld(format!(
+            "{} has open drop decision {}; answer or withdraw it before starting",
+            task.id, entry.id
+        )));
+    }
     if task.status == Status::Shelved {
         return Err(Error::InvalidTransition(
             "shelved".into(),

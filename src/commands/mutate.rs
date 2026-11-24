@@ -567,6 +567,14 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         ));
         ctx.recovered = true;
     }
+    if to == Status::Doing
+        && let Some((entry, _)) = crate::decisions::holds_execution(task)
+    {
+        return Err(Error::DecisionHeld(format!(
+            "{} has open drop decision {}; answer or withdraw it before starting",
+            task.id, entry.id
+        )));
+    }
     // Guard before the dependency and descendant checks, so a session that no longer holds
     // the task is told *that* rather than something incidental.
     ctx.claim_guard(&task.id, to, force)?;

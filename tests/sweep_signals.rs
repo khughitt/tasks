@@ -1048,13 +1048,15 @@ fn sweep_signals_action_evidence() {
             .iter()
             .map(|r| r["code"].as_str().unwrap())
             .collect();
-        if id == &pending || id == &identifier {
+        if id == &pending {
             assert_eq!(codes, ["decision_open"]);
             assert_eq!(curate["reasons"][0]["evidence"]["source"], "latest_note");
             assert_eq!(curate["reasons"][0]["evidence"]["note_index"], 1);
         } else if id == &recent {
             assert_eq!(codes, ["sample_recent"]);
         } else {
+            // Increment 2 deliberate delta (tasks-541cb1): `scope: inspect proposal::pending`
+            // is an ordinary identifier mention, not a dedicated `proposal:` segment.
             assert_eq!(curate["available"], true);
         }
     }

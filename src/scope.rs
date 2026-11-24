@@ -335,6 +335,27 @@ impl Scope {
             .collect()
     }
 
+    /// Canonical prefixes requested by this scope that were unreachable when opened.
+    pub fn unavailable_members(&self) -> Vec<String> {
+        match self {
+            Scope::Local(_) => Vec::new(),
+            Scope::All {
+                projects, members, ..
+            } => {
+                let reachable: std::collections::BTreeSet<&str> =
+                    projects.iter().map(|p| p.prefix.as_str()).collect();
+                let mut missing: Vec<String> = members
+                    .iter()
+                    .filter(|m| !reachable.contains(m.as_str()))
+                    .cloned()
+                    .collect();
+                missing.sort();
+                missing.dedup();
+                missing
+            }
+        }
+    }
+
     /// The union of every project's supported tasks plus intact future-format envelopes.
     pub fn scan_mixed(&self) -> Result<(Vec<Task>, Vec<crate::entries::FutureRecord>)> {
         let mut all = Vec::new();

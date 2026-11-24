@@ -108,6 +108,11 @@ pub fn state(
     deps: &Deps,
     now: OffsetDateTime,
 ) -> Option<ReviewReason> {
+    if matches!(task.status, Status::Idea | Status::Todo | Status::Blocked)
+        && !crate::decisions::holds_assess(task).is_empty()
+    {
+        return None;
+    }
     match task.status {
         Status::Idea if !task.reviewed => Some(ReviewReason::Unreviewed),
         Status::Idea if waits(task, deps, now) => None,
@@ -327,6 +332,16 @@ pub fn apply(
             "{} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope",
             task.id
         ));
+    } else if review == Review::Keep && awaiting == Awaiting::Keep {
+        let holding = crate::decisions::holds_assess(task);
+        if !holding.is_empty() {
+            let ids: Vec<&str> = holding.iter().map(|(e, _)| e.id.as_str()).collect();
+            warnings.push(format!(
+                "{} stays held from scope by open decision(s): {}",
+                task.id,
+                ids.join(", ")
+            ));
+        }
     }
     Ok(())
 }

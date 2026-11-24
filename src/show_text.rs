@@ -128,6 +128,9 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
     if let Some(escalation) = &o.escalation {
         sections.push(escalated(escalation, painter, width));
     }
+    if !o.decisions.is_empty() {
+        sections.push(decisions(&o.decisions, painter, width));
+    }
     if let Some(actions) = o.actions.as_ref().filter(|actions| !actions.is_empty()) {
         sections.push(format!(
             "{}{}",
@@ -444,6 +447,65 @@ fn escalated(escalation: &Escalation, painter: &Painter, width: Option<usize>) -
         painter,
         width,
     ));
+    rendered
+}
+
+fn decisions(
+    items: &[crate::output::LogicalDecision],
+    painter: &Painter,
+    width: Option<usize>,
+) -> String {
+    let mut rendered = present::rule("decisions", painter, width.unwrap_or(MEASURE));
+    for d in items {
+        let mut head = format!(
+            "[{}] {} {} ({} by {} at {})",
+            d.state,
+            d.data.kind.as_str(),
+            d.id,
+            d.data.origin,
+            d.by,
+            d.at
+        );
+        if d.scope_changed_since_open == Some(true) {
+            head.push_str("  [scope changed]");
+        }
+        if !d.open_dependents.tasks.is_empty() {
+            head.push_str(&format!(
+                "  [{} open dep(s)]",
+                d.open_dependents.tasks.len()
+            ));
+        } else if !d.open_dependents.complete {
+            head.push_str("  [dependents coverage incomplete]");
+        }
+        if let Some(seen) = &d.seen_scope {
+            let short = &seen[..seen.len().min(12)];
+            head.push_str(&format!("  scope:{short}"));
+        }
+        rendered.push_str(&block("  ", 2, &[(&head, None)], 4, painter, width));
+        for line in d.data.text.lines() {
+            rendered.push_str(&block("    ", 4, &[(line, None)], 4, painter, width));
+        }
+        if let Some(res) = &d.resolution {
+            let mut rline = format!(
+                "resolved: {} by {} at {}",
+                res.data.outcome.as_str(),
+                res.by,
+                res.at
+            );
+            if !res.data.text.is_empty() {
+                rline.push_str(" — ");
+                rline.push_str(&res.data.text);
+            }
+            rendered.push_str(&block(
+                "    ",
+                4,
+                &[(&rline, Some(Style::Chrome))],
+                4,
+                painter,
+                width,
+            ));
+        }
+    }
     rendered
 }
 
@@ -927,6 +989,7 @@ mod tests {
             files: vec![],
             multipart: vec![],
             inventory: vec![],
+            decisions: vec![],
         }
     }
 
