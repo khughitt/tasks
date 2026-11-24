@@ -24,7 +24,7 @@ import sys
 
 COLUMNS = (
     "id status updated reviewed awaiting_user deferred_until parked dead_paths cited_closed "
-    "deps_closed touched_commits twins triggers cluster verdict action evidence decided"
+    "deps_closed touched_commits twins triggers action_evidence cluster verdict action evidence decided"
 ).split()
 POOL = {"idea", "todo", "blocked"}
 ALL_STATUSES = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"]
@@ -279,6 +279,9 @@ def sweep(args):
     for row in pool:
         cmd, task = s.tasks_json("show", row["id"], "--no-fetch")
         with expect_shape(cmd):
+            actions = task["actions"]
+            if not isinstance(actions, list) or any(not isinstance(item, dict) for item in actions):
+                raise TypeError("actions must be a list of objects")
             detail = task["task"]
             if not isinstance(detail, dict):
                 raise TypeError("task must be an object")
@@ -311,7 +314,7 @@ def sweep(args):
         for pfx, _ in cites:
             if pfx != prefix:
                 foreign_prefixes.add(pfx)
-        loaded_pool.append((row, text, promoted, parent_id, dep_rows, cites))
+        loaded_pool.append((row, text, promoted, parent_id, dep_rows, cites, actions))
 
     known_prefixes = {prefix: prefix}
     if foreign_prefixes:
@@ -347,7 +350,7 @@ def sweep(args):
         return None
 
     results = []
-    for row, text, promoted, parent_id, dep_rows, cites in loaded_pool:
+    for row, text, promoted, parent_id, dep_rows, cites, actions in loaded_pool:
         prose_slash = {p for p in named_paths(text) if p.split("/")[0] in top}
         prose_roots = named_root_files(text, root_files)
         dead_set, existing_set = set(), set()
@@ -406,6 +409,7 @@ def sweep(args):
         results.append({
             "row": row, "parent": parent_id, "dead": dead, "cited": sorted(cited),
             "deps_closed": deps_closed, "touched": touched, "words": words(row["title"]),
+            "action_evidence": json.dumps(actions, separators=(",", ":")),
         })
 
     out = [COLUMNS]
@@ -427,7 +431,7 @@ def sweep(args):
             flag(row.get("awaiting_user")), until if isinstance(until, str) else "",
             flag(row.get("park")), ",".join(r["dead"]), ",".join(r["cited"]),
             flag(r["deps_closed"]), str(r["touched"]), ",".join(twins), str(triggers),
-            "", "", "", "", "",
+            r["action_evidence"], "", "", "", "", "",
         ])
     return "".join("\t".join(line) + "\n" for line in out)
 

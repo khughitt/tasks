@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 const COLUMNS: &str = "id status updated reviewed awaiting_user deferred_until parked \
-    dead_paths cited_closed deps_closed touched_commits twins triggers cluster verdict \
+    dead_paths cited_closed deps_closed touched_commits twins triggers action_evidence cluster verdict \
     action evidence decided";
 
 type Row = HashMap<String, String>;
@@ -1002,4 +1002,60 @@ fn sweep_signals_foreign_citation_ignores_missing_root_and_fails_on_corrupt_reco
     assert!(stderr.starts_with("sweep-signals:"), "{stderr}");
     assert!(stderr.contains("show"), "{stderr}");
     assert!(!stderr.contains("Traceback"), "{stderr}");
+}
+
+#[test]
+fn sweep_signals_action_evidence() {
+    use serde_json::{Value, json};
+
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let pending = add(&env, &dir, "Pending verdict", "details");
+    let recent = add(&env, &dir, "Recently touched", "details");
+    let control = add(&env, &dir, "Eligible control", "details");
+    let identifier = add(&env, &dir, "Identifier case", "details");
+    env.json(
+        &dir,
+        &["note", &pending, "scope: drop; proposal: keep or drop"],
+    );
+    env.json(
+        &dir,
+        &["note", &identifier, "scope: inspect proposal::pending"],
+    );
+    for id in [&pending, &control, &identifier] {
+        backdate(&dir, id);
+    }
+    let (code, rows, stderr) = ledger(&env, &dir);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(rows.len(), 4, "sample holds leave tasks in the sweep pool");
+    for id in [&pending, &recent, &control, &identifier] {
+        let cell = row(&rows, id)
+            .get("action_evidence")
+            .expect("missing ledger evidence");
+        let actions: Value = serde_json::from_str(cell).unwrap();
+        let detail = env.json(&dir, &["show", id, "--no-fetch"]);
+        assert_eq!(actions, detail["actions"]);
+        let curate = actions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["action"] == "curate")
+            .unwrap();
+        assert_eq!(curate["window"], json!({"older_than_days":7}));
+        let codes: Vec<_> = curate["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["code"].as_str().unwrap())
+            .collect();
+        if id == &pending || id == &identifier {
+            assert_eq!(codes, ["decision_open"]);
+            assert_eq!(curate["reasons"][0]["evidence"]["source"], "latest_note");
+            assert_eq!(curate["reasons"][0]["evidence"]["note_index"], 1);
+        } else if id == &recent {
+            assert_eq!(codes, ["sample_recent"]);
+        } else {
+            assert_eq!(curate["available"], true);
+        }
+    }
 }

@@ -113,7 +113,7 @@ Record that pre-run stamp on the sweep task; the report and a resumed session re
 
 ### The ledger's columns
 
-The script fills the first thirteen columns; the controller fills the last five:
+The script fills the first fourteen columns. The controller fills the last five.
 
 | Column | Meaning |
 |---|---|
@@ -125,6 +125,7 @@ The script fills the first thirteen columns; the controller fills the last five:
 | `touched_commits` | commits in the code checkout since `updated` that touch an existing path from `dead_paths`'s sources or an existing checkout root file named in `title`/`body` (orders clusters; never a trigger) |
 | `twins` | other pool tasks, excluding direct parent-child pairs, whose titles share at least 0.4 of their words (a hint for clustering) |
 | `triggers` | how many of `dead_paths`, `cited_closed`, `deps_closed` fired |
+| `action_evidence` | the read-only `actions` array from the same `show --no-fetch`, encoded as one TSV-safe JSON cell |
 | `cluster` | the cluster label, written at clustering |
 | `verdict` | one of `keep`, `refined`, `stale`, `duplicate`, `decision`, `decompose`, `skipped`, `left`, `pending`, `unwritten` |
 | `action` | one of `none`, `edited`, `closed`, `proposed` |
@@ -135,8 +136,8 @@ Signals are hints and their absence clears nothing. No task is closed, or skippe
 a signal alone.
 
 The controller is the ledger's only writer. It rewrites the file in place, keeps the
-header and the first thirteen columns as the script printed them, and replaces any tab
-or newline in a value with a space. The snapshot stamp is for coverage only: a pool
+header and the script-filled columns as printed, and replaces any tab or newline
+in a controller-written value with a space. Read columns by their header names. The snapshot stamp is for coverage only: a pool
 task that has changed since is read as it is now.
 
 The next sweep: set against this ledger, a later sweep's pool shows which tasks are
@@ -207,7 +208,7 @@ The worker brief gives:
   [Rows that left the pool](#rows-that-left-the-pool).
 
 The worker reads every task in the cluster (`tasks -C <swept root> show <id>`, keeping
-`task.updated`) and the documents they link, then follows SKILL.md §3 for each with
+`task.updated` and `actions`) and the documents they link, then follows SKILL.md §3 for each with
 these five rules:
 
 1. **Closures before rewording.** Settle duplicates and stale tasks first; reword
@@ -320,8 +321,12 @@ A sweep never scopes: it does not promote, brief or mark an idea reviewed.
   with verdict `unwritten`, no write, and a line in the report. Any later note answers a
   pending proposal, so a stray sweep note would also silently clear a decision the user
   still owes.
-- **Pending proposal.** A task whose latest note starts `curate:` or `scope:` and
-  contains `proposal:`:
+- **Pending proposal.** Use the fresh show's `answer` item with
+  `subject.source: latest_note`. The ledger's `action_evidence` preserves the
+  snapshot's source and note index. Read `task.notes[subject.note_index]` in
+  the fresh show to verify and relay the current proposal, including whether it
+  names this sweep. Apply the checks below to that proposal. The sampler's
+  `sample_recent` reason alone does not affect the sweep's pool or verdicts.
   - If the proposal is to drop it as stale or duplicate, re-check the evidence; when it
     holds and no guard applies, carry it out (verdict `stale` or `duplicate`, action
     `closed`).
@@ -382,6 +387,9 @@ In the persistent-storage case, account for the ledger as a retained item at the
 
 **Resuming.** The ledger is the map: the remainder is the rows with no `verdict`. Run
 `tasks -C <swept root> start <sweep-id>` and find the ledger and notes on `<sweep-id>`.
+Accept the current header or the earlier header with every same named column except
+`action_evidence`. Preserve that header and its existing evidence. For an older
+ledger, use the fresh show for proposal evidence.
 In a project's first sweep, if cluster `01` is settled and `<sweep-id>` lacks a
 `sweep: first closures verified` note, run [First closures](#first-closures) before
 continuing. Then, if any row has no `verdict`, continue with the first such cluster;
@@ -401,9 +409,9 @@ its notes:
   the drop message's evidence, and an `undo:` record built from the row's snapshot
   columns (`status`, `reviewed`, `awaiting_user`, `deferred_until`), since the drop
   cleared those fields on the record;
-- a latest note that is a proposal naming this sweep: its verdict (`decision`,
-  `decompose`, or a guarded `stale` or `duplicate`), action `proposed`, not a pending
-  row;
+- a proposal whose fresh `answer` subject locates the latest note naming this
+  sweep: its verdict (`decision`, `decompose`, or a guarded `stale` or `duplicate`)
+  with action `proposed`;
 - anything else: no verdict yet. A half-finished duplicate closure leaves nothing on
   the closing task, and a `refined` edit leaves no note, so these rows go back to the
   worker, whose rule 5 finishes a closure whose fold-in reached the survivor without
