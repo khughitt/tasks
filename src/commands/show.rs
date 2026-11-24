@@ -1,7 +1,9 @@
+pub(super) mod summary;
+
 use super::Ctx;
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
-use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
+use crate::output::{DepInfo, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::{DocKind, DocRead, Fetch, Located, Resolver, UnavailableCause, has_heading};
@@ -9,8 +11,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use time::OffsetDateTime;
 
-pub fn run(mut ctx: Ctx, id: String, fetch: Fetch, all_projects: bool) -> Result<Output> {
-    let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
+pub(super) fn run(mut ctx: Ctx, id: &str, fetch: Fetch, all_projects: bool) -> Result<ShowOut> {
+    let id = super::parse_id(&ctx.registry, &ctx.shorthand, id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let (recorded, task, mut all) = read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
@@ -29,10 +31,11 @@ pub fn run(mut ctx: Ctx, id: String, fetch: Fetch, all_projects: bool) -> Result
         fetch,
         &ctx.host,
     )?;
-    Ok(Output::Show(Box::new(ShowOut {
+    Ok(ShowOut {
         fields,
         warnings: ctx.warnings,
-    })))
+        summary: None,
+    })
 }
 
 /// `show --all-projects`: add every other reachable registered project's records to the

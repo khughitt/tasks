@@ -98,6 +98,19 @@ Use `list`, `search`, `show`, `tree`, `dep`, `tags` and `sample` to inspect and
 organize records. `graph --format mermaid` or `dot` renders dependency edges in
 work order. Read commands do not acquire claims or perform lifecycle transitions.
 
+Use `tasks --json show ID --summary` for a single task in at most 12,288 stdout
+bytes, including the final newline. It preserves the body, ownership, resolved
+links, inventory and warnings. The view keeps the creation note when present and
+fits whole recent notes in stored order. `summary.notes` counts total, shown and
+omitted notes, including archived history. `summary.complete` means every note is
+present.
+
+For decisions that depend on omitted history, run the `summary.full` argument
+array and direct stdout to a file, or repeat the same JSON command without
+`--summary` (for example, `tasks --json show ID > task.json`). This is a fresh
+read. If required detail alone exceeds the limit, the command returns
+`show_summary_too_large` and the same full-read method applies.
+
 ## Goals, lanes and dependencies
 
 `parent` expresses same-project containment. A task with children is a goal;

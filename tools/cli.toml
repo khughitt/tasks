@@ -461,6 +461,7 @@ args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--no-fetch"], value = "none" },
   { shared = "all_projects", value = "none" },
+  { names = ["--summary"], value = "none" },
 ]
 
 [[cli.tasks.commands]]

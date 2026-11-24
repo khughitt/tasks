@@ -213,12 +213,16 @@ fn main() {
             std::process::exit(1);
         }
     };
-    if matches!(&cli.command, cli::Command::Prime { summary: true, .. }) && format != Format::Json {
-        to_stderr(&format!(
-            "{}\n",
-            output::render_error(&error::Error::SummaryRequiresJson)
-        ));
-        std::process::exit(1);
+    if format != Format::Json {
+        let summary_error = match &cli.command {
+            cli::Command::Prime { summary: true, .. } => Some(error::Error::SummaryRequiresJson),
+            cli::Command::Show { summary: true, .. } => Some(error::Error::ShowSummaryRequiresJson),
+            _ => None,
+        };
+        if let Some(error) = summary_error {
+            to_stderr(&format!("{}\n", output::render_error(&error)));
+            std::process::exit(1);
+        }
     }
     let tasks_color = match std::env::var("TASKS_COLOR") {
         Ok(value) => Some(value),

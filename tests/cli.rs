@@ -55,6 +55,282 @@ fn common_git_fixtures_ignore_hostile_environment() {
 }
 
 #[test]
+fn show_summary_format_and_recovery() {
+    let mut env = TestEnv::new();
+    let project = env.init("sci");
+    write_doc(&project, "docs/input.md", "# Input\n");
+    let id = id_of(env.json(
+        &project,
+        &[
+            "add",
+            "Work",
+            "--source",
+            "sci-ffffff",
+            "--ref",
+            "input (input): docs/input.md",
+        ],
+    ));
+    write_claim(&env, "sci", &id, "fixture-owner", true);
+    let caller = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(&project, caller.path().join("project with space")).unwrap();
+    let full_args = [
+        "-C",
+        "project with space",
+        "show",
+        &id[4..],
+        "--no-fetch",
+        "--all-projects",
+    ];
+    let full = env.json(caller.path(), &full_args);
+    assert_eq!(full["claim"]["session"], "fixture-owner");
+    assert!(!full["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(full["inventory"][0]["handle"], "input");
+    assert!(full.get("summary").is_none());
+
+    let help = env.cmd(&project).args(["show", "--help"]).output().unwrap();
+    assert!(help.status.success());
+    assert!(
+        String::from_utf8(help.stdout)
+            .unwrap()
+            .contains("--summary")
+    );
+    let pretty = env
+        .cmd(&project)
+        .args(["--pretty", "show", &id, "--summary"])
+        .output()
+        .unwrap();
+    let from_env = env
+        .cmd(&project)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["show", &id, "--summary"])
+        .output()
+        .unwrap();
+    for refused in [pretty, from_env] {
+        assert_eq!(refused.status.code(), Some(1));
+        assert!(refused.stdout.is_empty());
+        assert_eq!(err_kind(&refused), "show_summary_requires_json");
+    }
+
+    let out = env
+        .cmd(caller.path())
+        .env("TASKS_FORMAT", "pretty")
+        .arg("--json")
+        .args(full_args)
+        .arg("--summary")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let mut shown: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let summary = shown.as_object_mut().unwrap().remove("summary").unwrap();
+    assert_eq!(summary["byte_limit"], 12_288);
+    assert_eq!(summary["complete"], true);
+    assert_eq!(shown, full);
+    let argv = summary["full"].as_array().unwrap();
+    let args: Vec<_> = argv.iter().map(|arg| arg.as_str().unwrap()).collect();
+    let absolute = std::path::absolute(caller.path().join("project with space")).unwrap();
+    assert_eq!(
+        &args[1..],
+        &[
+            "--json",
+            "-C",
+            absolute.to_str().unwrap(),
+            "show",
+            &id[4..],
+            "--no-fetch",
+            "--all-projects"
+        ]
+    );
+    assert!(std::path::Path::new(args[0]).is_absolute());
+    let recovered = std::process::Command::new(args[0])
+        .current_dir(&project)
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
+        .args(&args[1..])
+        .output()
+        .unwrap();
+    assert!(recovered.status.success(), "{recovered:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&recovered.stdout).unwrap(),
+        full
+    );
+}
+
+#[test]
+fn show_summary_tail_and_limits() {
+    use std::fmt::Write as _;
+
+    let mut env = TestEnv::new();
+    let project = env.init("sci");
+    let id = id_of(env.json(&project, &["add", "Note history"]));
+    let path = project.join(format!("tasks/{id}.md"));
+    let created = std::fs::read_to_string(&path).unwrap();
+    let show = || {
+        env.cmd(&project)
+            .args(["show", &id, "--summary"])
+            .output()
+            .unwrap()
+    };
+    let parse = |out: std::process::Output| {
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout.last(), Some(&b'\n'));
+        assert!(out.stdout.len() <= 12_288);
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        (out.stdout.len(), json)
+    };
+
+    let mut tied = format!("{created}- 2026-10-31T00:00:00Z (fixture): edge λ\"\\\n");
+    for index in 0..8 {
+        writeln!(tied, "- 2026-10-31T00:00:00Z (fixture): recent {index}").unwrap();
+    }
+    std::fs::write(&path, &tied).unwrap();
+    let (bytes, short) = parse(show());
+    assert_eq!(short["summary"]["complete"], true);
+    assert_eq!(
+        short["summary"]["notes"],
+        serde_json::json!({"total": 10, "shown": 10, "omitted": 0})
+    );
+    let pad = "x".repeat(12_288 - bytes);
+    let at_limit = tied.replace("edge ", &format!("edge {pad}"));
+    std::fs::write(&path, &at_limit).unwrap();
+    let (bytes, exact) = parse(show());
+    assert_eq!(bytes, 12_288);
+    assert_eq!(exact["summary"]["complete"], true);
+    let next = env.json(&project, &["next"]);
+    assert!(next.get("summary").is_none());
+    assert_eq!(next["next"]["task"]["id"], id);
+    assert!(next["next"].get("summary").is_none());
+
+    let over = at_limit.replace("edge ", "edge y");
+    std::fs::write(&path, &over).unwrap();
+    let (_, trimmed) = parse(show());
+    assert_eq!(trimmed["summary"]["complete"], false);
+    assert_eq!(
+        trimmed["summary"]["notes"],
+        serde_json::json!({"total": 10, "shown": 9, "omitted": 1})
+    );
+    assert_eq!(
+        &trimmed["task"]["notes"].as_array().unwrap()[1..],
+        &exact["task"]["notes"].as_array().unwrap()[2..]
+    );
+    let enormous = format!(
+        "{over}- 2026-10-31T00:00:00Z (fixture): {}\n",
+        "x".repeat(12_288)
+    );
+    std::fs::write(&path, enormous).unwrap();
+    let (_, trimmed) = parse(show());
+    assert_eq!(
+        trimmed["summary"]["notes"],
+        serde_json::json!({"total": 11, "shown": 1, "omitted": 10})
+    );
+    assert_eq!(trimmed["task"]["notes"][0], short["task"]["notes"][0]);
+
+    let mut long = created.clone();
+    for index in 0..2_699 {
+        writeln!(long, "- 2026-10-31T00:00:00Z (fixture): note {index}").unwrap();
+    }
+    std::fs::write(&path, long).unwrap();
+    let (_, trimmed) = parse(show());
+    let full = env.json(&project, &["show", &id]);
+    let notes = trimmed["task"]["notes"].as_array().unwrap();
+    let full_notes = full["task"]["notes"].as_array().unwrap();
+    assert_eq!(trimmed["summary"]["notes"]["total"], 2_700);
+    assert!(notes.len() > 1 && notes.len() < full_notes.len());
+    assert_eq!(notes[0], full_notes[0]);
+    assert_eq!(
+        &notes[1..],
+        &full_notes[full_notes.len() + 1 - notes.len()..]
+    );
+
+    std::fs::write(&path, created.split_once("## Notes\n").unwrap().0).unwrap();
+    let (_, empty) = parse(show());
+    assert_eq!(empty["summary"]["complete"], true);
+    assert_eq!(
+        empty["summary"]["notes"],
+        serde_json::json!({"total": 0, "shown": 0, "omitted": 0})
+    );
+    assert!(empty["task"].get("notes").is_none());
+
+    let unmarked = format!(
+        "{}## Notes\n\n- 2026-10-31T00:00:00Z (fixture): created\n- 2026-10-31T00:00:00Z (fixture): {}\n",
+        created.split_once("## Notes\n").unwrap().0,
+        "x".repeat(12_288),
+    );
+    std::fs::write(&path, unmarked).unwrap();
+    let (_, legacy) = parse(show());
+    assert_eq!(
+        legacy["summary"]["notes"],
+        serde_json::json!({"total": 2, "shown": 0, "omitted": 2})
+    );
+    assert!(legacy["task"].get("notes").is_none());
+}
+
+#[test]
+fn show_summary_required_payload_overflow() {
+    let mut env = TestEnv::new();
+    let project = env.init("sci");
+    let large = "x".repeat(12_288);
+    let body = id_of(env.json(&project, &["add", "Large body", "--body", &large]));
+    write_doc(&project, "docs/input.md", "# Input\n");
+    let inventory = id_of(env.json(
+        &project,
+        &[
+            "add",
+            "Large inventory",
+            "--ref",
+            &format!("input (input): docs/input.md — {large}"),
+        ],
+    ));
+    let origin = format!("codex:{large}");
+    let creation = id_of(env.json(
+        &project,
+        &["add", "Large creation note", "--origin-session", &origin],
+    ));
+    let warnings = id_of(env.json(&project, &["add", "Large warning list"]));
+    let path = project.join(format!("tasks/{warnings}.md"));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let missing = (0..450)
+        .map(|index| format!("sci-{index:06x}"))
+        .collect::<Vec<_>>();
+    let raw = raw.replacen(
+        "\n---\n",
+        &format!("\nrelated: [{}]\n---\n", missing.join(", ")),
+        1,
+    );
+    std::fs::write(&path, raw).unwrap();
+
+    for (id, field) in [
+        (body, "body"),
+        (inventory, "inventory"),
+        (creation, "creation"),
+        (warnings, "warnings"),
+    ] {
+        let full = env.json(&project, &["show", &id]);
+        let required = match field {
+            "body" => &full["task"]["body"],
+            "creation" => &full["task"]["notes"][0]["origin_session"],
+            other => &full[other],
+        };
+        assert!(
+            serde_json::to_vec(required).unwrap().len() > 12_288,
+            "{field}"
+        );
+        let out = env
+            .cmd(&project)
+            .args(["show", &id, "--summary"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty());
+        assert_eq!(err_kind(&out), "show_summary_too_large", "{field}");
+        assert!(err_detail(&out).contains("capture stdout to a file"));
+    }
+}
+
+#[test]
 fn prime_summary_empty_project() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

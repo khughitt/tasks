@@ -723,6 +723,9 @@ pub enum Command {
         /// only the task's own; other fields are unchanged.
         #[arg(long)]
         all_projects: bool,
+        /// Bound JSON output to 12 KiB by omitting older notes when needed.
+        #[arg(long)]
+        summary: bool,
     },
     /// Print a linked plan or spec body, or a referenced document.
     #[command(group(clap::ArgGroup::new("doc_kind").args(["plan", "spec", "handle"]).required(true)))]

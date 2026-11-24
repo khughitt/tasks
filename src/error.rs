@@ -19,6 +19,12 @@ pub enum Error {
         "prime summary exceeds 12288 bytes with required metadata; rerun the same JSON prime without --summary and capture stdout to a file"
     )]
     SummaryTooLarge,
+    #[error("show --summary requires JSON; use tasks --json show ID --summary")]
+    ShowSummaryRequiresJson,
+    #[error(
+        "show summary exceeds 12288 bytes with required detail; rerun the same JSON show without --summary and capture stdout to a file"
+    )]
+    ShowSummaryTooLarge,
     #[error("no tasks/.config.toml found above {0}")]
     NoProject(PathBuf),
     #[error("no tasks/.config.toml found above {dir}; {next}")]
@@ -277,9 +283,11 @@ impl Error {
             Error::CheckoutMissing(detail) => Error::CheckoutMissing(detail + suffix),
             Error::WorktreeOrphaned(detail) => Error::WorktreeOrphaned(detail + suffix),
             Error::Io(detail) => Error::Io(detail + suffix),
-            error @ (Error::NoProject(_) | Error::SummaryRequiresJson | Error::SummaryTooLarge) => {
-                error
-            }
+            error @ (Error::NoProject(_)
+            | Error::SummaryRequiresJson
+            | Error::SummaryTooLarge
+            | Error::ShowSummaryRequiresJson
+            | Error::ShowSummaryTooLarge) => error,
         }
     }
 
@@ -298,6 +306,8 @@ impl Error {
         match self {
             Error::SummaryRequiresJson => "summary_requires_json",
             Error::SummaryTooLarge => "summary_too_large",
+            Error::ShowSummaryRequiresJson => "show_summary_requires_json",
+            Error::ShowSummaryTooLarge => "show_summary_too_large",
             Error::NoProject(_) | Error::NoProjectNext { .. } => "no_project",
             Error::Config(_) => "config",
             Error::IdentityInvalid(_) => "identity_invalid",

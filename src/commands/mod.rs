@@ -169,12 +169,19 @@ fn dispatch(
             id,
             no_fetch,
             all_projects,
-        } => show::run(
-            open_id_ctx(dir, &id, host.clone())?,
-            id,
-            fetch(no_fetch),
-            all_projects,
-        ),
+            summary,
+        } => {
+            let mut out = show::run(
+                open_id_ctx(dir, &id, host.clone())?,
+                &id,
+                fetch(no_fetch),
+                all_projects,
+            )?;
+            if summary {
+                show::summary::apply(&mut out, dir, &id, no_fetch, all_projects)?;
+            }
+            Ok(Output::Show(Box::new(out)))
+        }
         Command::Doc {
             id,
             plan,

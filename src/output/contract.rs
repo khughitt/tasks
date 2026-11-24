@@ -655,6 +655,23 @@ pub struct ShowOut {
     #[serde(flatten)]
     pub fields: ShowFields,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ShowSummary>,
+}
+
+#[derive(Serialize)]
+pub struct ShowSummary {
+    pub byte_limit: usize,
+    pub complete: bool,
+    pub notes: ShowSummaryNotes,
+    pub full: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ShowSummaryNotes {
+    pub total: usize,
+    pub shown: usize,
+    pub omitted: usize,
 }
 
 #[derive(Serialize)]

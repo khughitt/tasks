@@ -68,6 +68,101 @@ fn fixture() -> (TestEnv, PathBuf, String, Value, String, Vec<u8>) {
 }
 
 #[test]
+fn show_summary_archived_history() {
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let id = common::id_of(env.json(
+        &root,
+        &[
+            "add",
+            "Archived",
+            "--origin",
+            "user",
+            "--origin-session",
+            "codex:filing",
+        ],
+    ));
+    let kept = format!(
+        r#"retained: {{"version":1,"host":"h","kind":"worktree","path":".worktrees/x","state":"kept","verification":"verified","purpose":"review","next_owner":"task:{id}","cleanup_trigger":"review complete"}}"#
+    );
+    env.json(&root, &["note", &id, &kept]);
+    env.json(
+        &root,
+        &[
+            "note",
+            &id,
+            &format!("old correction {}", "x".repeat(12_288)),
+        ],
+    );
+    env.json(&root, &["note", &id, "latest archived note"]);
+    let (archive, _) = archive_inline(&root, &id, false);
+    env.json(&root, &["note", &id, "inline note"]);
+
+    let full = env.json(&root, &["show", &id]);
+    let shown = env.json(&root, &["show", &id, "--summary"]);
+    let all_notes = full["task"]["notes"].as_array().unwrap();
+    assert_eq!(
+        shown["summary"]["notes"],
+        serde_json::json!({"total": 6, "shown": 4, "omitted": 2})
+    );
+    let view = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(view[0], all_notes[0]);
+    assert_eq!(view[0]["origin_session"], "codex:filing");
+    assert_eq!(&view[1..], &all_notes[3..]);
+    assert_eq!(shown["files"], full["files"]);
+    assert_eq!(shown["warnings"], full["warnings"]);
+
+    let args: Vec<_> = shown["summary"]["full"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    let recovered = std::process::Command::new(args[0])
+        .current_dir(env.home.path())
+        .env_clear()
+        .envs(common::isolated_env(env.home.path()))
+        .args(&args[1..])
+        .output()
+        .unwrap();
+    assert!(recovered.status.success(), "{recovered:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&recovered.stdout).unwrap(),
+        full
+    );
+    assert_eq!(all_notes[1]["text"], kept);
+    assert!(
+        all_notes[2]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("old correction ")
+    );
+
+    let missing = env
+        .cmd(&root)
+        .args(["show", "sci-ffffff", "--summary"])
+        .output()
+        .unwrap();
+    assert_eq!(common::err_kind(&missing), "task_not_found");
+    assert!(missing.stdout.is_empty());
+    std::fs::write(
+        root.join(format!("tasks/files/{id}/{archive}")),
+        "bad archive",
+    )
+    .unwrap();
+    let bad_full = env.cmd(&root).args(["show", &id]).output().unwrap();
+    let bad_summary = env
+        .cmd(&root)
+        .args(["show", &id, "--summary"])
+        .output()
+        .unwrap();
+    assert!(!bad_full.status.success());
+    assert_eq!(bad_summary.status, bad_full.status);
+    assert!(bad_summary.stdout.is_empty());
+    assert_eq!(common::err_kind(&bad_summary), common::err_kind(&bad_full));
+}
+
+#[test]
 fn archive_physical_and_logical_boundary() {
     let (env, root, id, before, name, bytes) = fixture();
     let shown = env.json(&root, &["show", &id]);
