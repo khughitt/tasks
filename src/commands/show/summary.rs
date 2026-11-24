@@ -93,6 +93,12 @@ fn full_argv(
         ));
     }
     let directory = std::path::absolute(super::super::start_dir(dir)?)?;
+    if !std::fs::metadata(&directory)?.is_dir() {
+        return Err(Error::Io(format!(
+            "show summary recovery directory must name a directory: {}",
+            directory.display()
+        )));
+    }
     let text = |path: &Path| {
         path.to_str()
             .map(str::to_owned)

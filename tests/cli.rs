@@ -156,6 +156,26 @@ fn show_summary_format_and_recovery() {
 }
 
 #[test]
+fn show_summary_recovery_requires_directory() {
+    let mut env = TestEnv::new();
+    let project = env.init("sci");
+    let id = id_of(env.json(&project, &["add", "Work"]));
+    let file = project.join(format!("tasks/{id}.md"));
+    let args = ["-C", file.to_str().unwrap(), "show", &id];
+    env.cmd(&project).args(args).assert().success();
+    let out = env
+        .cmd(&project)
+        .args(args)
+        .arg("--summary")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(err_kind(&out), "io");
+    assert!(err_detail(&out).contains("recovery directory"));
+}
+
+#[test]
 fn show_summary_tail_and_limits() {
     use std::fmt::Write as _;
 
