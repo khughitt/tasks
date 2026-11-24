@@ -8,7 +8,7 @@ use std::fmt::Display;
 
 #[derive(Default)]
 pub(crate) struct Closeout {
-    pub(crate) direct: Vec<TaskId>,
+    direct: Vec<TaskId>,
     pub(crate) open: BTreeSet<TaskId>,
     pub(crate) missing: BTreeSet<(TaskId, TaskId)>,
     has_foreign_hold: bool,
@@ -118,6 +118,16 @@ enum Visit {
 
 impl Membership<'_> {
     pub(crate) fn closeout(&mut self, goal: &Task) -> Result<Closeout> {
+        self.closeout_for(goal, Walk::Completion)
+    }
+
+    /// The projected member frontier. Direct prerequisites come from the action's
+    /// dependency view and are evaluated independently.
+    pub(crate) fn closeout_members(&mut self, goal: &Task) -> Result<Closeout> {
+        self.closeout_for(goal, Walk::Projected)
+    }
+
+    fn closeout_for(&mut self, goal: &Task, walk: Walk) -> Result<Closeout> {
         let registry = self.registry;
         let root = registry.canonical_id(&goal.id);
         let mut evidence = Closeout::default();
@@ -140,6 +150,10 @@ impl Membership<'_> {
                 continue;
             }
             if let Some(&start) = active.get(&id) {
+                if matches!(walk, Walk::Projected) {
+                    evidence.missing.insert((path.last().unwrap().clone(), id));
+                    continue;
+                }
                 let mut cycle = path[start..].to_vec();
                 let least = cycle.iter().enumerate().min_by_key(|(_, k)| *k).unwrap().0;
                 cycle.rotate_left(least);
@@ -155,7 +169,7 @@ impl Membership<'_> {
             active.insert(id.clone(), path.len());
             path.push(id.clone());
             stack.push(Visit::Leave(id.clone()));
-            let (mut reached, missing) = self.neighbors(&task, Walk::Completion)?;
+            let (mut reached, missing) = self.neighbors(&task, walk)?;
             evidence
                 .missing
                 .extend(missing.into_iter().map(|key| (id.clone(), key)));
@@ -163,6 +177,9 @@ impl Membership<'_> {
             stack.extend(reached.into_iter().rev().map(|t| Visit::Enter(Box::new(t))));
         }
 
+        if matches!(walk, Walk::Projected) {
+            return Ok(evidence);
+        }
         // The unique local parent chain determines whether an open member also
         // has an effective local-only path, independently of DFS visit order.
         if !evidence.open.is_empty() {

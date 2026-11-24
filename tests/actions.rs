@@ -458,3 +458,104 @@ fn actions_follow_dependencies_from_the_selected_checkout() {
     );
     assert_eq!(action(&listed["tasks"][0], "pick_up")["available"], true);
 }
+
+#[test]
+fn actions_keep_all_matching_holders_with_unresolved_identity() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    let config = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[needs.camera]\nmeaning = 'camera'\nexclusive = true\n\n[needs.quiet]\nmeaning = 'quiet host'\nexclusive = true\n");
+    std::fs::write(config, text).unwrap();
+    for id in ["aa-000001", "aa-000002", "aa-000003"] {
+        record(&dir, id, "todo", 2, "needs: [camera]\n");
+    }
+    record(&dir, "aa-000004", "todo", 2, "needs: [quiet]\n");
+    for id in ["aa-000001", "aa-000002"] {
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "test:holder")
+            .args(["start", id])
+            .assert()
+            .success();
+    }
+    env.fake_relay("#!/bin/sh\nexit 1\n");
+    std::fs::write(
+        env.home.path().join(".config/tasks/config.toml"),
+        "[identity]\nrelay = true\n",
+    )
+    .unwrap();
+    let run = |args: &[&str]| -> Value {
+        let out = env
+            .cmd(&dir)
+            .env("CLAUDE_CODE_SESSION_ID", "no-relay")
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice(&out).unwrap()
+    };
+    let ready = run(&["ready"]);
+    assert_eq!(ids(&ready["tasks"]), ["aa-000004"]);
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains("session identity unresolved")
+    );
+    let free = run(&["show", "aa-000004", "--no-fetch"]);
+    assert!(
+        action(&free, "pick_up")["reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let held = run(&["show", "aa-000003", "--no-fetch"]);
+    let reason_ids: Vec<_> = action(&held, "pick_up")["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|reason| (&reason["code"], &reason["evidence"]["task"]))
+        .collect();
+    assert_eq!(
+        reason_ids,
+        vec![
+            (&json!("resource_held"), &json!("aa-000001")),
+            (&json!("resource_held"), &json!("aa-000002")),
+        ]
+    );
+}
+
+#[test]
+fn actions_explain_known_goal_blockers_despite_a_foreign_scan_error() {
+    let mut env = TestEnv::new();
+    let own = env.init("aa");
+    let foreign = env.init("bb");
+    let piece = id_of(env.json(&foreign, &["add", "Foreign piece"]));
+    let prerequisite = id_of(env.json(&own, &["add", "Independent prerequisite"]));
+    let goal = id_of(env.json(
+        &own,
+        &["add", "Goal", "--piece", &piece, "--depends", &prerequisite],
+    ));
+    let child = id_of(env.json(&own, &["add", "Local child", "--parent", &goal]));
+    std::fs::write(
+        foreign.join("tasks/bb-ffffff.md"),
+        "---\nstatus: invalid\n---\n",
+    )
+    .unwrap();
+    let show = env.json(&own, &["show", &goal, "--no-fetch"]);
+    let close = action(&show, "close_goal");
+    assert_eq!(close["available"], false);
+    let reasons = close["reasons"].as_array().unwrap();
+    for (code, task) in [
+        ("member_open", child),
+        ("member_unknown", piece),
+        ("dependency_open", prerequisite),
+    ] {
+        assert!(
+            reasons.contains(&json!({"code":code,"evidence":{"task":task}})),
+            "{reasons:?}"
+        );
+    }
+    assert_eq!(env.fail(&own, &["done", &goal]), "parse");
+}

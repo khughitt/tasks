@@ -121,8 +121,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             actions,
         );
     }
-    let (all, claims) = ctx.scan_with_claims()?;
-    let now = crate::time::parse(&crate::time::now())?;
+    let (all, claims, now) = scan_for_listing(&ctx, actions)?;
     let prefixes = ctx.scope.prefixes();
     let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     check_parent(&filter, &all, |_| false)?;
@@ -219,6 +218,22 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     Ok(out)
 }
 
+/// The opt-in projection observes claim and resource TTL at the same clock reading.
+fn scan_for_listing(
+    ctx: &ReadCtx,
+    actions: bool,
+) -> Result<(Vec<Task>, crate::claims::ClaimSnapshot, OffsetDateTime)> {
+    if actions {
+        let scan = ctx.scope.scan()?;
+        let now = crate::time::parse(&crate::time::now())?;
+        let claims = crate::claims::ClaimSnapshot::load_at(ctx.scope.prefixes().iter(), now)?;
+        Ok((scan, claims, now))
+    } else {
+        let (scan, claims) = ctx.scan_with_claims()?;
+        Ok((scan, claims, crate::time::parse(&crate::time::now())?))
+    }
+}
+
 fn list_parked(
     mut ctx: ReadCtx,
     mut filter: TaskFilter,
@@ -229,8 +244,7 @@ fn list_parked(
     limit: Option<usize>,
     actions: bool,
 ) -> Result<Output> {
-    let (all, claims) = ctx.scan_with_claims()?;
-    let now = crate::time::parse(&crate::time::now())?;
+    let (all, claims, now) = scan_for_listing(&ctx, actions)?;
     let prefixes = ctx.scope.prefixes();
     let hierarchy = crate::hierarchy::view_of(&all, &prefixes, &ctx.registry);
     let rows = super::parked::rows_with_records(

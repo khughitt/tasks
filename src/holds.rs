@@ -152,11 +152,26 @@ impl HoldSnapshot {
     /// never a hold) nor the caller's own (the holding session may take more work needing
     /// it). `Mine::default` means the caller owns nothing, and every hold counts as
     /// another session's.
-    pub fn holder(&self, need: &str, task: &TaskId, mine: &Mine) -> Option<&Holder> {
+    pub fn holder<'a>(
+        &'a self,
+        need: &str,
+        task: &'a TaskId,
+        mine: &'a Mine,
+    ) -> Option<&'a Holder> {
+        self.matching_holders(need, task, mine).next()
+    }
+
+    pub(crate) fn matching_holders<'a>(
+        &'a self,
+        need: &str,
+        task: &'a TaskId,
+        mine: &'a Mine,
+    ) -> impl Iterator<Item = &'a Holder> + 'a {
         self.by_need
-            .get(need)?
-            .iter()
-            .find(|holder| holder.task != *task && !mine.owns(holder))
+            .get(need)
+            .into_iter()
+            .flatten()
+            .filter(move |holder| holder.task != *task && !mine.owns(holder))
     }
 
     /// No live hold anywhere: a view can skip resolving the caller's identity.

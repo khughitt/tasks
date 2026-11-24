@@ -28,6 +28,7 @@ impl ProjectScan {
 enum Walk {
     Display,
     Completion,
+    Projected,
 }
 
 struct MemoEntry {
@@ -101,7 +102,7 @@ impl<'r> Membership<'r> {
     fn neighbors(&mut self, record: &Task, walk: Walk) -> Result<(Vec<Task>, Vec<TaskId>)> {
         let registry = self.registry;
         let id = registry.canonical_id(&record.id);
-        self.project(&id.prefix)?;
+        self.walk_project(&id.prefix, walk)?;
         let mut reached: Vec<Task> = self.projects[&id.prefix]
             .as_ref()
             .map(|scan| {
@@ -115,16 +116,16 @@ impl<'r> Membership<'r> {
         let mut missing = Vec::new();
         for piece in &record.pieces {
             let key = registry.canonical_id(piece);
-            self.project(&key.prefix)?;
+            self.walk_project(&key.prefix, walk)?;
             let target = crate::dependency::resolve_canonical(registry, &key, |hop| {
-                if matches!(walk, Walk::Completion) {
-                    self.project(&hop.prefix)?;
+                if !matches!(walk, Walk::Display) {
+                    self.walk_project(&hop.prefix, walk)?;
                 }
                 self.lookup(hop)
             })?;
             match target {
                 Some(t)
-                    if matches!(walk, Walk::Completion)
+                    if !matches!(walk, Walk::Display)
                         && t.status == crate::model::Status::Moved =>
                 {
                     missing.push(key)
@@ -134,6 +135,20 @@ impl<'r> Membership<'r> {
             }
         }
         Ok((reached, missing))
+    }
+
+    /// A projection uses its own membership cache. A failed reached-project scan
+    /// leaves that frontier unresolved while the walk keeps the other branches.
+    fn walk_project(&mut self, prefix: &str, walk: Walk) -> Result<()> {
+        match self.project(prefix) {
+            Ok(_) => Ok(()),
+            Err(_) if matches!(walk, Walk::Projected) => {
+                self.projects
+                    .insert(self.registry.canonical_prefix(prefix).to_string(), None);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn walk_if_needed(&mut self, goal: &Task) -> Result<&MemoEntry> {
