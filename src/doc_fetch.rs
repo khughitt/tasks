@@ -150,7 +150,7 @@ fn read_pipe(
 pub(crate) fn fetch(request: FetchRequest, deadline: Instant) -> DocRead {
     #[cfg(test)]
     {
-        fetch_inner(request, deadline, None)
+        fetch_inner(request, deadline, None, None)
     }
     #[cfg(not(test))]
     {
@@ -162,6 +162,7 @@ fn fetch_inner(
     request: FetchRequest,
     deadline: Instant,
     #[cfg(test)] mut observer: Option<&mut dyn FnMut(CleanupEvent)>,
+    #[cfg(test)] arm_deadline: Option<&mut dyn FnMut() -> Instant>,
 ) -> DocRead {
     let unavailable = |cause: String| DocRead::Unavailable {
         reference: request.reference.clone(),
@@ -194,6 +195,11 @@ fn fetch_inner(
         Err(error) => return unavailable(format!("failed to start fetcher: {error}")),
     };
     let mut group = ChildGroup { child: Some(child) };
+    #[cfg(test)]
+    let deadline = match arm_deadline {
+        Some(arm) => arm(),
+        None => deadline,
+    };
     let child = group.child.as_mut().expect("child was spawned");
     let pid = child.id() as libc::pid_t;
     let stdout = child.stdout.take().expect("stdout is piped");
@@ -388,6 +394,65 @@ mod tests {
         )
     }
 
+    const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+    const CLEANUP_DEADLINE: Duration = Duration::from_millis(150);
+
+    fn wait_for_startup_pid(pidfile: &std::path::Path) -> i32 {
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        loop {
+            match std::fs::read_to_string(pidfile) {
+                Ok(text) if text.trim().is_empty() => {}
+                Ok(text) => {
+                    return text.trim().parse().unwrap_or_else(|error| {
+                        panic!(
+                            "fixture startup failed: invalid pid in {} ({text:?}): {error}",
+                            pidfile.display()
+                        )
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!(
+                    "fixture startup failed: could not read {}: {error}",
+                    pidfile.display()
+                ),
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture startup timed out after {STARTUP_TIMEOUT:?} waiting for {}",
+                pidfile.display()
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn fetch_after_pid_startup(
+        request: FetchRequest,
+        pidfile: &std::path::Path,
+    ) -> (DocRead, i32, Duration) {
+        let mut pid = None;
+        let mut started = None;
+        let result = {
+            let mut arm_deadline = || {
+                pid = Some(wait_for_startup_pid(pidfile));
+                let now = Instant::now();
+                started = Some(now);
+                now + CLEANUP_DEADLINE
+            };
+            fetch_inner(
+                request,
+                Instant::now() + STARTUP_TIMEOUT,
+                None,
+                Some(&mut arm_deadline),
+            )
+        };
+        let started = started.expect("fixture startup armed the cleanup deadline");
+        (
+            result,
+            pid.expect("fixture startup published the child pid"),
+            started.elapsed(),
+        )
+    }
+
     #[test]
     fn payload_requires_one_object_and_valid_id() {
         for text in [
@@ -419,6 +484,7 @@ mod tests {
             request("printf '%s'", r#"{"id":"test","body":""}"#),
             Instant::now() - Duration::from_secs(1),
             Some(&mut observe),
+            None,
         );
         assert!(matches!(result, DocRead::Unavailable { .. }));
         assert_eq!(cleanup_events, 0);
@@ -485,14 +551,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let pidfile = temp.path().join("pid");
         let command = format!(
-            "sleep 60 & printf '%s' $! > '{}'; wait; :",
+            "sleep 0.2; sleep 60 & printf '%s' $! > '{}'; wait; :",
             pidfile.display()
         );
-        let started = Instant::now();
-        let result = fetch(
-            request(&command, "input"),
-            started + Duration::from_millis(150),
-        );
+        let (result, pid, elapsed) = fetch_after_pid_startup(request(&command, "input"), &pidfile);
         assert!(
             result
                 .required()
@@ -500,8 +562,7 @@ mod tests {
                 .to_string()
                 .contains("deadline")
         );
-        assert!(started.elapsed() < Duration::from_secs(2));
-        let pid: i32 = std::fs::read_to_string(pidfile).unwrap().parse().unwrap();
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
         assert_not_running(pid);
     }
 
@@ -540,7 +601,7 @@ mod tests {
             let stop = root.join("stop");
             let pidfile = root.join("pid");
             let command = format!(
-                "setsid sh -c 'printf %s $$ > \"{0}/pid\"; while [ ! -e \"{0}/stop\" ]; do sleep 0.01; done' & while [ ! -e '{0}/pid' ]; do sleep 0.01; done; printf '%s' '{{\"id\":\"test\",\"body\":\"ok\"}}'; exit 0; :",
+                "sleep 0.2; setsid sh -c 'printf %s $$ > \"{0}/pid\"; while [ ! -e \"{0}/stop\" ]; do sleep 0.01; done' & while [ ! -e '{0}/pid' ]; do sleep 0.01; done; printf '%s' '{{\"id\":\"test\",\"body\":\"ok\"}}'; exit 0; :",
                 root.display()
             );
             std::thread::scope(|scope| {
@@ -554,12 +615,9 @@ mod tests {
                 });
                 let mut request = request(&command, "input");
                 request.budget_limited = budget_limited;
-                let started = Instant::now();
-                let result = fetch(request, started + Duration::from_millis(150));
-                let elapsed = started.elapsed();
+                let (result, pid, elapsed) = fetch_after_pid_startup(request, &pidfile);
                 std::fs::write(&stop, "").unwrap();
                 cleanup.join().unwrap();
-                let pid = std::fs::read_to_string(&pidfile).unwrap().parse().unwrap();
                 assert_not_running(pid);
                 assert!(elapsed < Duration::from_millis(600), "{elapsed:?}");
                 if budget_limited {
@@ -602,6 +660,7 @@ mod tests {
             request("printf '%s'", r#"{"id":"test","body":""}"#),
             Instant::now() + Duration::from_secs(1),
             Some(&mut observe),
+            None,
         );
         assert_eq!(result.required().unwrap().body, "");
         assert_eq!(order, ["before kill", "after kill", "reaped"]);
