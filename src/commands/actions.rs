@@ -332,7 +332,9 @@ impl<'a> Actions<'a> {
             let mine = if snapshot.is_empty() {
                 Ok(crate::holds::Mine::default())
             } else {
-                super::list::view_holds(&snapshot, &mut warnings, self.observation.host)
+                // The picker treats known holders as foreign when identity is unavailable.
+                // Identity diagnostics do not make an unrelated free need uncertain.
+                super::list::view_holds(&snapshot, &mut Vec::new(), self.observation.host)
             };
             let mine = mine.unwrap_or_else(|error| {
                 warnings.push(error.to_string());
@@ -345,7 +347,10 @@ impl<'a> Actions<'a> {
             }
         });
         for need in needs {
-            if let Some(holder) = holds.snapshot.holder(&need, &task.id, &holds.mine) {
+            for holder in holds
+                .snapshot
+                .matching_holders(&need, &task.id, &holds.mine)
+            {
                 reasons.push(evidence(
                     "resource_held",
                     json!({
@@ -476,7 +481,7 @@ impl<'a> Actions<'a> {
     }
 
     fn close_goal(&mut self, task: &Task, id: &TaskId) -> ActionExplanation {
-        let mut reasons = Vec::new();
+        let mut reasons = self.dependency_reasons(&task.depends);
         let membership = self.membership.get_or_insert_with(|| {
             let prefixes = self
                 .observation
@@ -490,7 +495,7 @@ impl<'a> Actions<'a> {
                 self.observation.scan,
             )
         });
-        match membership.closeout(task) {
+        match membership.closeout_members(task) {
             Ok(closeout) => {
                 reasons.extend(
                     closeout
@@ -504,7 +509,6 @@ impl<'a> Actions<'a> {
                         .iter()
                         .map(|(_, id)| evidence("member_unknown", json!({"task":id}))),
                 );
-                reasons.extend(self.dependency_reasons(&closeout.direct));
             }
             Err(error) => reasons.push(evidence(
                 "evidence_unknown",

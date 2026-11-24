@@ -773,15 +773,43 @@ impl ClaimSnapshot {
         Self::load_from_paths(paths.into_iter())
     }
 
+    pub(crate) fn load_at(
+        prefixes: impl Iterator<Item = impl AsRef<str>>,
+        now: time::OffsetDateTime,
+    ) -> Result<ClaimSnapshot> {
+        let paths = prefixes
+            .map(|prefix| ClaimStore::path_for(prefix.as_ref()))
+            .collect::<Result<Vec<_>>>()?;
+        Self::load_from_paths_at(paths.into_iter(), now)
+    }
+
     /// The path form, so a test can point at a file without setting the environment.
     pub fn load_from_paths(paths: impl Iterator<Item = PathBuf>) -> Result<ClaimSnapshot> {
+        Self::load_from_paths_with(paths, liveness)
+    }
+
+    fn load_from_paths_at(
+        paths: impl Iterator<Item = PathBuf>,
+        now: time::OffsetDateTime,
+    ) -> Result<ClaimSnapshot> {
+        let boot = boot_id();
+        let view = crate::pidview::current();
+        Self::load_from_paths_with(paths, |claim| {
+            liveness_with(claim, now, boot.as_deref(), view.as_ref(), proc_stat)
+        })
+    }
+
+    fn load_from_paths_with(
+        paths: impl Iterator<Item = PathBuf>,
+        observe: impl Fn(&Claim) -> Liveness,
+    ) -> Result<ClaimSnapshot> {
         let mut by_id = BTreeMap::new();
         let mut parks = BTreeMap::new();
         let mut escalations = BTreeMap::new();
         for path in paths {
             let store = ClaimStore::load_from(&path)?;
             for (id, claim) in store.iter() {
-                by_id.insert(id.clone(), (claim.clone(), liveness(claim)));
+                by_id.insert(id.clone(), (claim.clone(), observe(claim)));
             }
             for (id, park) in store.parks() {
                 parks.insert(id.clone(), park.clone());
@@ -1191,6 +1219,27 @@ pub fn proves_ownership(
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[test]
+    fn actions_claim_snapshot_uses_the_supplied_ttl_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("claims.toml");
+        let mut store = ClaimStore::load_from(&path).unwrap();
+        let id = TaskId::parse("aa-000001").unwrap();
+        let claim = claim_of("pidless", None, None);
+        let boundary = crate::time::parse(&claim.seen).unwrap() + time::Duration::hours(TTL_HOURS);
+        store.insert(&id, claim);
+        store.save().unwrap();
+
+        let observed =
+            |now| ClaimSnapshot::load_from_paths_at(std::iter::once(path.clone()), now).unwrap();
+        assert!(observed(boundary).held(&id).is_some());
+        assert!(
+            observed(boundary + time::Duration::SECOND)
+                .held(&id)
+                .is_none()
+        );
+    }
 
     fn sample() -> Claim {
         Claim {

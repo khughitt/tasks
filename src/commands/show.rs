@@ -13,13 +13,13 @@ use time::OffsetDateTime;
 
 pub(super) fn run(mut ctx: Ctx, id: &str, fetch: Fetch, all_projects: bool) -> Result<ShowOut> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, id)?;
-    let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
+    let now = crate::time::parse(&crate::time::now())?;
+    let claims = crate::claims::ClaimSnapshot::load_at(std::iter::once(&ctx.project.prefix), now)?;
     let (recorded, task, mut all) = read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
     if all_projects {
         widen(&ctx.registry, project, &mut all, &mut ctx.warnings)?;
     }
-    let now = crate::time::parse(&crate::time::now())?;
     let mut fields = describe(
         project,
         &ctx.registry,
