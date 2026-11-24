@@ -164,6 +164,15 @@ pub fn date(timestamp: &str) -> Span {
     Span::styled(day, Style::Date(When::On(date)))
 }
 
+/// A validated timestamp, shown as the exact stored stamp and painted by its day's age.
+/// The full stamp matters where revalidation compares it: two reads on the same day can
+/// differ only in the time.
+pub fn stamp(timestamp: &str) -> Span {
+    let date = crate::time::calendar_day(crate::time::day(timestamp))
+        .expect("records carry validated timestamps");
+    Span::styled(timestamp, Style::Date(When::On(date)))
+}
+
 /// The due column's `now`, which names no date.
 pub fn today() -> Span {
     Span::styled("now", Style::Date(When::Today))
@@ -271,6 +280,14 @@ mod tests {
         let day = ::time::Date::from_calendar_date(2026, ::time::Month::September, 25).unwrap();
         assert_eq!(span.style, Some(Style::Date(When::On(day))));
         assert_eq!(date("2026-09-25").text, "2026-09-25");
+    }
+
+    #[test]
+    fn a_stamp_shows_the_exact_timestamp_and_paints_by_its_day() {
+        let span = stamp("2026-09-25T15:47:16Z");
+        assert_eq!(span.text, "2026-09-25T15:47:16Z");
+        let day = ::time::Date::from_calendar_date(2026, ::time::Month::September, 25).unwrap();
+        assert_eq!(span.style, Some(Style::Date(When::On(day))));
     }
 
     #[test]

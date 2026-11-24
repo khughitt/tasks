@@ -9739,6 +9739,36 @@ fn piped_pretty_show_keeps_notes_on_one_line() {
 }
 
 #[test]
+fn pretty_show_prints_updated_as_the_full_stamp() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Stamped"]));
+    env.json(&dir, &["note", &id, "advances the stamp"]);
+    let task = env.json(&dir, &["show", &id])["task"].clone();
+    let updated = task["updated"].as_str().unwrap().to_string();
+    let created = task["created"].as_str().unwrap().to_string();
+    let text = env.pretty(&dir, &["show", &id]);
+    let updated_line = text
+        .lines()
+        .find(|l| l.starts_with("updated:"))
+        .unwrap_or_else(|| panic!("no updated row: {text}"));
+    assert_eq!(
+        updated_line,
+        format!("updated:  {updated}"),
+        "the overview shows the exact stored stamp"
+    );
+    let created_line = text
+        .lines()
+        .find(|l| l.starts_with("created:"))
+        .unwrap_or_else(|| panic!("no created row: {text}"));
+    assert_eq!(
+        created_line,
+        format!("created:  {}", &created[..10]),
+        "created stays date-only"
+    );
+}
+
+#[test]
 fn colored_list_paints_priorities_on_the_magenta_scale() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

@@ -278,7 +278,7 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         rows.push(("tags", vec![present::tags(&t.tags)]));
     }
     rows.push(("created", vec![present::date(&t.created)]));
-    rows.push(("updated", vec![present::date(&t.updated)]));
+    rows.push(("updated", vec![present::stamp(&t.updated)]));
     if let Some(started) = &t.started {
         rows.push(("started", vec![present::date(started)]));
     }
@@ -960,7 +960,7 @@ mod tests {
             "owner:      fix/sheet\n".into(),
             "tags:       web-ui, bug\n".into(),
             "created:    2026-09-25\n".into(),
-            "updated:    2026-10-02\n".into(),
+            "updated:    2026-10-02T08:03:41Z\n".into(),
             "started:    2026-09-25\n".into(),
             "agent:      claude-code/claude-opus-5-5\n".into(),
             "\n".into(),
