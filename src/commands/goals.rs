@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 /// `closed` adds the goals closed inside [`crate::goals::CLOSED_WINDOW`].
 pub fn run(mut ctx: ReadCtx, closed: bool, order: crate::goals::GoalOrder) -> Result<Output> {
-    let all = ctx.scope.scan()?;
+    let all = ctx.scan_mixed()?;
     let prefixes = ctx.scope.prefixes();
     let observed_at = crate::time::now();
     let now = crate::time::parse(&observed_at)?;

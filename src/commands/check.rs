@@ -226,14 +226,16 @@ pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
         head_tree: snap.head.as_ref().and_then(|head| head.tree.clone()),
         tree: snap.tree.clone(),
     };
-    if let Ok(qualified) = note_route::qualify(&project, &snap, &slot.passed()?)?
+    let guard = crate::staged::guard::check_index(&project, &snap)?;
+    if guard.errors.is_empty()
+        && let Ok(qualified) = note_route::qualify(&project, &snap, &slot.passed()?)?
         && note_route::check(&project, &qualified).is_ok()
     {
         slot.record(accepted)?;
         return Ok(Output::Check(CheckOut {
             growth: None,
             errors: Vec::new(),
-            warnings: Vec::new(),
+            warnings: guard.untouched_future_warnings,
         }));
     }
     let content = Content::materialize(&snap.top, &snap.tree)?;
@@ -258,6 +260,15 @@ pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
     for finding in out.errors.iter_mut().chain(out.warnings.iter_mut()) {
         finding.file = finding.file.replace(&copy, &records);
         finding.detail = finding.detail.replace(&copy, &records);
+    }
+    for err in guard.errors {
+        if !out
+            .errors
+            .iter()
+            .any(|existing| existing.file == err.file && existing.kind == err.kind)
+        {
+            out.errors.push(err);
+        }
     }
     if out.errors.is_empty() {
         slot.record(accepted)?;
@@ -404,7 +415,10 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     } else {
         None // The staged tree is already an immutable snapshot.
     };
-    let (records, parse_errors) = ctx.project.scan_lenient_with_raw();
+    let audit = ctx.project.scan_audit_with_raw();
+    let records = audit.records;
+    let unsupported_records = audit.unsupported;
+    let parse_errors = audit.errors;
     let mut growth_rows: Vec<_> = records
         .iter()
         .map(|(task, raw)| {
@@ -503,12 +517,36 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
         ));
     }
 
+    for future in &unsupported_records {
+        warnings.push(Finding {
+            id: Some(future.id.to_string()),
+            file: future.path.clone(),
+            kind: "unsupported_record_version".into(),
+            detail: future.warning(),
+        });
+    }
+
     for error in parse_errors {
         let file = match &error {
             Error::Parse { file, .. } => file.clone(),
             _ => "tasks/".into(),
         };
         errors.push(finding(None, file, "parse", error.to_string()));
+    }
+
+    // In a Git-backed records checkout, plain `tasks check` also enforces the changed-index
+    // record guard (today's records pre-commit hook invokes plain `tasks check`).
+    if ctx.project.content.is_none()
+        && let Some(guard) = crate::staged::guard::check_plain_git_index(&ctx.project)?
+    {
+        for err in guard.errors {
+            if !errors
+                .iter()
+                .any(|existing| existing.file == err.file && existing.kind == err.kind)
+            {
+                errors.push(err);
+            }
+        }
     }
 
     let checkout = &ctx.project.checkout;
@@ -593,6 +631,9 @@ pub fn run(ctx: Ctx, growth: bool) -> Result<Output> {
     let counterpart = |id: &TaskId| -> Result<Counterpart> {
         let canonical = ctx.registry.canonical_id(id);
         if canonical.prefix == ctx.project.prefix {
+            if unsupported_records.iter().any(|u| u.id == canonical) {
+                return Ok(Counterpart::Unreachable);
+            }
             return Ok(match record(id)? {
                 Some(task) => Counterpart::Present(Box::new(task)),
                 None => Counterpart::Missing,

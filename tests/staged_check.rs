@@ -472,8 +472,11 @@ fn a_staged_check_outside_a_hook_reads_the_repository_index() {
     fx.write(&id, "not a task record\n");
     fx.git(&["add", &fx.rel(&id)]);
     fx.write(&id, &valid);
+    // Plain `check` in a Git-backed records checkout also enforces the changed-index
+    // record guard so legacy pre-commit hooks calling plain `check` cannot admit a
+    // malformed or unsupported staged task blob behind a valid working copy.
     let plain = fx.env.cmd(&fx.project).args(["check"]).output().unwrap();
-    assert!(plain.status.success(), "{plain:?}");
+    assert_eq!(plain.status.code(), Some(1), "{plain:?}");
     let staged = fx
         .env
         .cmd(&fx.project)
@@ -488,6 +491,38 @@ fn a_staged_check_outside_a_hook_reads_the_repository_index() {
         !String::from_utf8_lossy(&staged.stdout).contains("tasks-staged-"),
         "{report}"
     );
+    // Non-record staged breakage (a staged spec removal kept in the working tree)
+    // still distinguishes working-tree `check` from index-only `check --staged`.
+    fx.git(&["reset", "-q", "HEAD", "--", &fx.rel(&id)]);
+    let spec = fx.project.join("docs/specs/kept.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "# Spec\n").unwrap();
+    assert!(
+        fx.env
+            .cmd(&fx.project)
+            .args(["edit", &id, "--spec", "docs/specs/kept.md"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    fx.git(&["add", "-A"]);
+    fx.commit(&[]).unwrap();
+    fx.git(&[
+        "rm",
+        "-q",
+        "--cached",
+        &format!("{PREFIX}/docs/specs/kept.md"),
+    ]);
+    let plain_doc = fx.env.cmd(&fx.project).args(["check"]).output().unwrap();
+    assert!(plain_doc.status.success(), "{plain_doc:?}");
+    let staged_doc = fx
+        .env
+        .cmd(&fx.project)
+        .args(["check", "--staged"])
+        .output()
+        .unwrap();
+    assert_eq!(staged_doc.status.code(), Some(1), "{staged_doc:?}");
 }
 
 #[test]

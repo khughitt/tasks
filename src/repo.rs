@@ -9,6 +9,17 @@ use std::path::{Path, PathBuf};
 
 pub const CONFIG_REL: &str = "tasks/.config.toml";
 
+pub struct MixedScan {
+    pub tasks: Vec<Task>,
+    pub unsupported: Vec<crate::entries::FutureRecord>,
+}
+
+pub struct AuditScan {
+    pub records: Vec<(Task, String)>,
+    pub unsupported: Vec<crate::entries::FutureRecord>,
+    pub errors: Vec<Error>,
+}
+
 pub(crate) struct StatusPaths {
     pub dirty: Vec<String>,
     pub ignored: Vec<String>,
@@ -1156,6 +1167,32 @@ impl Project {
         crate::history::physical_for_save(task, |archive| self.read_archive(&task.id, archive))
     }
 
+    /// Inspect a record's envelope and raw bytes read-only without reserializing.
+    #[allow(dead_code)]
+    pub fn inspect_envelope(&self, id: &TaskId) -> Result<crate::entries::RecordEnvelope> {
+        let raw = self.read_raw(id)?;
+        let file = format!("tasks/{id}.md");
+        let envelope = crate::entries::inspect_envelope(&raw, &file)?;
+        if let crate::entries::RecordEnvelope::Future(ref future) = envelope {
+            if future.id != *id {
+                return Err(Error::Parse {
+                    file,
+                    detail: format!("id field is {}", future.id),
+                });
+            }
+            if future.id.prefix != self.prefix {
+                return Err(Error::Parse {
+                    file,
+                    detail: format!(
+                        "prefix {:?} does not match project prefix {:?}",
+                        future.id.prefix, self.prefix
+                    ),
+                });
+            }
+        }
+        Ok(envelope)
+    }
+
     pub fn read_task(&self, id: &TaskId) -> Result<Task> {
         self.read_task_with_raw(id).map(|(task, _)| task)
     }
@@ -1163,6 +1200,26 @@ impl Project {
     pub fn read_task_with_raw(&self, id: &TaskId) -> Result<(Task, String)> {
         let raw = self.read_raw(id)?;
         let file = format!("tasks/{id}.md");
+        if let crate::entries::RecordEnvelope::Future(future) =
+            crate::entries::inspect_envelope(&raw, &file)?
+        {
+            if future.id != *id {
+                return Err(Error::Parse {
+                    file,
+                    detail: format!("id field is {}", future.id),
+                });
+            }
+            if future.id.prefix != self.prefix {
+                return Err(Error::Parse {
+                    file,
+                    detail: format!(
+                        "prefix {:?} does not match project prefix {:?}",
+                        future.id.prefix, self.prefix
+                    ),
+                });
+            }
+            return Err(future.refusal());
+        }
         let physical = parse_physical(&raw, &file)?;
         if physical.id() != id {
             return Err(Error::Parse {
@@ -1257,6 +1314,133 @@ impl Project {
             .into_iter()
             .map(|id| self.read_task(&id))
             .collect()
+    }
+
+    /// Mixed-version collection scan: keeps supported format 1/2 records, records intact
+    /// future-format envelopes separately without modifying them, and still fails hard on
+    /// malformed envelopes or malformed supported records.
+    pub fn scan_mixed(&self) -> Result<MixedScan> {
+        let mut tasks = Vec::new();
+        let mut unsupported = Vec::new();
+        for id in self.task_files()? {
+            let raw = self.read_raw(&id)?;
+            let file = format!("tasks/{id}.md");
+            match crate::entries::inspect_envelope(&raw, &file)? {
+                crate::entries::RecordEnvelope::Future(future) => {
+                    if future.id != id {
+                        return Err(Error::Parse {
+                            file,
+                            detail: format!("id field is {}", future.id),
+                        });
+                    }
+                    if future.id.prefix != self.prefix {
+                        return Err(Error::Parse {
+                            file,
+                            detail: format!(
+                                "prefix {:?} does not match project prefix {:?}",
+                                future.id.prefix, self.prefix
+                            ),
+                        });
+                    }
+                    unsupported.push(future);
+                }
+                crate::entries::RecordEnvelope::Format1
+                | crate::entries::RecordEnvelope::Format2 => {
+                    tasks.push(self.read_task(&id)?);
+                }
+            }
+        }
+        Ok(MixedScan { tasks, unsupported })
+    }
+
+    pub fn scan_audit_with_raw(&self) -> AuditScan {
+        let mut records = Vec::new();
+        let mut unsupported = Vec::new();
+        let mut errors = Vec::new();
+        let entries = match std::fs::read_dir(self.tasks_dir()) {
+            Ok(entries) => entries,
+            Err(error) => {
+                return AuditScan {
+                    records,
+                    unsupported,
+                    errors: vec![error.into()],
+                };
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    errors.push(error.into());
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let Some(name) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let Some(stem) = name.strip_suffix(".md") else {
+                continue;
+            };
+            if stem.starts_with('.') {
+                continue;
+            }
+            match TaskId::parse(stem) {
+                Ok(id) => {
+                    let file = format!("tasks/{id}.md");
+                    let raw = match self.read_raw(&id) {
+                        Ok(raw) => raw,
+                        Err(error) => {
+                            errors.push(error);
+                            continue;
+                        }
+                    };
+                    match crate::entries::inspect_envelope(&raw, &file) {
+                        Ok(crate::entries::RecordEnvelope::Future(future)) => {
+                            if future.id != id {
+                                errors.push(Error::Parse {
+                                    file,
+                                    detail: format!("id field is {}", future.id),
+                                });
+                            } else if future.id.prefix != self.prefix {
+                                errors.push(Error::Parse {
+                                    file,
+                                    detail: format!(
+                                        "prefix {:?} does not match project prefix {:?}",
+                                        future.id.prefix, self.prefix
+                                    ),
+                                });
+                            } else {
+                                unsupported.push(future);
+                            }
+                        }
+                        Ok(
+                            crate::entries::RecordEnvelope::Format1
+                            | crate::entries::RecordEnvelope::Format2,
+                        ) => match self.read_task_with_raw(&id) {
+                            Ok(task) => records.push(task),
+                            Err(error) => errors.push(error),
+                        },
+                        Err(error) => errors.push(error),
+                    }
+                }
+                Err(_) => errors.push(Error::Parse {
+                    file: format!("tasks/{name}"),
+                    detail: "filename is not a valid task id".into(),
+                }),
+            }
+        }
+        records.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
+        unsupported.sort_by(|left, right| left.id.cmp(&right.id));
+        AuditScan {
+            records,
+            unsupported,
+            errors,
+        }
     }
 
     pub fn scan_lenient(&self) -> (Vec<Task>, Vec<Error>) {
@@ -2147,6 +2331,9 @@ mod tests {
 
     fn sample(p: &Project) -> Task {
         Task {
+            format: 1,
+            open_decisions: Vec::new(),
+            entries: Vec::new(),
             note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: p.new_id().unwrap(),

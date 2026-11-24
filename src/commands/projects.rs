@@ -69,13 +69,22 @@ pub fn run(
 ) -> Result<Output> {
     let key = ProjectSort::parse(sort)?;
     let registry = Registry::load()?;
-    let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
+    let mut warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
         let reachable = is_reachable(&registry, prefix)?;
         let (counts, total, last_activity, color, retired, located, identity) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
-            let tasks = project.scan().map_err(|error| error.in_project(prefix))?;
+            let mixed = project
+                .scan_mixed()
+                .map_err(|error| error.in_project(prefix))?;
+            for future in mixed.unsupported {
+                let warning = future.warning();
+                if !warnings.contains(&warning) {
+                    warnings.push(warning);
+                }
+            }
+            let tasks = mixed.tasks;
             // Timestamps are fixed-width UTC with no fractional part, so the lexical max
             // is the chronological one.
             let last = tasks.iter().map(|task| task.updated.clone()).max();

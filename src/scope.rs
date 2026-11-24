@@ -335,6 +335,51 @@ impl Scope {
             .collect()
     }
 
+    /// The union of every project's supported tasks plus intact future-format envelopes.
+    pub fn scan_mixed(&self) -> Result<(Vec<Task>, Vec<crate::entries::FutureRecord>)> {
+        let mut all = Vec::new();
+        let mut unsupported = Vec::new();
+        let qualify = matches!(self, Scope::All { .. });
+        for project in self.projects() {
+            let mixed = project.scan_mixed().map_err(|error| {
+                if qualify {
+                    error.in_project(&project.prefix)
+                } else {
+                    error
+                }
+            })?;
+            all.extend(mixed.tasks);
+            unsupported.extend(mixed.unsupported);
+        }
+        Ok((all, unsupported))
+    }
+
+    /// One scan per project, for commands that group by project (`tree`), carrying intact
+    /// future-format envelopes separately.
+    #[allow(clippy::type_complexity)]
+    pub fn scan_each_mixed(
+        &self,
+    ) -> Result<(
+        Vec<(&Project, Vec<Task>)>,
+        Vec<crate::entries::FutureRecord>,
+    )> {
+        let qualify = matches!(self, Scope::All { .. });
+        let mut per_project = Vec::new();
+        let mut unsupported = Vec::new();
+        for project in self.projects() {
+            let mixed = project.scan_mixed().map_err(|error| {
+                if qualify {
+                    error.in_project(&project.prefix)
+                } else {
+                    error
+                }
+            })?;
+            per_project.push((project, mixed.tasks));
+            unsupported.extend(mixed.unsupported);
+        }
+        Ok((per_project, unsupported))
+    }
+
     /// The union of every project's tasks, projects in scope order.
     pub fn scan(&self) -> Result<Vec<Task>> {
         let mut all = Vec::new();

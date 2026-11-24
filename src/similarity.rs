@@ -89,6 +89,9 @@ mod tests {
 
     fn feedback_task(id: &str, title: &str) -> Task {
         Task {
+            format: 1,
+            open_decisions: Vec::new(),
+            entries: Vec::new(),
             note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),

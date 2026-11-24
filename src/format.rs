@@ -6,6 +6,7 @@ use crate::model::{
 };
 
 pub const REFS_DELIMITER: &str = "## References";
+pub const ENTRIES_DELIMITER: &str = "## Entries";
 pub const NOTES_DELIMITER: &str = "## Notes";
 const KEYS: [&str; 39] = [
     "id",
@@ -64,6 +65,10 @@ pub struct PhysicalTask {
 }
 
 impl PhysicalTask {
+    #[allow(dead_code)]
+    pub fn format(&self) -> u8 {
+        self.metadata.format
+    }
     pub fn id(&self) -> &TaskId {
         &self.metadata.id
     }
@@ -173,11 +178,27 @@ fn parse_numbered_fields<'a>(
 }
 
 pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
+    let format = match crate::entries::inspect_envelope(text, file)? {
+        crate::entries::RecordEnvelope::Format1 => 1u8,
+        crate::entries::RecordEnvelope::Format2 => 2u8,
+        crate::entries::RecordEnvelope::Future(future) => return Err(future.refusal()),
+    };
     let (fm, after) = split_frontmatter(text, file)?;
     let fm = quote_timestamps(fm);
     let pairs = parse_fields(&fm, file)?;
     for (k, _) in &pairs {
-        if !KEYS.contains(&k.as_str()) {
+        if format >= 2 && k == "awaiting_user" {
+            return Err(perr(
+                file,
+                "awaiting_user is forbidden in format 2; human waiting is derived from open decisions",
+            ));
+        }
+        let allowed = if format >= 2 {
+            KEYS.contains(&k.as_str()) || matches!(k.as_str(), "format" | "open_decisions")
+        } else {
+            KEYS.contains(&k.as_str())
+        };
+        if !allowed {
             return Err(perr(file, format!("unknown key {k:?}")));
         }
     }
@@ -236,7 +257,12 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
         .map(|d| TaskId::parse(d))
         .collect::<Result<Vec<_>>>()
         .map_err(|e| perr(file, e.to_string()))?;
-    let (body, refs, notes) = split_body(after, file)?;
+    let (body, refs, entries, notes) = split_body(after, file, format)?;
+    let open_decisions = if format >= 2 {
+        optional_list("open_decisions")?
+    } else {
+        Vec::new()
+    };
     let archives = optional_list("note_archives")?
         .iter()
         .map(|value| {
@@ -247,6 +273,9 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
     crate::history::validate_descriptors(&archives)
         .map_err(|error| perr(file, error.to_string()))?;
     let mut task = Task {
+        format,
+        open_decisions,
+        entries,
         note_archives: Vec::new(),
         wake_on: optional_list("wake_on")?
             .iter()
@@ -373,16 +402,23 @@ pub fn quote_timestamps(fm: &str) -> String {
         .join("\n")
 }
 
-fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> {
+type BodyParts = (String, Vec<Ref>, Vec<crate::entries::Entry>, Vec<Note>);
+
+fn split_body(after: &str, file: &str, format: u8) -> Result<BodyParts> {
     let mut body = Vec::new();
     let mut refs = Vec::new();
+    let mut entries = Vec::new();
     let mut in_refs = false;
+    let mut in_entries = false;
     let mut notes: Vec<Note> = Vec::new();
     let mut in_notes = false;
     // Whether the current note has already had a `provenance:` continuation line.
     let mut continued = false;
     for line in after.lines() {
         if line == REFS_DELIMITER {
+            if in_entries {
+                return Err(perr(file, "## References after ## Entries"));
+            }
             if in_notes {
                 return Err(perr(file, "## References after ## Notes"));
             }
@@ -392,10 +428,23 @@ fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> 
             in_refs = true;
             continue;
         }
+        if format >= 2 && line == ENTRIES_DELIMITER {
+            if in_notes {
+                return Err(perr(file, "## Entries after ## Notes"));
+            }
+            if in_entries {
+                return Err(perr(file, "second ## Entries heading"));
+            }
+            in_refs = false;
+            in_entries = true;
+            continue;
+        }
         if line == NOTES_DELIMITER {
             if in_notes {
                 return Err(perr(file, "second ## Notes heading"));
             }
+            in_refs = false;
+            in_entries = false;
             in_notes = true;
             continue;
         }
@@ -407,6 +456,12 @@ fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> 
                 refs.push(
                     crate::refs::parse_entry(text)
                         .map_err(|error| perr(file, error.to_string()))?,
+                );
+            }
+        } else if !in_notes && in_entries {
+            if !line.trim().is_empty() {
+                entries.push(
+                    crate::entries::parse_entry_line(line).map_err(|detail| perr(file, detail))?,
                 );
             }
         } else if !in_notes {
@@ -444,7 +499,7 @@ fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> 
         .unwrap_or(&body)
         .trim_end()
         .to_string();
-    Ok((body, refs, notes))
+    Ok((body, refs, entries, notes))
 }
 
 fn validate_notes(notes: &[Note]) -> Result<()> {
@@ -462,8 +517,8 @@ pub fn parse_note_section(text: &str, file: &str) -> Result<Vec<Note>> {
     if !text.starts_with("## Notes\n") && !text.starts_with("## Notes\r\n") {
         return Err(perr(file, "archive must begin with ## Notes"));
     }
-    let (body, refs, notes) = split_body(text, file)?;
-    if !body.is_empty() || !refs.is_empty() {
+    let (body, refs, entries, notes) = split_body(text, file, 1)?;
+    if !body.is_empty() || !refs.is_empty() || !entries.is_empty() {
         return Err(perr(file, "archive may contain only its note section"));
     }
     validate_notes(&notes).map_err(|error| perr(file, error.to_string()))?;
@@ -569,10 +624,14 @@ fn validate_note_keys(
 }
 
 pub fn validate_body(body: &str) -> Result<()> {
-    if let Some(delimiter) = body
-        .lines()
-        .find(|line| matches!(*line, NOTES_DELIMITER | REFS_DELIMITER))
-    {
+    validate_body_for_format(body, 1)
+}
+
+pub fn validate_body_for_format(body: &str, format: u8) -> Result<()> {
+    if let Some(delimiter) = body.lines().find(|line| {
+        matches!(*line, NOTES_DELIMITER | REFS_DELIMITER)
+            || (format >= 2 && *line == ENTRIES_DELIMITER)
+    }) {
         Err(Error::Validation(format!(
             "body contains reserved {delimiter} delimiter"
         )))
@@ -763,7 +822,14 @@ pub fn validate_task(t: &Task) -> Result<()> {
     if t.depends.contains(&t.id) {
         return Err(Error::Validation("task cannot depend on itself".into()));
     }
-    validate_body(&t.body)?;
+    if t.format >= 2 && t.awaiting_user {
+        return Err(Error::Validation(
+            "format 2 records cannot carry awaiting_user; human waiting is derived from open decisions"
+                .into(),
+        ));
+    }
+    validate_body_for_format(&t.body, t.format)?;
+    crate::entries::validate_entries(t.format, &t.open_decisions, &t.entries)?;
     let mut handles = std::collections::HashSet::new();
     for entry in &t.refs {
         crate::refs::validate_entry(entry)?;
@@ -782,12 +848,16 @@ pub fn validate_task(t: &Task) -> Result<()> {
 pub fn serialize_physical(record: &PhysicalTask) -> String {
     let t = &record.metadata;
     let s = |v: &str| Value::Scalar(v.to_string());
-    let mut pairs = vec![
+    let mut pairs = Vec::new();
+    if t.format >= 2 {
+        pairs.push(("format".into(), Value::Raw(t.format.to_string())));
+    }
+    pairs.extend([
         ("id".into(), s(&t.id.to_string())),
         ("title".into(), s(&t.title)),
         ("status".into(), s(t.status.as_str())),
         ("priority".into(), Value::Raw(t.priority.to_string())),
-    ];
+    ]);
     if let Some(z) = t.size {
         pairs.push(("size".into(), s(z.as_str())));
     }
@@ -812,8 +882,14 @@ pub fn serialize_physical(record: &PhysicalTask) -> String {
         pairs.push(("reviewed".into(), Value::Raw("true".into())));
     }
     // Raw for the same reason as `parallel`.
-    if t.awaiting_user {
+    if t.format < 2 && t.awaiting_user {
         pairs.push(("awaiting_user".into(), Value::Raw("true".into())));
+    }
+    if t.format >= 2 && !t.open_decisions.is_empty() {
+        pairs.push((
+            "open_decisions".into(),
+            Value::List(t.open_decisions.clone()),
+        ));
     }
     if let Some(reviewed_at) = &t.reviewed_at {
         pairs.push(("reviewed_at".into(), Value::Raw(reviewed_at.clone())));
@@ -927,6 +1003,15 @@ pub fn serialize_physical(record: &PhysicalTask) -> String {
         for entry in &t.refs {
             out.push_str("- ");
             out.push_str(&crate::refs::render_entry(entry));
+            out.push('\n');
+        }
+    }
+    if t.format >= 2 && !t.entries.is_empty() {
+        out.push('\n');
+        out.push_str(ENTRIES_DELIMITER);
+        out.push_str("\n\n");
+        for entry in &t.entries {
+            out.push_str(&crate::entries::serialize_entry_line(entry));
             out.push('\n');
         }
     }

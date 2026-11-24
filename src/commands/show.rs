@@ -72,11 +72,16 @@ fn widen(
     let own = registry.canonical_prefix(&project.prefix);
     // Not `scan_each`: that would scan this project's registered copy only to drop it.
     for other in scope.projects().iter().filter(|other| other.prefix != own) {
-        all.extend(
-            other
-                .scan()
-                .map_err(|error| error.in_project(&other.prefix))?,
-        );
+        let mixed = other
+            .scan_mixed()
+            .map_err(|error| error.in_project(&other.prefix))?;
+        for future in mixed.unsupported {
+            let warning = future.warning();
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
+            }
+        }
+        all.extend(mixed.tasks);
     }
     Ok(())
 }
@@ -87,7 +92,16 @@ pub(super) fn read_record(
     claims: &crate::claims::ClaimSnapshot,
 ) -> Result<(Option<Project>, Task, Vec<Task>)> {
     let found = match ctx.project.read_task(id) {
-        Ok(task) => (None, task, ctx.project.scan()?),
+        Ok(task) => {
+            let mixed = ctx.project.scan_mixed()?;
+            for future in mixed.unsupported {
+                let warning = future.warning();
+                if !ctx.warnings.contains(&warning) {
+                    ctx.warnings.push(warning);
+                }
+            }
+            (None, task, mixed.tasks)
+        }
         Err(Error::TaskNotFound(_)) => {
             let (worktree, project, task, all) = match recorded_elsewhere(id, claims) {
                 Err(Error::TaskNotFound(_)) => {
@@ -142,6 +156,7 @@ pub(super) fn recorded_elsewhere<'a>(
     match super::parked::open_recorded(id, Path::new(worktree)) {
         Ok(Some((project, task, all))) => Ok((worktree, project, task, all)),
         Ok(None) => Err(unavailable(String::new())),
+        Err(error @ Error::UnsupportedRecordVersion { .. }) => Err(error),
         Err(error) => Err(unavailable(format!(": {error}"))),
     }
 }
@@ -175,7 +190,11 @@ pub fn describe(
         crate::dependency::resolve(registry, id, |id| {
             match all.iter().find(|candidate| candidate.id == *id) {
                 Some(found) => Ok(Some(found.clone())),
-                None => resolver.resolve_canonical_task(id),
+                None => match resolver.resolve_canonical_task(id) {
+                    Ok(found) => Ok(found),
+                    Err(Error::UnsupportedRecordVersion { .. }) => Ok(None),
+                    Err(other) => Err(other),
+                },
             }
         })
     })?;
@@ -461,7 +480,11 @@ fn resolve_row(
     let canonical = registry.canonical_id(id);
     let resolved = match all.iter().find(|candidate| candidate.id == canonical) {
         Some(found) => Some(found.clone()),
-        None => resolver.resolve_canonical_task(&canonical)?,
+        None => match resolver.resolve_canonical_task(&canonical) {
+            Ok(found) => found,
+            Err(Error::UnsupportedRecordVersion { .. }) => None,
+            Err(other) => return Err(other),
+        },
     };
     let canonical_id = canonical.to_string();
     match resolved {

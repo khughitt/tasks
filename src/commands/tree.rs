@@ -38,7 +38,14 @@ pub fn run(mut ctx: ReadCtx, id: Option<String>, all: bool, format: Format) -> R
     let mut captured = Vec::new();
     let mut opened = Vec::new();
     let mut projects = Vec::new();
-    for (project, tasks) in ctx.scope.scan_each()? {
+    let (per_project, unsupported) = ctx.scope.scan_each_mixed()?;
+    for future in unsupported {
+        let warning = future.warning();
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
+    for (project, tasks) in per_project {
         let start = captured.len();
         opened.push(project.prefix.clone());
         captured.extend(tasks);

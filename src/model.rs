@@ -137,6 +137,9 @@ mod tests {
         step: Option<&str>,
     ) -> Task {
         Task {
+            format: 1,
+            open_decisions: Vec::new(),
+            entries: Vec::new(),
             note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
@@ -591,6 +594,15 @@ pub struct Ref {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Task {
+    /// Physical record schema version: 1 (unversioned) or 2.
+    #[serde(skip)]
+    pub(crate) format: u8,
+    /// Open decision UUID pointers in format-2 frontmatter.
+    #[serde(skip)]
+    pub(crate) open_decisions: Vec<String>,
+    /// Typed entries from the format-2 `## Entries` section.
+    #[serde(skip)]
+    pub(crate) entries: Vec<crate::entries::Entry>,
     #[serde(skip)]
     pub(crate) note_archives: Vec<crate::history::ArchiveDescriptor>,
     pub id: TaskId,

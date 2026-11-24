@@ -549,10 +549,22 @@ impl ReadCtx {
             .collect()
     }
 
+    /// Every supported task in scope; records intact future-format warnings on `self`.
+    pub fn scan_mixed(&mut self) -> Result<Vec<Task>> {
+        let (all, unsupported) = self.scope.scan_mixed()?;
+        for future in unsupported {
+            let warning = future.warning();
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
+        }
+        Ok(all)
+    }
+
     /// Every task in scope plus the claim snapshot for the scope's prefixes: the prologue
     /// of each read command that reports claims.
-    pub fn scan_with_claims(&self) -> Result<(Vec<Task>, crate::claims::ClaimSnapshot)> {
-        let all = self.scope.scan()?;
+    pub fn scan_with_claims(&mut self) -> Result<(Vec<Task>, crate::claims::ClaimSnapshot)> {
+        let all = self.scan_mixed()?;
         let prefixes = self.scope.prefixes();
         let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
         Ok((all, claims))

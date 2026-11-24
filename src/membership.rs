@@ -203,7 +203,11 @@ impl<'r> Membership<'r> {
                 .position(&id)
                 .map(|slot| entry.tasks[slot].clone())),
             Some(None) => Ok(None),
-            None => crate::resolve::resolve_registered_canonical(self.registry, &id),
+            None => match crate::resolve::resolve_registered_canonical(self.registry, &id) {
+                Ok(task) => Ok(task),
+                Err(crate::error::Error::UnsupportedRecordVersion { .. }) => Ok(None),
+                Err(error) => Err(error),
+            },
         }
     }
 
@@ -246,10 +250,16 @@ impl<'r> Membership<'r> {
         }
         let project =
             crate::scope::open_registered(self.registry, prefix, crate::scope::Origin::Prefix)?;
-        let scan = project
-            .scan()
+        let mixed = project
+            .scan_mixed()
             .map_err(|error| error.in_project(&project.prefix))?;
-        Ok(Some(ProjectScan::new(scan, self.registry)))
+        for future in mixed.unsupported {
+            let warning = future.warning();
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
+        }
+        Ok(Some(ProjectScan::new(mixed.tasks, self.registry)))
     }
 
     /// Canonical prefixes of every member returned so far.

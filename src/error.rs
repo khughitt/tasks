@@ -50,6 +50,14 @@ pub enum Error {
     InvalidId(String, String),
     #[error("{file}: {detail}")]
     Parse { file: String, detail: String },
+    #[error(
+        "{id} ({path}) uses unsupported record format {format}; upgrade tasks to read or modify it"
+    )]
+    UnsupportedRecordVersion {
+        id: String,
+        path: String,
+        format: u32,
+    },
     #[error("{0}")]
     Validation(String),
     #[error("task {0} changed since it was read; refresh with tasks show --json")]
@@ -202,6 +210,13 @@ impl Error {
                 file,
                 detail: detail + suffix,
             },
+            Error::UnsupportedRecordVersion { id, path, format } => {
+                Error::UnsupportedRecordVersion {
+                    id,
+                    path: path + suffix,
+                    format,
+                }
+            }
             Error::ClaimFenceRefused(detail) => Error::ClaimFenceRefused(detail + suffix),
             Error::Validation(detail) => Error::Validation(detail + suffix),
             error @ (Error::TaskRevisionMismatch(_) | Error::TaskChildrenRevisionMismatch(_)) => {
@@ -298,6 +313,13 @@ impl Error {
                 file: format!("project {prefix}: {file}"),
                 detail,
             },
+            Error::UnsupportedRecordVersion { id, path, format } => {
+                Error::UnsupportedRecordVersion {
+                    id,
+                    path: format!("project {prefix}: {path}"),
+                    format,
+                }
+            }
             other => other,
         }
     }
@@ -318,6 +340,7 @@ impl Error {
             Error::UnresolvableId(_) => "unresolvable_id",
             Error::InvalidId(..) => "invalid_id",
             Error::Parse { .. } => "parse",
+            Error::UnsupportedRecordVersion { .. } => "unsupported_record_version",
             Error::ClaimFenceRefused(_) => "claim_fence_refused",
             Error::Validation(_) => "validation",
             Error::TaskRevisionMismatch(_) => "task_revision_mismatch",

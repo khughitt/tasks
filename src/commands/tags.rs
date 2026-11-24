@@ -20,12 +20,12 @@ fn meaning_of(scope: &Scope, tag: &str) -> Option<String> {
 /// Tag frequencies over open tasks, or over the given statuses: how many tasks carry
 /// each tag. Visibility only: this is how a shared vocabulary would be chosen, not
 /// enforced.
-pub fn run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
+pub fn run(mut ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
     let statuses = statuses
         .iter()
         .map(|status| Status::parse(status))
         .collect::<Result<Vec<_>>>()?;
-    let all = ctx.scope.scan()?;
+    let all = ctx.scan_mixed()?;
     let mut rows: BTreeMap<&str, TagRow> = BTreeMap::new();
     for task in all.iter().filter(|task| {
         if statuses.is_empty() {

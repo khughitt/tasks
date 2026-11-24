@@ -1,7 +1,7 @@
 use super::{ClaimIntent, Ctx, dep, parse_id};
 use crate::cli::FieldArgs;
 use crate::error::{Error, Result};
-use crate::format::{normalize_note_text, validate_body, validate_line, validate_task};
+use crate::format::{normalize_note_text, validate_line, validate_task};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::repo::Project;
@@ -61,7 +61,7 @@ pub fn apply_fields(
         } else {
             body.clone()
         };
-        validate_body(&body)?;
+        crate::format::validate_body_for_format(&body, task.format)?;
         task.body = body;
     }
     let mut handles = std::collections::HashSet::new();

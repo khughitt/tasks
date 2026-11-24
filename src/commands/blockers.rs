@@ -47,9 +47,18 @@ pub fn run(mut ctx: ReadCtx, args: BlockersArgs) -> Result<Output> {
         .filter(|prefix| !scanned.contains(prefix))
         .cloned()
         .collect();
-    let coverage = Coverage::new(mode, requested, scanned.clone(), unreachable);
+    let mut coverage = Coverage::new(mode, requested, scanned.clone(), unreachable);
 
-    let all = ctx.scope.scan()?;
+    let (all, unsupported) = ctx.scope.scan_mixed()?;
+    if !unsupported.is_empty() {
+        coverage.complete = false;
+        for future in unsupported {
+            let warning = future.warning();
+            if !ctx.warnings.contains(&warning) {
+                ctx.warnings.push(warning);
+            }
+        }
+    }
     let analysis = crate::blockers::build(&all, &ctx.registry, coverage, |id| {
         super::list::scan_lookup(&ctx, &all, id)
     })?;

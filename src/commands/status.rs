@@ -45,7 +45,14 @@ pub fn start(
     if let Some(reason) = reason.as_deref() {
         crate::format::validate_line("reason", reason)?;
     }
-    let local = ctx.project.scan()?;
+    let mixed = ctx.project.scan_mixed()?;
+    for future in mixed.unsupported {
+        let warning = future.warning();
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
+    let local = mixed.tasks;
     let snapshot = crate::halt::snapshot(&ctx.project, &ctx.registry, &local)?;
     if force
         && !snapshot.halts().is_empty()

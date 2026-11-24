@@ -10,7 +10,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
-    let local = ctx.project.scan()?;
+    let local = ctx.project.scan_mixed()?.tasks;
     let snapshot = crate::halt::snapshot(&ctx.project, &ctx.registry, &local)?;
     if snapshot.allows(task) {
         return Ok(());
@@ -43,6 +43,21 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "a shelf requires its checkpoint; use `tasks shelve {0}` to renew or `tasks unshelve {0}` to return to review",
             original.id
         )));
+    }
+    if edited.format != original.format {
+        return Err(Error::Validation(
+            "format is managed by tasks; it cannot be edited".into(),
+        ));
+    }
+    if edited.open_decisions != original.open_decisions {
+        return Err(Error::Validation(
+            "open_decisions are managed by decision commands; they cannot be edited".into(),
+        ));
+    }
+    if edited.entries != original.entries {
+        return Err(Error::Validation(
+            "Entries are immutable in the editor; use decision commands to update them".into(),
+        ));
     }
     if edited.id != original.id {
         return Err(Error::Validation("id is immutable".into()));

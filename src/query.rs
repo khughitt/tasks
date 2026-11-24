@@ -293,6 +293,9 @@ mod tests {
 
     fn t(id: &str, status: Status, priority: u8, size: Option<Size>, deps: &[&str]) -> Task {
         Task {
+            format: 1,
+            open_decisions: Vec::new(),
+            entries: Vec::new(),
             note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),

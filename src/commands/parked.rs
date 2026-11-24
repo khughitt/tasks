@@ -295,13 +295,16 @@ pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Ta
     if project.prefix != id.prefix {
         return Ok(None);
     }
-    let scan = project
-        .scan()
+    let mixed = project
+        .scan_mixed()
         .map_err(|error| error.in_project(&project.prefix))?;
-    let Some(task) = scan.iter().find(|task| task.id == *id).cloned() else {
+    if let Some(future) = mixed.unsupported.iter().find(|future| future.id == *id) {
+        return Err(future.refusal());
+    }
+    let Some(task) = mixed.tasks.iter().find(|task| task.id == *id).cloned() else {
         return Ok(None);
     };
-    Ok(Some((project, task, scan)))
+    Ok(Some((project, task, mixed.tasks)))
 }
 
 pub(super) fn resumable_lifecycle(task: &Task) -> bool {

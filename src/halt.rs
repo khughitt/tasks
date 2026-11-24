@@ -40,7 +40,7 @@ fn authority_snapshot(
     {
         local
     } else {
-        authoritative = authority.scan()?;
+        authoritative = authority.scan_mixed()?.tasks;
         &authoritative
     };
     let mut halts: Vec<Task> = records
@@ -93,7 +93,11 @@ fn reachable(halt: &Task, local: &[Task], registry: &Registry) -> Result<HashSet
         if id.prefix == halt.id.prefix {
             Ok(local.iter().find(|task| task.id == *id).cloned())
         } else {
-            crate::resolve::resolve_registered_canonical(registry, id)
+            match crate::resolve::resolve_registered_canonical(registry, id) {
+                Ok(task) => Ok(task),
+                Err(crate::error::Error::UnsupportedRecordVersion { .. }) => Ok(None),
+                Err(error) => Err(error),
+            }
         }
     };
     // Queue entries are canonical; only stored dependency and moved_to pointers are raw.
@@ -142,6 +146,9 @@ mod tests {
 
     fn task(hex: &str) -> Task {
         Task {
+            format: 1,
+            open_decisions: Vec::new(),
+            entries: Vec::new(),
             note_archives: Vec::new(),
             wake_on: Vec::new(),
             id: TaskId::parse(&format!("sci-{hex}")).unwrap(),
