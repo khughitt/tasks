@@ -2,6 +2,7 @@ use super::facts::WakeFacts;
 use super::input::{Fact, Harness, HookInput, fact};
 use crate::claims::{Claim, ClaimSnapshot, Liveness};
 use crate::registry::Registry;
+use crate::relay::ancestry::{ProcSource, Scope, walk};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -31,6 +32,40 @@ fn value<'a>(container: &'a Value, key: &str) -> Option<&'a Value> {
         None
     }
 }
+/// Where the guard reads the process tree: `parent` is the hook's parent, whose nearest
+/// harness session process is the one ending its turn (relay runs the hook beneath it).
+/// Injected so tests never touch the real `/proc`.
+pub(super) struct Processes<S> {
+    pub parent: Option<u32>,
+    pub source: S,
+}
+impl<S: ProcSource> Processes<S> {
+    /// The nearest harness session process at or above `from`, as pid and start time.
+    /// `None` when the walk cannot establish one, which is never evidence of another holder.
+    fn session(&self, from: Option<u32>) -> Option<(u32, u64)> {
+        match walk(from?, &self.source) {
+            Scope::Harness(boundary) => Some((boundary.entry.pid, boundary.entry.start)),
+            Scope::Hosting(..) | Scope::Outside | Scope::Unknown { .. } => None,
+        }
+    }
+}
+/// A claim on the stopping session's id that a different live harness process holds: a
+/// `--resume` copy shares the conversation's session id but not its process
+/// (tasks-8ef117). Only a confirmed-live recorded pid whose walk reaches a harness session
+/// process other than the caller's counts; every uncertain case stays the caller's own.
+fn held_elsewhere(
+    claim: &Claim,
+    live: &Liveness,
+    caller: Option<(u32, u64)>,
+    processes: &Processes<impl ProcSource>,
+) -> bool {
+    let (Liveness::Live, Some(pid), Some(caller)) = (live, claim.pid, caller) else {
+        return false;
+    };
+    processes
+        .session(Some(pid))
+        .is_some_and(|holder| holder != caller)
+}
 fn deny(text: impl Into<String>) -> GuardDecision {
     GuardDecision::Deny(text.into())
 }
@@ -38,6 +73,7 @@ pub(super) fn decide(
     event: &HookInput,
     claims: impl FnOnce() -> Result<Claims, String>,
     facts: impl FnOnce(Harness) -> Result<WakeFacts, String>,
+    processes: &Processes<impl ProcSource>,
 ) -> GuardDecision {
     let h = event.harness;
     let e = &event.event;
@@ -141,10 +177,18 @@ pub(super) fn decide(
         &["claude-code", "codex", "agy"]
     };
     let wanted = |s: &str| s == session || prefixes.iter().any(|p| s == format!("{p}:{session}"));
-    let own: Vec<_> = rows
+    let session_rows: Vec<_> = rows
         .iter()
         .filter(|(_, c, l)| !l.is_stale() && wanted(&c.session))
         .collect();
+    let caller = session_rows
+        .iter()
+        .any(|(_, c, l)| *l == Liveness::Live && c.pid.is_some())
+        .then(|| processes.session(processes.parent))
+        .flatten();
+    let (elsewhere, own): (Vec<_>, Vec<_>) = session_rows
+        .into_iter()
+        .partition(|(_, c, l)| held_elsewhere(c, l, caller, processes));
     let root = format!("codex:{session}");
     let related: Vec<_> = rows
         .iter()
@@ -160,7 +204,7 @@ pub(super) fn decide(
         return GuardDecision::Allow;
     }
     if worker {
-        return deny(reason(h, &own, &[], None, None, true));
+        return deny(reason(h, &own, &[], &elsewhere, None, None, true));
     }
     let mut wake = None;
     let mut unseen = None;
@@ -224,7 +268,15 @@ pub(super) fn decide(
             }
         }
     }
-    deny(reason(h, &own, &related, wake, unseen.as_deref(), false))
+    deny(reason(
+        h,
+        &own,
+        &related,
+        &elsewhere,
+        wake,
+        unseen.as_deref(),
+        false,
+    ))
 }
 
 fn in_flight(
@@ -385,6 +437,7 @@ fn reason(
     h: Harness,
     own: &[&(String, Claim, Liveness)],
     related: &[&(String, Claim, Liveness)],
+    elsewhere: &[&(String, Claim, Liveness)],
     wake: Option<bool>,
     unseen: Option<&str>,
     worker: bool,
@@ -409,6 +462,20 @@ fn reason(
             parts.push(format!("Wake inputs unavailable: {unseen}; repair the facts reader. No wake exception was granted."));
         }
     }
+    if !elsewhere.is_empty() {
+        let held = elsewhere
+            .iter()
+            .map(|(id, c, _)| {
+                format!(
+                    "`{id}` in `{}` (pid {})",
+                    c.worktree,
+                    c.pid.expect("held elsewhere by a recorded pid")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(format!("Another live process of this conversation holds {held}; leave it to that process: do not park, close or release it from here."));
+    }
     parts.join(" ")
 }
 
@@ -416,6 +483,32 @@ fn reason(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::HashMap;
+
+    /// An injected process table: every listed process is a `comm`, a parent and a start.
+    #[derive(Default)]
+    struct Table(HashMap<u32, (&'static str, u32, u64)>);
+    impl ProcSource for Table {
+        fn stat(&self, pid: u32) -> Option<String> {
+            let (comm, ppid, start) = self.0.get(&pid)?;
+            let filler = (0..17).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
+            Some(format!("{pid} ({comm}) S {ppid} {filler} {start} x"))
+        }
+        fn exe(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn cmdline(&self, pid: u32) -> Option<Vec<u8>> {
+            self.0
+                .get(&pid)
+                .map(|(comm, ..)| format!("{comm}\0").into_bytes())
+        }
+    }
+    fn none() -> Processes<Table> {
+        Processes {
+            parent: None,
+            source: Table::default(),
+        }
+    }
     fn event(h: Harness) -> HookInput {
         HookInput {
             harness: h,
@@ -434,7 +527,7 @@ mod tests {
                 e.event["facts"]["stopHookActive"] = json!({"status":"valid","value":true});
             }
             assert!(matches!(
-                decide(&e, || panic!("claims"), |_| panic!("facts")),
+                decide(&e, || panic!("claims"), |_| panic!("facts"), &none()),
                 GuardDecision::Allow
             ));
         }
@@ -446,7 +539,7 @@ mod tests {
         e.event["nativeEvent"] = json!("SubagentStop");
         e.event["identity"]["value"]["root"] = json!(format!("codex:{}", "r".repeat(1024)));
         assert!(matches!(
-            decide(&e, || Ok(vec![]), |_| panic!("worker facts")),
+            decide(&e, || Ok(vec![]), |_| panic!("worker facts"), &none()),
             GuardDecision::Allow
         ));
     }
@@ -454,7 +547,8 @@ mod tests {
     fn missing_agy_identity_names_conversation_id() {
         let mut e = event(Harness::Agy);
         e.event["identity"] = Value::Null;
-        let GuardDecision::Deny(reason) = decide(&e, || panic!("claims"), |_| panic!("facts"))
+        let GuardDecision::Deny(reason) =
+            decide(&e, || panic!("claims"), |_| panic!("facts"), &none())
         else {
             panic!("allowed")
         };
@@ -464,11 +558,11 @@ mod tests {
     fn complete_read_precedes_child_and_no_claim_skips_facts() {
         let e = event(Harness::Claude);
         assert!(matches!(
-            decide(&e, || Ok(vec![]), |_| panic!("facts")),
+            decide(&e, || Ok(vec![]), |_| panic!("facts"), &none()),
             GuardDecision::Allow
         ));
         assert!(matches!(
-            decide(&e, || Err("failed".into()), |_| panic!("facts")),
+            decide(&e, || Err("failed".into()), |_| panic!("facts"), &none()),
             GuardDecision::Deny(_)
         ));
     }
@@ -513,6 +607,79 @@ mod tests {
             Ok(false)
         );
     }
+    fn pid_row(id: &str, pid: Option<u32>, live: Liveness) -> (String, Claim, Liveness) {
+        let (_, mut claim, live) = row("actor", live);
+        claim.pid = pid;
+        (id.into(), claim, live)
+    }
+    /// The stopping Claude Code process (100) runs the hook beneath relay (101); a
+    /// `--resume` copy of the same conversation is 200; 201 is a shell under the stopping
+    /// process and 300 one under no harness.
+    fn tree(parent: Option<u32>) -> Processes<Table> {
+        Processes {
+            parent,
+            source: Table(HashMap::from([
+                (1, ("systemd", 0, 1)),
+                (100, ("claude", 1, 1000)),
+                (101, ("node", 100, 1010)),
+                (200, ("claude", 1, 2000)),
+                (201, ("bash", 100, 1020)),
+                (300, ("bash", 1, 3000)),
+            ])),
+        }
+    }
+    #[test]
+    fn a_claim_held_by_another_live_process_of_the_conversation_is_not_own() {
+        let e = event(Harness::Claude);
+        let no_facts = |_| -> Result<WakeFacts, String> { panic!("facts") };
+        let copy = pid_row("sci-000002", Some(200), Liveness::Live);
+        assert!(matches!(
+            decide(&e, || Ok(vec![copy.clone()]), no_facts, &tree(Some(101))),
+            GuardDecision::Allow
+        ));
+        let decide_one = |claim: (String, Claim, Liveness), parent| {
+            decide(
+                &e,
+                || Ok(vec![claim]),
+                |_| Ok(wake(Some(false), None, None)),
+                &tree(parent),
+            )
+        };
+        // Every uncertain case stays protected: this process, a child of it, a pid under no
+        // harness or missing from the table, no pid, an unverifiable claim, unknown ancestry.
+        for (pid, live, parent) in [
+            (Some(100), Liveness::Live, Some(101)),
+            (Some(201), Liveness::Live, Some(101)),
+            (Some(300), Liveness::Live, Some(101)),
+            (Some(999), Liveness::Live, Some(101)),
+            (None, Liveness::Live, Some(101)),
+            (Some(200), Liveness::Unverifiable("view".into()), Some(101)),
+            (Some(200), Liveness::Live, None),
+            (Some(200), Liveness::Live, Some(300)),
+        ] {
+            assert!(
+                matches!(
+                    decide_one(pid_row("sci-000002", pid, live.clone()), parent),
+                    GuardDecision::Deny(_)
+                ),
+                "{pid:?} {live:?} {parent:?}"
+            );
+        }
+        let mine = pid_row("sci-000001", Some(100), Liveness::Live);
+        let GuardDecision::Deny(text) = decide(
+            &e,
+            || Ok(vec![mine, copy]),
+            |_| Ok(wake(Some(false), None, None)),
+            &tree(Some(101)),
+        ) else {
+            panic!("allowed with an own claim")
+        };
+        assert!(text.contains("`sci-000001` in `/fixture`. "), "{text}");
+        assert!(
+            text.contains("Another live process of this conversation holds `sci-000002` in `/fixture` (pid 200)"),
+            "{text}"
+        );
+    }
     fn row(session: &str, live: Liveness) -> (String, Claim, Liveness) {
         let claim=toml::from_str(&format!("owner='tester'\nsession='{session}'\nhost='fixture'\nworktree='/fixture'\nstarted='2026-11-15T00:00:00Z'\nseen='2026-11-15T00:00:00Z'\n")).unwrap();
         ("sci-000001".into(), claim, live)
@@ -548,6 +715,7 @@ mod tests {
                         &e,
                         || Ok(vec![row(session, live)]),
                         |_| Ok(wake(Some(false), None, None)),
+                        &none(),
                     );
                     assert_eq!(
                         matches!(result, GuardDecision::Deny(_)),
@@ -564,6 +732,7 @@ mod tests {
             &e,
             || Ok(vec![related]),
             |_| Ok(wake(Some(false), None, None)),
+            &none(),
         );
         let GuardDecision::Deny(text) = result else {
             panic!("lost worker claim")
@@ -590,6 +759,7 @@ mod tests {
                             &e,
                             || Ok(vec![row("actor", Liveness::Live)]),
                             |_| Ok(wake(capability, kinds, statuses)),
+                            &none(),
                         );
                         assert_eq!(
                             matches!(result, GuardDecision::Allow),
@@ -605,7 +775,8 @@ mod tests {
                     decide(
                         &e,
                         || Ok(vec![row("actor", Liveness::Live)]),
-                        |_| Ok(wake(Some(true), Some(&["shell", "subagent"]), None))
+                        |_| Ok(wake(Some(true), Some(&["shell", "subagent"]), None)),
+                        &none()
                     ),
                     GuardDecision::Deny(_)
                 ));
