@@ -32,7 +32,7 @@ A claim on the stopping session's id is another process's when it is confirmed l
 records a pid, and that pid's nearest harness session process (itself or an ancestor)
 differs, by pid and start time, from the stopping one, which is the hook's nearest
 harness ancestor. A `--resume` copy shares the conversation's session id but not its
-process. Such a claim does not hold the stop. A deny for other claims names it and says
+process. The guard walks `/proc` itself because `relay whoami` answers for its caller only. Such a claim does not hold the stop. A deny for other claims names it and says
 to leave it to its holder. A claim without a pid, or an ancestry walk that reaches no
 harness session, stays the stopping session's own.
 Retry and agy's own-termination exemptions precede identity, registry, claims and

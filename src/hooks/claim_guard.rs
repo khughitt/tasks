@@ -1,8 +1,8 @@
+use super::ancestry::{ProcSource, session_process};
 use super::facts::WakeFacts;
 use super::input::{Fact, Harness, HookInput, fact};
 use crate::claims::{Claim, ClaimSnapshot, Liveness};
 use crate::registry::Registry;
-use crate::relay::ancestry::{ProcSource, Scope, walk};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -43,10 +43,7 @@ impl<S: ProcSource> Processes<S> {
     /// The nearest harness session process at or above `from`, as pid and start time.
     /// `None` when the walk cannot establish one, which is never evidence of another holder.
     fn session(&self, from: Option<u32>) -> Option<(u32, u64)> {
-        match walk(from?, &self.source) {
-            Scope::Harness(boundary) => Some((boundary.entry.pid, boundary.entry.start)),
-            Scope::Hosting(..) | Scope::Outside | Scope::Unknown { .. } => None,
-        }
+        session_process(from?, &self.source)
     }
 }
 /// A claim on the stopping session's id that a different live harness process holds: a

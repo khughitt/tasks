@@ -55,7 +55,7 @@ pub fn identity(host: &crate::config::HostConfig, warnings: &mut Vec<String>) ->
     identity_from(
         |key| std::env::var_os(key),
         unix_session_id(),
-        || crate::relay::level(host),
+        || crate::whoami::level(host),
         warnings,
     )
 }
@@ -71,7 +71,7 @@ pub fn identity(host: &crate::config::HostConfig, warnings: &mut Vec<String>) ->
 pub fn identity_from(
     get: impl Fn(&str) -> Option<OsString>,
     session_pid: Option<u32>,
-    relay: impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>>,
+    relay: impl FnOnce() -> Result<Option<crate::whoami::Resolved>>,
     _warnings: &mut Vec<String>,
 ) -> Result<Identity> {
     let var = |key: &str| {
@@ -96,12 +96,12 @@ pub fn identity_from(
         return Ok(Identity {
             tagged: resolved.session.clone(),
             session: resolved.session,
-            pid: Some((resolved.pid, PidSource::Relay)),
+            pid: Some((resolved.process.pid, PidSource::Relay)),
             root_session: resolved.root_session,
             proof: Some(Proof {
-                pid_start: resolved.pid_start,
-                boot_id: resolved.boot_id,
-                host: resolved.host,
+                pid_start: resolved.process.start,
+                boot_id: resolved.process.boot_id,
+                host: resolved.process.host,
             }),
         });
     }
@@ -1269,56 +1269,39 @@ pub fn name_the_claim(error: Error, held: Option<&str>) -> Error {
     }
 }
 
-/// Current contract (docs/ownership.md): does this caller own `claim`, proved from the claim's own recorded process
-/// handle and the caller's ancestry, with no registry read?
-pub fn proves_ownership(
-    claim: &Claim,
-    scope: &crate::relay::ancestry::Scope,
-    host: &str,
-    boot_id: Option<&str>,
-    get: &impl Fn(&str) -> Option<OsString>,
-) -> bool {
-    let crate::relay::ancestry::Scope::Harness(boundary) = scope else {
-        return false;
-    };
-    let nearest = &boundary.entry;
-    let (Some(pid), Some(pid_start)) = (claim.pid, claim.pid_start) else {
-        return false;
-    };
-    // 1. same host, same boot.
-    if boot_id.is_none() || claim.host != host || claim.boot_id.as_deref() != boot_id {
+/// Whether `claim_session` names the session `session_id` of `harness`. The same session is
+/// written more than one way across the levels: natively a Claude claim stores the raw id,
+/// its tagged form is `claude:<id>`, and a relay agent id is `claude-code:<id>`. Exactly
+/// those known forms compare equal; any other difference is a real mismatch, never a
+/// change of notation.
+fn same_session(claim_session: &str, harness: &str, session_id: &str) -> bool {
+    claim_session == session_id
+        || claim_session == format!("{harness}:{session_id}")
+        || (harness == "claude-code" && claim_session == format!("claude:{session_id}"))
+}
+
+/// Current contract (docs/ownership.md): does this caller own `claim`, proved from the claim's
+/// own recorded process handle and the caller's nearest harness session process, whether or
+/// not relay could name its session?
+pub fn proves_ownership(claim: &Claim, caller: &crate::whoami::Caller) -> bool {
+    // The *nearest* harness boundary, not any ancestor: a session nested under the owner
+    // has the owner among its ancestors and must still be refused.
+    let process = &caller.process;
+    if claim.host != process.host
+        || claim.boot_id.as_deref() != Some(process.boot_id.as_str())
+        || claim.pid != Some(process.pid)
+        || claim.pid_start != Some(process.start)
+    {
         return false;
     }
-    // 2. the *nearest* harness boundary, not any ancestor: a session nested under the
-    //    owner has the owner among its ancestors and must still be refused.
-    if nearest.pid != pid || nearest.start != pid_start {
-        return false;
-    }
-    if boundary.harness == "agy" {
-        return match crate::native::value(get, "ANTIGRAVITY_CONVERSATION_ID") {
-            Ok(Some(conv)) => crate::relay::resolve::same_session(&claim.session, "agy", &conv),
-            _ => false,
-        };
-    }
-    if boundary.harness == "codex" {
-        if crate::relay::resolve::hint_for("codex", get).is_err() {
-            return false;
-        }
-        return match crate::native::value(get, "CODEX_THREAD_ID") {
-            Ok(Some(thread)) => {
-                crate::relay::resolve::same_session(&claim.session, "codex", &thread)
-            }
-            _ => false,
-        };
-    }
-    // 3. a scoped hint must not contradict the claim, so that deferring a resolution error
-    //    cannot turn a contradicted session into an accepted owner.
-    match crate::relay::resolve::hint_for(boundary.harness, get) {
-        Ok(Some(hint)) => {
-            crate::relay::resolve::same_session(&claim.session, boundary.harness, &hint)
-        }
-        Ok(None) => true,
-        Err(_) => false,
+    let same = |id: &str| same_session(&claim.session, &caller.harness, id);
+    match caller.harness.as_str() {
+        // One session per process, so only a contradicting hint refuses.
+        "claude-code" | "opencode" => caller.hint.as_deref().is_none_or(same),
+        // Workers share their controller's process: only the concrete thread tells them apart.
+        "codex" => caller.thread.as_deref().is_some_and(same),
+        // Sessions of one process are told apart by their own id.
+        _ => caller.hint.as_deref().is_some_and(same),
     }
 }
 
@@ -1378,8 +1361,6 @@ mod tests {
         }
     }
 
-    use crate::relay::ancestry::{Boundary, HARNESS_COMMS, ProcEntry, Scope};
-
     const PROOF_BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
 
     fn claim_of(session: &str, pid: Option<u32>, pid_start: Option<u64>) -> Claim {
@@ -1399,277 +1380,145 @@ mod tests {
         }
     }
 
-    fn boundary(comm: &str, harness: &'static str, pid: u32, start: u64) -> Boundary {
-        Boundary {
-            entry: ProcEntry {
+    fn caller(harness: &str, pid: u32, start: u64) -> crate::whoami::Caller {
+        crate::whoami::Caller {
+            harness: harness.into(),
+            process: crate::whoami::Process {
+                host: "testhost".into(),
+                boot_id: PROOF_BOOT.into(),
                 pid,
-                ppid: 1,
-                comm: comm.into(),
                 start,
             },
-            harness,
+            hint: None,
+            thread: None,
         }
     }
 
-    fn nearest(comm: &str, pid: u32, start: u64) -> Scope {
-        let &(_, harness) = HARNESS_COMMS.iter().find(|(c, _)| *c == comm).unwrap();
-        Scope::Harness(boundary(comm, harness, pid, start))
-    }
-
-    fn no_env() -> impl Fn(&str) -> Option<OsString> {
-        |_| None
+    fn hinted(harness: &str, pid: u32, start: u64, hint: &str) -> crate::whoami::Caller {
+        crate::whoami::Caller {
+            hint: Some(hint.into()),
+            thread: (harness == "codex").then(|| hint.into()),
+            ..caller(harness, pid, start)
+        }
     }
 
     #[test]
-    fn delegated_relay_proof_requires_a_concrete_matching_thread() {
-        let claim = claim_of("codex:worker", Some(42), Some(900));
-        for (vars, expected) in [
-            (
-                vec![("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")],
-                true,
-            ),
-            (vec![("CODEX_THREAD_ID", "sibling")], false),
-            (vec![("CODEX_SESSION_ID", "worker")], false),
-            (vec![], false),
-            (
-                vec![
-                    ("CODEX_SESSION_ID", "private\nroot"),
-                    ("CODEX_THREAD_ID", "worker"),
-                ],
-                false,
-            ),
-        ] {
-            let get = |key: &str| {
-                vars.iter()
-                    .find(|(k, _)| *k == key)
-                    .map(|(_, v)| OsString::from(v))
+    fn every_relay_proof_only_case_matches_its_verdict() {
+        let mut seen = 0;
+        for case in crate::whoami::tests::corpus() {
+            let Some(verdict) = case["tasks"]["proofOnly"].as_str() else {
+                continue;
             };
-            assert_eq!(
-                proves_ownership(
-                    &claim,
-                    &nearest("codex", 42, 900),
-                    "testhost",
-                    Some(PROOF_BOOT),
-                    &get
-                ),
-                expected,
-                "{vars:?}"
+            seen += 1;
+            let held = &case["tasks"]["claim"];
+            let mut claim = claim_of(
+                held["session"].as_str().unwrap(),
+                Some(held["pid"].as_u64().unwrap() as u32),
+                Some(held["pidStart"].as_str().unwrap().parse().unwrap()),
             );
+            claim.host = held["host"].as_str().unwrap().into();
+            claim.boot_id = Some(held["bootId"].as_str().unwrap().into());
+            let answer = crate::whoami::tests::answer(&case).unwrap();
+            let proved = answer
+                .caller()
+                .is_some_and(|caller| proves_ownership(&claim, caller));
+            assert_eq!(proved, verdict == "accept", "{}", case["name"]);
         }
-        assert!(proves_ownership(
-            &claim_of("claude-code:owner", Some(42), Some(900)),
-            &nearest("claude", 42, 900),
-            "testhost",
-            Some(PROOF_BOOT),
-            &no_env()
-        ));
+        assert!(seen >= 12, "{seen}");
     }
 
     #[test]
-    fn a_proof_establishes_the_owner_from_the_claims_own_contents() {
+    fn a_codex_proof_needs_the_concrete_thread_not_the_root_hint() {
         let claim = claim_of("codex:s1", Some(42), Some(900));
-        assert!(proves_ownership(
-            &claim,
-            &nearest("codex", 42, 900),
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("CODEX_THREAD_ID", "s1")])
-        ));
+        assert!(proves_ownership(&claim, &hinted("codex", 42, 900, "s1")));
+        assert!(!proves_ownership(&claim, &hinted("codex", 42, 900, "s2")));
+        let root_only = crate::whoami::Caller {
+            thread: None,
+            ..hinted("codex", 42, 900, "s1")
+        };
+        assert!(!proves_ownership(&claim, &root_only));
+        assert!(!proves_ownership(&claim, &caller("codex", 42, 900)));
     }
 
     #[test]
     fn a_proof_refuses_a_session_nested_under_the_owner() {
         // claude(8) owns the claim; a codex(9) session launched beneath it has 8 among its
-        // ancestors, but its *nearest* boundary is 9. Two distinct harness processes with
-        // two distinct identities: it must be refused.
+        // ancestors, but its *nearest* boundary is 9.
         let claim = claim_of("claude-code:c1", Some(8), Some(800));
         assert!(!proves_ownership(
             &claim,
-            &nearest("codex", 9, 900),
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("CODEX_THREAD_ID", "claude-code:c1")])
+            &hinted("codex", 9, 900, "claude-code:c1")
         ));
-    }
-
-    #[test]
-    fn a_proof_is_defeated_by_a_contradicted_hint() {
-        let claim = claim_of("claude-code:c1", Some(42), Some(900));
-        let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".into());
+        // A nested Claude Code session that inherits the outer session's id proves nothing.
         assert!(!proves_ownership(
             &claim,
-            &nearest("claude", 42, 900),
-            "testhost",
-            Some(PROOF_BOOT),
-            &env
+            &hinted("claude-code", 9, 900, "c1")
         ));
     }
 
     #[test]
-    fn a_proof_survives_a_known_representation_change() {
-        for stored in ["c1", "claude:c1", "claude-code:c1"] {
+    fn a_proof_survives_a_known_representation_change_only() {
+        for (stored, expected) in [
+            ("c1", true),
+            ("claude:c1", true),
+            ("claude-code:c1", true),
+            ("codex:c1", false),
+            ("other", false),
+        ] {
             let claim = claim_of(stored, Some(42), Some(900));
-            let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".into());
-            assert!(
-                proves_ownership(
-                    &claim,
-                    &nearest("claude", 42, 900),
-                    "testhost",
-                    Some(PROOF_BOOT),
-                    &env
-                ),
+            assert_eq!(
+                proves_ownership(&claim, &hinted("claude-code", 42, 900, "c1")),
+                expected,
                 "{stored}"
             );
         }
+        // Only Claude Code has the `claude:` form.
+        assert!(!proves_ownership(
+            &claim_of("claude:s1", Some(42), Some(900)),
+            &hinted("codex", 42, 900, "s1")
+        ));
     }
 
     #[test]
     fn a_proof_fails_on_pid_reuse_a_new_boot_or_another_host() {
         let claim = claim_of("codex:s1", Some(42), Some(900));
-        assert!(!proves_ownership(
-            &claim,
-            &nearest("codex", 42, 901),
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("CODEX_THREAD_ID", "s1")])
-        ));
-        assert!(!proves_ownership(
-            &claim,
-            &nearest("codex", 42, 900),
-            "testhost",
-            Some("22222222-2222-4222-8222-222222222222"),
-            &env_of(&[("CODEX_THREAD_ID", "s1")])
-        ));
-        assert!(!proves_ownership(
-            &claim,
-            &nearest("codex", 42, 900),
-            "elsewhere",
-            Some(PROOF_BOOT),
-            &env_of(&[("CODEX_THREAD_ID", "s1")])
-        ));
+        let good = hinted("codex", 42, 900, "s1");
+        assert!(proves_ownership(&claim, &good));
+        assert!(!proves_ownership(&claim, &hinted("codex", 43, 900, "s1")));
+        assert!(!proves_ownership(&claim, &hinted("codex", 42, 901, "s1")));
+        let mut rebooted = good.clone();
+        rebooted.process.boot_id = "22222222-2222-4222-8222-222222222222".into();
+        assert!(!proves_ownership(&claim, &rebooted));
+        let mut elsewhere = good;
+        elsewhere.process.host = "elsewhere".into();
+        assert!(!proves_ownership(&claim, &elsewhere));
     }
 
     #[test]
     fn a_proof_is_unavailable_without_recorded_process_evidence() {
         // Native Claude without CLAUDE_PID, and every Codex claim, carry pid: None.
-        let claim = claim_of("codex:s1", None, None);
+        let good = hinted("codex", 42, 900, "s1");
+        assert!(!proves_ownership(&claim_of("codex:s1", None, None), &good));
         assert!(!proves_ownership(
-            &claim,
-            &nearest("codex", 42, 900),
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("CODEX_THREAD_ID", "s1")])
+            &claim_of("codex:s1", Some(42), None),
+            &good
         ));
+        let mut bootless = claim_of("codex:s1", Some(42), Some(900));
+        bootless.boot_id = None;
+        assert!(!proves_ownership(&bootless, &good));
     }
 
     #[test]
-    fn a_proof_needs_an_established_harness_boundary() {
-        let claim = claim_of("codex:s1", Some(42), Some(900));
-        assert!(!proves_ownership(
-            &claim,
-            &Scope::Outside,
-            "testhost",
-            Some(PROOF_BOOT),
-            &no_env()
-        ));
-        assert!(!proves_ownership(
-            &claim,
-            &Scope::Unknown {
-                pid: 4,
-                file: "stat"
-            },
-            "testhost",
-            Some(PROOF_BOOT),
-            &no_env()
-        ));
-    }
-
-    #[test]
-    fn a_proof_is_never_established_by_a_hosting_process() {
-        let claim = claim_of("claude-code:c1", Some(300), Some(3000));
-        assert!(!proves_ownership(
-            &claim,
-            &Scope::Hosting(boundary("claude", "claude-code", 300, 3000), "daemon"),
-            "testhost",
-            Some(PROOF_BOOT),
-            &no_env()
-        ));
-    }
-
-    #[test]
-    fn a_proof_at_a_version_boundary_is_its_own_not_the_outer_sessions() {
-        // The outer claude(500) holds the claim; a nested 2.1.280(600) runs under it, with
-        // the outer session's id inherited. Its boundary is 600, so it proves nothing.
-        let outer = claim_of("claude-code:c1", Some(500), Some(5000));
-        let inherited = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".into());
-        let nested = Scope::Harness(boundary("2.1.280", "claude-code", 600, 6000));
-        assert!(!proves_ownership(
-            &outer,
-            &nested,
-            "testhost",
-            Some(PROOF_BOOT),
-            &inherited
-        ));
-        // A claim that the version process itself holds is proved, and its hint is the
-        // Claude Code variable.
-        let own = claim_of("claude-code:bg1", Some(600), Some(6000));
-        let hint = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "bg1".into());
-        assert!(proves_ownership(
-            &own,
-            &nested,
-            "testhost",
-            Some(PROOF_BOOT),
-            &hint
-        ));
-        let contradicted = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".into());
-        assert!(!proves_ownership(
-            &own,
-            &nested,
-            "testhost",
-            Some(PROOF_BOOT),
-            &contradicted
-        ));
-    }
-
-    #[test]
-    fn agy_proof_requires_the_matching_conversation() {
-        let claim = claim_of("agy:conv-1", Some(42), Some(900));
-        let scope = nearest("agy", 42, 900);
-        assert!(proves_ownership(
-            &claim,
-            &scope,
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-1")])
-        ));
-        assert!(!proves_ownership(
-            &claim,
-            &scope,
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-2")])
-        ));
-        assert!(!proves_ownership(
-            &claim,
-            &scope,
-            "testhost",
-            Some(PROOF_BOOT),
-            &no_env()
-        ));
-        assert!(!proves_ownership(
-            &claim,
-            &scope,
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "a\nb")])
-        ));
-        assert!(proves_ownership(
-            &claim_of("conv-1", Some(42), Some(900)),
-            &scope,
-            "testhost",
-            Some(PROOF_BOOT),
-            &env_of(&[("ANTIGRAVITY_CONVERSATION_ID", "conv-1")])
-        ));
+    fn a_shared_process_needs_its_own_session_id() {
+        for harness in ["agy", "pi"] {
+            let claim = claim_of(&format!("{harness}:conv-1"), Some(42), Some(900));
+            let proves = |caller| proves_ownership(&claim, &caller);
+            assert!(proves(hinted(harness, 42, 900, "conv-1")), "{harness}");
+            assert!(!proves(hinted(harness, 42, 900, "conv-2")), "{harness}");
+            assert!(!proves(caller(harness, 42, 900)), "{harness}");
+        }
+        let claim = claim_of("opencode:o1", Some(42), Some(900));
+        assert!(proves_ownership(&claim, &caller("opencode", 42, 900)));
     }
 
     #[test]
@@ -1690,22 +1539,22 @@ mod tests {
         assert!(pidless.proof.is_none());
     }
 
-    fn relay_off() -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
+    fn relay_off() -> impl FnOnce() -> Result<Option<crate::whoami::Resolved>> {
         || Ok(None)
     }
 
-    fn relay_resolves(
-        session: &str,
-    ) -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
+    fn relay_resolves(session: &str) -> impl FnOnce() -> Result<Option<crate::whoami::Resolved>> {
         let session = session.to_string();
         move || {
-            Ok(Some(crate::relay::resolve::Resolved {
+            Ok(Some(crate::whoami::Resolved {
                 session,
                 root_session: None,
-                pid: 42,
-                pid_start: 900,
-                boot_id: "boot".into(),
-                host: "testhost".into(),
+                process: crate::whoami::Process {
+                    host: "testhost".into(),
+                    boot_id: "boot".into(),
+                    pid: 42,
+                    start: 900,
+                },
             }))
         }
     }

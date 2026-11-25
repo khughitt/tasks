@@ -56,7 +56,7 @@ mod recovery;
 mod refs;
 mod registry;
 mod related;
-mod relay;
+mod relay_cli;
 mod rename;
 mod repo;
 mod resolve;
@@ -75,6 +75,7 @@ mod surface;
 mod table;
 mod time;
 mod tombstone;
+mod whoami;
 mod written;
 
 use clap::{CommandFactory, Parser};

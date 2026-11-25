@@ -621,8 +621,8 @@ fn invalid_answers() {
             r#"{"verified":true,"harness":"codex","agent":"codex/m","model":"m","effort":null,"reason":null,"source":{}}"#.into(),
         ),
         (
-            "nearest pi",
-            r#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"pi"}}"#.into(),
+            "nearest outside closed set",
+            r#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"unlisted"}}"#.into(),
         ),
         (
             "verified claude-code",

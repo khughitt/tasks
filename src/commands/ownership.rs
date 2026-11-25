@@ -562,13 +562,9 @@ pub(crate) fn ownership(
     if explicit || !host.relay_identity {
         return Ownership::Foreign;
     }
-    let proved = crate::claims::proves_ownership(
-        claim,
-        &crate::relay::ancestry::current_scope(),
-        &crate::claims::hostname(),
-        crate::claims::boot_id().as_deref(),
-        &|key| std::env::var_os(key),
-    );
+    let proved = crate::whoami::current()
+        .caller()
+        .is_some_and(|caller| crate::claims::proves_ownership(claim, caller));
     if proved {
         Ownership::ByProof
     } else {

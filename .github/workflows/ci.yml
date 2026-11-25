@@ -43,7 +43,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Node for frozen hook replay
+      - name: Node for the frozen hook replay and relay tests
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '22'
@@ -51,7 +51,7 @@ jobs:
         run: node --version >> "$RUNNER_TEMP/ci-evidence/setup-report.txt"
 
       - name: Install zsh and Rust toolchain
-        # Python is recorded in setup-report; Node is needed only by hook replay.
+        # Python is recorded in setup-report; Node only by the frozen hook replay and relay tests.
         run: |
           set -euo pipefail
           bash -euo pipefail -s <<'SH' 2>&1 | tee "$EVIDENCE_DIR/toolchain-setup.log"
