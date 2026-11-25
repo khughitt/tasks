@@ -2,8 +2,11 @@
 //! publish, beside the HEAD commit and HEAD's tree for the same directory.
 //!
 //! Every read here names an object id, so the snapshot cannot change while a check runs.
-//! The index is the one Git hands a pre-commit hook (`GIT_INDEX_FILE`, which a pathspec
-//! commit points at a temporary index), or the repository's own index outside a hook.
+//! The index is the one Git hands the records repository's pre-commit hook
+//! (`GIT_INDEX_FILE`, which a pathspec commit points at a temporary index), or the
+//! repository's own index otherwise. A code checkout's hook also exports
+//! `GIT_INDEX_FILE`, naming the code commit's index, which says nothing about records
+//! kept in another repository or worktree.
 
 use crate::error::{Error, Result};
 use std::path::{Path, PathBuf};
@@ -72,20 +75,102 @@ fn line(bytes: Vec<u8>, what: &str) -> Result<String> {
     Ok(text.into())
 }
 
-/// The index to read: the hook's `GIT_INDEX_FILE` (relative to this process's working
-/// directory, as Git resolves it for the hook), else the repository's own index.
-pub(crate) fn index_file(records: &Path, inherited: Option<std::ffi::OsString>) -> Result<PathBuf> {
-    if let Some(value) = inherited {
-        if value.is_empty() {
-            return Err(failed(INDEX_ENV, "is set but empty"));
-        }
-        let path = PathBuf::from(value);
-        return Ok(if path.is_absolute() {
-            path
-        } else {
-            std::env::current_dir()?.join(path)
-        });
+/// What an inherited `GIT_INDEX_FILE` names.
+pub(crate) enum Inherited {
+    /// Nothing: it is unset.
+    None,
+    /// An index of the repository and worktree holding the records: the commit being made
+    /// publishes it.
+    Records(PathBuf),
+    /// Anything else, as given: in a code checkout's hook, the code commit's index.
+    Foreign(std::ffi::OsString),
+}
+
+/// Classifies the inherited `GIT_INDEX_FILE`, resolved against this process's working
+/// directory as Git resolves it for the hook.
+///
+/// Git keeps an index, and the temporary ones it commits from, in the worktree's own Git
+/// directory, so that directory names the index's owner whatever else the environment
+/// says: the hook of a main checkout exports no `GIT_DIR`. An index anywhere else was
+/// named by hand and belongs to the repository Git would use it with, the one the
+/// inherited environment and working directory select.
+pub(crate) fn inherited_index(records: &Path) -> Result<Inherited> {
+    let Some(value) = std::env::var_os(INDEX_ENV) else {
+        return Ok(Inherited::None);
+    };
+    let index = std::env::current_dir()?.join(&value);
+    if !index.is_file() {
+        return Ok(Inherited::Foreign(value));
     }
+    let dir = index
+        .parent()
+        .ok_or_else(|| failed(INDEX_ENV, format!("{} has no directory", index.display())))?
+        .canonicalize()?;
+    let owner = if is_git_dir(&dir)? {
+        Some(dir)
+    } else {
+        selected_git_dir()?
+    };
+    let own = git_dir(line(
+        run(records, None, &["rev-parse", "--absolute-git-dir"])?,
+        "Git directory",
+    )?)?;
+    Ok(if owner.as_deref() == Some(own.as_path()) {
+        Inherited::Records(index)
+    } else {
+        Inherited::Foreign(value)
+    })
+}
+
+fn git_dir(path: String) -> Result<PathBuf> {
+    Ok(PathBuf::from(path).canonicalize()?)
+}
+
+/// Whether `dir` is itself a Git directory, a linked worktree's included.
+fn is_git_dir(dir: &Path) -> Result<bool> {
+    Ok(crate::git::at(dir)
+        .args(["rev-parse", "--resolve-git-dir", "."])
+        .output()?
+        .status
+        .success())
+}
+
+/// The Git directory the inherited environment and working directory select, if any.
+fn selected_git_dir() -> Result<Option<PathBuf>> {
+    let out = std::process::Command::new("git")
+        .env("LC_ALL", "C")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()?;
+    if out.status.success() {
+        return git_dir(line(out.stdout, "Git directory")?).map(Some);
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("not a git repository") {
+        return Ok(None);
+    }
+    Err(failed("git rev-parse", stderr.trim()))
+}
+
+/// The index a staged check reads: the hook's, else the repository's own. An inherited
+/// index of another repository is refused: `--staged` asks about the commit being made,
+/// and that commit publishes no records of this project.
+pub(crate) fn staged_index(records: &Path) -> Result<PathBuf> {
+    match inherited_index(records)? {
+        Inherited::Records(index) => Ok(index),
+        Inherited::None => repository_index(records),
+        Inherited::Foreign(value) => Err(failed(
+            INDEX_ENV,
+            format!(
+                "{value:?} names no index of the records repository at {}; run plain \
+                 `tasks check` from another repository's hook, or unset {INDEX_ENV}",
+                records.display()
+            ),
+        )),
+    }
+}
+
+/// The own index of the repository holding `records`.
+pub(crate) fn repository_index(records: &Path) -> Result<PathBuf> {
     let path = line(
         run(
             records,
@@ -97,7 +182,10 @@ pub(crate) fn index_file(records: &Path, inherited: Option<std::ffi::OsString>) 
     Ok(PathBuf::from(path))
 }
 
-/// Reads the staged tree of `records` from `index`, and HEAD's.
+/// Reads the staged tree of `records` from `index`, and HEAD's. `write-tree` locks and
+/// rewrites the index it reads, so it gets a private copy: a check neither waits on nor
+/// disturbs another session's commit in the same repository. Git replaces an index by
+/// rename, so the copy is one whole version.
 pub(crate) fn read(records: &Path, index: &Path) -> Result<Snapshot> {
     if !index.is_file() {
         return Err(failed(
@@ -135,7 +223,10 @@ pub(crate) fn read(records: &Path, index: &Path) -> Result<Snapshot> {
         write.push(format!("--prefix={subdir}/"));
     }
     let write: Vec<&str> = write.iter().map(String::as_str).collect();
-    let tree = line(run(&top, Some(index), &write)?, "staged tree")?;
+    let scratch = super::scratch::Scratch::create()?;
+    let copy = scratch.path().join("index");
+    std::fs::copy(index, &copy)?;
+    let tree = line(run(&top, Some(&copy), &write)?, "staged tree")?;
     let head = match run(
         &top,
         None,

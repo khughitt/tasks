@@ -185,15 +185,16 @@ fn lifecycle_findings(
 
 /// `check --staged`: audit the project's records as the index Git will publish them.
 ///
-/// The index is the one Git hands a pre-commit hook in `GIT_INDEX_FILE`, else the
-/// repository's own. The project is opened from the staged config at its real records
+/// The index is the one Git hands the records repository's pre-commit hook in
+/// `GIT_INDEX_FILE`, else the repository's own; another repository's is refused. The
+/// project is opened from the staged config at its real records
 /// path, so relative paths, registry comparisons and Git reads are unchanged; records
 /// content is read from a private copy of the staged tree. An ordinary appended note on a
 /// tree this host already accepted takes the note route (`crate::staged::note_route`);
 /// every other commit gets the full audit. A passing check records the staged tree.
 pub fn run_staged(mut ctx: Ctx) -> Result<Output> {
     use crate::staged::{content::Content, note_route, snapshot, validated};
-    let index = snapshot::index_file(&ctx.project.records, std::env::var_os(snapshot::INDEX_ENV))?;
+    let index = snapshot::staged_index(&ctx.project.records)?;
     let snap = snapshot::read(&ctx.project.records, &index)?;
     let config = snapshot::tree_entry(&snap.top, &snap.tree, crate::repo::CONFIG_REL)?
         .filter(|entry| matches!(entry.mode.as_str(), "100644" | "100755"))
