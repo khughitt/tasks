@@ -373,12 +373,22 @@ whole operation, including retained payload inspection.
 `tasks check --staged` audits a project's records as the index Git will publish them,
 for a records repository's pre-commit hook. It reads the index Git names in
 `GIT_INDEX_FILE` (a temporary index for a pathspec commit; relative to the working
-directory, as Git sets it for hooks), or the repository's own index outside a hook. It
-writes the staged tree of the records directory with `git write-tree --prefix` and opens
+directory, as Git sets it for hooks), or the repository's own index outside a hook. A
+`GIT_INDEX_FILE` naming no index of the repository and worktree holding the records, as in
+a code checkout's hook, is refused (`staged_snapshot`): that commit publishes no records.
+An index belongs to the repository an exported `GIT_DIR` names, else to the Git directory
+it lies in, else (an index named by hand, outside every Git directory) to the repository
+of the working directory, whatever `-C` says.
+The check writes the staged tree of the records directory with `git write-tree --prefix`
+from a private copy of the index, so it takes no index lock and changes no index, and opens
 the project from that tree's config at its real records path, so relative checkout
 paths, registry comparisons and Git reads are those of the project itself. A staged
-config whose prefix differs from the working copy's is refused. Plain `tasks check`
-remains the full audit of the working tree.
+config whose prefix differs from the working copy's is refused.
+
+Plain `tasks check` remains the full audit of the working tree. In a Git-backed records
+directory it also refuses a task record the index changes from HEAD to an unsupported or
+malformed one. That guard reads the index being committed in the records repository's own
+hook and the repository's own index everywhere else, a code checkout's hook included.
 
 Two routes give the verdict, and the exit status and findings follow `check`:
 

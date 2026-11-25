@@ -4,13 +4,13 @@
 //! the staged tree, so file contents, modes and symlinks are what Git will publish. The
 //! directory is removed when the copy is dropped.
 
+use super::scratch::Scratch;
 use super::snapshot::INDEX_ENV;
 use crate::error::{Error, Result};
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct Content {
-    scratch: PathBuf,
+    _scratch: Scratch,
     root: PathBuf,
 }
 
@@ -21,24 +21,12 @@ fn failed(detail: impl std::fmt::Display) -> Error {
 impl Content {
     /// Writes `tree` from the repository at `top` into a fresh private directory.
     pub(crate) fn materialize(top: &Path, tree: &str) -> Result<Content> {
-        let scratch = loop {
-            let candidate = std::env::temp_dir().join(format!(
-                "tasks-staged-{}-{:016x}",
-                std::process::id(),
-                fastrand::u64(..)
-            ));
-            // Private to this user: the copy holds the project's records.
-            match std::fs::DirBuilder::new().mode(0o700).create(&candidate) {
-                Ok(()) => break candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(failed(format!("{}: {error}", candidate.display()))),
-            }
-        };
+        let scratch = Scratch::create()?;
+        let index = scratch.path().join("index");
         let content = Content {
-            root: scratch.join("records"),
-            scratch,
+            root: scratch.path().join("records"),
+            _scratch: scratch,
         };
-        let index = content.scratch.join("index");
         let git = |args: &[&str]| -> Result<()> {
             let out = crate::git::at(top)
                 .env(INDEX_ENV, &index)
@@ -73,16 +61,5 @@ impl Content {
     /// The staged records directory.
     pub(crate) fn root(&self) -> &Path {
         &self.root
-    }
-}
-
-impl Drop for Content {
-    fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.scratch) {
-            eprintln!(
-                "tasks: cleanup needs attention: could not remove {}: {error}",
-                self.scratch.display()
-            );
-        }
     }
 }

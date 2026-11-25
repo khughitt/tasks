@@ -7,5 +7,6 @@
 pub(crate) mod content;
 pub(crate) mod guard;
 pub(crate) mod note_route;
+pub(crate) mod scratch;
 pub(crate) mod snapshot;
 pub(crate) mod validated;

@@ -17,6 +17,8 @@ struct Fx {
     _base: tempfile::TempDir,
     records: PathBuf,
     project: PathBuf,
+    /// The project's code checkout, its own repository.
+    code: PathBuf,
     trace: PathBuf,
 }
 
@@ -62,6 +64,7 @@ impl Fx {
             _base: base,
             records,
             project,
+            code,
         };
         if commit_config {
             fx.git(&["add", "-A"]);
@@ -614,4 +617,313 @@ fn a_record_from_another_version_is_replaced_not_refused() {
     assert!(fx.full_audit_ran());
     let text = std::fs::read_to_string(&files[0]).unwrap();
     assert!(text.starts_with("version = 1\n"), "{text}");
+}
+
+/// Installs `script` as the pre-commit hook of the repository at `dir`.
+fn install_hook(fx: &Fx, dir: &Path, name: &str, script: &str) {
+    let hooks = fx._base.path().canonicalize().unwrap().join(name);
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-commit");
+    std::fs::write(&hook, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = git_fixture::command(fx.env.home.path(), dir)
+        .args(["config", "core.hooksPath", hooks.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
+/// The code checkout and a linked worktree of it: Git exports `GIT_DIR` to the hooks of
+/// the second only.
+fn code_checkouts(fx: &Fx) -> [PathBuf; 2] {
+    let linked = fx._base.path().canonicalize().unwrap().join("linked");
+    let out = git_fixture::command(fx.env.home.path(), &fx.code)
+        .args(["worktree", "add", "-q", "-b", "wt"])
+        .arg(&linked)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    git_fixture::assert_worktree(fx.env.home.path(), &fx.code, &linked);
+    [fx.code.clone(), linked]
+}
+
+/// Stages a change whose blob only the code repository holds, then commits it through the
+/// hook in every form that hands the hook a different index: the repository's own, and the
+/// temporary ones of `-a` and a pathspec.
+fn code_commits(fx: &Fx, dir: &Path) -> Vec<(String, Output)> {
+    let git = |args: &[&str]| {
+        git_fixture::command(fx.env.home.path(), dir)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let forms: [&[&str]; 3] = [&[], &["-a"], &["--", "README"]];
+    forms
+        .iter()
+        .enumerate()
+        .map(|(i, form)| {
+            let text = format!("{} {i}\n", dir.display());
+            std::fs::write(dir.join("README"), text).unwrap();
+            assert!(git(&["add", "README"]).status.success());
+            let mut args = vec!["commit", "-qm", "code"];
+            args.extend_from_slice(form);
+            (format!("{} {form:?}", dir.display()), git(&args))
+        })
+        .collect()
+}
+
+#[test]
+fn a_code_hook_checks_the_records_against_their_own_index() {
+    let fx = Fx::new();
+    let id = fx.add("one", &[]);
+    let checkouts = code_checkouts(&fx);
+    let scripts = [
+        "exec tasks check".to_string(),
+        // From the records directory, where nothing but the index's own location says
+        // whose index it is: a main checkout's hook has no GIT_DIR.
+        format!("cd '{}' && exec tasks check", fx.project.display()),
+    ];
+    for script in &scripts {
+        install_hook(&fx, &fx.code, "code-hooks", script);
+        for dir in &checkouts {
+            for (form, out) in code_commits(&fx, dir) {
+                assert!(out.status.success(), "{script}: {form}: {out:?}");
+            }
+        }
+    }
+
+    // The records' own staged changes are still guarded.
+    let valid = fx.read(&id);
+    fx.write(&id, "not a task record\n");
+    fx.git(&["add", &fx.rel(&id)]);
+    fx.write(&id, &valid);
+    for script in &scripts {
+        install_hook(&fx, &fx.code, "code-hooks", script);
+        for dir in &checkouts {
+            for (form, out) in code_commits(&fx, dir) {
+                assert!(!out.status.success(), "{script}: {form}: {out:?}");
+                let text = String::from_utf8_lossy(&out.stderr);
+                assert!(text.contains(&id), "{script}: {form}: {out:?}");
+                assert!(
+                    !text.contains("staged_snapshot"),
+                    "{script}: {form}: {text}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_staged_check_refuses_a_code_hooks_index() {
+    let fx = Fx::new();
+    fx.add("one", &[]);
+    install_hook(&fx, &fx.code, "code-hooks", "exec tasks check --staged");
+    for dir in code_checkouts(&fx) {
+        for (form, out) in code_commits(&fx, &dir) {
+            assert!(!out.status.success(), "{form}: {out:?}");
+            let text = String::from_utf8_lossy(&out.stderr);
+            let error: serde_json::Value = serde_json::from_str(&text)
+                .unwrap_or_else(|error| panic!("{form}: {error}: {text}"));
+            assert_eq!(error["error"]["kind"], "staged_snapshot", "{form}: {text}");
+            let message = error["error"]["detail"].as_str().unwrap();
+            assert!(
+                message.contains("GIT_INDEX_FILE") && message.contains("records repository"),
+                "{form}: {message}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_records_hook_running_plain_check_reads_the_index_being_committed() {
+    let fx = Fx::new();
+    let a = fx.add("a", &[]);
+    let b = fx.add("b", &[]);
+    install_hook(
+        &fx,
+        &fx.records,
+        "plain-hooks",
+        &format!("exec tasks check -C '{}'", fx.project.display()),
+    );
+    // Left out of the pathspec commit, a malformed staged record does not block it...
+    let valid = fx.read(&b);
+    fx.write(&b, "not a task record\n");
+    fx.git(&["add", &fx.rel(&b)]);
+    fx.write(&b, &valid);
+    fx.append_note(&a, "committed by pathspec");
+    fx.commit(&["--", &fx.rel(&a)]).unwrap();
+    // ...and in the commit, it does.
+    fx.append_note(&a, "committed with the index");
+    fx.git(&["add", &fx.rel(&a)]);
+    let refused = fx.commit(&[]).unwrap_err();
+    assert!(refused.contains(&b), "{refused}");
+    fx.git(&["reset", "-q", "--hard"]);
+
+    // A custom index outside every Git directory belongs to the repository being committed.
+    let custom = fx._base.path().canonicalize().unwrap().join("custom-index");
+    std::fs::copy(fx.records.join(".git/index"), &custom).unwrap();
+    fx.write(&b, "not a task record\n");
+    let git = |args: &[&str]| {
+        git_fixture::command(fx.env.home.path(), &fx.records)
+            .env("GIT_INDEX_FILE", &custom)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(git(&["add", &fx.rel(&b)]).status.success());
+    fx.write(&b, &valid);
+    let out = git(&["commit", "-qm", "custom"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&b), "{out:?}");
+}
+
+#[test]
+fn an_in_tree_worktree_hook_checks_the_index_being_committed() {
+    let fx = Fx::new();
+    let base = fx._base.path().canonicalize().unwrap();
+    let main = base.join("intree");
+    repo(fx.env.home.path(), &main);
+    fx.env.json(&main, &["init", "--prefix", "it"]);
+    let git = |dir: &Path, args: &[&str]| {
+        git_fixture::command(fx.env.home.path(), dir)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let id = common::id_of(fx.env.json(&main, &["add", "one"]));
+    assert!(git(&main, &["add", "-A"]).status.success());
+    assert!(git(&main, &["commit", "-qm", "records"]).status.success());
+    let linked = base.join("intree-wt");
+    let out = git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "wt",
+            linked.to_str().unwrap(),
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    git_fixture::assert_worktree(fx.env.home.path(), &main, &linked);
+    for args in ["check", "check --staged"] {
+        install_hook(&fx, &main, "intree-hooks", &format!("exec tasks {args}"));
+        let record = linked.join(format!("tasks/{id}.md"));
+        let valid = std::fs::read_to_string(&record).unwrap();
+        std::fs::write(&record, "not a task record\n").unwrap();
+        assert!(git(&linked, &["add", "tasks"]).status.success());
+        std::fs::write(&record, &valid).unwrap();
+        std::fs::write(linked.join("README"), format!("{args}\n")).unwrap();
+        // The pathspec commit's temporary index leaves the malformed record out.
+        let out = git(&linked, &["commit", "-qm", "code", "--", "README"]);
+        assert!(out.status.success(), "{args}: {out:?}");
+        let out = git(&linked, &["commit", "-qm", "record"]);
+        assert!(!out.status.success(), "{args}: {out:?}");
+        // The main checkout's index is another worktree's: its records are unaffected.
+        let out = fx
+            .env
+            .cmd(&linked)
+            .env("GIT_DIR", main.join(".git/worktrees/intree-wt"))
+            .env(
+                "GIT_INDEX_FILE",
+                main.join(".git/worktrees/intree-wt/index"),
+            )
+            .arg("check")
+            .arg("-C")
+            .arg(&main)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args}: {out:?}");
+        assert!(git(&linked, &["reset", "-q", "--hard"]).status.success());
+    }
+}
+
+#[test]
+fn a_check_neither_waits_on_nor_rewrites_the_repository_index() {
+    let fx = Fx::new();
+    let id = fx.add("one", &[]);
+    // Staged since the last commit, so the index holds no cached tree for the project.
+    fx.append_note(&id, "staged");
+    fx.git(&["add", &fx.rel(&id)]);
+    let index = fx.records.join(".git/index");
+    let before = std::fs::read(&index).unwrap();
+    // Another session's commit holds the index lock.
+    let lock = fx.records.join(".git/index.lock");
+    std::fs::write(&lock, "").unwrap();
+    for args in [&["check"][..], &["check", "--staged"]] {
+        let out = fx.env.cmd(&fx.project).args(args).output().unwrap();
+        assert!(out.status.success(), "{args:?}: {out:?}");
+        assert_eq!(std::fs::read(&index).unwrap(), before, "{args:?}");
+    }
+    assert!(lock.exists());
+}
+
+#[test]
+fn an_exported_git_dir_says_whose_a_hand_named_index_is() {
+    let fx = Fx::new();
+    let id = fx.add("one", &[]);
+    install_hook(
+        &fx,
+        &fx.records,
+        "plain-hooks",
+        &format!("exec tasks check -C '{}'", fx.project.display()),
+    );
+    // Records committed with an index kept in another repository's Git directory.
+    let index = fx.code.join(".git/elsewhere");
+    std::fs::copy(fx.records.join(".git/index"), &index).unwrap();
+    let valid = fx.read(&id);
+    fx.write(&id, "not a task record\n");
+    let git = |args: &[&str]| {
+        git_fixture::command(fx.env.home.path(), &fx.records)
+            .env("GIT_DIR", fx.records.join(".git"))
+            .env("GIT_WORK_TREE", &fx.records)
+            .env("GIT_INDEX_FILE", &index)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(git(&["add", &fx.rel(&id)]).status.success());
+    fx.write(&id, &valid);
+    let out = git(&["commit", "-qm", "elsewhere"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&id),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn a_guard_that_cannot_read_the_index_refuses_rather_than_skips() {
+    let fx = Fx::new();
+    fx.add("one", &[]);
+    // Neither the directory's name nor Git's refusal of the repository reads as "no staged
+    // records here".
+    let missing = fx._base.path().join("prefix/missing");
+    for (key, value) in [
+        ("TMPDIR", missing.as_os_str()),
+        ("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1".as_ref()),
+    ] {
+        let out = fx
+            .env
+            .cmd(&fx.project)
+            .env(key, value)
+            .arg("check")
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{key}: {out:?}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("staged_snapshot"), "{key}: {text}");
+    }
+
+    let index = fx.records.join(".git/index");
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = fx.env.cmd(&fx.project).arg("check").output().unwrap();
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("staged_snapshot") && text.contains(".git/index"),
+        "{text}"
+    );
 }

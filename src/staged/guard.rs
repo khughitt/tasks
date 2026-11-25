@@ -9,7 +9,7 @@ use crate::format::parse_physical;
 use crate::model::TaskId;
 use crate::output::Finding;
 use crate::repo::Project;
-use crate::staged::snapshot::{self, Snapshot};
+use crate::staged::snapshot::{self, Inherited, Snapshot};
 use std::collections::BTreeSet;
 
 /// Git's well-known empty tree OID, used to diff against an unborn HEAD or absent project tree.
@@ -206,13 +206,21 @@ pub(crate) fn check_index(project: &Project, snap: &Snapshot) -> Result<StagedGu
 }
 
 /// Runs the changed-index record guard for plain `tasks check` when the records checkout is
-/// inside a Git repository with an existing index. Non-Git checkouts return `Ok(None)`.
+/// inside a Git repository with an existing index: the one its hook commits, else its own.
+/// Non-Git checkouts return `Ok(None)`.
 pub(crate) fn check_plain_git_index(project: &Project) -> Result<Option<StagedGuardReport>> {
-    let inherited = std::env::var_os(snapshot::INDEX_ENV);
-    let index = match snapshot::index_file(&project.records, inherited) {
+    let own = match snapshot::repository_index(&project.records) {
         Ok(path) => path,
-        Err(Error::StagedSnapshot(_)) => return Ok(None),
+        Err(Error::StagedSnapshot(detail)) if detail.contains(snapshot::NOT_A_REPOSITORY) => {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
+    };
+    let index = match snapshot::inherited_index(&project.records)? {
+        Inherited::Records(index) => index,
+        // In a code checkout's hook the commit publishes none of these records; their own
+        // staged changes are still guarded.
+        Inherited::None | Inherited::Foreign(_) => own,
     };
     if !index.is_file() {
         return Ok(None);
@@ -220,9 +228,7 @@ pub(crate) fn check_plain_git_index(project: &Project) -> Result<Option<StagedGu
     let snap = match snapshot::read(&project.records, &index) {
         Ok(snap) => snap,
         // A project directory not yet staged in the index has no staged changes to guard.
-        Err(Error::StagedSnapshot(detail))
-            if detail.contains("not a git repository") || detail.contains("prefix") =>
-        {
+        Err(Error::StagedSnapshot(detail)) if detail.contains(snapshot::PREFIX_NOT_STAGED) => {
             return Ok(None);
         }
         Err(error) => return Err(error),
