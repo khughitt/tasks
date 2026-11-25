@@ -28,7 +28,15 @@ pub(crate) fn claim_guard(
     diagnostics: &mut dyn Write,
 ) -> i32 {
     let decision = match read(input) {
-        Ok(event) => claim_guard::decide(&event, claim_guard::read_claims, facts::read),
+        Ok(event) => claim_guard::decide(
+            &event,
+            claim_guard::read_claims,
+            facts::read,
+            &claim_guard::Processes {
+                parent: crate::relay::ancestry::self_ppid(),
+                source: crate::relay::ancestry::LiveProc,
+            },
+        ),
         Err(error) => claim_guard::GuardDecision::Deny(format!(
             "claim-guard: {error}; if you hold a task claim, act on it before ending the turn."
         )),
