@@ -858,3 +858,72 @@ fn a_check_neither_waits_on_nor_rewrites_the_repository_index() {
     }
     assert!(lock.exists());
 }
+
+#[test]
+fn an_exported_git_dir_says_whose_a_hand_named_index_is() {
+    let fx = Fx::new();
+    let id = fx.add("one", &[]);
+    install_hook(
+        &fx,
+        &fx.records,
+        "plain-hooks",
+        &format!("exec tasks check -C '{}'", fx.project.display()),
+    );
+    // Records committed with an index kept in another repository's Git directory.
+    let index = fx.code.join(".git/elsewhere");
+    std::fs::copy(fx.records.join(".git/index"), &index).unwrap();
+    let valid = fx.read(&id);
+    fx.write(&id, "not a task record\n");
+    let git = |args: &[&str]| {
+        git_fixture::command(fx.env.home.path(), &fx.records)
+            .env("GIT_DIR", fx.records.join(".git"))
+            .env("GIT_WORK_TREE", &fx.records)
+            .env("GIT_INDEX_FILE", &index)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(git(&["add", &fx.rel(&id)]).status.success());
+    fx.write(&id, &valid);
+    let out = git(&["commit", "-qm", "elsewhere"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&id),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn a_guard_that_cannot_read_the_index_refuses_rather_than_skips() {
+    let fx = Fx::new();
+    fx.add("one", &[]);
+    // Neither the directory's name nor Git's refusal of the repository reads as "no staged
+    // records here".
+    let missing = fx._base.path().join("prefix/missing");
+    for (key, value) in [
+        ("TMPDIR", missing.as_os_str()),
+        ("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1".as_ref()),
+    ] {
+        let out = fx
+            .env
+            .cmd(&fx.project)
+            .env(key, value)
+            .arg("check")
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{key}: {out:?}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("staged_snapshot"), "{key}: {text}");
+    }
+
+    let index = fx.records.join(".git/index");
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = fx.env.cmd(&fx.project).arg("check").output().unwrap();
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("staged_snapshot") && text.contains(".git/index"),
+        "{text}"
+    );
+}

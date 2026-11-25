@@ -211,7 +211,9 @@ pub(crate) fn check_index(project: &Project, snap: &Snapshot) -> Result<StagedGu
 pub(crate) fn check_plain_git_index(project: &Project) -> Result<Option<StagedGuardReport>> {
     let own = match snapshot::repository_index(&project.records) {
         Ok(path) => path,
-        Err(Error::StagedSnapshot(_)) => return Ok(None),
+        Err(Error::StagedSnapshot(detail)) if detail.contains(snapshot::NOT_A_REPOSITORY) => {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
     let index = match snapshot::inherited_index(&project.records)? {
@@ -226,9 +228,7 @@ pub(crate) fn check_plain_git_index(project: &Project) -> Result<Option<StagedGu
     let snap = match snapshot::read(&project.records, &index) {
         Ok(snap) => snap,
         // A project directory not yet staged in the index has no staged changes to guard.
-        Err(Error::StagedSnapshot(detail))
-            if detail.contains("not a git repository") || detail.contains("prefix") =>
-        {
+        Err(Error::StagedSnapshot(detail)) if detail.contains(snapshot::PREFIX_NOT_STAGED) => {
             return Ok(None);
         }
         Err(error) => return Err(error),

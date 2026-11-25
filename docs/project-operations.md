@@ -376,6 +376,9 @@ for a records repository's pre-commit hook. It reads the index Git names in
 directory, as Git sets it for hooks), or the repository's own index outside a hook. A
 `GIT_INDEX_FILE` naming no index of the repository and worktree holding the records, as in
 a code checkout's hook, is refused (`staged_snapshot`): that commit publishes no records.
+An index belongs to the repository an exported `GIT_DIR` names, else to the Git directory
+it lies in, else (an index named by hand, outside every Git directory) to the repository
+of the working directory, whatever `-C` says.
 The check writes the staged tree of the records directory with `git write-tree --prefix`
 from a private copy of the index, so it takes no index lock and changes no index, and opens
 the project from that tree's config at its real records path, so relative checkout

@@ -14,6 +14,12 @@ use std::path::{Path, PathBuf};
 /// The environment variable Git sets for hooks to name the index being committed.
 pub(crate) const INDEX_ENV: &str = "GIT_INDEX_FILE";
 
+/// How Git, under `LC_ALL=C`, says that a directory is in no repository.
+pub(crate) const NOT_A_REPOSITORY: &str = "not a git repository";
+
+/// How `git write-tree --prefix` says that the index holds nothing there.
+pub(crate) const PREFIX_NOT_STAGED: &str = "git-write-tree: prefix ";
+
 #[derive(Debug, Clone)]
 pub(crate) struct Snapshot {
     /// The repository's top level.
@@ -89,11 +95,11 @@ pub(crate) enum Inherited {
 /// Classifies the inherited `GIT_INDEX_FILE`, resolved against this process's working
 /// directory as Git resolves it for the hook.
 ///
-/// Git keeps an index, and the temporary ones it commits from, in the worktree's own Git
-/// directory, so that directory names the index's owner whatever else the environment
-/// says: the hook of a main checkout exports no `GIT_DIR`. An index anywhere else was
-/// named by hand and belongs to the repository Git would use it with, the one the
-/// inherited environment and working directory select.
+/// An exported `GIT_DIR` names the repository Git uses the index with. A main checkout's
+/// hook exports none, but Git keeps an index, and the temporary ones it commits from, in
+/// the worktree's own Git directory, so that directory names the owner wherever the hook
+/// has gone since. An index anywhere else was named by hand and belongs to the repository
+/// the working directory selects.
 pub(crate) fn inherited_index(records: &Path) -> Result<Inherited> {
     let Some(value) = std::env::var_os(INDEX_ENV) else {
         return Ok(Inherited::None);
@@ -106,7 +112,7 @@ pub(crate) fn inherited_index(records: &Path) -> Result<Inherited> {
         .parent()
         .ok_or_else(|| failed(INDEX_ENV, format!("{} has no directory", index.display())))?
         .canonicalize()?;
-    let owner = if is_git_dir(&dir)? {
+    let owner = if std::env::var_os("GIT_DIR").is_none() && is_git_dir(&dir)? {
         Some(dir)
     } else {
         selected_git_dir()?
@@ -145,7 +151,7 @@ fn selected_git_dir() -> Result<Option<PathBuf>> {
         return git_dir(line(out.stdout, "Git directory")?).map(Some);
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if stderr.contains("not a git repository") {
+    if stderr.contains(NOT_A_REPOSITORY) {
         return Ok(None);
     }
     Err(failed("git rev-parse", stderr.trim()))
@@ -225,7 +231,8 @@ pub(crate) fn read(records: &Path, index: &Path) -> Result<Snapshot> {
     let write: Vec<&str> = write.iter().map(String::as_str).collect();
     let scratch = super::scratch::Scratch::create()?;
     let copy = scratch.path().join("index");
-    std::fs::copy(index, &copy)?;
+    std::fs::copy(index, &copy)
+        .map_err(|error| failed("index", format!("{}: {error}", index.display())))?;
     let tree = line(run(&top, Some(&copy), &write)?, "staged tree")?;
     let head = match run(
         &top,
