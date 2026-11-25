@@ -129,8 +129,8 @@ requires a valid concrete CODEX_THREAD_ID matching the claim: sibling, absent,
 malformed or session-only hints cannot substitute. At an agy boundary, relay
 identity and proof-only continuation require a valid `ANTIGRAVITY_CONVERSATION_ID`.
 Rows sharing the agy process are selected by it, and a conversation with no row is
-refused rather than assigned another conversation's row. A pi boundary needs its
-`PI_SESSION_ID` in the same way. Parentage never authorizes
+refused rather than assigned another conversation's row. A relay newer than 0.6.0
+also recognizes pi, whose boundary needs its `PI_SESSION_ID` in the same way. Parentage never authorizes
 a foreign claim. A mismatched explicit TASKS_SESSION disables proof fallback.
 
 Parking releases ownership, so the next start is a new acquisition and needs

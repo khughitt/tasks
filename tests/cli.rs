@@ -20289,7 +20289,8 @@ fn an_acceptance_hosting_process_refuses_before_reading_the_registry() {
             text.contains(role) && text.contains("not a session"),
             "{role}: {text}"
         );
-        assert!(!text.contains("does not exist"), "{role}: {text}");
+        assert!(text.contains("HOSTING_PROCESS"), "{role}: {text}");
+        assert!(!text.contains("NOT_REGISTERED"), "{role}: {text}");
     }
 }
 

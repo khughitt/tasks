@@ -21,36 +21,36 @@ const SET_SESSION_ONLY: &str = "set TASKS_SESSION to this session's exact id, wi
 
 /// A matched agent: its id becomes the claim session, its process handle the claim's proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resolved {
-    pub session: String,
-    pub root_session: Option<String>,
-    pub process: Process,
+pub(crate) struct Resolved {
+    pub(crate) session: String,
+    pub(crate) root_session: Option<String>,
+    pub(crate) process: Process,
 }
 
 /// The Linux process handle of the nearest harness process.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Process {
-    pub host: String,
-    pub boot_id: String,
-    pub pid: u32,
-    pub start: u64,
+pub(crate) struct Process {
+    pub(crate) host: String,
+    pub(crate) boot_id: String,
+    pub(crate) pid: u32,
+    pub(crate) start: u64,
 }
 
 /// What proof-only continuation needs: the nearest harness *session* process, with the
 /// native caller that may contradict a claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Caller {
-    pub harness: String,
-    pub process: Process,
+pub(crate) struct Caller {
+    pub(crate) harness: String,
+    pub(crate) process: Process,
     /// The native session id relay selected for this harness.
-    pub hint: Option<String>,
+    pub(crate) hint: Option<String>,
     /// Codex only: the caller's own thread id. The root id never stands in for it.
-    pub thread: Option<String>,
+    pub(crate) thread: Option<String>,
 }
 
 /// relay's answer for one caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Answer {
+pub(crate) enum Answer {
     Resolved(Resolved, Caller),
     Outside,
     /// No single session could be named. `caller` survives when the nearest harness
@@ -62,7 +62,7 @@ pub enum Answer {
 }
 
 impl Answer {
-    pub fn caller(&self) -> Option<&Caller> {
+    pub(crate) fn caller(&self) -> Option<&Caller> {
         match self {
             Answer::Resolved(_, caller) => Some(caller),
             Answer::Refused { caller, .. } => caller.as_ref(),
@@ -77,12 +77,23 @@ struct Wire {
     schema: u64,
     status: String,
     boundary: Option<WireBoundary>,
-    hint: Option<String>,
+    /// Nullable, but always present beside a boundary.
+    #[serde(default, deserialize_with = "present")]
+    hint: Option<Option<String>>,
     native: WireNative,
     agent: Option<WireAgent>,
-    root_session: Option<String>,
+    /// Nullable, but always present when resolved.
+    #[serde(default, deserialize_with = "present")]
+    root_session: Option<Option<String>>,
     code: Option<String>,
     message: Option<String>,
+}
+
+/// Tell an absent field (`None`) from a null one (`Some(None)`).
+fn present<'de, D: serde::Deserializer<'de>>(
+    field: D,
+) -> std::result::Result<Option<Option<String>>, D::Error> {
+    Option::deserialize(field).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -105,6 +116,7 @@ struct WireProcess {
 #[derive(Deserialize)]
 struct WireAgent {
     id: String,
+    harness: String,
     process: WireProcess,
 }
 
@@ -124,11 +136,15 @@ fn refuse(detail: &str) -> Error {
     Error::Config(format!("relay identity: {detail}"))
 }
 
-/// Parse one schema-1 result line. `Err` is an answer outside the contract.
-pub fn parse(stdout: &[u8]) -> std::result::Result<Answer, String> {
+/// Parse one schema-1 result line from a run that exited with `success`. `Err` is an answer
+/// outside the contract.
+fn parse(success: bool, stdout: &[u8]) -> std::result::Result<Answer, String> {
     let wire: Wire = serde_json::from_slice(stdout).map_err(|error| error.to_string())?;
     if wire.schema != 1 {
         return Err(format!("schema {} is not supported", wire.schema));
+    }
+    if success == (wire.status == "failed") {
+        return Err(format!("status {:?} contradicts the exit", wire.status));
     }
     let refused = |caller| -> std::result::Result<Answer, String> {
         let code = wire.code.as_deref().ok_or("no code")?;
@@ -168,7 +184,7 @@ pub fn parse(stdout: &[u8]) -> std::result::Result<Answer, String> {
                 .parse()
                 .map_err(|_| format!("start {:?} is not a tick count", process.start))?,
         },
-        hint: wire.hint.clone(),
+        hint: wire.hint.clone().ok_or("no hint")?,
         thread: (boundary.harness == "codex" && wire.native.codex_thread.state == "present")
             .then(|| wire.native.codex_thread.value.clone())
             .flatten(),
@@ -184,13 +200,14 @@ pub fn parse(stdout: &[u8]) -> std::result::Result<Answer, String> {
         return refused(usable.then_some(caller));
     }
     let agent = wire.agent.as_ref().ok_or("no agent")?;
-    if agent.process != *process {
-        return Err("the agent's handle is not the boundary's".into());
+    if agent.process != *process || agent.harness != boundary.harness || boundary.role != "session"
+    {
+        return Err("the agent is not the boundary's session".into());
     }
     Ok(Answer::Resolved(
         Resolved {
             session: agent.id.clone(),
-            root_session: wire.root_session.clone(),
+            root_session: wire.root_session.clone().ok_or("no rootSession")?,
             process: caller.process.clone(),
         },
         caller,
@@ -201,7 +218,7 @@ pub fn parse(stdout: &[u8]) -> std::result::Result<Answer, String> {
 /// relay on, no caller is ever placed on a lower level by a missing or broken relay.
 fn classify(run: Run) -> Answer {
     let detail = match run {
-        Run::Exited { stdout, .. } => match parse(&stdout) {
+        Run::Exited { success, stdout } => match parse(success, &stdout) {
             Ok(answer) => return answer,
             Err(error) => format!(
                 "`relay whoami --json` gave no usable answer ({error}); it needs relay 0.4.0 or \
@@ -219,14 +236,14 @@ fn classify(run: Run) -> Answer {
 }
 
 /// The answer for this process, asked once: its ancestry and environment do not change.
-pub fn current() -> &'static Answer {
+pub(crate) fn current() -> &'static Answer {
     static ANSWER: OnceLock<Answer> = OnceLock::new();
     ANSWER.get_or_init(|| classify(relay_cli::run(&["whoami", "--json"], TIMEOUT, STDOUT_CAP)))
 }
 
 /// The relay level of the identity ladder. `Ok(None)` means relay is off or the caller is
 /// under no harness; either way the native levels apply unchanged.
-pub fn level(host: &HostConfig) -> Result<Option<Resolved>> {
+pub(crate) fn level(host: &HostConfig) -> Result<Option<Resolved>> {
     if !host.relay_identity {
         return Ok(None);
     }
@@ -280,7 +297,7 @@ pub(crate) mod tests {
                     .unwrap_or_else(|| json!({"CODEX_THREAD_ID": {"state": "absent"}})),
             }),
         };
-        parse(line.to_string().as_bytes())
+        parse(line["status"] != "failed", line.to_string().as_bytes())
     }
 
     fn case(name: &str) -> Value {
@@ -376,7 +393,7 @@ pub(crate) mod tests {
         let changed = |pointer: &str, value: Value| {
             let mut line = good.clone();
             *line.pointer_mut(pointer).unwrap() = value;
-            parse(line.to_string().as_bytes()).unwrap_err()
+            parse(true, line.to_string().as_bytes()).unwrap_err()
         };
         changed("/schema", json!(2));
         changed("/status", json!("maybe"));
@@ -385,8 +402,17 @@ pub(crate) mod tests {
         changed("/agent/process/pid", json!(43));
         changed("/boundary/process/start", json!("soon"));
         changed("/boundary/process/bootId", Value::Null);
-        assert!(parse(b"").is_err());
-        assert!(parse(b"{\"error\":{\"kind\":\"usage\"}}").is_err());
+        changed("/boundary/role", json!("daemon"));
+        changed("/agent/harness", json!("agy"));
+        for key in ["hint", "rootSession"] {
+            let mut line = good.clone();
+            line.as_object_mut().unwrap().remove(key);
+            assert!(parse(true, line.to_string().as_bytes()).is_err(), "{key}");
+        }
+        // Only `failed` exits 1.
+        assert!(parse(false, good.to_string().as_bytes()).is_err());
+        assert!(parse(false, b"").is_err());
+        assert!(parse(false, b"{\"error\":{\"kind\":\"usage\"}}").is_err());
     }
 
     #[test]
