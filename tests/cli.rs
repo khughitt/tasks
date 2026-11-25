@@ -20129,7 +20129,9 @@ fn an_acceptance_world_readable_registry_is_refused() {
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("privately owned"));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("REGISTRY_UNREADABLE"), "{text}");
+    assert!(text.contains("TASKS_SESSION"), "{text}");
 }
 
 #[test]
@@ -20149,8 +20151,7 @@ fn an_acceptance_schema_one_registry_is_superseded() {
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stderr);
-    assert!(text.contains("superseded"), "{text}");
-    assert!(text.contains("relay reap"), "{text}");
+    assert!(text.contains("REGISTRY_SUPERSEDED"), "{text}");
     assert!(text.contains("TASKS_SESSION"), "{text}");
     assert!(
         !env.claim_store("sci").exists()
@@ -20254,9 +20255,9 @@ fn an_acceptance_version_session_under_claude_never_claims_as_the_outer_session(
         .find_map(|line| line.strip_prefix("VERSION="))
         .unwrap_or_else(|| panic!("no VERSION= line in stdout: {stdout}"));
     let text = String::from_utf8_lossy(&out.stderr);
-    assert!(text.contains("2.1.280"), "{text}");
+    assert!(text.contains("NOT_REGISTERED"), "{text}");
     assert!(text.contains("TASKS_SESSION"), "{text}");
-    assert!(text.contains(&format!("pid {pid}")), "{text}");
+    assert!(text.contains(&format!("pid {pid} ")), "{text}");
     let store = env.claim_store("sci");
     assert!(
         !store.exists()
@@ -20290,6 +20291,55 @@ fn an_acceptance_hosting_process_refuses_before_reading_the_registry() {
         );
         assert!(!text.contains("does not exist"), "{role}: {text}");
     }
+}
+
+#[test]
+fn an_acceptance_missing_relay_refuses_and_the_explicit_pair_still_works() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    relay_on(&env);
+    std::fs::remove_file(env.fake_bin().join("relay")).unwrap();
+
+    // The native id would place this caller on the Claude level, which relay outranks.
+    let script = format!("CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {id}\n");
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("relay is not on PATH"), "{text}");
+    assert!(text.contains("TASKS_SESSION"), "{text}");
+
+    let script = format!("TASKS_SESSION=explicit \"$TASKS_BIN\" start {id}\n");
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[test]
+fn an_acceptance_pi_session_claims_as_its_own_row() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+    let script = format!(
+        "{}\nwrite_registry\nPI_SESSION_ID=p1 \"$TASKS_BIN\" start {id}\n\
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"$HOME/held.toml\"\n\
+         \"$TASKS_BIN\" done {id} 'no id' 2>/dev/null && echo CLOSED_WITHOUT_ID\n\
+         PI_SESSION_ID=p2 \"$TASKS_BIN\" done {id} other 2>/dev/null && echo CLOSED_BY_OTHER\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         PI_SESSION_ID=p1 \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "pi", "p1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "pi", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("CLOSED_"), "{stdout}");
+    let held = std::fs::read_to_string(env.home.path().join("held.toml")).unwrap();
+    assert!(held.contains("session = \"pi:p1\""), "{held}");
 }
 
 #[test]
@@ -20357,6 +20407,7 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
     hold_vocab(&dir);
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2", "--need", "quiet"]));
     let second = id_of(env.json(&dir, &["add", "Second", "-p", "2", "--need", "quiet"]));
+    env.frozen_relay();
     let state = env.home.path().join("relay-state");
     let after_start = env.home.path().join("after-start.toml");
 
@@ -20485,6 +20536,7 @@ fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
     // No config file: relay is off, and the registry below is never consulted.
+    env.frozen_relay();
     let state = env.home.path().join("relay-state");
 
     let script = format!(
@@ -24466,6 +24518,7 @@ fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
     hold_vocab(&dir);
     let first = id_of(env.json(&dir, &["add", "Capture", "-p", "2", "--need", "quiet"]));
     let second = id_of(env.json(&dir, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    env.frozen_relay();
     let state = env.home.path().join("relay-state");
     let script = format!(
         "set -e\n{}\nwrite_registry\n\
@@ -25693,6 +25746,7 @@ fn prime_warns_once_when_identity_cannot_resolve_with_lanes_present() {
             "add", "Capture", "-p", "2", "--need", "quiet", "--parent", &lane,
         ],
     ));
+    env.frozen_relay();
     let state = env.home.path().join("relay-state");
     let script = format!(
         "set -e\n{}\nwrite_registry\n\

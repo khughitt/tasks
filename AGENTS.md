@@ -80,6 +80,9 @@ so the tracker on `PATH` is not repointed at a worktree:
   `resolve.rs` (spec/plan links), `complete.rs` (shell completion candidates; best-effort, never errors), `query.rs`, `src/output/` / `format.rs` (JSON default, `--pretty`),
   `hierarchy.rs` (parent validation, subtree walks, forest).
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
+- `src/whoami.rs` — native session identity from `relay whoami --json`; `src/relay_cli.rs` is the bounded
+  relay subprocess it shares with `src/codex_model.rs`. Relay-on tests run the frozen relay in
+  `tests/fixtures/relay/`, under Node.
 - `src/hooks/`, `tests/hooks.rs` — read-only session subscribers and frozen producer/oracle replay;
   [hook protocol](docs/hooks.md). Replay requires Python 3 and Node 22 or newer.
 - `tests/attachments.rs` — end-to-end tests for attach, detach, show, check, and rename of task files.

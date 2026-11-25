@@ -1,10 +1,8 @@
+use crate::relay_cli::{self, Run};
 use serde_json::Value;
 use std::ffi::OsStr;
-use std::io::{ErrorKind, Read};
-use std::os::fd::AsRawFd;
-use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const STDOUT_CAP: usize = 64 * 1024;
@@ -28,6 +26,7 @@ pub(crate) enum Harness {
     ClaudeCode,
     Agy,
     Opencode,
+    Pi,
 }
 
 impl Harness {
@@ -37,6 +36,7 @@ impl Harness {
             "claude-code" => Some(Self::ClaudeCode),
             "agy" => Some(Self::Agy),
             "opencode" => Some(Self::Opencode),
+            "pi" => Some(Self::Pi),
             _ => None,
         }
     }
@@ -47,16 +47,9 @@ impl Harness {
             Self::ClaudeCode => "claude-code",
             Self::Agy => "agy",
             Self::Opencode => "opencode",
+            Self::Pi => "pi",
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Run {
-    Exited { success: bool, stdout: Vec<u8> },
-    Timeout,
-    Missing,
-    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,86 +75,6 @@ pub(crate) enum Outcome {
         agent: &'static str,
         warning: String,
     },
-}
-
-pub(crate) fn run_relay(timeout: Duration, cap: usize) -> Run {
-    let deadline = Instant::now() + timeout;
-    let mut child = match Command::new("relay")
-        .args(["model", "--harness", "codex", "--json"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Run::Missing,
-        Err(_) => return Run::Failed,
-    };
-
-    let result = collect_relay(&mut child, deadline, cap);
-    if !matches!(result, Run::Exited { .. }) {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    result
-}
-
-fn collect_relay(child: &mut Child, deadline: Instant, cap: usize) -> Run {
-    let Some(mut pipe) = child.stdout.take() else {
-        return Run::Failed;
-    };
-    let fd = pipe.as_raw_fd();
-    // Keep stdout on the deadline owner's thread so timeout closes it immediately.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
-        return Run::Failed;
-    }
-
-    let mut stdout = Vec::new();
-    let mut buffer = [0; 4096];
-    loop {
-        if Instant::now() >= deadline {
-            return Run::Timeout;
-        }
-        let limit = (cap - stdout.len()).saturating_add(1).min(buffer.len());
-        match pipe.read(&mut buffer[..limit]) {
-            Ok(0) => break,
-            Ok(count) => {
-                stdout.extend_from_slice(&buffer[..count]);
-                if stdout.len() > cap {
-                    return Run::Failed;
-                }
-            }
-            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                pause_until_relay_check(deadline)
-            }
-            Err(_) => return Run::Failed,
-        }
-    }
-    drop(pipe);
-
-    while Instant::now() < deadline {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return Run::Exited {
-                    success: status.success(),
-                    stdout,
-                };
-            }
-            Ok(None) => pause_until_relay_check(deadline),
-            Err(_) => return Run::Failed,
-        }
-    }
-    Run::Timeout
-}
-
-fn pause_until_relay_check(deadline: Instant) {
-    std::thread::sleep(
-        deadline
-            .saturating_duration_since(Instant::now())
-            .min(Duration::from_millis(5)),
-    );
 }
 
 fn valid_model(model: &str) -> bool {
@@ -307,7 +220,11 @@ pub(crate) fn classify(run: Run, tasks_agent: Option<&OsStr>) -> Outcome {
 pub(crate) fn resolve() -> &'static Outcome {
     static OUTCOME: OnceLock<Outcome> = OnceLock::new();
     OUTCOME.get_or_init(|| {
-        let run = run_relay(TIMEOUT, STDOUT_CAP);
+        let run = relay_cli::run(
+            &["model", "--harness", "codex", "--json"],
+            TIMEOUT,
+            STDOUT_CAP,
+        );
         let tasks_agent = std::env::var_os("TASKS_AGENT");
         classify(run, tasks_agent.as_deref())
     })
@@ -324,7 +241,10 @@ pub(crate) fn triggered() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use std::os::unix::ffi::OsStrExt;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
 
     const VERIFIED_WITH_EFFORT: &[u8] = br#"{"verified":true,"harness":"codex","agent":"codex/mock-model@low","model":"mock-model","effort":"low","reason":null,"source":{"nearest":"codex"}}"#;
     const VERIFIED_WITHOUT_EFFORT: &[u8] = br#"{"verified":true,"harness":"codex","agent":"codex/mock-model","model":"mock-model","effort":null,"reason":null,"source":{"nearest":"codex"}}"#;
@@ -339,7 +259,14 @@ mod tests {
 
         const PROBE_HOME: &str = "TASKS_TEST_RESOLVER_PIPE_HOME";
         if let Some(home) = std::env::var_os(PROBE_HOME) {
-            assert_eq!(run_relay(TIMEOUT, STDOUT_CAP), Run::Timeout);
+            assert_eq!(
+                relay_cli::run(
+                    &["model", "--harness", "codex", "--json"],
+                    TIMEOUT,
+                    STDOUT_CAP,
+                ),
+                Run::Timeout
+            );
             fs::write(Path::new(&home).join("resolved"), "yes").unwrap();
             assert_eq!(std::io::stdin().read(&mut [0]).unwrap(), 0);
             return;
@@ -493,7 +420,7 @@ mod tests {
             ),
             (
                 "nearest outside closed set",
-                br#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"pi"}}"#,
+                br#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"unlisted"}}"#,
             ),
             (
                 "verified with non-codex nearest",
@@ -557,6 +484,7 @@ mod tests {
             ("\"claude-code\"", Some(Harness::ClaudeCode)),
             ("\"agy\"", Some(Harness::Agy)),
             ("\"opencode\"", Some(Harness::Opencode)),
+            ("\"pi\"", Some(Harness::Pi)),
         ] {
             let body = format!(
                 r#"{{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{{"nearest":{raw}}}}}"#

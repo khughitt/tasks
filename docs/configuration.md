@@ -172,8 +172,8 @@ headers = false
 ```
 
 `identity.relay` defaults false. Enabling it changes claim identity resolution
-to consult relay after an explicit session override; unreadable relay ancestry
-can refuse a mutation. It does not enable arbitrary note provenance strings.
+to run `relay whoami --json` after an explicit session override; a relay that is
+missing, older than 0.4.0 or without an answer refuses a mutation that needs identity. It does not enable arbitrary note provenance strings.
 See [ownership](ownership.md#identity-and-liveness).
 
 Scheme names match `[a-z][a-z0-9-]*`; `files` is reserved. Commands must be nonblank

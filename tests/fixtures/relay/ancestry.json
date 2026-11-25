@@ -118,5 +118,12 @@
         {"pid": 1048695, "ppid": 1047941, "comm": "python3", "tty": null, "exe": "/usr/bin/python3.14", "argv": ["/usr/bin/python3", "<probe-root>/bin/hook.py", "<probe-root>/runs/r1-headless", "PreToolUse", "ptu"]},
         {"pid": 1047941, "ppid": 1047936, "comm": "agy", "tty": null, "exe": "<home>/.local/bin/agy", "argv": ["<home>/.local/bin/agy", "-p", "Do exactly these steps, then reply DONE. Step 1: call run_command with CommandLine \"echo parent_ok\". Step 2: call invoke_subagent with TypeName \"self\" and a prompt telling the subagent to call run_command with CommandLine \"echo child_ok\" and reply with its output. Do nothing else.", "--model", "gemini-3.8-flash-low", "--dangerously-skip-permissions"]},
         {"pid": 1047936, "ppid": 1047924, "comm": "python3", "tty": null, "exe": "/usr/bin/python3.14", "argv": ["python3", "bin/probe.py", "headless", "r1-headless", "--timeout", "300", "--", "-p", "Do exactly these steps, then reply DONE. Step 1: call run_command with CommandLine \"echo parent_ok\". Step 2: call invoke_subagent with TypeName \"self\" and a prompt telling the subagent to call run_command with CommandLine \"echo child_ok\" and reply with its output. Do nothing else.", "--model", "gemini-3.8-flash-low", "--dangerously-skip-permissions"]} ],
-      "session": 1047941, "terminal": null } ]
+      "session": 1047941, "terminal": null },
+    { "name": "interactive-pi", "source": "pi 1.1.0 bash tool under tmux, measured 2026-11-25 (relay-828903)", "harness": "pi",
+      "rows": [
+        {"pid": 3885509, "ppid": 3885365, "comm": "bash", "tty": null, "exe": "/usr/bin/bash", "argv": ["/bin/bash", "-c", "<probe>"]},
+        {"pid": 3885365, "ppid": 3885363, "comm": "pi", "tty": true, "exe": "<home>/.nvm/versions/node/v26.5.0/bin/node", "argv": ["pi"]},
+        {"pid": 3885363, "ppid": 3885355, "comm": "sh", "tty": true, "exe": "/usr/bin/bash", "argv": ["sh", "-c", "<home>/.local/share/pi/1.1.0/node_modules/.bin/pi; echo $? > <probe-root>/exit; sleep 60"]},
+        {"pid": 3885355, "ppid": 1733, "comm": "tmux: server", "tty": null, "exe": "/usr/bin/tmux", "argv": ["tmux", "-S", "<probe-root>/tmux.sock", "-f", "/dev/null", "new-session", "-d", "-s", "x"]} ],
+      "session": 3885365, "terminal": 3885365 } ]
 }

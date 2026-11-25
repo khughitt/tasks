@@ -1,8 +1,8 @@
 # Work ownership
 
 Type: protocol; document types 1.
-The claim/park protocol is currently unversioned; its optional relay input accepts
-registry schema 2. This defines ownership across worktrees and links the
+The claim/park protocol is currently unversioned; its optional relay input is the
+schema-1 result of `relay whoami --json`. This defines ownership across worktrees and links the
 [task model](task-model.md) and [project recovery guide](project-operations.md).
 
 ## Participants and state
@@ -103,10 +103,15 @@ uses TTL rather than a command PID. Without usable process evidence a claim's
 seen stamp remains live for four hours. Session id 0 is refused; set an explicit
 session there. `TASKS_OWNER`, git branch, then USER chooses advisory owner.
 
-With `[identity] relay = true`, Linux `/proc` ancestry selects the nearest
-claude/codex/opencode/agy harness boundary (including versioned Claude binaries).
-Daemon/pty hosts are not sessions. Registry schema 2 must match host, boot, PID,
-process start and harness. Missing or conflicting evidence refuses acquisition.
+With `[identity] relay = true`, `tasks` runs `relay whoami --json` (relay 0.4.0 or
+newer on PATH, 10 s deadline) at most once per process and adopts its answer: the
+registered agent id becomes the claim's session and the agent's Linux process handle
+its proof. `outside` (no harness above the caller) leaves the native levels
+unchanged. Every other answer refuses acquisition with relay's message and code: no
+single session, a Claude daemon or pty host, unreadable ancestry or registry, and a
+relay that is missing, too old, late or unusable, under a plain shell too. A host
+without `/proc` refuses before asking. relay owns the harness, ancestry and registry
+rules; `tasks` keeps no copy for claims.
 The explicit session level bypasses relay for recovery and distinguishing agents.
 It supplies no native note provenance; see [task model](task-model.md#origin-and-provenance).
 
@@ -117,12 +122,15 @@ the controller's row. Nested harnesses are separate sessions.
 
 Exact resolved session equality authorizes continuation. Relay proof can also
 continue an existing claim after the registry disappears, using the recorded
-host/boot/start evidence and current nearest boundary. For Codex, proof also
+host/boot/start evidence and the session boundary and native ids that `relay whoami`
+still reports. Without a usable relay, or at a hidden (PID 1) boundary, there is no
+proof. For Codex, proof also
 requires a valid concrete CODEX_THREAD_ID matching the claim: sibling, absent,
 malformed or session-only hints cannot substitute. At an agy boundary, relay
 identity and proof-only continuation require a valid `ANTIGRAVITY_CONVERSATION_ID`.
 Rows sharing the agy process are selected by it, and a conversation with no row is
-refused rather than assigned another conversation's row. Parentage never authorizes
+refused rather than assigned another conversation's row. A pi boundary needs its
+`PI_SESSION_ID` in the same way. Parentage never authorizes
 a foreign claim. A mismatched explicit TASKS_SESSION disables proof fallback.
 
 Parking releases ownership, so the next start is a new acquisition and needs
@@ -207,8 +215,8 @@ Failure to read identity on a read view owns no holds; it does not free them.
 Pending move/rename/migration and retired-project guards are independent of claims;
 follow [project recovery](project-operations.md), not forced claim edits.
 
-Upgrade every tasks binary that accesses a host's stores before enabling schema-2
-relay and PID-view claims. Older binaries can drop proof fields or prune a claim
+Upgrade every tasks binary that accesses a host's stores, and relay, before enabling
+relay identity and PID-view claims. Older binaries can drop proof fields or prune a claim
 from the wrong view. Version output includes a build commit when known, but does
 not mark uncommitted source changes. Neither local locks nor this protocol offer
 cross-host exclusion or power-loss durability guarantees.

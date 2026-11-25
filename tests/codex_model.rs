@@ -622,7 +622,7 @@ fn invalid_answers() {
         ),
         (
             "nearest pi",
-            r#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"pi"}}"#.into(),
+            r#"{"verified":false,"harness":"codex","agent":null,"model":null,"effort":null,"reason":"not-under-codex","source":{"nearest":"unlisted"}}"#.into(),
         ),
         (
             "verified claude-code",

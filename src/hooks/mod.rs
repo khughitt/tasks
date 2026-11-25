@@ -1,4 +1,5 @@
 //! Read-only session policy on relay's projected subscriber envelope.
+mod ancestry;
 mod claim_guard;
 mod facts;
 mod halt_notice;
@@ -33,8 +34,8 @@ pub(crate) fn claim_guard(
             claim_guard::read_claims,
             facts::read,
             &claim_guard::Processes {
-                parent: crate::relay::ancestry::self_ppid(),
-                source: crate::relay::ancestry::LiveProc,
+                parent: ancestry::self_ppid(),
+                source: ancestry::LiveProc,
             },
         ),
         Err(error) => claim_guard::GuardDecision::Deny(format!(

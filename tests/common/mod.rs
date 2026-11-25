@@ -98,6 +98,16 @@ impl TestEnv {
         dest
     }
 
+    /// Put the frozen relay on this test's PATH. It answers `relay whoami --json` from the
+    /// registry under `RELAY_STATE_DIR` and the caller's real ancestry.
+    pub fn frozen_relay(&self) -> PathBuf {
+        self.fake_relay(concat!(
+            "#!/bin/sh\nexec node '",
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/relay/whoami.mjs' \"$@\"\n"
+        ))
+    }
+
     pub fn cmd(&self, dir: &Path) -> Command {
         let mut c = Command::cargo_bin("tasks").unwrap();
         c.env_clear();
@@ -825,8 +835,10 @@ pub fn warnings_of(v: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-/// Enable relay identity for this test's HOME and return its relay state directory.
+/// Enable relay identity for this test's HOME, answered by the frozen relay, and return its
+/// relay state directory.
 pub fn relay_on(env: &TestEnv) -> std::path::PathBuf {
+    env.frozen_relay();
     let config = env.home.path().join(".config/tasks/config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
