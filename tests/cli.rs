@@ -54,6 +54,21 @@ fn common_git_fixtures_ignore_hostile_environment() {
     prime_warns_about_uncommitted_task_files_only_in_a_git_checkout();
 }
 
+/// `show` JSON with each action reason's `evidence.observed_at` removed: that stamp is
+/// when this read observed claim liveness, so two reads straddling a second differ there
+/// and nowhere else.
+fn without_liveness_observation(show: &serde_json::Value) -> serde_json::Value {
+    let mut show = show.clone();
+    for action in show["actions"].as_array_mut().into_iter().flatten() {
+        for reason in action["reasons"].as_array_mut().into_iter().flatten() {
+            if let Some(evidence) = reason["evidence"].as_object_mut() {
+                evidence.remove("observed_at");
+            }
+        }
+    }
+    show
+}
+
 #[test]
 fn show_summary_format_and_recovery() {
     let mut env = TestEnv::new();
@@ -124,7 +139,10 @@ fn show_summary_format_and_recovery() {
     let summary = shown.as_object_mut().unwrap().remove("summary").unwrap();
     assert_eq!(summary["byte_limit"], 12_288);
     assert_eq!(summary["complete"], true);
-    assert_eq!(shown, full);
+    assert_eq!(
+        without_liveness_observation(&shown),
+        without_liveness_observation(&full)
+    );
     let argv = summary["full"].as_array().unwrap();
     let args: Vec<_> = argv.iter().map(|arg| arg.as_str().unwrap()).collect();
     let absolute = std::path::absolute(caller.path().join("project with space")).unwrap();
@@ -11854,6 +11872,12 @@ fn quiet_lists_quiet_parks_across_projects_by_priority_then_park_time() {
             "user",
             "--reason",
             "review",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Look?",
         ])
         .assert()
         .success();
@@ -12092,6 +12116,12 @@ fn quiet_ignores_unavailable_non_quiet_parks_but_parked_lists_warn() {
             "user",
             "--reason",
             "review",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Review?",
         ])
         .assert()
         .success();
@@ -19469,6 +19499,31 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
                 "5",
                 "--needs",
                 "idle",
+            ],
+        ),
+        (
+            (vec!["decision", "open"], "--kind"),
+            vec![
+                "decision", "open", i, "--kind", "question", "--origin", "workflow", "--text",
+                "Which?",
+            ],
+        ),
+        (
+            (vec!["park"], "--decision-kind"),
+            vec![
+                "park",
+                i,
+                "step",
+                "--waiting-on",
+                "user",
+                "--reason",
+                "decision",
+                "--decision-kind",
+                "question",
+                "--decision-origin",
+                "workflow",
+                "--decision-text",
+                "Which?",
             ],
         ),
         (
