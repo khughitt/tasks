@@ -201,7 +201,12 @@ fn follows_writer_source_reuse_no_inference_and_non_gating() {
         e.json(&aa, &["next"])["next"]["task"]["id"],
         next["next"]["task"]["id"]
     );
-    assert_eq!(e.json(&aa, &["blockers"]), blockers);
+    // `observed_at` stamps each read, so two reads straddling a second differ there only.
+    let unstamped = |mut v: serde_json::Value| {
+        v.as_object_mut().unwrap().remove("observed_at");
+        v
+    };
+    assert_eq!(unstamped(e.json(&aa, &["blockers"])), unstamped(blockers));
     let shown = e.json(&aa, &["show", &t]);
     assert!(shown["task"].get("depends").is_none());
     assert!(shown["task"].get("parent").is_none());
