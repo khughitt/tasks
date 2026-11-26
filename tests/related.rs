@@ -661,9 +661,15 @@ fn pretty_links_group_retired_spellings_and_preserve_json() {
     assert!(json.get("links").is_none());
 
     let pretty = env.pretty(&local, &["show", &task]);
-    assert_eq!(pretty.matches(&canonical).count(), 1, "{pretty}");
-    assert_eq!(pretty.matches("new-ffffff").count(), 1, "{pretty}");
+    // The links section merges each target's roles and retired spellings into one row;
+    // the actions section names the same targets as blocking evidence, so count there.
     let links = pretty.split_once("── links ").unwrap().1;
+    let links = links
+        .split_once("── ")
+        .map_or(links, |(section, _)| section);
+    assert_eq!(links.matches(&canonical).count(), 1, "{pretty}");
+    assert_eq!(links.matches("new-ffffff").count(), 1, "{pretty}");
+    assert!(!links.contains("old-"), "{pretty}");
     assert!(
         links
             .lines()
