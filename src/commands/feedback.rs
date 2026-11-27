@@ -117,6 +117,7 @@ pub fn run(
     summary: String,
     category: String,
     body: String,
+    tldr: Option<String>,
     recur: Option<String>,
     new: bool,
     attribution: Attribution<'_>,
@@ -196,6 +197,7 @@ pub fn run(
                 &ctx.registry,
                 summary,
                 body,
+                tldr,
                 &category,
                 &from,
                 &stamp,
@@ -236,6 +238,7 @@ fn create(
     registry: &Registry,
     summary: String,
     body: String,
+    tldr: Option<String>,
     category: &str,
     from: &str,
     stamp: &super::Stamp,
@@ -246,6 +249,10 @@ fn create(
     let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
+    if let Some(tldr) = tldr {
+        crate::entries::promote_for_titles(&mut task)?;
+        task.tldr = Some(tldr);
+    }
     task.origin = attribution.origin;
     let at = task.created.clone();
     super::append_occurrence_note(

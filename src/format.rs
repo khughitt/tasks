@@ -180,6 +180,16 @@ fn parse_numbered_fields<'a>(
 }
 
 pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
+    parse_physical_with(text, file, false)
+}
+
+/// `parse_physical` that also admits `long_title` and `tldr` below the titles format,
+/// for the `$EDITOR` save, which promotes the record before writing it.
+pub fn parse_physical_admitting_titles(text: &str, file: &str) -> Result<PhysicalTask> {
+    parse_physical_with(text, file, true)
+}
+
+fn parse_physical_with(text: &str, file: &str, admit_titles: bool) -> Result<PhysicalTask> {
     let format = match crate::entries::inspect_envelope(text, file)? {
         crate::entries::RecordEnvelope::Format1 => 1u8,
         crate::entries::RecordEnvelope::Current(version) => version,
@@ -197,7 +207,7 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
         }
         let allowed = KEYS.contains(&k.as_str())
             || (format >= 2 && matches!(k.as_str(), "format" | "open_decisions"))
-            || (format >= crate::entries::TITLES_FORMAT
+            || ((admit_titles || format >= crate::entries::TITLES_FORMAT)
                 && matches!(k.as_str(), "long_title" | "tldr"));
         if !allowed {
             return Err(perr(file, format!("unknown key {k:?}")));
