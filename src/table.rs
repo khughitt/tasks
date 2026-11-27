@@ -422,30 +422,83 @@ fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -
     }
 }
 
-/// Trim trailing display whitespace without dropping the ANSI sequences around it.
+/// Trim trailing display whitespace without dropping the ANSI sequences around it. A
+/// scaled OSC 66 run is visible text, so it is kept as content.
 fn trim_visible_end(text: &str) -> String {
     let mut end = 0;
     let mut escapes = Vec::new();
-    let mut chars = text.char_indices();
-    while let Some((index, c)) = chars.next() {
+    let mut at = 0;
+    while at < text.len() {
+        let c = text[at..].chars().next().expect("in bounds");
         if c == '\x1b' {
-            let mut escape_end = index + c.len_utf8();
-            for (offset, terminator) in chars.by_ref() {
-                escape_end = offset + terminator.len_utf8();
-                if terminator.is_ascii_alphabetic() {
-                    break;
-                }
+            let (escape_end, width) = escape(text, at);
+            if width > 0 {
+                end = escape_end;
+            } else {
+                escapes.push(at..escape_end);
             }
-            escapes.push(index..escape_end);
-        } else if !c.is_whitespace() {
-            end = index + c.len_utf8();
+            at = escape_end;
+            continue;
         }
+        if !c.is_whitespace() {
+            end = at + c.len_utf8();
+        }
+        at += c.len_utf8();
     }
     let mut trimmed = text[..end].to_string();
     for escape in escapes.into_iter().filter(|escape| escape.start >= end) {
         trimmed.push_str(&text[escape]);
     }
     trimmed
+}
+
+/// The escape sequence starting at byte `start` (an ESC): its end and the cells it
+/// draws. A CSI or other two-byte escape ends at its first letter and draws nothing. An
+/// OSC (`ESC ]`) ends at BEL or ST (`ESC \\`); kitty's text sizing (`OSC 66`) draws
+/// `s * w` cells, or `s` times its payload's cells when `w` is absent; any other OSC
+/// draws nothing.
+fn escape(text: &str, start: usize) -> (usize, usize) {
+    let rest = &text[start + 1..];
+    if let Some(osc) = rest.strip_prefix(']') {
+        let body_start = start + 2;
+        let (body_len, terminator) = match (osc.find('\x07'), osc.find("\x1b\\")) {
+            (Some(bel), Some(st)) if st < bel => (st, 2),
+            (Some(bel), _) => (bel, 1),
+            (None, Some(st)) => (st, 2),
+            (None, None) => (osc.len(), 0),
+        };
+        let end = body_start + body_len + terminator;
+        return (end, osc_width(&osc[..body_len]));
+    }
+    let mut end = start + 1;
+    for (offset, c) in rest.char_indices() {
+        end = start + 1 + offset + c.len_utf8();
+        if c.is_ascii_alphabetic() {
+            break;
+        }
+    }
+    (end, 0)
+}
+
+fn osc_width(body: &str) -> usize {
+    let Some(sizing) = body.strip_prefix("66;") else {
+        return 0;
+    };
+    let (metadata, payload) = sizing.split_once(';').unwrap_or((sizing, ""));
+    let mut scale = 1;
+    let mut width = 0;
+    for pair in metadata.split(':') {
+        match pair.split_once('=') {
+            Some(("s", value)) => scale = value.parse().unwrap_or(1),
+            Some(("w", value)) => width = value.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    if width > 0 {
+        scale * width
+    } else {
+        scale * crate::ellipsis::display_cells(payload)
+    }
 }
 
 /// Chrome text wrapped to the layout's width, one line when the width is unknown.
@@ -462,20 +515,21 @@ pub fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
     )
 }
 
-/// Display columns of `text`, skipping ANSI escape sequences.
+/// Display columns of `text`, skipping ANSI escape sequences and counting the cells a
+/// kitty text-sizing (OSC 66) run occupies.
 pub fn visible_width(text: &str) -> usize {
     let mut count = 0;
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
+    let mut at = 0;
+    while at < text.len() {
+        let c = text[at..].chars().next().expect("in bounds");
         if c == '\x1b' {
-            for terminator in chars.by_ref() {
-                if terminator.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            count += c.width().unwrap_or(0);
+            let (end, width) = escape(text, at);
+            count += width;
+            at = end;
+            continue;
         }
+        count += c.width().unwrap_or(0);
+        at += c.len_utf8();
     }
     count
 }
@@ -973,5 +1027,31 @@ mod tests {
             multi_29.lines().all(|line| visible_width(line) <= 29),
             "{multi_29}"
         );
+    }
+
+    #[test]
+    fn visible_width_skips_osc_bel_and_st() {
+        assert_eq!(
+            visible_width("\x1b]66;s=2:n=5:d=8:w=5:v=2;Tag sema\x07"),
+            10
+        );
+        assert_eq!(visible_width("\x1b]66;s=2;ab\x1b\\"), 4);
+        assert_eq!(
+            visible_width("\x1b[1m\x1b]66;s=2:n=3:d=4:w=3:v=2;Tag \x07\x1b[0m x"),
+            8
+        );
+        assert_eq!(visible_width("\x1b]8;;https://x\x07link\x1b]8;;\x07"), 4);
+        assert_eq!(visible_width("\x1b]0;title\x1b\\ok"), 2);
+    }
+
+    #[test]
+    fn trim_visible_end_keeps_osc_intact() {
+        let scaled = "\x1b]66;s=2:n=5:d=8:w=5:v=2;Tag sema\x07";
+        assert_eq!(trim_visible_end(&format!("{scaled}   ")), scaled);
+        assert_eq!(
+            trim_visible_end(&format!("ab{scaled}\x1b[0m  ")),
+            format!("ab{scaled}\x1b[0m")
+        );
+        assert_eq!(trim_visible_end("ab  \x1b]8;;\x07"), "ab\x1b]8;;\x07");
     }
 }

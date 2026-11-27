@@ -3,6 +3,135 @@ use crate::model::Status;
 use crate::output::Format;
 use crate::palette::{Palette, Rgb};
 
+/// Whether pretty headings use kitty text sizing: `auto` when the terminal is kitty,
+/// `always`, or `never`. Set by `TASKS_TEXT_SIZING` or config `[output] text_sizing`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextSizing {
+    Auto,
+    Always,
+    Never,
+}
+
+impl TextSizing {
+    pub fn parse(value: &str) -> Result<TextSizing> {
+        match value {
+            "auto" => Ok(TextSizing::Auto),
+            "always" => Ok(TextSizing::Always),
+            "never" => Ok(TextSizing::Never),
+            other => Err(Error::Validation(format!(
+                "text sizing must be auto, always, or never, got {other:?}"
+            ))),
+        }
+    }
+}
+
+/// Scaling is on for pretty output with colour not turned off, and then `always`, or
+/// `auto` on a kitty terminal (`TERM=xterm-kitty`) attached to stdout outside tmux.
+/// Never on for JSON.
+pub fn text_sizing_on(
+    mode: TextSizing,
+    format: Format,
+    color: ColorMode,
+    stdout_is_terminal: bool,
+    painter_enabled: bool,
+    term: Option<&str>,
+    tmux: bool,
+) -> bool {
+    format == Format::Pretty
+        && color != ColorMode::Never
+        && match mode {
+            TextSizing::Always => true,
+            TextSizing::Never => false,
+            TextSizing::Auto => {
+                stdout_is_terminal && painter_enabled && term == Some("xterm-kitty") && !tmux
+            }
+        }
+}
+
+/// The style table for headings: each role names a scale, painted bold in its hue
+/// (a lane in its project colour, a top-level goal in its goal hue). Later roles
+/// extend it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    LaneHeading,
+    GoalHeading,
+}
+
+/// One OSC 66 scale: `s=2` with fraction `n/d`, each chunk `payload_cells` wide and
+/// occupying `width * 2` cells.
+#[derive(Debug, Clone, Copy)]
+struct Scale {
+    numerator: usize,
+    denominator: usize,
+    width: usize,
+    payload_cells: usize,
+}
+
+impl Scale {
+    /// Cells one chunk occupies (`s * w`).
+    fn occupied(self) -> usize {
+        2 * self.width
+    }
+}
+
+impl Role {
+    fn scale(self) -> Scale {
+        match self {
+            // 1.5x: 4 cells of text drawn in 6.
+            Role::LaneHeading => Scale {
+                numerator: 3,
+                denominator: 4,
+                width: 3,
+                payload_cells: 4,
+            },
+            // 1.25x: 8 cells of text drawn in 10.
+            Role::GoalHeading => Scale {
+                numerator: 5,
+                denominator: 8,
+                width: 5,
+                payload_cells: 8,
+            },
+        }
+    }
+}
+
+/// `text` packed into chunks of exactly `cells` display cells: a wide glyph that would
+/// straddle a boundary opens the next chunk, and every short chunk is space-padded.
+fn chunks(text: &str, cells: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        let width = c.width().unwrap_or(0);
+        if used + width > cells {
+            current.push_str(&" ".repeat(cells - used));
+            out.push(std::mem::take(&mut current));
+            used = 0;
+        }
+        current.push(c);
+        used += width;
+    }
+    if !current.is_empty() {
+        current.push_str(&" ".repeat(cells - used));
+        out.push(current);
+    }
+    out
+}
+
+/// Cells `text` occupies once scaled for `role`.
+pub fn scaled_width(text: &str, role: Role) -> usize {
+    let scale = role.scale();
+    chunks(text, scale.payload_cells).len() * scale.occupied()
+}
+
+/// `title` clipped with `…` so that, scaled for `role`, it fits in `available` cells.
+pub fn clip_for_heading(title: &str, role: Role, available: usize) -> String {
+    let scale = role.scale();
+    let cap = available / scale.occupied() * scale.payload_cells;
+    crate::ellipsis::clip(title, cap, crate::ellipsis::Measure::DisplayCells)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorMode {
     Auto,
@@ -313,6 +442,7 @@ pub struct Painter {
     priority: Option<PriorityScale>,
     title: Option<TitleScale>,
     tree: Option<TreeScale>,
+    sizing: bool,
 }
 
 impl Painter {
@@ -328,7 +458,36 @@ impl Painter {
             priority: None,
             title: None,
             tree: None,
+            sizing: false,
         }
+    }
+
+    /// Headings scale with kitty text sizing (OSC 66) only when `on`; `main` decides it
+    /// with [`text_sizing_on`].
+    pub fn with_text_sizing(self, on: bool) -> Painter {
+        Painter { sizing: on, ..self }
+    }
+
+    pub fn sizing(&self) -> bool {
+        self.sizing
+    }
+
+    /// `text` scaled for `role` as OSC 66 chunks when sizing is on, else unchanged.
+    /// Style it (bold, colour) around the result: the terminal scales painted text.
+    pub fn scaled(&self, text: &str, role: Role) -> String {
+        if !self.sizing {
+            return text.to_string();
+        }
+        let scale = role.scale();
+        chunks(text, scale.payload_cells)
+            .iter()
+            .map(|payload| {
+                format!(
+                    "\x1b]66;s=2:n={}:d={}:w={}:v=2;{payload}\x07",
+                    scale.numerator, scale.denominator, scale.width
+                )
+            })
+            .collect()
     }
 
     /// Dates paint only with a recency; without one `Style::Date` is the identity.
@@ -949,5 +1108,187 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn sizing(
+        mode: TextSizing,
+        color: ColorMode,
+        terminal: bool,
+        term: Option<&str>,
+        tmux: bool,
+    ) -> bool {
+        let painter = Painter::new(color, Format::Pretty, terminal);
+        text_sizing_on(
+            mode,
+            Format::Pretty,
+            color,
+            terminal,
+            painter.enabled(),
+            term,
+            tmux,
+        )
+    }
+
+    #[test]
+    fn text_sizing_rejects_unknown_value() {
+        assert_eq!(TextSizing::parse("auto").unwrap(), TextSizing::Auto);
+        assert_eq!(TextSizing::parse("always").unwrap(), TextSizing::Always);
+        assert_eq!(TextSizing::parse("never").unwrap(), TextSizing::Never);
+        assert!(TextSizing::parse("big").is_err());
+    }
+
+    #[test]
+    fn auto_mode_off_when_not_terminal() {
+        let kitty = Some("xterm-kitty");
+        assert!(sizing(
+            TextSizing::Auto,
+            ColorMode::Auto,
+            true,
+            kitty,
+            false
+        ));
+        assert!(!sizing(
+            TextSizing::Auto,
+            ColorMode::Auto,
+            false,
+            kitty,
+            false
+        ));
+        assert!(!sizing(
+            TextSizing::Auto,
+            ColorMode::Always,
+            false,
+            kitty,
+            false
+        ));
+        assert!(!sizing(
+            TextSizing::Auto,
+            ColorMode::Auto,
+            true,
+            Some("xterm-256color"),
+            false
+        ));
+        assert!(!sizing(
+            TextSizing::Auto,
+            ColorMode::Auto,
+            true,
+            None,
+            false
+        ));
+        assert!(!sizing(
+            TextSizing::Never,
+            ColorMode::Auto,
+            true,
+            kitty,
+            false
+        ));
+    }
+
+    #[test]
+    fn auto_mode_off_under_tmux() {
+        assert!(!sizing(
+            TextSizing::Auto,
+            ColorMode::Auto,
+            true,
+            Some("xterm-kitty"),
+            true
+        ));
+    }
+
+    #[test]
+    fn always_mode_emits_when_piped() {
+        assert!(sizing(
+            TextSizing::Always,
+            ColorMode::Auto,
+            false,
+            None,
+            true
+        ));
+        let painter = Painter::new(ColorMode::Auto, Format::Pretty, false).with_text_sizing(true);
+        assert!(painter.sizing());
+        assert!(
+            painter
+                .scaled("Tag", Role::GoalHeading)
+                .starts_with("\x1b]66;")
+        );
+        assert!(!text_sizing_on(
+            TextSizing::Always,
+            Format::Json,
+            ColorMode::Always,
+            true,
+            false,
+            None,
+            false
+        ));
+    }
+
+    #[test]
+    fn never_with_color_never() {
+        assert!(!sizing(
+            TextSizing::Always,
+            ColorMode::Never,
+            true,
+            Some("xterm-kitty"),
+            false
+        ));
+        let off = Painter::new(ColorMode::Never, Format::Pretty, true);
+        assert!(!off.sizing());
+        assert_eq!(
+            off.scaled("Tag semantics", Role::LaneHeading),
+            "Tag semantics"
+        );
+    }
+
+    #[test]
+    fn lane_scaled_chunks_are_four_characters() {
+        let painter = Painter::new(ColorMode::Always, Format::Pretty, true).with_text_sizing(true);
+        let chunk = |payload: &str| format!("\x1b]66;s=2:n=3:d=4:w=3:v=2;{payload}\x07");
+        assert_eq!(
+            painter.scaled("Tag semantics", Role::LaneHeading),
+            [chunk("Tag "), chunk("sema"), chunk("ntic"), chunk("s   ")].concat()
+        );
+        assert_eq!(scaled_width("Tag semantics", Role::LaneHeading), 24);
+    }
+
+    #[test]
+    fn goal_scaled_chunks_are_eight_characters() {
+        let painter = Painter::new(ColorMode::Always, Format::Pretty, true).with_text_sizing(true);
+        let chunk = |payload: &str| format!("\x1b]66;s=2:n=5:d=8:w=5:v=2;{payload}\x07");
+        assert_eq!(
+            painter.scaled("Tag semantics", Role::GoalHeading),
+            [chunk("Tag sema"), chunk("ntics   ")].concat()
+        );
+        assert_eq!(scaled_width("Tag semantics", Role::GoalHeading), 20);
+    }
+
+    #[test]
+    fn scaled_chunks_count_wide_cells() {
+        let painter = Painter::new(ColorMode::Always, Format::Pretty, true).with_text_sizing(true);
+        let chunk = |payload: &str| format!("\x1b]66;s=2:n=5:d=8:w=5:v=2;{payload}\x07");
+        // 漢字abc = 7 cells; the next 漢 would straddle cell 8, so it opens the next chunk.
+        assert_eq!(
+            painter.scaled("漢字abc漢&x", Role::GoalHeading),
+            [chunk("漢字abc "), chunk("漢&x    ")].concat()
+        );
+        assert_eq!(scaled_width("漢字abc漢&x", Role::GoalHeading), 20);
+        // A wide glyph that ends exactly on the boundary stays in its chunk.
+        assert_eq!(
+            painter.scaled("漢字ab漢", Role::GoalHeading),
+            chunk("漢字ab漢")
+        );
+        assert_eq!(scaled_width("", Role::GoalHeading), 0);
+    }
+
+    #[test]
+    fn clip_for_heading_never_exceeds_width() {
+        let long = "x".repeat(200);
+        let lane = clip_for_heading(&long, Role::LaneHeading, 80);
+        assert_eq!(crate::ellipsis::display_cells(&lane), 52);
+        assert!(lane.ends_with('…'));
+        assert!(scaled_width(&lane, Role::LaneHeading) <= 80);
+        let goal = clip_for_heading(&long, Role::GoalHeading, 80);
+        assert_eq!(crate::ellipsis::display_cells(&goal), 64);
+        assert!(scaled_width(&goal, Role::GoalHeading) <= 80);
+        assert_eq!(clip_for_heading("Short", Role::GoalHeading, 80), "Short");
     }
 }

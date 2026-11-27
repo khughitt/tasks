@@ -848,6 +848,7 @@ mod tests {
         let (temp, project, registry, command) = prefetch_fixture();
         let host = crate::config::HostConfig {
             headers: false,
+            text_sizing: None,
             relay_identity: false,
             docs_schemes: [("stub".into(), command)].into(),
         };
@@ -895,6 +896,7 @@ mod tests {
             let worker = scope.spawn(move || {
                 let host = crate::config::HostConfig {
                     headers: false,
+                    text_sizing: None,
                     relay_identity: false,
                     docs_schemes: [("stub".into(), command)].into(),
                 };
@@ -957,6 +959,7 @@ mod tests {
                 let worker = scope.spawn(move || {
                     let host = crate::config::HostConfig {
                         headers: false,
+                        text_sizing: None,
                         relay_identity: false,
                         docs_schemes: [("stub".into(), command)].into(),
                     };

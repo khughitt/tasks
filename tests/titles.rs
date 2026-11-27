@@ -406,3 +406,18 @@ fn prime_summary_omits_long_title_and_tldr() {
         "{text}"
     );
 }
+
+#[test]
+fn text_sizing_env_value_is_validated() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let out = env
+        .cmd(&sci)
+        .args(["list", "--pretty"])
+        .env("TASKS_TEXT_SIZING", "big")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("TASKS_TEXT_SIZING"), "{stderr}");
+}
