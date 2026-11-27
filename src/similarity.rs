@@ -12,6 +12,12 @@ pub fn tokens(title: &str) -> Vec<String> {
         .collect()
 }
 
+/// The text feedback recurrence matches: the original report (`long_title`) when a
+/// title was shortened, else the title.
+pub fn match_text(task: &Task) -> &str {
+    task.long_title.as_deref().unwrap_or(&task.title)
+}
+
 pub fn jaccard(a: &[String], b: &[String]) -> f64 {
     let a: std::collections::BTreeSet<&String> = a.iter().collect();
     let b: std::collections::BTreeSet<&String> = b.iter().collect();
@@ -42,7 +48,7 @@ pub fn find(summary: &str, candidates: &[Task]) -> Match {
     let mut exact: Vec<&Task> = Vec::new();
     let mut ambiguous: Vec<(f64, &Task)> = Vec::new();
     for task in candidates {
-        let have = tokens(&task.title);
+        let have = tokens(match_text(task));
         if have == wanted {
             exact.push(task);
         }

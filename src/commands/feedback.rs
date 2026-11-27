@@ -303,7 +303,7 @@ fn recur_into(
             )));
         }
         if let Some(wanted) = &wanted
-            && crate::similarity::tokens(&task.title) != *wanted
+            && crate::similarity::tokens(crate::similarity::match_text(task)) != *wanted
         {
             return Err(Error::Validation(format!(
                 "{} was renamed since it matched; rerun",

@@ -266,8 +266,9 @@ impl<'a> Fields<'a> {
     }
 }
 
-/// `search`'s phrase: a literal substring of a task's title or body, compared after
-/// lowercasing both. Notes, frontmatter, and attachments are never searched; metadata
+/// `search`'s phrase: a literal substring of a task's title, `long_title`, `tldr` or body,
+/// compared after lowercasing both. Notes, other frontmatter, and attachments are never
+/// searched; metadata
 /// such as tags and source stays with the field filters.
 #[derive(Debug)]
 pub struct TextQuery(String);
@@ -281,7 +282,10 @@ impl TextQuery {
     }
 
     pub fn matches(&self, task: &Task) -> bool {
+        let contains = |text: &str| text.to_lowercase().contains(&self.0);
         self.matches_text(&task.title, &task.body)
+            || task.long_title.as_deref().is_some_and(contains)
+            || task.tldr.as_deref().is_some_and(contains)
     }
 
     /// The same match over any title and body: `docs --search` reads documents with it.

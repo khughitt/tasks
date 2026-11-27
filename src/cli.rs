@@ -898,7 +898,7 @@ pub enum Command {
     },
     /// List tasks whose title or body contains a phrase; takes every list option.
     #[command(
-        after_help = "Matching is a literal, case-insensitive substring of the title or body; notes,\nfrontmatter, and attachments are not searched.\n\nExamples:\n  tasks search \"text search\"\n  tasks search claim --all-projects --status idea\n  tasks search --parked worktree"
+        after_help = "Matching is a literal, case-insensitive substring of the title, long title, tldr\nor body; notes, other frontmatter, and attachments are not searched.\n\nExamples:\n  tasks search \"text search\"\n  tasks search claim --all-projects --status idea\n  tasks search --parked worktree"
     )]
     Search {
         /// The phrase to find; quote several words to search for them together.

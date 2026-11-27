@@ -171,3 +171,90 @@ fn feedback_tldr_on_create_promotes() {
     assert_eq!(task["tldr"], "Listing bottleneck");
     assert_eq!(record(&target, &id).lines().nth(1), Some(TITLES_FORMAT));
 }
+
+#[test]
+fn sourced_add_matches_given_long_title_against_old_title() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let old = id_of(env.json(&sci, &["add", "Paste line one", "--source", "S"]));
+    let out = env.json(
+        &sci,
+        &[
+            "add",
+            "Different concise",
+            "--source",
+            "S",
+            "--long-title",
+            "Paste line one",
+        ],
+    );
+    assert_eq!(out["action"], "reused", "{out}");
+    assert_eq!(out["id"], old.as_str());
+}
+
+#[test]
+fn sourced_add_matches_given_title_against_existing_long_title() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let old = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Concise",
+            "--source",
+            "S",
+            "--long-title",
+            "Paste line one",
+        ],
+    ));
+    let out = env.json(&sci, &["add", "Paste line one", "--source", "S"]);
+    assert_eq!(out["action"], "reused", "{out}");
+    assert_eq!(out["id"], old.as_str());
+}
+
+#[test]
+fn feedback_recurrence_matches_long_title() {
+    let (env, target, reporter) = feedback_env();
+    let report = "Listing output is slow on large projects";
+    let file = |env: &TestEnv| {
+        env.json(
+            &reporter,
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                report,
+                "--category",
+                "friction",
+            ],
+        )
+    };
+    let id = id_of(file(&env));
+    env.json(
+        &target,
+        &["edit", &id, "--title", "Short", "--long-title", report],
+    );
+    let again = file(&env);
+    assert_eq!(again["id"], id.as_str(), "{again}");
+    assert_ne!(again["action"], "created", "{again}");
+}
+
+#[test]
+fn search_matches_long_title_and_tldr() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let by_long = id_of(env.json(&sci, &["add", "A", "--long-title", "Make goals stand out"]));
+    let by_tldr = id_of(env.json(&sci, &["add", "B", "--tldr", "Headings that stand out"]));
+    env.json(&sci, &["add", "C"]);
+    let out = env.json(&sci, &["search", "stand out"]);
+    let mut ids: Vec<&str> = out["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    ids.sort();
+    let mut want = vec![by_long.as_str(), by_tldr.as_str()];
+    want.sort();
+    assert_eq!(ids, want, "{out}");
+}
