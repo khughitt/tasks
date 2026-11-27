@@ -111,7 +111,7 @@ with `unsupported_record_version` warnings rather than failing unrelated reads.
    `note --reviewed --awaiting-user` records that a reviewed idea waits on the user;
    a re-review with `--reviewed` clears `awaiting_user` unless `--awaiting-user` is given
    again, and `--no-reviewed` readmits it with the answer.
-   `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
+   `tasks search "<phrase>"` is `list` narrowed to tasks whose title, long title, tldr or body contains the
    phrase (literal, case-insensitive; notes are not searched) and takes every `list`
    option, so `tasks search "<phrase>" --all-projects` (all open work, including shelves) is the
    duplicate check before filing.
@@ -448,7 +448,7 @@ be read): read it there, never from config files.
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
 `tasks list --source <ref>` finds everything filed from one reference, matched exactly.
 A sourced `add` is idempotent: when the project already holds a task with that same source
-*and* title, in any status, the existing id comes back as `action: "reused"` and nothing is
+*and* title (its title or `long_title` equal to the given title or `--long-title`), in any status, the existing id comes back as `action: "reused"` and nothing is
 written, so refiling a batch from one origin never duplicates. The other flags on a reused
 call are ignored, not merged — `tasks edit` that id if the record should change.
 
@@ -958,6 +958,13 @@ suffix always means the project you stand in, even when `--project` or another i
 the command elsewhere, and a suffix missing locally is not found rather than searched for.
 Outside every project it is `invalid_id`; use the full id there and for other projects.
 
+- Titles: file a concise title of 2-5 words, at most 48 display cells, naming the outcome,
+  and a one-line `--tldr "<what it is about>"` (at most 160 cells). When a longer sentence
+  is the natural title (a paste line, a report), make it `--long-title` and shorten the
+  title. When shortening an existing title with `edit --title`, pass the old sentence as
+  `--long-title` so sourced add and feedback recurrence still match it. Lanes and
+  top-level goals show their title as a heading in pretty views; that is output, not a
+  contract to write for.
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
 - A thought to revisit later: `tasks add "<title>" --status idea --defer 60d` (or a date,
   `--defer 2026-11-10`); every status change clears the date, so scope it with
@@ -994,7 +1001,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   remaining condition and date. Scope still skips live/unverifiable claims and respects
   human decisions. Reopening a target removes its wake evidence; a close/reopen entirely
   between scans is not an event delivery guarantee. The checkpoint bounds this gap.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--origin <user|agent|mixed>] [--origin-session <key>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
+- A scoped task: `tasks add "<title>" [--tldr "<one line>"] [--long-title "<sentence>"] -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--origin <user|agent|mixed>] [--origin-session <key>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
   Add a body with `--body <text>`, or use `tasks add "<title>" --body - < body.md`
   to read a multi-line body from stdin.
   Pass `--origin` on any `add` or `feedback` when your own session shows whose ask it
