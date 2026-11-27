@@ -312,6 +312,8 @@ fn list_pending(
         let task_ref = crate::output::PendingTaskRef {
             id: canonical.to_string(),
             title: task.title.clone(),
+            long_title: task.long_title.clone(),
+            tldr: task.tldr.clone(),
             status: task.status,
             project: canonical.prefix.clone(),
         };

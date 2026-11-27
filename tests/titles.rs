@@ -258,3 +258,151 @@ fn search_matches_long_title_and_tldr() {
     want.sort();
     assert_eq!(ids, want, "{out}");
 }
+
+/// Every row in `out` (recursively) whose `id` is `id`.
+fn rows_for<'a>(out: &'a serde_json::Value, id: &str, found: &mut Vec<&'a serde_json::Value>) {
+    match out {
+        serde_json::Value::Object(map) => {
+            if map.get("id").and_then(|v| v.as_str()) == Some(id) && map.contains_key("title") {
+                found.push(out);
+            }
+            for value in map.values() {
+                rows_for(value, id, found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for value in items {
+                rows_for(value, id, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn assert_keys(out: &serde_json::Value, id: &str, what: &str) {
+    let mut found = Vec::new();
+    rows_for(out, id, &mut found);
+    assert!(!found.is_empty(), "{what}: no row for {id}: {out}");
+    for row in found {
+        assert_eq!(row["tldr"], "Short tldr", "{what}: {row}");
+        assert_eq!(row["long_title"], "Long sentence title", "{what}: {row}");
+    }
+}
+
+const KEYS: [&str; 4] = [
+    "--tldr",
+    "Short tldr",
+    "--long-title",
+    "Long sentence title",
+];
+
+fn with_keys<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let mut all = args.to_vec();
+    all.extend_from_slice(&KEYS);
+    all
+}
+
+#[test]
+fn json_rows_carry_long_title_and_tldr() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &with_keys(&["add", "Lane", "--lane"])));
+    let goal = id_of(env.json(
+        &sci,
+        &with_keys(&["add", "Goal", "--parent", &lane, "--origin", "user"]),
+    ));
+    let leaf = id_of(env.json(&sci, &with_keys(&["add", "Leaf", "--parent", &goal])));
+    let blocker = id_of(env.json(&sci, &with_keys(&["add", "Blocker"])));
+    env.json(&sci, &["add", "Waits", "--depends", &blocker]);
+    let parked = id_of(env.json(&sci, &with_keys(&["add", "Parked"])));
+    env.json(&sci, &["start", &parked]);
+    env.json(
+        &sci,
+        &[
+            "park",
+            &parked,
+            "answer the question",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "decision",
+            "--decision-kind",
+            "question",
+            "--decision-origin",
+            "workflow",
+            "--decision-text",
+            "Which?",
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &with_keys(&["add", "Quiet"])));
+    env.json(&sci, &["start", &quiet]);
+    env.json(
+        &sci,
+        &[
+            "park",
+            &quiet,
+            "run it",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "5",
+        ],
+    );
+
+    assert_keys(&env.json(&sci, &["list"]), &leaf, "list");
+    assert_keys(&env.json(&sci, &["tree"]), &goal, "tree");
+    let prime = env.json(&sci, &["prime"]);
+    assert_keys(&prime, &lane, "prime lanes");
+    assert_keys(&prime, &goal, "prime roadmap");
+    assert_keys(&env.json(&sci, &["lanes"]), &lane, "lanes");
+    assert_keys(&env.json(&sci, &["ready"]), &leaf, "ready");
+    assert_keys(
+        &env.json(&sci, &["goals", "--project", "sci"]),
+        &goal,
+        "goals",
+    );
+    assert_keys(&env.json(&sci, &["list", "--pending"]), &parked, "pending");
+    assert_keys(&env.json(&sci, &["list", "--parked"]), &parked, "parked");
+    assert_keys(
+        &env.json(&sci, &["quiet", "--project", "sci"]),
+        &quiet,
+        "quiet",
+    );
+    assert_keys(&env.json(&sci, &["blockers"]), &blocker, "blockers");
+}
+
+#[test]
+fn json_rows_omit_absent_keys() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane"]));
+    env.json(&sci, &["add", "Leaf", "--parent", &lane]);
+    for args in [
+        vec!["list"],
+        vec!["tree"],
+        vec!["prime"],
+        vec!["lanes"],
+        vec!["ready"],
+    ] {
+        let out = env.json(&sci, &args);
+        let text = out.to_string();
+        assert!(
+            !text.contains("\"tldr\"") && !text.contains("\"long_title\""),
+            "{args:?}: {text}"
+        );
+    }
+}
+
+#[test]
+fn prime_summary_omits_long_title_and_tldr() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &with_keys(&["add", "Lane", "--lane"])));
+    env.json(&sci, &with_keys(&["add", "Goal", "--parent", &lane]));
+    let out = env.json(&sci, &["prime", "--summary"]);
+    let text = out.to_string();
+    assert!(
+        !text.contains("\"tldr\"") && !text.contains("\"long_title\""),
+        "{text}"
+    );
+}

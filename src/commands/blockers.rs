@@ -173,6 +173,8 @@ fn row(rank: usize, impact: &Impact, claims: &ClaimSnapshot, now: OffsetDateTime
         rank,
         id: task.id.to_string(),
         title: task.title.clone(),
+        long_title: task.long_title.clone(),
+        tldr: task.tldr.clone(),
         project_color: None,
         activity: None,
         status: task.status,

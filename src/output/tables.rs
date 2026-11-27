@@ -1584,6 +1584,8 @@ mod tests {
             actions: None,
             id: id.into(),
             title: format!("title {id}"),
+            long_title: None,
+            tldr: None,
             project_color: None,
             activity: None,
             goal_work: None,

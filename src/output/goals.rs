@@ -445,6 +445,8 @@ mod tests {
             rows.push(GoalRow {
                 id: id.into(),
                 title: title.into(),
+                long_title: None,
+                tldr: None,
                 status,
                 origin: Some(Origin::User),
                 priority: 1,

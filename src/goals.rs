@@ -114,6 +114,10 @@ impl Attention {
 pub struct GoalRow {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<Origin>,
@@ -454,6 +458,8 @@ pub fn goal_rows<'a>(
         let row = GoalRow {
             id: task.id.to_string(),
             title: task.title.clone(),
+            long_title: task.long_title.clone(),
+            tldr: task.tldr.clone(),
             status: task.status,
             origin: task.origin,
             priority: task.priority,
