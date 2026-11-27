@@ -107,7 +107,7 @@ pub(crate) fn check_index(project: &Project, snap: &Snapshot) -> Result<StagedGu
                     });
                 }
             }
-            Ok(RecordEnvelope::Format1 | RecordEnvelope::Format2) => {
+            Ok(RecordEnvelope::Format1 | RecordEnvelope::Current(_)) => {
                 match parse_physical(&text, &change.path) {
                     Ok(physical) => {
                         if physical.id() != &id {

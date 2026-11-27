@@ -166,6 +166,8 @@ mod tests {
             wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
             title: "Later".into(),
+            long_title: None,
+            tldr: None,
             status,
             priority: 2,
             size: None,

@@ -1345,7 +1345,7 @@ impl Project {
                     unsupported.push(future);
                 }
                 crate::entries::RecordEnvelope::Format1
-                | crate::entries::RecordEnvelope::Format2 => {
+                | crate::entries::RecordEnvelope::Current(_) => {
                     tasks.push(self.read_task(&id)?);
                 }
             }
@@ -1420,7 +1420,7 @@ impl Project {
                         }
                         Ok(
                             crate::entries::RecordEnvelope::Format1
-                            | crate::entries::RecordEnvelope::Format2,
+                            | crate::entries::RecordEnvelope::Current(_),
                         ) => match self.read_task_with_raw(&id) {
                             Ok(task) => records.push(task),
                             Err(error) => errors.push(error),
@@ -2338,6 +2338,8 @@ mod tests {
             wake_on: Vec::new(),
             id: p.new_id().unwrap(),
             title: "T".into(),
+            long_title: None,
+            tldr: None,
             status: Status::Todo,
             priority: 2,
             size: None,

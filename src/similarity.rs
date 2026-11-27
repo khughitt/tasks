@@ -96,6 +96,8 @@ mod tests {
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: title.into(),
+            long_title: None,
+            tldr: None,
             status: crate::model::Status::Idea,
             priority: 2,
             size: None,

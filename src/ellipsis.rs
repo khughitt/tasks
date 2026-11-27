@@ -7,6 +7,11 @@ pub enum Measure {
     DisplayCells,
 }
 
+/// Display cells of unpainted text, counted per character as `clip` counts them.
+pub fn display_cells(text: &str) -> usize {
+    text.chars().map(|c| c.width().unwrap_or(0)).sum()
+}
+
 pub fn clip(text: &str, limit: usize, measure: Measure) -> String {
     if limit == 0 {
         return String::new();

@@ -25,6 +25,8 @@ pub fn blank(
         wake_on: Vec::new(),
         id: project.new_id()?,
         title,
+        long_title: None,
+        tldr: None,
         status,
         priority: 2,
         size: None,
