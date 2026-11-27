@@ -153,6 +153,10 @@ fn cells(row: &GoalRow, painter: &Painter, now: time::OffsetDateTime) -> Vec<Str
     }
 }
 
+/// The narrowest terminal that still prints a goal's tldr line under its row; piped
+/// output (no width) always prints it.
+const TLDR_MIN_WIDTH: usize = 100;
+
 pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> String {
     if out.goals.is_empty() {
         return "no goals you asked for; goals without an origin are not shown (tasks edit <id> --origin user)".into();
@@ -324,6 +328,12 @@ pub(super) fn render(out: &GoalsOut, painter: &Painter, layout: &Layout) -> Stri
                 "attention",
                 Detail::Wrap(values[Field::Attention as usize].clone()),
             ));
+        }
+        if let Some(tldr) = &goal.tldr
+            && layout.width.is_none_or(|width| width >= TLDR_MIN_WIDTH)
+        {
+            row.details
+                .push(("tldr", Detail::Wrap(painter.paint(Style::Chrome, tldr))));
         }
         if goal.closed.is_some() {
             closed.push(row);
@@ -691,6 +701,36 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn goals_pretty_prints_tldr_line_when_width_allows() {
+        let mut out = report_fixture();
+        out.goals[1].tldr = Some("Render within the host's budget".into());
+        let line_after = |text: &str| {
+            let lines: Vec<&str> = text.lines().collect();
+            let at = lines
+                .iter()
+                .position(|l| l.starts_with("material-5d6b2c"))
+                .unwrap();
+            lines.get(at + 1).map(|l| l.to_string()).unwrap_or_default()
+        };
+        let wide = render(&out, &painter(false), &at(120, false));
+        assert!(
+            line_after(&wide).split_whitespace().collect::<Vec<_>>()[..3]
+                == ["tldr:", "Render", "within"],
+            "{wide}"
+        );
+        let narrow = render(&out, &painter(false), &at(60, false));
+        assert!(!narrow.contains("Render within"), "{narrow}");
+        let piped = render(&out, &painter(false), &Layout::default());
+        assert!(
+            line_after(&piped).split_whitespace().collect::<Vec<_>>()[..3]
+                == ["tldr:", "Render", "within"],
+            "{piped}"
+        );
+        let before = render(&report_fixture(), &painter(false), &at(120, false));
+        assert!(!before.contains("tldr:"), "{before}");
+    }
+
     #[test]
     fn goals_titles_unicode_and_no_width() {
         let mut out = report_fixture();
