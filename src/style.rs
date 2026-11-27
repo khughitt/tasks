@@ -127,10 +127,27 @@ pub fn scaled_width(text: &str, role: Role) -> usize {
 }
 
 /// `title` clipped with `…` so that, scaled for `role`, it fits in `available` cells.
+/// Counted in chunks, not cells: a wide glyph pushed past a chunk boundary adds a chunk.
 pub fn clip_for_heading(title: &str, role: Role, available: usize) -> String {
     let scale = role.scale();
-    let cap = available / scale.occupied() * scale.payload_cells;
-    crate::ellipsis::clip(title, cap, crate::ellipsis::Measure::DisplayCells)
+    let fits = |text: &str| chunks(text, scale.payload_cells).len() * scale.occupied() <= available;
+    if fits(title) {
+        return title.to_string();
+    }
+    let mut clipped = String::new();
+    for c in title.chars() {
+        let mut longer = clipped.clone();
+        longer.push(c);
+        if !fits(&format!("{longer}…")) {
+            break;
+        }
+        clipped = longer;
+    }
+    if fits(&format!("{clipped}…")) {
+        format!("{clipped}…")
+    } else {
+        String::new()
+    }
 }
 
 /// The hue steps a top-level goal's colour turns through, in degrees, well separated.
@@ -1313,6 +1330,13 @@ mod tests {
         assert_eq!(crate::ellipsis::display_cells(&goal), 64);
         assert!(scaled_width(&goal, Role::GoalHeading) <= 80);
         assert_eq!(clip_for_heading("Short", Role::GoalHeading, 80), "Short");
+        // Wide glyphs pushed past a chunk boundary add chunks; the clip must count them.
+        let mixed = "a漢漢漢".repeat(20);
+        for role in [Role::LaneHeading, Role::GoalHeading] {
+            let clipped = clip_for_heading(&mixed, role, 80);
+            assert!(scaled_width(&clipped, role) <= 80, "{role:?}: {clipped}");
+            assert!(clipped.ends_with('…'), "{role:?}: {clipped}");
+        }
     }
 
     #[test]

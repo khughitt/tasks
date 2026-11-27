@@ -188,6 +188,12 @@ pub fn run(
             // Current contract (docs/project-operations.md): a holder's recurrence follows the owner's registered
             // root, where it landed. `recur_into` saved its own pruned store first.
             super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
+            if tldr.is_some() {
+                ctx.warnings.push(format!(
+                    "--tldr sets only a new task's tldr; {} recurred and keeps its own (`tasks edit {} --tldr` to change it)",
+                    task.id, task.id
+                ));
+            }
             (task, "recurred", at)
         }
         None => {

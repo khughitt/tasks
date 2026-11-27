@@ -528,6 +528,12 @@ archive descriptors. Unset optional fields and empty Task lists are omitted;
 false booleans, zero numbers and empty body remain. Response containers such as
 `tasks` and `warnings` remain arrays, and an empty `next` result is explicit null.
 Summary/park/goal rows are projections, not interchangeable full Task objects.
+`long_title` and `tldr`, when set, appear on full Task JSON and, right after
+`title`, on summary rows (`list`, `ready`, `tree`, `prime`, `lanes`), park
+rows (`list --parked`, `quiet`), pending task refs (`list --pending`),
+goal rows (`goals`) and blocker rows (`blockers`); unset, they are omitted.
+Relationship entries (`depends_on`, `related_to`, `dependents` and the others
+below) carry `title` only. `prime --summary` drops both keys from every row.
 Resolved relationship entries on `show` and `next` (`parent`, `children`,
 `depends_on`, `dependents`, `related_to`, `follows_tasks`, `followed_by`,
 `wake_targets` and `source_task`) carry `id`, `title`, `status` and `updated`

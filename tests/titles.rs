@@ -450,3 +450,36 @@ fn osc66_appears_only_under_the_gating_rules() {
     );
     assert!(run(&["--pretty", "--color", "auto", "lanes"], Some("always")).contains(osc));
 }
+
+#[test]
+fn feedback_tldr_on_recurrence_warns_instead_of_dropping() {
+    let (env, _target, reporter) = feedback_env();
+    let report = "Listing output is slow on large projects";
+    let first = id_of(env.json(
+        &reporter,
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            report,
+            "--category",
+            "friction",
+        ],
+    ));
+    let again = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            report,
+            "--category",
+            "friction",
+            "--tldr",
+            "Slow listing",
+        ],
+    );
+    assert_eq!(again["id"], first.as_str(), "{again}");
+    let warnings = again["warnings"].to_string();
+    assert!(warnings.contains("--tldr"), "{again}");
+}
