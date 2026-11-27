@@ -381,7 +381,8 @@ source remains the actual filing origin. Use the tasks skill's relation table:
 ordinary decomposition uses parent, and dependencies record waits. Do not retype
 historical links or infer continuation merely from a citation or shared subject.
 
-A research task title names the outcome. Its body has all five fields:
+A research task title names the outcome in 2-5 words, with a one-line `--tldr`
+(the tasks skill's title guidance). Its body has all five fields:
 
 ```markdown
 Question: Does the existing rename API require loading the profile first?

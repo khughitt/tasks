@@ -96,7 +96,9 @@ retained reference document may resolve in the code tree instead.
    if any fails, nothing is written and the closure is skipped with the reason (see
    [Closing stale and duplicate tasks](#closing-stale-and-duplicate-tasks)).
 5. **Edit**, only through the CLI, only these:
-   - `--title`, `--body`: rewrite for clarity and brevity. Keep every fact. State the
+   - `--title`, `--body`: rewrite for clarity and brevity. Keep every fact. A shortened
+     title keeps the old sentence: `--title "<concise>" --long-title "<old title>"`
+     (2-5 words, at most 48 cells); add or tighten a one-line `--tldr`. State the
      assumptions the text implies. Collect questions you cannot answer under one
      `## Open questions` heading at the end of the body; reuse an existing one. Notes
      are stored apart from the body and survive the rewrite.
@@ -339,7 +341,8 @@ Nothing else. A pass with nothing in those groups says so in one line.
 
 ## What a good task reads like
 
-- The title names the outcome, not the activity.
+- The title names the outcome, not the activity, in 2-5 words; a one-line tldr says
+  what it is about, and a longer original sentence lives in `long_title`.
 - The body answers why, what done looks like, and where to look. It repeats nothing the
   linked spec already says.
 - Assumptions are sentences, not implications. Unknowns are open questions, not hedges.
