@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HostConfig {
     pub headers: bool,
+    pub text_sizing: Option<crate::style::TextSizing>,
     pub relay_identity: bool,
     pub docs_schemes: BTreeMap<String, String>,
 }
@@ -33,6 +34,8 @@ struct FileDocs {
 struct FileOutput {
     #[serde(default)]
     headers: bool,
+    #[serde(default)]
+    text_sizing: Option<String>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -63,6 +66,21 @@ impl HostConfig {
         } else {
             supplied.unwrap_or(self.headers)
         })
+    }
+
+    /// `TASKS_TEXT_SIZING` beats config `[output] text_sizing`; the default is `auto`.
+    pub fn resolve_text_sizing(&self, env: Option<&OsStr>) -> Result<crate::style::TextSizing> {
+        match env {
+            Some(value) => value
+                .to_str()
+                .and_then(|value| crate::style::TextSizing::parse(value).ok())
+                .ok_or_else(|| {
+                    Error::Config(format!(
+                        "TASKS_TEXT_SIZING must be auto, always, or never, got {value:?}"
+                    ))
+                }),
+            None => Ok(self.text_sizing.unwrap_or(crate::style::TextSizing::Auto)),
+        }
     }
 
     pub fn path() -> Result<PathBuf> {
@@ -124,8 +142,21 @@ impl HostConfig {
                 )));
             }
         }
+        let text_sizing = file
+            .output
+            .text_sizing
+            .as_deref()
+            .map(|value| {
+                crate::style::TextSizing::parse(value).map_err(|_| {
+                    Error::Config(format!(
+                        "{path}: [output] text_sizing must be auto, always, or never, got {value:?}"
+                    ))
+                })
+            })
+            .transpose()?;
         Ok(HostConfig {
             headers: file.output.headers,
+            text_sizing,
             relay_identity: file.identity.relay,
             docs_schemes: file.docs.schemes,
         })
@@ -301,5 +332,33 @@ mod tests {
             let error = HostConfig::parse(text, "c.toml").unwrap_err().to_string();
             assert!(error.contains("c.toml"), "{text:?}: {error}");
         }
+    }
+
+    #[test]
+    fn text_sizing_env_beats_config() {
+        use crate::style::TextSizing;
+        let host = HostConfig::parse("[output]\ntext_sizing = \"never\"\n", "c.toml").unwrap();
+        assert_eq!(host.resolve_text_sizing(None).unwrap(), TextSizing::Never);
+        assert_eq!(
+            host.resolve_text_sizing(Some(OsStr::new("always")))
+                .unwrap(),
+            TextSizing::Always
+        );
+        assert_eq!(
+            HostConfig::default().resolve_text_sizing(None).unwrap(),
+            TextSizing::Auto
+        );
+        let error = host
+            .resolve_text_sizing(Some(OsStr::new("big")))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("TASKS_TEXT_SIZING"), "{error}");
+        let error = HostConfig::parse("[output]\ntext_sizing = \"big\"\n", "c.toml")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("text_sizing") && error.contains("c.toml"),
+            "{error}"
+        );
     }
 }

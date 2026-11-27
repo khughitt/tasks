@@ -144,6 +144,8 @@ mod tests {
             wake_on: Vec::new(),
             id: TaskId::parse("sci-000001").unwrap(),
             title: "T".into(),
+            long_title: None,
+            tldr: None,
             status,
             priority: 2,
             size: None,
@@ -594,7 +596,7 @@ pub struct Ref {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Task {
-    /// Physical record schema version: 1 (unversioned) or 2.
+    /// Physical record schema version: 1 (unversioned), 2, or the titles format.
     #[serde(skip)]
     pub(crate) format: u8,
     /// Open decision UUID pointers in format-2 frontmatter.
@@ -607,6 +609,12 @@ pub struct Task {
     pub(crate) note_archives: Vec<crate::history::ArchiveDescriptor>,
     pub id: TaskId,
     pub title: String,
+    /// The full sentence a concise title was shortened from, kept for the record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_title: Option<String>,
+    /// One line, at most 160 display cells, saying what the task is about.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
     pub status: Status,
     pub priority: u8,
     #[serde(skip_serializing_if = "Option::is_none")]

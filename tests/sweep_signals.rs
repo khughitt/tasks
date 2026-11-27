@@ -1092,3 +1092,57 @@ fn sweep_signals_action_evidence() {
     assert_eq!(ans["subject"]["entry"], dec_id);
     assert_eq!(ans["subject"]["kind"], "drop");
 }
+
+#[test]
+fn sweep_signals_scans_long_title_and_tldr() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    init_git(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/kept.rs"), "fn main() {}\n").unwrap();
+    git(&dir, &["add", "src"]);
+    git(&dir, &["commit", "-q", "-m", "init"]);
+    let closed = add(&env, &dir, "Closed one", "x");
+    env.json(&dir, &["edit", &closed, "--status", "done"]);
+    let by_long = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Short",
+            "--long-title",
+            "Fix src/gone.rs reading",
+            "--body",
+            "x",
+        ],
+    ));
+    let by_tldr = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Other",
+            "--tldr",
+            &format!("after {closed}"),
+            "--body",
+            "x",
+        ],
+    ));
+    backdate(&dir, &by_tldr);
+    let (code, rows, stderr) = ledger(&env, &dir);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(row(&rows, &by_long)["dead_paths"], "src/gone.rs");
+    assert_eq!(row(&rows, &by_tldr)["cited_closed"], closed);
+}
+
+#[test]
+fn twins_compare_long_title() {
+    let mut env = TestEnv::new();
+    let dir = env.init("aa");
+    init_git(&dir);
+    let sentence = "Rename the widget cache loader module";
+    let a = id_of(env.json(&dir, &["add", "Widget cache", "--long-title", sentence]));
+    let b = id_of(env.json(&dir, &["add", "Loader rename", "--long-title", sentence]));
+    let (code, rows, stderr) = ledger(&env, &dir);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(row(&rows, &a)["twins"], b);
+    assert_eq!(row(&rows, &b)["twins"], a);
+}

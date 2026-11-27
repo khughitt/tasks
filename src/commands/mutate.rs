@@ -64,6 +64,15 @@ pub fn apply_fields(
         crate::format::validate_body_for_format(&body, task.format)?;
         task.body = body;
     }
+    if fields.tldr.is_some() || fields.long_title.is_some() {
+        crate::entries::promote_for_titles(task)?;
+    }
+    if let Some(tldr) = &fields.tldr {
+        task.tldr = Some(tldr.clone());
+    }
+    if let Some(long_title) = &fields.long_title {
+        task.long_title = Some(long_title.clone());
+    }
     let mut handles = std::collections::HashSet::new();
     for text in &fields.refs {
         let entry = crate::refs::parse_entry(text)?;

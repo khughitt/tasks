@@ -901,6 +901,8 @@ pub(crate) mod tests {
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: id.into(),
+            long_title: None,
+            tldr: None,
             status,
             priority: 2,
             size: None,

@@ -25,6 +25,8 @@ pub fn blank(
         wake_on: Vec::new(),
         id: project.new_id()?,
         title,
+        long_title: None,
+        tldr: None,
         status,
         priority: 2,
         size: None,
@@ -66,15 +68,27 @@ pub fn blank(
     })
 }
 
-/// Tasks in `project` already carrying exactly this `source` and `title`, lowest id
-/// first. Every status counts: refiling something already done or dropped is precisely
-/// the duplicate this exists to catch. Title equality is exact, because the key has to be
-/// something a caller can reproduce byte for byte, not something that merely looks alike.
-fn duplicates_of(project: &Project, source: &str, title: &str) -> Result<Vec<Task>> {
+/// Tasks in `project` already carrying exactly this `source` and a matching title, lowest
+/// id first. A task matches when the set {given title, given long_title} meets the set
+/// {its title, its long_title}, so a record whose title was shortened (the old sentence
+/// kept as `long_title`) still matches a refiling of that sentence. Every status counts:
+/// refiling something already done or dropped is precisely the duplicate this exists to
+/// catch. Equality is exact, because the key has to be something a caller can reproduce
+/// byte for byte, not something that merely looks alike.
+fn duplicates_of(
+    project: &Project,
+    source: &str,
+    title: &str,
+    long_title: Option<&str>,
+) -> Result<Vec<Task>> {
+    let given = |text: &str| text == title || long_title == Some(text);
     let mut found: Vec<Task> = project
         .scan()?
         .into_iter()
-        .filter(|task| task.source.as_deref() == Some(source) && task.title == title)
+        .filter(|task| {
+            task.source.as_deref() == Some(source)
+                && (given(&task.title) || task.long_title.as_deref().is_some_and(given))
+        })
         .collect();
     found.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(found)
@@ -99,7 +113,7 @@ pub fn run(
     // The context's lock keeps the duplicate check and create in one critical section.
     if let Some(source) = &fields.source {
         validate_line("source", source)?;
-        let existing = duplicates_of(&ctx.project, source, &title)?;
+        let existing = duplicates_of(&ctx.project, source, &title, fields.long_title.as_deref())?;
         if let Some(task) = existing.first() {
             ctx.warnings.push(format!(
                 "{} already carries this source and title; reused it, wrote nothing",

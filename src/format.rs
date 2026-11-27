@@ -8,6 +8,8 @@ use crate::model::{
 pub const REFS_DELIMITER: &str = "## References";
 pub const ENTRIES_DELIMITER: &str = "## Entries";
 pub const NOTES_DELIMITER: &str = "## Notes";
+/// The longest `tldr`, in display cells.
+pub const TLDR_MAX_CELLS: usize = 160;
 const KEYS: [&str; 39] = [
     "id",
     "title",
@@ -178,9 +180,19 @@ fn parse_numbered_fields<'a>(
 }
 
 pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
+    parse_physical_with(text, file, false)
+}
+
+/// `parse_physical` that also admits `long_title` and `tldr` below the titles format,
+/// for the `$EDITOR` save, which promotes the record before writing it.
+pub fn parse_physical_admitting_titles(text: &str, file: &str) -> Result<PhysicalTask> {
+    parse_physical_with(text, file, true)
+}
+
+fn parse_physical_with(text: &str, file: &str, admit_titles: bool) -> Result<PhysicalTask> {
     let format = match crate::entries::inspect_envelope(text, file)? {
         crate::entries::RecordEnvelope::Format1 => 1u8,
-        crate::entries::RecordEnvelope::Format2 => 2u8,
+        crate::entries::RecordEnvelope::Current(version) => version,
         crate::entries::RecordEnvelope::Future(future) => return Err(future.refusal()),
     };
     let (fm, after) = split_frontmatter(text, file)?;
@@ -193,11 +205,10 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
                 "awaiting_user is forbidden in format 2; human waiting is derived from open decisions",
             ));
         }
-        let allowed = if format >= 2 {
-            KEYS.contains(&k.as_str()) || matches!(k.as_str(), "format" | "open_decisions")
-        } else {
-            KEYS.contains(&k.as_str())
-        };
+        let allowed = KEYS.contains(&k.as_str())
+            || (format >= 2 && matches!(k.as_str(), "format" | "open_decisions"))
+            || ((admit_titles || format >= crate::entries::TITLES_FORMAT)
+                && matches!(k.as_str(), "long_title" | "tldr"));
         if !allowed {
             return Err(perr(file, format!("unknown key {k:?}")));
         }
@@ -299,6 +310,8 @@ pub fn parse_physical(text: &str, file: &str) -> Result<PhysicalTask> {
             .map_err(|error| perr(file, error.to_string()))?,
         id: TaskId::parse(&required("id")?).map_err(|e| perr(file, e.to_string()))?,
         title: required("title")?,
+        long_title: scalar("long_title")?,
+        tldr: scalar("tldr")?,
         status: Status::parse(&required("status")?).map_err(|e| perr(file, e.to_string()))?,
         priority,
         size: scalar("size")?
@@ -756,6 +769,18 @@ pub fn validate_task(t: &Task) -> Result<()> {
         TaskId::parse(&dependency.to_string())?;
     }
     validate_line("title", &t.title)?;
+    if let Some(long_title) = &t.long_title {
+        validate_line("long_title", long_title)?;
+    }
+    if let Some(tldr) = &t.tldr {
+        validate_line("tldr", tldr)?;
+        let cells = crate::ellipsis::display_cells(tldr);
+        if cells > TLDR_MAX_CELLS {
+            return Err(Error::Validation(format!(
+                "tldr must be at most {TLDR_MAX_CELLS} display cells, got {cells}"
+            )));
+        }
+    }
     if t.priority > 4 {
         return Err(Error::Validation("priority must be 0-4".into()));
     }
@@ -855,6 +880,14 @@ pub fn serialize_physical(record: &PhysicalTask) -> String {
     pairs.extend([
         ("id".into(), s(&t.id.to_string())),
         ("title".into(), s(&t.title)),
+    ]);
+    if let Some(long_title) = &t.long_title {
+        pairs.push(("long_title".into(), s(long_title)));
+    }
+    if let Some(tldr) = &t.tldr {
+        pairs.push(("tldr".into(), s(tldr)));
+    }
+    pairs.extend([
         ("status".into(), s(t.status.as_str())),
         ("priority".into(), Value::Raw(t.priority.to_string())),
     ]);
@@ -2145,5 +2178,64 @@ mod tests {
         t.model = Some(String::new());
         let err = validate_task(&t).unwrap_err();
         assert!(err.to_string().contains("model must not be empty"), "{err}");
+    }
+
+    fn titles_record(format_line: &str) -> String {
+        format!(
+            "---\n{format_line}id: sci-000009\ntitle: Goal headings\nlong_title: Make goals stand out in pretty output\ntldr: Scaled headings and concise titles\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n"
+        )
+    }
+
+    #[test]
+    fn titles_keys_round_trip_at_titles_format() {
+        let text = titles_record(&format!("format: {}\n", crate::entries::TITLES_FORMAT));
+        let t = crate::history::fixture(&text, "x").unwrap();
+        assert_eq!(
+            t.long_title.as_deref(),
+            Some("Make goals stand out in pretty output")
+        );
+        assert_eq!(
+            t.tldr.as_deref(),
+            Some("Scaled headings and concise titles")
+        );
+        let written = crate::history::fixture_text(&t);
+        assert_eq!(written, text);
+        let again = crate::history::fixture(&written, "x").unwrap();
+        assert_eq!(crate::history::fixture_text(&again), text);
+    }
+
+    #[test]
+    fn titles_keys_refused_below_titles_format() {
+        for header in ["format: 2\n", ""] {
+            let err = crate::history::fixture(&titles_record(header), "x").unwrap_err();
+            assert!(
+                err.to_string().contains("unknown key \"long_title\""),
+                "{err}"
+            );
+            let only_tldr = titles_record(header)
+                .replace("long_title: Make goals stand out in pretty output\n", "");
+            let err = crate::history::fixture(&only_tldr, "x").unwrap_err();
+            assert!(err.to_string().contains("unknown key \"tldr\""), "{err}");
+        }
+    }
+
+    #[test]
+    fn tldr_over_160_cells_refused() {
+        let text = titles_record(&format!("format: {}\n", crate::entries::TITLES_FORMAT));
+        let mut t = crate::history::fixture(&text, "x").unwrap();
+        t.tldr = Some("a".repeat(161));
+        let err = validate_task(&t).unwrap_err();
+        assert!(err.to_string().contains("tldr"), "{err}");
+        t.tldr = Some("漢".repeat(80));
+        validate_task(&t).unwrap();
+        t.tldr = Some("漢".repeat(81));
+        assert!(validate_task(&t).is_err());
+        t.tldr = Some("two\nlines".into());
+        let err = validate_task(&t).unwrap_err();
+        assert!(err.to_string().contains("tldr"), "{err}");
+        t.tldr = Some("ok".into());
+        t.long_title = Some("two\nlines".into());
+        let err = validate_task(&t).unwrap_err();
+        assert!(err.to_string().contains("long_title"), "{err}");
     }
 }

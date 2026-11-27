@@ -153,6 +153,8 @@ mod tests {
             wake_on: Vec::new(),
             id: TaskId::parse(&format!("sci-{hex}")).unwrap(),
             title: hex.into(),
+            long_title: None,
+            tldr: None,
             status: Status::Todo,
             priority: 2,
             size: None,

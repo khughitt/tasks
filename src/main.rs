@@ -312,7 +312,30 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
+    let text_sizing = match &host {
+        Some(host) => {
+            match host.resolve_text_sizing(std::env::var_os("TASKS_TEXT_SIZING").as_deref()) {
+                Ok(mode) => mode,
+                Err(error) => {
+                    to_stderr(&format!("{}\n", output::render_error(&error)));
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => style::TextSizing::Never,
+    };
+    let stdout_is_terminal = std::io::stdout().is_terminal();
+    let stdout_painter = style::Painter::new(color_mode, format, stdout_is_terminal);
+    let sizing = style::text_sizing_on(
+        text_sizing,
+        format,
+        color_mode,
+        stdout_is_terminal,
+        stdout_painter.enabled(),
+        std::env::var("TERM").ok().as_deref(),
+        std::env::var_os("TMUX").is_some(),
+    );
+    let stdout_painter = stdout_painter.with_text_sizing(sizing);
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
     let width = if format == Format::Pretty {
         table::terminal_width()

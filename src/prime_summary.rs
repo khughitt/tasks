@@ -89,6 +89,7 @@ pub fn bound(out: &mut PrimeOut, full: Vec<String>) -> Result<()> {
     for root in &mut out.roadmap {
         root.children.clear();
     }
+    drop_titles(out);
     out.parked.truncate(3);
     out.doing.truncate(5);
     out.ready.truncate(5);
@@ -115,6 +116,35 @@ pub fn bound(out: &mut PrimeOut, full: Vec<String>) -> Result<()> {
         refresh(out, &original, hidden_descendants);
     }
     Ok(())
+}
+
+/// The summary is a bounded session context: the concise title is enough, so the
+/// `long_title` and `tldr` of every row are dropped before measuring the budget.
+fn drop_titles(out: &mut PrimeOut) {
+    fn clear(row: &mut crate::output::TaskSummary) {
+        row.long_title = None;
+        row.tldr = None;
+    }
+    fn tree(nodes: &mut [TreeNode]) {
+        for node in nodes {
+            clear(&mut node.summary);
+            tree(&mut node.children);
+        }
+    }
+    out.ready
+        .iter_mut()
+        .chain(&mut out.doing)
+        .chain(&mut out.closeout)
+        .for_each(clear);
+    for row in &mut out.parked {
+        row.long_title = None;
+        row.tldr = None;
+    }
+    for lane in &mut out.lanes {
+        clear(&mut lane.lane);
+        lane.pick.iter_mut().chain(&mut lane.active).for_each(clear);
+    }
+    tree(&mut out.roadmap);
 }
 
 fn refresh(out: &mut PrimeOut, original: &BTreeMap<&'static str, Vec<String>>, descendants: usize) {

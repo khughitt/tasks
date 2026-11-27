@@ -113,6 +113,8 @@ mod tests {
             wake_on: Vec::new(),
             id: TaskId::parse(id).unwrap(),
             title: "t".into(),
+            long_title: None,
+            tldr: None,
             status: Status::Todo,
             priority: 2,
             size: None,

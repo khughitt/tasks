@@ -243,6 +243,14 @@ fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
         painter,
         width,
     ));
+    // The tldr reads under the title, dimmed; `long_title` is kept for the record only.
+    if let Some(tldr) = &o.task.tldr {
+        let tldr = Span {
+            text: tldr.clone(),
+            style: Some(Style::Chrome),
+        };
+        rendered.push_str(&block("", 0, &spans(&[tldr]), 0, painter, width));
+    }
     let rows = overview_rows(o);
     let key_width = rows.iter().map(|(key, _)| key.len() + 1).max().unwrap_or(0);
     for (key, value) in &rows {
@@ -1739,5 +1747,34 @@ mod tests {
             out
         };
         assert_eq!(stripped, render(&example(), &plain(), Some(120)));
+    }
+
+    #[test]
+    fn show_pretty_puts_tldr_under_title() {
+        let mut o = fields();
+        o.task.tldr = Some("Save hides behind the keyboard".into());
+        let text = render(&o, &plain(), Some(80));
+        let lines: Vec<&str> = text.lines().collect();
+        let title = lines
+            .iter()
+            .position(|line| line.starts_with("Phone sheet hides Save"))
+            .unwrap();
+        assert_eq!(lines[title + 1], "Save hides behind the keyboard", "{text}");
+        assert!(lines[title + 2].starts_with("status:"), "{text}");
+        let colored = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false);
+        let painted = render(&o, &colored, Some(80));
+        assert!(
+            painted.contains("\x1b[2mSave hides behind the keyboard\x1b[0m"),
+            "{painted:?}"
+        );
+    }
+
+    #[test]
+    fn show_pretty_without_tldr_unchanged() {
+        let mut o = fields();
+        let before = render(&o, &plain(), Some(80));
+        o.task.long_title = Some("A long sentence that pretty views never print".into());
+        assert_eq!(render(&o, &plain(), Some(80)), before);
+        assert!(!before.contains("never print"));
     }
 }

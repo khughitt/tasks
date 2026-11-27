@@ -50,7 +50,7 @@ fn write_f2_sample(dir: &Path, id: &str) -> String {
 
 fn write_f3(dir: &Path, id: &str) -> String {
     let text = format!(
-        "---\nformat: 3\nid: {id}\ntitle: Future record\nstatus: todo\npriority: 2\n\
+        "---\nformat: 9\nid: {id}\ntitle: Future record\nstatus: todo\npriority: 2\n\
          assessment: {D1}\ncreated: 2026-11-20T00:00:00Z\nupdated: 2026-11-20T00:00:00Z\n\
          depends: []\ntags: []\n---\n\nFuture body.\n"
     );
@@ -209,7 +209,7 @@ fn mixed_version_collection_keeps_independent_rows_blocks_dependents_and_refuses
             let s = w.as_str().unwrap();
             s.contains("mx-000009")
                 && s.contains("tasks/mx-000009.md")
-                && s.contains("3")
+                && s.contains("9")
                 && s.contains("unsupported_record_version")
         }),
         "list must warn about unsupported future record: {warns:?}"
@@ -238,7 +238,7 @@ fn mixed_version_collection_keeps_independent_rows_blocks_dependents_and_refuses
             "{args:?}: {err}"
         );
         let detail = err["error"]["detail"].as_str().unwrap();
-        assert!(detail.contains("3"), "{detail}");
+        assert!(detail.contains("9"), "{detail}");
     }
 
     // Unsafe goal closure refuses when a declared piece or local sibling is unsupported.
@@ -597,7 +597,7 @@ fn check_and_staged_check_enforce_changed_index_guard_and_warn_on_untouched_futu
             .status
             .success()
     );
-    // Update the id inside the staged destination to match the new filename, still format: 3.
+    // Update the id inside the staged destination to match the new filename, still format: 9.
     let moved_f3 = f3_bytes.replace("pa-000009", "pa-00000d");
     std::fs::write(pa.join("tasks/pa-00000d.md"), &moved_f3).unwrap();
     assert!(git(&["add", "pa/tasks/pa-00000d.md"]).status.success());

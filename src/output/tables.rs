@@ -1,6 +1,7 @@
 use crate::lanes::{Causes, LaneRow, LaneState};
+use crate::palette::Rgb;
 use crate::present;
-use crate::style::{Painter, Style};
+use crate::style::{Painter, Role, Style};
 
 use super::contract::{
     CarriedOut, Counts, DateColumn, DroppedOut, GoalWork, HaltRow, MigrateOut, Output, ParkedRow,
@@ -726,7 +727,7 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                     tree_rows(
                         std::slice::from_ref(node),
                         0,
-                        &mut rails,
+                        &mut rails, None,
                         painter,
                         marks,
                         &mut roadmap,
@@ -936,7 +937,7 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             let marks = Marks::of_tree(&o.nodes, TypeColumn::Leading);
             let mut rows = Vec::new();
             let mut rails = Vec::new();
-            tree_rows(&o.nodes, 0, &mut rails, painter, marks, &mut rows);
+            tree_rows(&o.nodes, 0, &mut rails, None, painter, marks, &mut rows);
             let mut displayed_works = Vec::new();
             collect_tree_goal_work(&o.nodes, &mut displayed_works);
             let mut rendered =
@@ -1078,7 +1079,7 @@ fn lane_table(
     if show_work {
         columns.push(Column::fixed("work"));
     }
-    columns.push(Column::wrap("title", 20, None));
+    // Every lane row is headed, so the lane's title is on its heading line.
     columns.push(Column::wrap("state", 20, None));
     let task = |row: &TaskSummary| {
         format!(
@@ -1131,12 +1132,15 @@ fn lane_table(
                         .unwrap_or_default(),
                 );
             }
-            cells.push(
-                present::title(&row.lane.title, row.lane.project_color, row.lane.activity)
-                    .paint(painter),
-            );
             cells.push(state);
             let mut built = Row::new(cells);
+            built.heading = Some(crate::table::Heading {
+                prefix: if pad { "  " } else { "" }.into(),
+                title: row.lane.title.clone(),
+                role: Role::LaneHeading,
+                color: heading_hue(&row.lane, Role::LaneHeading),
+                rail: String::new(),
+            });
             if detail {
                 if let Some(guidance) = &row.guidance {
                     built
@@ -1356,14 +1360,19 @@ fn task_row(
         }
     }
     cells.push(date);
-    cells.push(title_cell(row, painter));
+    cells.push(title_cell(row, painter, true));
     crate::table::Row::new(cells)
 }
 
 /// The title and the suffixes that ride with it: tags, a due cadence, a deferral, a quiet
 /// recipe, the owner.
-fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
-    let mut cell = present::title(&row.title, row.project_color, row.activity).paint(painter);
+/// A headed row (`title: false`) keeps only the suffixes: its title is on the heading line.
+fn title_cell(row: &TaskSummary, painter: &Painter, title: bool) -> String {
+    let mut cell = if title {
+        present::title(&row.title, row.project_color, row.activity).paint(painter)
+    } else {
+        String::new()
+    };
     if !row.tags.is_empty() {
         let tags = present::tags(&row.tags);
         cell.push(' ');
@@ -1422,48 +1431,112 @@ fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
             .paint(painter),
         );
     }
-    cell
+    if title {
+        cell
+    } else {
+        cell.trim_start().to_string()
+    }
 }
 
+/// The heading a row gets in a tree: a lane, or a top-level goal (a goal whose parent is
+/// a lane, or a root goal with no lane above it). Subgoals and leaves get none.
+fn heading_role(row: &TaskSummary) -> Option<Role> {
+    if row.lane {
+        return Some(Role::LaneHeading);
+    }
+    let under_lane = row.parent.is_some()
+        && row.parent.as_deref() == row.in_lane.as_ref().map(|lane| lane.to_string()).as_deref();
+    let root = row.parent.is_none() && row.in_lane.is_none();
+    (row.goal && (under_lane || root)).then_some(Role::GoalHeading)
+}
+
+/// A heading's hue: the project colour for a lane, the goal's own hue for a goal; none
+/// for an uncoloured or near-grey project, which leaves the heading bold alone.
+fn heading_hue(row: &TaskSummary, role: Role) -> Option<Rgb> {
+    match role {
+        Role::LaneHeading => crate::style::heading_color(row.project_color),
+        Role::GoalHeading => row
+            .project_color
+            .and_then(|project| crate::style::goal_hue(project, &row.id)),
+    }
+}
+
+/// `rails` holds, per ancestor depth, whether that ancestor has later siblings and the
+/// colour of the rail connecting them (its parent's): a lane's rails take the project
+/// colour, rails inside a top-level goal's subtree that goal's hue.
 fn tree_rows(
     nodes: &[TreeNode],
     depth: usize,
-    rails: &mut Vec<bool>,
+    rails: &mut Vec<(bool, Option<Rgb>)>,
+    parent_rail: Option<Rgb>,
     painter: &Painter,
     marks: Marks,
     rows: &mut Vec<crate::table::Row>,
 ) {
     for (index, node) in nodes.iter().enumerate() {
         let has_more = index + 1 < nodes.len();
-        let prefix = if depth == 0 {
-            String::new()
-        } else {
-            let mut buf = String::new();
-            for (col_idx, &ancestor_has_more) in rails.iter().enumerate() {
-                let seg = if ancestor_has_more { "│  " } else { "   " };
-                buf.push_str(
-                    &present::tree_guide(seg, node.summary.project_color, col_idx + 1)
-                        .paint(painter),
-                );
+        let summary = &node.summary;
+        let mut guides = String::new();
+        for (col_idx, &(ancestor_has_more, color)) in rails.iter().enumerate() {
+            let seg = if ancestor_has_more { "│  " } else { "   " };
+            guides.push_str(&present::tree_guide(seg, color, col_idx + 1).paint(painter));
+        }
+        let guide = |segment: &str| {
+            if depth == 0 {
+                String::new()
+            } else {
+                present::tree_guide(segment, parent_rail, depth).paint(painter)
             }
-            let branch = if has_more { "├─ " } else { "└─ " };
-            buf.push_str(
-                &present::tree_guide(branch, node.summary.project_color, depth).paint(painter),
-            );
-            buf
         };
-        rows.push(task_row(
-            &node.summary,
-            DateColumn::Updated,
+        let branch = format!("{guides}{}", guide(if has_more { "├─ " } else { "└─ " }));
+        let continuation = format!("{guides}{}", guide(if has_more { "│  " } else { "   " }));
+        let role = heading_role(summary);
+        let own_rail = match role {
+            Some(Role::GoalHeading) => summary
+                .project_color
+                .and_then(|project| crate::style::goal_hue(project, &summary.id))
+                .or(summary.project_color),
+            _ if depth == 0 => summary.project_color,
+            _ => parent_rail,
+        };
+        let row = match role {
+            None => task_row(summary, DateColumn::Updated, painter, marks, true, &branch),
+            Some(role) => {
+                let mut row = task_row(
+                    summary,
+                    DateColumn::Updated,
+                    painter,
+                    marks,
+                    true,
+                    &continuation,
+                );
+                *row.cells
+                    .last_mut()
+                    .expect("a task row ends with its title") = title_cell(summary, painter, false);
+                let pad = if marks.review { "  " } else { "" };
+                row.heading = Some(crate::table::Heading {
+                    prefix: format!("{pad}{branch}"),
+                    title: summary.title.clone(),
+                    role,
+                    color: heading_hue(summary, role),
+                    rail: format!("{pad}{continuation}"),
+                });
+                row
+            }
+        };
+        rows.push(row);
+        if depth > 0 {
+            rails.push((has_more, parent_rail));
+        }
+        tree_rows(
+            &node.children,
+            depth + 1,
+            rails,
+            own_rail,
             painter,
             marks,
-            true,
-            &prefix,
-        ));
-        if depth > 0 {
-            rails.push(has_more);
-        }
-        tree_rows(&node.children, depth + 1, rails, painter, marks, rows);
+            rows,
+        );
         if depth > 0 {
             rails.pop();
         }
@@ -1584,6 +1657,8 @@ mod tests {
             actions: None,
             id: id.into(),
             title: format!("title {id}"),
+            long_title: None,
+            tldr: None,
             project_color: None,
             activity: None,
             goal_work: None,
@@ -1679,7 +1754,7 @@ mod tests {
         };
         let mut built = Vec::new();
         let mut rails = Vec::new();
-        tree_rows(nodes, 0, &mut rails, painter, marks, &mut built);
+        tree_rows(nodes, 0, &mut rails, None, painter, marks, &mut built);
         crate::table::render(&task_columns(marks, true), &built, &layout, None, painter)
     }
 
@@ -2002,6 +2077,7 @@ mod tests {
             &[root],
             0,
             &mut rails,
+            None,
             &plain(),
             Marks::default(),
             &mut built,
@@ -2387,8 +2463,14 @@ mod tests {
         });
         let tree_text = pretty(&tree_out, &plain(), &headed);
         assert!(tree_text.starts_with("   id"), "{tree_text}");
+        // A lane row is headed: its title line comes first, then the row with its mark.
+        assert_eq!(
+            tree_text.lines().nth(1),
+            Some("   title xx-000001"),
+            "{tree_text}"
+        );
         assert!(
-            tree_text.lines().nth(1).unwrap().starts_with("≡  "),
+            tree_text.lines().nth(2).unwrap().starts_with("≡  "),
             "{tree_text}"
         );
         let tree_hdr: Vec<&str> = tree_text
@@ -2404,7 +2486,8 @@ mod tests {
             ]
         );
 
-        // Prime lanes has 5 columns (`id, P, work, title, state`); Output::Lanes stays 4 columns.
+        // Prime lanes has 4 columns (`id, P, work, state`); Output::Lanes 3. The lane title
+        // is on each row's heading line.
         let mut prime_lane = leaf.clone();
         prime_lane.goal_work = Some(crate::output::GoalWork {
             pieces: crate::goals::Pieces {
@@ -2437,7 +2520,7 @@ mod tests {
             .unwrap()
             .split_whitespace()
             .collect();
-        assert_eq!(prime_lane_hdr, ["id", "P", "work", "title", "state"]);
+        assert_eq!(prime_lane_hdr, ["id", "P", "work", "state"]);
 
         let mut standalone_lane = lane_row;
         standalone_lane.lane.goal_work = None;
@@ -2455,7 +2538,7 @@ mod tests {
             .unwrap()
             .split_whitespace()
             .collect();
-        assert_eq!(lanes_hdr, ["id", "P", "title", "state"]);
+        assert_eq!(lanes_hdr, ["id", "P", "state"]);
     }
 
     #[test]
@@ -2774,5 +2857,379 @@ mod tests {
             c1.r, c1.g, c1.b, c2.r, c2.g, c2.b, c3.r, c3.g, c3.b
         );
         assert!(d3_line.starts_with(&expected_prefix), "{d3_line:?}");
+    }
+
+    // ---- headings (titles-and-headings spec, Display) ----
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Lane,
+        Goal,
+        Leaf,
+    }
+
+    fn hnode(
+        id: &str,
+        title: &str,
+        kind: Kind,
+        parent: Option<&str>,
+        in_lane: Option<&str>,
+        color: Option<crate::palette::Rgb>,
+        children: Vec<TreeNode>,
+    ) -> TreeNode {
+        let mut r = row(id, false);
+        r.title = title.into();
+        r.lane = kind == Kind::Lane;
+        r.goal = kind != Kind::Leaf;
+        r.parent = parent.map(Into::into);
+        r.in_lane = in_lane.map(|id| crate::model::TaskId::parse(id).unwrap());
+        r.project_color = color;
+        TreeNode {
+            summary: r,
+            children,
+        }
+    }
+
+    /// L (lane) > G1 > {S (subgoal) > A, B}, G2 > C; R (root goal, no lane) > D.
+    fn headed_forest(color: Option<crate::palette::Rgb>) -> Vec<TreeNode> {
+        let l = Some("xx-00000a");
+        vec![
+            hnode(
+                "xx-00000a",
+                "Vocabulary and presentation",
+                Kind::Lane,
+                None,
+                l,
+                color,
+                vec![
+                    hnode(
+                        "xx-00000b",
+                        "Tag semantics",
+                        Kind::Goal,
+                        l,
+                        l,
+                        color,
+                        vec![
+                            hnode(
+                                "xx-00000c",
+                                "Sub goal",
+                                Kind::Goal,
+                                Some("xx-00000b"),
+                                l,
+                                color,
+                                vec![hnode(
+                                    "xx-00000d",
+                                    "Leaf A",
+                                    Kind::Leaf,
+                                    Some("xx-00000c"),
+                                    l,
+                                    color,
+                                    vec![],
+                                )],
+                            ),
+                            hnode(
+                                "xx-00000e",
+                                "Leaf B",
+                                Kind::Leaf,
+                                Some("xx-00000b"),
+                                l,
+                                color,
+                                vec![],
+                            ),
+                        ],
+                    ),
+                    hnode(
+                        "xx-00000f",
+                        "Agent-friendly JSON",
+                        Kind::Goal,
+                        l,
+                        l,
+                        color,
+                        vec![hnode(
+                            "xx-000010",
+                            "Leaf C",
+                            Kind::Leaf,
+                            Some("xx-00000f"),
+                            l,
+                            color,
+                            vec![],
+                        )],
+                    ),
+                ],
+            ),
+            hnode(
+                "xx-000011",
+                "Root goal",
+                Kind::Goal,
+                None,
+                None,
+                color,
+                vec![hnode(
+                    "xx-000012",
+                    "Leaf D",
+                    Kind::Leaf,
+                    Some("xx-000011"),
+                    None,
+                    color,
+                    vec![],
+                )],
+            ),
+        ]
+    }
+
+    fn tree_text(nodes: Vec<TreeNode>, painter: &Painter, width: Option<usize>) -> String {
+        pretty(
+            &Output::Tree(crate::output::TreeOut {
+                nodes,
+                warnings: vec![],
+            }),
+            painter,
+            &crate::table::Layout {
+                width,
+                headers: false,
+            },
+        )
+    }
+
+    fn line_with<'a>(text: &'a str, needle: &str) -> (usize, &'a str) {
+        text.lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(needle))
+            .unwrap_or_else(|| panic!("no line with {needle}:\n{text}"))
+    }
+
+    fn sized() -> Painter {
+        Painter::new(ColorMode::Always, Format::Pretty, false).with_text_sizing(true)
+    }
+
+    #[test]
+    fn tree_detail_path_keeps_leaf_rows_separate() {
+        let forest = || {
+            let mut forest = headed_forest(None);
+            forest[0].children[0].summary.title =
+                "A goal title long enough to wrap at sixty columns of terminal width".into();
+            forest[0].children[0].children[1].summary.title =
+                "A leaf title that is long enough to wrap onto a continuation line".into();
+            forest
+        };
+        for width in [Some(60), Some(120), None] {
+            let text = tree_text(forest(), &plain(), width);
+            for id in ["xx-00000d", "xx-00000e", "xx-000010", "xx-000012"] {
+                assert_eq!(
+                    text.lines().filter(|line| line.contains(id)).count(),
+                    1,
+                    "{id} at {width:?}:\n{text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tree_heads_lane_and_top_level_goals_only() {
+        let text = tree_text(headed_forest(None), &plain(), Some(120));
+        for (id, title) in [
+            ("xx-00000a", "Vocabulary and presentation"),
+            ("xx-00000b", "Tag semantics"),
+            ("xx-00000f", "Agent-friendly JSON"),
+            ("xx-000011", "Root goal"),
+        ] {
+            let (heading, heading_line) = line_with(&text, title);
+            let (row, row_line) = line_with(&text, id);
+            assert_eq!(row, heading + 1, "{id}:\n{text}");
+            assert!(!heading_line.contains(id), "{heading_line}");
+            assert!(!row_line.contains(title), "{row_line}");
+        }
+        for (id, title) in [("xx-00000c", "Sub goal"), ("xx-00000d", "Leaf A")] {
+            let (_, row_line) = line_with(&text, id);
+            assert!(row_line.contains(title), "{id}: {row_line}");
+        }
+        assert_eq!(text.lines().count(), 4 + 9, "{text}");
+    }
+
+    #[test]
+    fn headed_row_omits_only_title_text() {
+        let forest = || {
+            let mut forest = headed_forest(None);
+            let goal = &mut forest[0].children[0].summary;
+            goal.tags = vec!["ux".into()];
+            goal.owner = Some("keith".into());
+            forest
+        };
+        let text = tree_text(forest(), &plain(), Some(120));
+        let (_, row_line) = line_with(&text, "xx-00000b");
+        assert!(
+            row_line.contains("[ux]") && row_line.contains("@keith"),
+            "{row_line}"
+        );
+        assert!(!row_line.contains("Tag semantics"), "{row_line}");
+        let narrow = tree_text(forest(), &plain(), Some(40));
+        assert!(
+            !narrow.lines().any(|line| line.trim() == "title:"),
+            "{narrow}"
+        );
+    }
+
+    #[test]
+    fn scaled_heading_reserves_two_rows_with_rail() {
+        let text = tree_text(headed_forest(None), &sized(), Some(120));
+        let heading = text
+            .find("\x1b]66;s=2:n=5:d=8:w=5:v=2;Tag sema\x07")
+            .expect("goal heading is scaled");
+        let start = text[..heading]
+            .rfind("\n\n\x1b[2A")
+            .expect("two rows reserved");
+        let after: Vec<&str> = text[heading..].splitn(3, '\n').collect();
+        assert!(after[1].contains('│'), "rail line: {:?}", after[1]);
+        assert!(after[2].contains("xx-00000b"), "row: {:?}", after[2]);
+        assert!(!text[start..heading].contains("xx-"), "{text:?}");
+        assert!(
+            text.contains("\x1b]66;s=2:n=3:d=4:w=3:v=2;Voca\x07"),
+            "{text:?}"
+        );
+        let plain_text = tree_text(headed_forest(None), &plain(), Some(120));
+        assert!(!plain_text.contains("\x1b]") && !plain_text.contains("\x1b[2A"));
+    }
+
+    #[test]
+    fn branch_connector_on_heading_not_row() {
+        let text = tree_text(headed_forest(None), &plain(), Some(120));
+        let (_, first_heading) = line_with(&text, "Tag semantics");
+        let (_, first_row) = line_with(&text, "xx-00000b");
+        assert!(
+            first_heading.contains("├─ Tag semantics"),
+            "{first_heading}"
+        );
+        assert!(first_row.contains("│  xx-00000b"), "{first_row}");
+        assert!(!first_row.contains('├'), "{first_row}");
+        let (_, last_heading) = line_with(&text, "Agent-friendly JSON");
+        let (_, last_row) = line_with(&text, "xx-00000f");
+        assert!(
+            last_heading.contains("└─ Agent-friendly JSON"),
+            "{last_heading}"
+        );
+        assert!(last_row.contains("   xx-00000f"), "{last_row}");
+        assert!(!last_row.contains('└'), "{last_row}");
+    }
+
+    #[test]
+    fn heading_clips_to_scaled_width() {
+        let mut forest = headed_forest(None);
+        forest[0].children[0].summary.title = "x".repeat(70);
+        let text = tree_text(forest, &sized(), Some(80));
+        let heading = text
+            .lines()
+            .find(|line| line.contains("\x1b]66;s=2:n=5"))
+            .unwrap();
+        assert!(crate::table::visible_width(heading) <= 80, "{heading:?}");
+        assert!(heading.contains('…'), "{heading:?}");
+        let mut unscaled = headed_forest(None);
+        unscaled[0].children[0].summary.title = "y".repeat(200);
+        let text = tree_text(unscaled, &plain(), Some(80));
+        let (_, heading) = line_with(&text, "yyyy");
+        assert!(crate::table::visible_width(heading) <= 80, "{heading}");
+        assert!(heading.ends_with('…'), "{heading}");
+    }
+
+    #[test]
+    fn rails_use_ancestor_colours() {
+        let palette = crate::palette::Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap();
+        let scale = crate::style::TreeScale::new(&palette);
+        let proj = crate::palette::Rgb::parse_hex("#4e9af1").unwrap();
+        let painter = Painter::new(ColorMode::Always, Format::Pretty, false).with_tree_scale(scale);
+        let text = tree_text(headed_forest(Some(proj)), &painter, None);
+        let (_, leaf) = line_with(&text, "xx-00000e");
+        let hue = crate::style::goal_hue(proj, "xx-00000b").unwrap();
+        let lane_rail = scale.color(Some(proj), 1);
+        let goal_rail = scale.color(Some(hue), 2);
+        let expected = format!(
+            "\x1b[38;2;{};{};{}m│  \x1b[0m\x1b[38;2;{};{};{}m└─ \x1b[0m",
+            lane_rail.r, lane_rail.g, lane_rail.b, goal_rail.r, goal_rail.g, goal_rail.b
+        );
+        assert!(leaf.contains(&expected), "{leaf:?}");
+        let (_, heading) = line_with(&text, "Tag semantics");
+        assert!(
+            heading.contains(&format!(
+                "\x1b[1;38;2;{};{};{}mTag semantics",
+                hue.r, hue.g, hue.b
+            )),
+            "{heading:?}"
+        );
+        let (_, lane) = line_with(&text, "Vocabulary");
+        assert!(
+            lane.contains(&format!(
+                "\x1b[1;38;2;{};{};{}mVocabulary",
+                proj.r, proj.g, proj.b
+            )),
+            "{lane:?}"
+        );
+    }
+
+    #[test]
+    fn uncoloured_project_heading_is_plain_bold() {
+        let painter = Painter::new(ColorMode::Always, Format::Pretty, false);
+        for color in [None, crate::palette::Rgb::parse_hex("#808080")] {
+            let text = tree_text(headed_forest(color), &painter, Some(120));
+            let (_, lane) = line_with(&text, "Vocabulary");
+            assert!(
+                lane.contains("\x1b[1mVocabulary and presentation\x1b[0m"),
+                "{lane:?}"
+            );
+            let (_, goal) = line_with(&text, "Tag semantics");
+            assert!(goal.contains("\x1b[1mTag semantics\x1b[0m"), "{goal:?}");
+        }
+    }
+
+    #[test]
+    fn lanes_pretty_uses_lane_heading() {
+        let mut lane = hnode(
+            "xx-00000a",
+            "Vocabulary and presentation",
+            Kind::Lane,
+            None,
+            Some("xx-00000a"),
+            None,
+            vec![],
+        )
+        .summary;
+        lane.goal_work = Some(crate::output::GoalWork {
+            pieces: crate::goals::Pieces {
+                done: 1,
+                total: 2,
+                ideas: 0,
+            },
+            unresolved_pieces: 0,
+        });
+        let lane_row = crate::lanes::LaneRow {
+            lane,
+            guidance: None,
+            state: crate::lanes::LaneState::Empty,
+            pick: None,
+            steps: 0,
+            active: vec![],
+            held: vec![],
+            causes: crate::lanes::Causes::default(),
+        };
+        let layout = crate::table::Layout {
+            width: Some(120),
+            headers: false,
+        };
+        let lanes = pretty(
+            &Output::Lanes(crate::output::LanesOut {
+                lanes: vec![lane_row.clone()],
+                warnings: vec![],
+            }),
+            &plain(),
+            &layout,
+        );
+        let mut prime = empty_prime();
+        prime.lanes = vec![lane_row];
+        let prime = pretty(&Output::Prime(Box::new(prime)), &plain(), &layout);
+        for text in [lanes, prime] {
+            let (heading, heading_line) = line_with(&text, "Vocabulary and presentation");
+            let (row, row_line) = line_with(&text, "xx-00000a");
+            assert_eq!(row, heading + 1, "{text}");
+            assert!(!heading_line.contains("xx-00000a"), "{heading_line}");
+            assert!(row_line.contains("empty"), "{row_line}");
+        }
     }
 }

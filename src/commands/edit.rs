@@ -2,7 +2,7 @@ use super::{Ctx, apply_fields, id_out, load, save, transition};
 use crate::attachments::parse_ledger_note;
 use crate::cli::EditArgs;
 use crate::error::{Error, Result};
-use crate::format::parse_physical;
+use crate::format::parse_physical_admitting_titles;
 use crate::model::{Note, Status, Task, TaskId};
 use crate::output::Output;
 use crate::resolve::{DocKind, Resolver};
@@ -144,6 +144,9 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
     let has_flags = args.title.is_some()
         || args.status.is_some()
         || fields.body.is_some()
+        || fields.tldr.is_some()
+        || fields.long_title.is_some()
+        || args.no_tldr
         || !fields.refs.is_empty()
         || !args.rm_refs.is_empty()
         || args.no_refs
@@ -242,6 +245,9 @@ pub fn run(mut ctx: Ctx, id: String, args: EditArgs) -> Result<Output> {
             )));
         }
         task.defer = None;
+    }
+    if args.no_tldr {
+        task.tldr = None;
     }
     if args.no_source {
         task.source = None;
@@ -556,7 +562,9 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     super::guard_write(&ctx.registry, &ctx.shorthand, &original).map_err(keep)?;
 
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
-    let physical = parse_physical(&edited_raw, &tmp_display).map_err(keep)?;
+    // The editor admits `long_title` and `tldr` below the titles format; the save
+    // promotes the record (check_invariants still sees the header's own format).
+    let physical = parse_physical_admitting_titles(&edited_raw, &tmp_display).map_err(keep)?;
     if physical.archives != original.note_archives {
         return Err(keep(Error::Validation(format!(
             "note archive descriptors are protected; use `tasks show {}` for full history",
@@ -568,6 +576,11 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     })
     .map_err(keep)?;
     check_invariants(&original, &edited).map_err(keep)?;
+    if edited.format < crate::entries::TITLES_FORMAT
+        && (edited.long_title.is_some() || edited.tldr.is_some())
+    {
+        crate::entries::promote_for_titles(&mut edited).map_err(keep)?;
+    }
     crate::review::stamp_edited(&original, &mut edited);
     // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it
     // is also the baseline `save` compares other checkouts against, and a hand-edited stamp

@@ -6,9 +6,11 @@ use crate::model::{HarnessProvenance, Task, TaskId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-pub const SUPPORTED_RECORD_FORMAT: u32 = 2;
+/// The record format that admits `long_title` and `tldr`.
+pub const TITLES_FORMAT: u8 = 3;
+pub const SUPPORTED_RECORD_FORMAT: u32 = TITLES_FORMAT as u32;
 
-/// Metadata and untouched raw bytes of a record declaring a newer format version (`> 2`).
+/// Metadata and untouched raw bytes of a record declaring a newer format version (`> SUPPORTED_RECORD_FORMAT`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FutureRecord {
     pub id: TaskId,
@@ -38,7 +40,8 @@ impl FutureRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordEnvelope {
     Format1,
-    Format2,
+    /// A versioned format this binary reads: `2..=SUPPORTED_RECORD_FORMAT`.
+    Current(u8),
     Future(FutureRecord),
 }
 
@@ -51,8 +54,8 @@ fn perr(file: &str, detail: impl Into<String>) -> Error {
 
 /// Inspect the frontmatter envelope before dispatching to a format-specific parser.
 ///
-/// Unversioned files dispatch to Format 1. `format: 2` dispatches to Format 2.
-/// Any positive integer `> 2` with a well-formed envelope and valid `id` returns
+/// Unversioned files dispatch to Format 1. `format: 2` up to
+/// `SUPPORTED_RECORD_FORMAT` dispatch to `Current`. Any larger integer with a well-formed envelope and valid `id` returns
 /// `RecordEnvelope::Future`, keeping raw bytes untouched for read-only inspection.
 /// Malformed envelopes return `Error::Parse`.
 pub fn inspect_envelope(text: &str, file: &str) -> Result<RecordEnvelope> {
@@ -122,8 +125,8 @@ pub fn inspect_envelope(text: &str, file: &str) -> Result<RecordEnvelope> {
             format!("format header must be >= 2 (format 1 is unversioned), got {version}"),
         ));
     }
-    if version == SUPPORTED_RECORD_FORMAT {
-        return Ok(RecordEnvelope::Format2);
+    if version <= SUPPORTED_RECORD_FORMAT {
+        return Ok(RecordEnvelope::Current(version as u8));
     }
 
     let id_raw = raw_id.ok_or_else(|| perr(file, "future-format record is missing id"))?;
@@ -938,7 +941,6 @@ pub fn validate_entries(format: u8, open_decisions: &[String], entries: &[Entry]
 /// Validates and performs an explicit format-1 -> format-2 upgrade before saving.
 /// Protects a format-1 body containing `## Entries` and a format-1 idea carrying
 /// `awaiting_user: true` from incidental conversion.
-#[allow(dead_code)]
 pub fn upgrade_to_format_2(task: &mut Task, replace_awaiting_user: bool) -> Result<()> {
     if task.format >= 2 {
         return Ok(());
@@ -967,6 +969,14 @@ pub fn upgrade_to_format_2(task: &mut Task, replace_awaiting_user: bool) -> Resu
     Ok(())
 }
 
+/// Promotes a record so it may carry `long_title` and `tldr`: the format-2 upgrade
+/// (with its refusals) first, then the titles format. The format never decreases.
+pub fn promote_for_titles(task: &mut Task) -> Result<()> {
+    upgrade_to_format_2(task, false)?;
+    task.format = task.format.max(TITLES_FORMAT);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,14 +999,26 @@ mod tests {
         let f2 = format!("---\nformat: 2\n{}", f1.strip_prefix("---\n").unwrap());
         assert_eq!(
             inspect_envelope(&f2, "tasks/tst-000001.md").unwrap(),
-            RecordEnvelope::Format2
+            RecordEnvelope::Current(2)
         );
 
-        let f3 = "---\nformat: 3\nid: tst-000001\nassessment: 6f76bdab-e417-4ae7-81ce-09fc70d6487a\n---\nbody\n";
-        match inspect_envelope(f3, "tasks/tst-000001.md").unwrap() {
+        let titles = format!(
+            "---\nformat: {TITLES_FORMAT}\n{}",
+            f1.strip_prefix("---\n").unwrap()
+        );
+        assert_eq!(
+            inspect_envelope(&titles, "tasks/tst-000001.md").unwrap(),
+            RecordEnvelope::Current(TITLES_FORMAT)
+        );
+
+        let next = TITLES_FORMAT + 1;
+        let f3 = format!(
+            "---\nformat: {next}\nid: tst-000001\nassessment: 6f76bdab-e417-4ae7-81ce-09fc70d6487a\n---\nbody\n"
+        );
+        match inspect_envelope(&f3, "tasks/tst-000001.md").unwrap() {
             RecordEnvelope::Future(fut) => {
                 assert_eq!(fut.id.to_string(), "tst-000001");
-                assert_eq!(fut.format, 3);
+                assert_eq!(fut.format, u32::from(next));
                 assert_eq!(fut.path, "tasks/tst-000001.md");
                 assert_eq!(fut.raw, f3);
             }
@@ -1007,8 +1029,8 @@ mod tests {
             "---\nformat: 1\nid: tst-000001\n---\n",
             "---\nformat: 0\nid: tst-000001\n---\n",
             "---\nformat: \"2\"\nid: tst-000001\n---\n",
-            "---\nformat: 3\n---\n",
-            "---\nformat: 3\nid: bad-id\n---\n",
+            "---\nformat: 99\n---\n",
+            "---\nformat: 99\nid: bad-id\n---\n",
             "---\nformat: 3\nformat: 3\nid: tst-000001\n---\n",
         ] {
             assert!(inspect_envelope(bad, "t.md").is_err(), "{bad}");
@@ -1113,6 +1135,34 @@ mod tests {
         .unwrap();
         let err2 = upgrade_to_format_2(&mut t2, false).unwrap_err();
         assert!(err2.to_string().contains("## Entries"), "{err2}");
+        assert_eq!(t2.format, 1);
+    }
+
+    #[test]
+    fn promote_for_titles_upgrades_format_1_then_raises() {
+        let plain = "---\nid: tst-000003\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-11-20T00:00:00Z\nupdated: 2026-11-20T00:00:00Z\ndepends: []\ntags: []\n---\n\nBody.\n";
+        let mut t = crate::history::fixture(plain, "t3.md").unwrap();
+        assert_eq!(t.format, 1);
+        promote_for_titles(&mut t).unwrap();
+        assert_eq!(t.format, TITLES_FORMAT);
+
+        // Already at the titles format: unchanged.
+        promote_for_titles(&mut t).unwrap();
+        assert_eq!(t.format, TITLES_FORMAT);
+
+        // Never lowers a higher format.
+        t.format = TITLES_FORMAT + 1;
+        promote_for_titles(&mut t).unwrap();
+        assert_eq!(t.format, TITLES_FORMAT + 1);
+
+        // A format-1 body holding the reserved heading keeps the format-2 refusal.
+        let mut t2 = crate::history::fixture(
+            "---\nid: tst-000004\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-11-20T00:00:00Z\nupdated: 2026-11-20T00:00:00Z\ndepends: []\ntags: []\n---\n\nIntro\n\n## Entries\n\nLiteral text.\n",
+            "t4.md",
+        )
+        .unwrap();
+        let err = promote_for_titles(&mut t2).unwrap_err();
+        assert!(err.to_string().contains("## Entries"), "{err}");
         assert_eq!(t2.format, 1);
     }
 }

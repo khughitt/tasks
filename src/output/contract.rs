@@ -735,6 +735,10 @@ pub struct PendingCoverage {
 pub struct PendingTaskRef {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
     pub status: Status,
     pub project: String,
 }
@@ -899,6 +903,10 @@ pub struct TaskSummary {
     pub actions: Option<Vec<ActionExplanation>>,
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
     #[serde(skip)]
     pub project_color: Option<crate::palette::Rgb>,
     #[serde(skip)]
@@ -1144,6 +1152,10 @@ pub struct ParkedRow {
     pub actions: Option<Vec<ActionExplanation>>,
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
     #[serde(skip)]
     pub project_color: Option<crate::palette::Rgb>,
     #[serde(skip)]
@@ -1480,6 +1492,10 @@ pub struct BlockerRow {
     pub rank: usize,
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
     #[serde(skip)]
     pub project_color: Option<crate::palette::Rgb>,
     #[serde(skip)]

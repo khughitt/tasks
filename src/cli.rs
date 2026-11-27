@@ -389,6 +389,12 @@ pub struct FieldArgs {
     /// Body text, or `-` to read it from stdin.
     #[arg(short = 'b', long)]
     pub body: Option<String>,
+    /// One line, at most 160 display cells, saying what the task is about.
+    #[arg(long)]
+    pub tldr: Option<String>,
+    /// The full sentence a concise title was shortened from, kept for the record.
+    #[arg(long)]
+    pub long_title: Option<String>,
     /// Urgency, 0 (most urgent) to 4.
     #[arg(
         short = 'p',
@@ -501,7 +507,7 @@ pub struct EditArgs {
         "rm_pieces", "no_pieces",
         "refs", "body", "priority", "size", "complexity", "process", "origin", "parallel",
         "lane", "every", "defer", "tags", "needs", "depends", "related", "spec", "plan",
-        "step", "parent", "source", "agent"
+        "step", "parent", "source", "agent", "tldr", "long_title", "no_tldr"
     ])]
     pub editor: bool,
     /// Remove a reference by handle (repeatable).
@@ -512,6 +518,9 @@ pub struct EditArgs {
     pub no_refs: bool,
     #[arg(long)]
     pub title: Option<String>,
+    /// Clear the tldr.
+    #[arg(long, conflicts_with = "tldr")]
+    pub no_tldr: bool,
     /// Move to a status: idea, todo, doing, blocked, done, or dropped. Shelved is
     /// entered with `shelve`, never here.
     /// Status, defer, and needs change in separate operations.
@@ -889,7 +898,7 @@ pub enum Command {
     },
     /// List tasks whose title or body contains a phrase; takes every list option.
     #[command(
-        after_help = "Matching is a literal, case-insensitive substring of the title or body; notes,\nfrontmatter, and attachments are not searched.\n\nExamples:\n  tasks search \"text search\"\n  tasks search claim --all-projects --status idea\n  tasks search --parked worktree"
+        after_help = "Matching is a literal, case-insensitive substring of the title, long title, tldr\nor body; notes, other frontmatter, and attachments are not searched.\n\nExamples:\n  tasks search \"text search\"\n  tasks search claim --all-projects --status idea\n  tasks search --parked worktree"
     )]
     Search {
         /// The phrase to find; quote several words to search for them together.
@@ -1231,6 +1240,9 @@ Pretty output always labels its columns, whatever --headers or --no-headers says
         /// single-line note, so it must be one line.
         #[arg(short = 'b', long)]
         body: Option<String>,
+        /// One line, at most 160 display cells, saying what the report is about.
+        #[arg(long)]
+        tldr: Option<String>,
         /// Append to this open feedback task instead of matching titles.
         #[arg(
             long,

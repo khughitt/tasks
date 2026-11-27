@@ -73,6 +73,8 @@ pub enum Detail {
 pub struct Row {
     pub cells: Vec<String>,
     pub details: Vec<(&'static str, Detail)>,
+    /// A heading line printed above the row, outside the table.
+    pub heading: Option<Heading>,
 }
 
 impl Row {
@@ -80,8 +82,25 @@ impl Row {
         Row {
             cells,
             details: Vec::new(),
+            heading: None,
         }
     }
+}
+
+/// A lane or top-level goal title printed on its own line above its row
+/// (docs/user-guide.md). It sits outside comfy-table, which cannot measure scaled text;
+/// `render` indents it to the key column, clips it to the width, paints it bold in
+/// `color` and scales it for `role` when the painter has text sizing on. A scaled
+/// heading takes two rows: the second carries `rail`.
+#[derive(Debug, Clone)]
+pub struct Heading {
+    /// Painted tree guides (and review padding) before the title.
+    pub prefix: String,
+    pub title: String,
+    pub role: crate::style::Role,
+    pub color: Option<crate::palette::Rgb>,
+    /// Painted guides continuing the tree under a scaled heading.
+    pub rail: String,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -328,8 +347,10 @@ pub fn render(
 
     let lines: Vec<String> = table.lines().map(|line| trim_visible_end(&line)).collect();
     let header_lines = usize::from(layout.headers);
-    let has_details =
-        matches!(mode, Mode::Stacked(_)) || rows.iter().any(|row| !row.details.is_empty());
+    let has_details = matches!(mode, Mode::Stacked(_))
+        || rows
+            .iter()
+            .any(|row| !row.details.is_empty() || row.heading.is_some());
     let mut rendered = String::new();
     for line in &lines[..header_lines] {
         rendered.push_str(line);
@@ -342,21 +363,32 @@ pub fn render(
         }
         return rendered;
     }
-    // Fixed first cells never wrap; continuations have a blank id column, even when
-    // real rows carry leading review padding or tree indentation.
-    let blocks = row_blocks(&lines[header_lines..], natural[0]);
+    // Fixed cells up to the key (id) column never wrap, and the key cell is never
+    // blank on a real row; continuations are blank through it, even when real rows
+    // carry leading review padding, tree indentation or an empty type cell.
+    let key = kept
+        .iter()
+        .position(|&index| columns[index].header == "id")
+        .unwrap_or(0);
+    let lead: usize = kept[..key].iter().map(|&index| natural[index] + GAP).sum();
+    let blocks = row_blocks(&lines[header_lines..], lead + natural[kept[key]]);
     assert_eq!(
         blocks.len(),
         rows.len(),
         "one block of lines per row:\n{lines:?}"
     );
     for (block, row) in blocks.iter().zip(rows) {
+        if let Some(heading) = &row.heading {
+            rendered.push_str(&heading_lines(heading, lead, layout.width, painter));
+        }
         for line in block {
             rendered.push_str(line);
             rendered.push('\n');
         }
-        if let Mode::Stacked(moved) = mode {
-            let text = row.cells.get(moved).cloned().unwrap_or_default();
+        if let Mode::Stacked(moved) = mode
+            && let Some(text) = row.cells.get(moved).filter(|text| !text.is_empty())
+        {
+            let text = text.clone();
             rendered.push_str(&detail(
                 columns[moved].header,
                 &Detail::Wrap(text),
@@ -371,8 +403,44 @@ pub fn render(
     rendered
 }
 
-fn row_blocks(lines: &[String], id_width: usize) -> Vec<Vec<&String>> {
-    let blank_id = " ".repeat(id_width);
+/// The heading's line (two when scaled: the heading, then its rail), indented by `lead`.
+fn heading_lines(
+    heading: &Heading,
+    lead: usize,
+    width: Option<usize>,
+    painter: &Painter,
+) -> String {
+    use crate::ellipsis::{Measure, clip};
+    let indent = " ".repeat(lead);
+    let available = width.map(|width| width.saturating_sub(lead + visible_width(&heading.prefix)));
+    let title = match available {
+        Some(available) if painter.sizing() => {
+            crate::style::clip_for_heading(&heading.title, heading.role, available)
+        }
+        Some(available) => clip(&heading.title, available, Measure::DisplayCells),
+        None => heading.title.clone(),
+    };
+    let text = painter.paint(
+        Style::Heading(heading.color),
+        &painter.scaled(&title, heading.role),
+    );
+    if painter.sizing() {
+        // Reserve both rows first, so a heading on the last row scrolls before it is drawn.
+        format!(
+            "\n\n\x1b[2A{}\n{}\n",
+            trim_visible_end(&format!("{indent}{}{text}", heading.prefix)),
+            trim_visible_end(&format!("{indent}{}", heading.rail))
+        )
+    } else {
+        format!(
+            "{}\n",
+            trim_visible_end(&format!("{indent}{}{text}", heading.prefix))
+        )
+    }
+}
+
+fn row_blocks(lines: &[String], key_end: usize) -> Vec<Vec<&String>> {
+    let blank_id = " ".repeat(key_end);
     let mut blocks: Vec<Vec<&String>> = Vec::new();
     for line in lines {
         match blocks.last_mut() {
@@ -422,30 +490,83 @@ fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -
     }
 }
 
-/// Trim trailing display whitespace without dropping the ANSI sequences around it.
+/// Trim trailing display whitespace without dropping the ANSI sequences around it. A
+/// scaled OSC 66 run is visible text, so it is kept as content.
 fn trim_visible_end(text: &str) -> String {
     let mut end = 0;
     let mut escapes = Vec::new();
-    let mut chars = text.char_indices();
-    while let Some((index, c)) = chars.next() {
+    let mut at = 0;
+    while at < text.len() {
+        let c = text[at..].chars().next().expect("in bounds");
         if c == '\x1b' {
-            let mut escape_end = index + c.len_utf8();
-            for (offset, terminator) in chars.by_ref() {
-                escape_end = offset + terminator.len_utf8();
-                if terminator.is_ascii_alphabetic() {
-                    break;
-                }
+            let (escape_end, width) = escape(text, at);
+            if width > 0 {
+                end = escape_end;
+            } else {
+                escapes.push(at..escape_end);
             }
-            escapes.push(index..escape_end);
-        } else if !c.is_whitespace() {
-            end = index + c.len_utf8();
+            at = escape_end;
+            continue;
         }
+        if !c.is_whitespace() {
+            end = at + c.len_utf8();
+        }
+        at += c.len_utf8();
     }
     let mut trimmed = text[..end].to_string();
     for escape in escapes.into_iter().filter(|escape| escape.start >= end) {
         trimmed.push_str(&text[escape]);
     }
     trimmed
+}
+
+/// The escape sequence starting at byte `start` (an ESC): its end and the cells it
+/// draws. A CSI or other two-byte escape ends at its first letter and draws nothing. An
+/// OSC (`ESC ]`) ends at BEL or ST (`ESC \\`); kitty's text sizing (`OSC 66`) draws
+/// `s * w` cells, or `s` times its payload's cells when `w` is absent; any other OSC
+/// draws nothing.
+fn escape(text: &str, start: usize) -> (usize, usize) {
+    let rest = &text[start + 1..];
+    if let Some(osc) = rest.strip_prefix(']') {
+        let body_start = start + 2;
+        let (body_len, terminator) = match (osc.find('\x07'), osc.find("\x1b\\")) {
+            (Some(bel), Some(st)) if st < bel => (st, 2),
+            (Some(bel), _) => (bel, 1),
+            (None, Some(st)) => (st, 2),
+            (None, None) => (osc.len(), 0),
+        };
+        let end = body_start + body_len + terminator;
+        return (end, osc_width(&osc[..body_len]));
+    }
+    let mut end = start + 1;
+    for (offset, c) in rest.char_indices() {
+        end = start + 1 + offset + c.len_utf8();
+        if c.is_ascii_alphabetic() {
+            break;
+        }
+    }
+    (end, 0)
+}
+
+fn osc_width(body: &str) -> usize {
+    let Some(sizing) = body.strip_prefix("66;") else {
+        return 0;
+    };
+    let (metadata, payload) = sizing.split_once(';').unwrap_or((sizing, ""));
+    let mut scale = 1;
+    let mut width = 0;
+    for pair in metadata.split(':') {
+        match pair.split_once('=') {
+            Some(("s", value)) => scale = value.parse().unwrap_or(1),
+            Some(("w", value)) => width = value.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    if width > 0 {
+        scale * width
+    } else {
+        scale * crate::ellipsis::display_cells(payload)
+    }
 }
 
 /// Chrome text wrapped to the layout's width, one line when the width is unknown.
@@ -462,20 +583,21 @@ pub fn paragraph(text: &str, painter: &Painter, layout: &Layout) -> String {
     )
 }
 
-/// Display columns of `text`, skipping ANSI escape sequences.
+/// Display columns of `text`, skipping ANSI escape sequences and counting the cells a
+/// kitty text-sizing (OSC 66) run occupies.
 pub fn visible_width(text: &str) -> usize {
     let mut count = 0;
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
+    let mut at = 0;
+    while at < text.len() {
+        let c = text[at..].chars().next().expect("in bounds");
         if c == '\x1b' {
-            for terminator in chars.by_ref() {
-                if terminator.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            count += c.width().unwrap_or(0);
+            let (end, width) = escape(text, at);
+            count += width;
+            at = end;
+            continue;
         }
+        count += c.width().unwrap_or(0);
+        at += c.len_utf8();
     }
     count
 }
@@ -973,5 +1095,31 @@ mod tests {
             multi_29.lines().all(|line| visible_width(line) <= 29),
             "{multi_29}"
         );
+    }
+
+    #[test]
+    fn visible_width_skips_osc_bel_and_st() {
+        assert_eq!(
+            visible_width("\x1b]66;s=2:n=5:d=8:w=5:v=2;Tag sema\x07"),
+            10
+        );
+        assert_eq!(visible_width("\x1b]66;s=2;ab\x1b\\"), 4);
+        assert_eq!(
+            visible_width("\x1b[1m\x1b]66;s=2:n=3:d=4:w=3:v=2;Tag \x07\x1b[0m x"),
+            8
+        );
+        assert_eq!(visible_width("\x1b]8;;https://x\x07link\x1b]8;;\x07"), 4);
+        assert_eq!(visible_width("\x1b]0;title\x1b\\ok"), 2);
+    }
+
+    #[test]
+    fn trim_visible_end_keeps_osc_intact() {
+        let scaled = "\x1b]66;s=2:n=5:d=8:w=5:v=2;Tag sema\x07";
+        assert_eq!(trim_visible_end(&format!("{scaled}   ")), scaled);
+        assert_eq!(
+            trim_visible_end(&format!("ab{scaled}\x1b[0m  ")),
+            format!("ab{scaled}\x1b[0m")
+        );
+        assert_eq!(trim_visible_end("ab  \x1b]8;;\x07"), "ab\x1b]8;;\x07");
     }
 }

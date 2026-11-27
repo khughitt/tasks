@@ -32,7 +32,7 @@ grammar = "<n>d | <n>w"
 meaning = "a duration; 0d disables an age check"
 
 [vocabulary.values.harness]
-set = ["claude-code", "codex", "opencode", "agy"]
+set = ["claude-code", "codex", "opencode", "agy", "pi"]
 
 [vocabulary.values.color]
 set = ["auto", "always", "never"]
@@ -476,6 +476,8 @@ options = [
   { shared = "status", role = "set", value = "enum", values = ["idea", "todo"], default = "todo", repeatable = false },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { names = ["--body", "-b"], value = "string" },
+  { names = ["--tldr"], value = "string" },
+  { names = ["--long-title"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
@@ -663,6 +665,9 @@ args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--editor"], value = "none" },
   { names = ["--title"], value = "string" },
+  { names = ["--tldr"], value = "string" },
+  { names = ["--no-tldr"], value = "none" },
+  { names = ["--long-title"], value = "string" },
   { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped"], repeatable = false },
   { shared = "force", value = "none" },
   { names = ["--reason"], value = "string" },
@@ -935,6 +940,7 @@ options = [
   { shared = "project", role = "select", value = "string", required = true, repeatable = false },
   { names = ["--category"], value = "enum", values = ["friction", "gap", "idea", "positive"], required = true },
   { names = ["--body", "-b"], value = "string" },
+  { names = ["--tldr"], value = "string" },
   { names = ["--recur"], value = "ref" },
   { names = ["--new"], value = "none" },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed"] },
@@ -1198,8 +1204,8 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings, long_doing, profile or usage-trend"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile", "usage-trend"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings, long_doing, profile, usage-trend or trace"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile", "usage-trend", "trace"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex", "agy"], repeatable = false },
@@ -1394,6 +1400,56 @@ summary = "Import an accepted replay's episodes into an empty spend state histor
 options = [
   { names = ["--from-replay"], value = "path", required = true },
   { names = ["--sha256"], value = "string", required = true },
+]
+
+[[cli.obs.commands]]
+path = ["env"]
+summary = "sample, stamp and query execution environments"
+
+[[cli.obs.commands]]
+path = ["env", "sample"]
+summary = "append a host sample of the configured tools and skills to the environment ledger"
+options = [
+  { names = ["--state-dir"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["env", "stamp"]
+summary = "append this shell's tool resolution, keyed by its relay session, to the environment ledger"
+options = [
+  { names = ["--state-dir"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["env", "show"]
+verb = "show"
+summary = "print one indexed session's harness, instruction hashes, tools and declared tools"
+args = [{ name = "session", value = "string", required = true }]
+options = [
+  { names = ["--state-dir"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["env", "diff"]
+summary = "group a window's sessions by one environment component, or list those differing from --from"
+args = [{ name = "component", value = "string", required = true }]
+options = [
+  { names = ["--state-dir"], value = "path" },
+  { names = ["--from"], value = "string" },
+  { names = ["--baseline"], value = "none" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex", "agy", "pi"], repeatable = false },
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+  { shared = "until", role = "bound", value = "when", repeatable = false },
+]
+
+[[cli.obs.commands]]
+path = ["env", "components"]
+summary = "list the environment components present in a window"
+options = [
+  { names = ["--state-dir"], value = "path" },
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+  { shared = "until", role = "bound", value = "when", repeatable = false },
 ]
 
 # ---- lit
@@ -1946,6 +2002,65 @@ options = [
   { names = ["--right"], value = "string", required = true },
   { names = ["--stance"], value = "enum", values = ["same", "distinct"], required = true },
   { names = ["--grounds"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["exposure-event"]
+summary = "Record one look at data, or one piece of prior knowledge, as an exposure event"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--payload"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["reservation-assignment"]
+summary = "Freeze a reservation assignment as a chain root or as its head's successor"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--payload"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["exposure-log"]
+summary = "List recorded exposure events, narrowed by subject or proposition"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--subject"], value = "string" },
+  { names = ["--proposition"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["reservation-head"]
+summary = "Show a reservation chain's head, its changes and the events it did not consider"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--chain"], value = "string", required = true },
+  { names = ["--scope"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["reservation-statement"]
+summary = "Check a reservation chain's checked-in statement against its current records and the exposure they have not considered"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--chain"], value = "string", required = true },
+  { names = ["--scope"], value = "string" },
+  { names = ["--check"], value = "string" },
+  { names = ["--write"], value = "path" },
+  { names = ["--as-of"], value = "string" },
+  { names = ["--block-on"], value = "string", repeatable = true },
+  { names = ["--all-considered", "--no-all-considered"], value = "none" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
 ]
 
 [[cli.science.commands]]
@@ -3497,7 +3612,7 @@ protocol = "harness hook: stdout is the reply, exit code is the guard's"
 summary = "Dispatch one harness hook event to the subscribers and guards"
 args = [{ name = "event", value = "string", required = true }]
 options = [
-  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode", "agy"], required = true, repeatable = false },
+  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode", "agy", "pi"], required = true, repeatable = false },
   { names = ["--outer-ms"], value = "int" },
   { names = ["--subscribers"], value = "path" },
 ]
@@ -3603,6 +3718,48 @@ summary = "Withdraw a pending question"
 args = [{ name = "id", value = "string", required = true }]
 
 options = [{ names = ["--reason"], value = "enum", values = ["user", "asker"] }]
+
+[[cli.relay.commands]]
+path = ["peer"]
+output = "none"
+summary = "Work with one other agent session on a task"
+
+[[cli.relay.commands]]
+path = ["peer", "open"]
+summary = "Open a run on a task as its lead"
+args = [{ name = "task", value = "string", required = true }]
+
+[[cli.relay.commands]]
+path = ["peer", "join"]
+summary = "Join a task's run as its reviewer"
+args = [{ name = "task", value = "string", required = true }]
+
+[[cli.relay.commands]]
+path = ["peer", "send"]
+summary = "Send the peer a message from this session"
+args = [{ name = "task", value = "string", required = true }]
+options = [
+  { names = ["--file"], value = "path", required = true },
+  { names = ["--id"], value = "string" },
+]
+
+[[cli.relay.commands]]
+path = ["peer", "wait"]
+summary = "Block until the peer's next message; exit 3 closed, 4 peer gone, 5 timeout"
+args = [{ name = "task", value = "string", required = true }]
+options = [{ names = ["--timeout-ms"], value = "int" }]
+
+[[cli.relay.commands]]
+path = ["peer", "show"]
+verb = "show"
+summary = "A task's run and who holds each role"
+args = [{ name = "task", value = "string", required = true }]
+
+[[cli.relay.commands]]
+path = ["peer", "close"]
+summary = "End a task's run for both sides"
+args = [{ name = "task", value = "string", required = true }]
+options = [{ names = ["--reason"], value = "string" }]
 
 [[cli.relay.commands]]
 path = ["presence"]

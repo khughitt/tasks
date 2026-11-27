@@ -117,6 +117,7 @@ pub fn run(
     summary: String,
     category: String,
     body: String,
+    tldr: Option<String>,
     recur: Option<String>,
     new: bool,
     attribution: Attribution<'_>,
@@ -187,6 +188,12 @@ pub fn run(
             // Current contract (docs/project-operations.md): a holder's recurrence follows the owner's registered
             // root, where it landed. `recur_into` saved its own pruned store first.
             super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
+            if tldr.is_some() {
+                ctx.warnings.push(format!(
+                    "--tldr sets only a new task's tldr; {} recurred and keeps its own (`tasks edit {} --tldr` to change it)",
+                    task.id, task.id
+                ));
+            }
             (task, "recurred", at)
         }
         None => {
@@ -196,6 +203,7 @@ pub fn run(
                 &ctx.registry,
                 summary,
                 body,
+                tldr,
                 &category,
                 &from,
                 &stamp,
@@ -236,6 +244,7 @@ fn create(
     registry: &Registry,
     summary: String,
     body: String,
+    tldr: Option<String>,
     category: &str,
     from: &str,
     stamp: &super::Stamp,
@@ -246,6 +255,10 @@ fn create(
     let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
+    if let Some(tldr) = tldr {
+        crate::entries::promote_for_titles(&mut task)?;
+        task.tldr = Some(tldr);
+    }
     task.origin = attribution.origin;
     let at = task.created.clone();
     super::append_occurrence_note(
@@ -296,7 +309,7 @@ fn recur_into(
             )));
         }
         if let Some(wanted) = &wanted
-            && crate::similarity::tokens(&task.title) != *wanted
+            && crate::similarity::tokens(crate::similarity::match_text(task)) != *wanted
         {
             return Err(Error::Validation(format!(
                 "{} was renamed since it matched; rerun",
