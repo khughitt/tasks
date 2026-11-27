@@ -119,7 +119,8 @@ fn chunks(text: &str, cells: usize) -> Vec<String> {
     out
 }
 
-/// Cells `text` occupies once scaled for `role`.
+/// Cells `text` occupies once scaled for `role`; tests measure headings with it.
+#[cfg(test)]
 pub fn scaled_width(text: &str, role: Role) -> usize {
     let scale = role.scale();
     chunks(text, scale.payload_cells).len() * scale.occupied()
@@ -130,6 +131,28 @@ pub fn clip_for_heading(title: &str, role: Role, available: usize) -> String {
     let scale = role.scale();
     let cap = available / scale.occupied() * scale.payload_cells;
     crate::ellipsis::clip(title, cap, crate::ellipsis::Measure::DisplayCells)
+}
+
+/// The hue steps a top-level goal's colour turns through, in degrees, well separated.
+const GOAL_HUE_STEPS: [f64; 8] = [0.0, 40.0, -40.0, 80.0, -80.0, 120.0, -120.0, 160.0];
+
+/// Below this OKLCH chroma a project colour is too close to grey to turn.
+const MIN_HUE_CHROMA: f64 = 0.04;
+
+/// A project colour that can carry a hue, or `None` when it is too close to grey.
+pub fn heading_color(project: Option<Rgb>) -> Option<Rgb> {
+    project.filter(|color| color.chroma() >= MIN_HUE_CHROMA)
+}
+
+/// A top-level goal's own hue: the project colour turned by a step fixed by the goal's
+/// id (the first 8 hex of its SHA-256, mod 8), so it keeps its colour across runs and
+/// views. `None` for a near-grey project.
+pub fn goal_hue(project: Rgb, goal_id: &str) -> Option<Rgb> {
+    use sha2::Digest;
+    heading_color(Some(project))?;
+    let digest = sha2::Sha256::digest(goal_id.as_bytes());
+    let first = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]);
+    Some(project.rotate_hue(GOAL_HUE_STEPS[first as usize % GOAL_HUE_STEPS.len()]))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1290,5 +1313,23 @@ mod tests {
         assert_eq!(crate::ellipsis::display_cells(&goal), 64);
         assert!(scaled_width(&goal, Role::GoalHeading) <= 80);
         assert_eq!(clip_for_heading("Short", Role::GoalHeading, 80), "Short");
+    }
+
+    #[test]
+    fn goal_hue_is_stable_per_id() {
+        let project = Rgb::parse_hex("#4e9af1").unwrap();
+        let first = goal_hue(project, "tasks-cea445").unwrap();
+        assert_eq!(goal_hue(project, "tasks-cea445"), Some(first));
+        let hues: std::collections::BTreeSet<(u8, u8, u8)> = (0..40)
+            .map(|n| goal_hue(project, &format!("tasks-{n:06x}")).unwrap())
+            .map(|c| (c.r, c.g, c.b))
+            .collect();
+        assert!(hues.len() >= 4, "{hues:?}");
+    }
+
+    #[test]
+    fn goal_hue_none_for_grey_project() {
+        let grey = Rgb::parse_hex("#808080").unwrap();
+        assert_eq!(goal_hue(grey, "tasks-cea445"), None);
     }
 }

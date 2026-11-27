@@ -421,3 +421,32 @@ fn text_sizing_env_value_is_validated() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("TASKS_TEXT_SIZING"), "{stderr}");
 }
+
+#[test]
+fn osc66_appears_only_under_the_gating_rules() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane"]));
+    env.json(&sci, &["add", "Goal", "--parent", &lane]);
+    let run = |args: &[&str], sizing: Option<&str>| {
+        let mut cmd = env.cmd(&sci);
+        cmd.args(args);
+        if let Some(mode) = sizing {
+            cmd.env("TASKS_TEXT_SIZING", mode);
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let osc = "\x1b]66;";
+    let tree = ["--pretty", "--color", "auto", "tree"];
+    assert!(run(&tree, Some("always")).contains(osc));
+    assert!(!run(&tree, None).contains(osc), "auto is off when piped");
+    assert!(!run(&tree, Some("never")).contains(osc));
+    assert!(!run(&["--pretty", "--color", "never", "tree"], Some("always")).contains(osc));
+    assert!(
+        !run(&["tree"], Some("always")).contains(osc),
+        "never in JSON"
+    );
+    assert!(run(&["--pretty", "--color", "auto", "lanes"], Some("always")).contains(osc));
+}

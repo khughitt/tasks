@@ -144,6 +144,42 @@ impl Rgb {
         from_oklab([lightness, a * fits, b * fits])
     }
 
+    /// OKLCH chroma: how far the colour sits from grey.
+    pub fn chroma(self) -> f64 {
+        let [_, a, b] = to_oklab(self);
+        a.hypot(b)
+    }
+
+    /// The same OKLCH lightness and chroma at a hue turned by `degrees`; chroma is
+    /// reduced until the colour fits sRGB.
+    pub fn rotate_hue(self, degrees: f64) -> Rgb {
+        if degrees == 0.0 {
+            return self;
+        }
+        let [lightness, a, b] = to_oklab(self);
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let (a, b) = (a * cos - b * sin, a * sin + b * cos);
+        let fits = |chroma: f64| {
+            linear_rgb_from_oklab([lightness, a * chroma, b * chroma])
+                .iter()
+                .all(|channel| (0.0..=1.0).contains(channel))
+        };
+        if fits(1.0) {
+            return from_oklab([lightness, a, b]);
+        }
+        let (mut inside, mut outside) = (0.0, 1.0);
+        for _ in 0..24 {
+            let chroma = 0.5 * (inside + outside);
+            if fits(chroma) {
+                inside = chroma;
+            } else {
+                outside = chroma;
+            }
+        }
+        let fits = inside;
+        from_oklab([lightness, a * fits, b * fits])
+    }
+
     /// OKLab lightness, for tests that check a scale's order.
     #[cfg(test)]
     pub fn lightness(self) -> f64 {
@@ -1111,5 +1147,22 @@ mod tests {
         let tasks_gold = Rgb::parse_hex("#aa8c0e").unwrap();
         let ratio = tasks_gold.contrast_ratio(bg);
         assert!(ratio > 5.5 && ratio < 6.0, "expected ~5.7:1, got {ratio}");
+    }
+
+    #[test]
+    fn rotate_hue_keeps_lightness() {
+        let blue = Rgb::parse_hex("#4e9af1").unwrap();
+        assert!(blue.chroma() > 0.1, "{}", blue.chroma());
+        for degrees in [40.0, -40.0, 80.0, 160.0] {
+            let turned = blue.rotate_hue(degrees);
+            assert!(
+                (turned.lightness() - blue.lightness()).abs() < 0.01,
+                "{degrees}: {turned:?}"
+            );
+            assert_ne!(turned, blue, "{degrees}");
+        }
+        assert_eq!(blue.rotate_hue(0.0), blue);
+        let grey = Rgb::parse_hex("#808080").unwrap();
+        assert!(grey.chroma() < 0.01);
     }
 }

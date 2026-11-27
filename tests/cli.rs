@@ -26577,7 +26577,9 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
         .assert()
         .success();
     let text = env.pretty(&sci, &["lanes"]);
-    assert!(text.lines().next().unwrap().starts_with(&lane), "{text}");
+    // The lane's title is its heading line; the row under it starts with the lane id.
+    assert_eq!(text.lines().next(), Some("Lane title"), "{text}");
+    assert!(text.lines().nth(1).unwrap().starts_with(&lane), "{text}");
     assert!(
         text.contains("        guide:  Lane guidance here."),
         "{text}"
@@ -26592,7 +26594,7 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
     let colored = String::from_utf8(out.stdout).unwrap();
     for span in [
         format!("{SCI_ID}{lane}"),
-        format!("{paint}Lane title"),
+        "\x1b[1;38;2;18;52;86mLane title".to_string(),
         format!("{SCI_ID}{pick}"),
         format!("{paint}Pick step"),
         format!("{SCI_ID}{running}"),
