@@ -169,6 +169,7 @@ relay = false
 
 [output]
 headers = false
+text_sizing = "auto"
 ```
 
 `identity.relay` defaults false. Enabling it changes claim identity resolution
@@ -187,6 +188,14 @@ not a command copied automatically from a task record.
 overrides the file. The opposing global flags conflict, including across a
 subcommand. JSON and non-table output gain no header decoration.
 
+`output.text_sizing` is `auto` (default), `always` or `never` and controls whether
+pretty lane and goal headings use kitty text sizing (OSC 66). `TASKS_TEXT_SIZING`
+overrides it. `auto` scales when stdout is a terminal, colour is on,
+`TERM=xterm-kitty` and `TMUX` is unset; `always` scales any `--pretty` output with
+colour not turned off, piped included (for `less -R` and tests); `never` turns it
+off. JSON and `--color never` never carry OSC 66. The headings are output, not a
+contract.
+
 Ordinary invocations read and validate the complete host file once, sharing that
 observation across presentation, identity and document providers before command
 side effects. Invalid config or environment is an error even under a winning flag
@@ -197,7 +206,9 @@ fails; usable symlinks are allowed. Help, version, completion and the local-only
 `attachments` eligibility query keep their host-config-free behavior.
 
 Upgrade installed readers before writing new keys: older strict readers reject
-them. Existing project settings and the registry remain separate contracts. The
+them. That holds for `output.text_sizing` and for records carrying `long_title` or
+`tldr` (format 3): install the new binary on every host that reads the records
+before any of them writes either. Existing project settings and the registry remain separate contracts. The
 cross-tool convention is in ops's `docs/user-preferences.md`.
 
 ## Environment and precedence
@@ -205,6 +216,7 @@ cross-tool convention is in ops's `docs/user-preferences.md`.
 | Variable | Meaning |
 | --- | --- |
 | `TASKS_FORMAT` | `json` (default) or `pretty`; explicit format flag overrides a valid value. Invalid set values still fail. `--json` and `--pretty` conflict. |
+| `TASKS_TEXT_SIZING` | `auto`, `always` or `never`; overrides `output.text_sizing`, default `auto`. Other values fail on ordinary invocations. |
 | `TASKS_HEADERS` | Exactly `true` or `false`; explicit `--headers`/`--no-headers` overrides a valid value, then `output.headers`, then false. Empty, non-UTF-8 and other values fail on ordinary invocations even under a flag. |
 | `TASKS_OWNER` | Advisory owner override, then git branch, then USER. Chosen value must pass owner grammar. |
 | `TASKS_SESSION`, `TASKS_SESSION_PID` | Explicit claim identity and optional process identity; see ownership before using a PID across namespaces. |

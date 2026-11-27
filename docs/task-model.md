@@ -162,9 +162,11 @@ optional booleans false, and other optional values absent.
 
 | Field | Value and meaning |
 | --- | --- |
-| `format` | Optional record format integer (`>= 2`); absent means format 1. Format 2 adds `open_decisions` and `## Entries`, forbids physical `awaiting_user`, and is read alongside format-1 records. Future formats (`> 2`) fail direct targeted reads/writes with `unsupported_record_version` and are skipped with warnings during scans. |
+| `format` | Optional record format integer (`>= 2`); absent means format 1. Format 2 adds `open_decisions` and `## Entries`, forbids physical `awaiting_user`, and is read alongside format-1 records. Format 3 (the titles format) also admits `long_title` and `tldr`. Writing either key promotes the record: a format-1 record is first upgraded to format 2, which refuses a body holding a literal `## Entries` line and a legacy `awaiting_user: true` wait, then raised to format 3; the format never decreases. Future formats (`> 3`) fail direct targeted reads/writes with `unsupported_record_version` and are skipped with warnings during scans. |
 | `open_decisions` | Format-2-only list of open decision entry UUIDv4s (`[]` when none are open); maintained in sync with `## Entries` resolutions. |
-| `id`, `title` | Immutable canonical id; nonempty single-line title. |
+| `id`, `title` | Immutable canonical id; nonempty single-line title, with no length limit. A concise title of a few words is the convention; it is also the heading a lane or goal shows. |
+| `long_title` | Format-3 only: the full sentence a concise title was shortened from, kept for the record and for matching (sourced add, feedback recurrence, search). One line, no limit; pretty views never print it. |
+| `tldr` | Format-3 only: one line, at most 160 display cells, saying what the task is about; `show` prints it under the title and `goals` under the row. |
 | `status` | `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, `dropped`, `moved`. |
 | `priority` | Integer 0–4, lower is more urgent; creation default 2. |
 | `size`, `complexity`, `process` | Optional `xs/s/m/l/xl`, `low/mid/high`, `direct/planned`; absent means unassessed. |

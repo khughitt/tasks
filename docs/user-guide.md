@@ -40,6 +40,24 @@ tasks note demo-abcdef "Reproduced with an empty input"
 tasks done demo-abcdef "Verified the corrected behavior"
 ```
 
+Give a task a concise title of a few words and, when it helps, a one-line `--tldr`
+(at most 160 display cells). When shortening an existing sentence title, keep the
+sentence as `--long-title` so matching still finds it:
+
+```sh
+tasks add "Goal headings" --tldr "Scaled lane and goal headings in pretty output"
+tasks edit demo-abcdef --title "Goal headings" --long-title "Make lanes and goals stand out in pretty output"
+tasks edit demo-abcdef --no-tldr
+```
+
+`long_title` is kept for the record and for matching: sourced `add` reuses a task
+whose title or long title equals the given title or long title, feedback recurrence
+compares the original report, and `search` also matches long titles and tldrs.
+Pretty views never print it; `show` prints the tldr under the title, and `goals`
+prints it under the goal row when the terminal is at least 100 columns wide (or
+piped). Writing either key moves the record to format 3
+([task model](task-model.md#identity-and-physical-format)).
+
 `start` establishes a host-local work claim and records an advisory owner.
 Starting a goal with local descendants in `todo`, `blocked`, or `doing` also
 suggests `tasks ready --under <goal-id>` to find eligible work. The claim is on
@@ -428,3 +446,16 @@ OKLab by column depth (capped at depth 6) from a muted project shade (or muted
 contrast against `bg` (dim chrome without a resolved palette; plain connectors when
 color is disabled).
 Activity affects presentation only; priorities and work selection keep their order.
+
+In `tree`, `prime`'s roadmap and lanes sections, and `lanes`, each lane and each
+top-level goal (a goal directly under a lane, or a root goal with no lane above it)
+gets a heading line with its title above its row; the row keeps its id, metadata
+and title suffixes. Lane headings are bold in the project colour; each top-level
+goal heading is bold in its own hue, the project colour turned in OKLCH by a step
+fixed by the goal's id, and the rails inside its subtree take that hue. A project
+with no colour, or one too close to grey, gets bold headings in the default
+foreground. On kitty, headings are scaled with text sizing (lanes 1.5x, goals
+1.25x, two terminal rows each); `TASKS_TEXT_SIZING` or `[output] text_sizing`
+chooses `auto`, `always` or `never`
+([configuration](configuration.md#host-settings-and-document-providers)). Headings
+clip with `…` to the terminal width, counted in scaled cells.
