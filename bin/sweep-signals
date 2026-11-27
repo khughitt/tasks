@@ -270,6 +270,9 @@ def sweep(args):
             rparent = r.get("parent")
             if rparent is not None and not isinstance(rparent, str):
                 raise TypeError("row parent must be a string")
+            rlong = r.get("long_title")
+            if rlong is not None and not isinstance(rlong, str):
+                raise TypeError("row long_title must be a string")
             by_id[rid] = r
         pool = sorted((r for r in rows
                        if r["status"] in POOL and not (r.get("claim") or {}).get("live")),
@@ -289,7 +292,11 @@ def sweep(args):
             title, body = detail["title"], detail["body"]
             if not isinstance(title, str) or not isinstance(body, str):
                 raise TypeError("task title and body must be strings")
-            text = f"{title}\n{body}"
+            long_title, tldr = detail.get("long_title"), detail.get("tldr")
+            for name, value in (("long_title", long_title), ("tldr", tldr)):
+                if value is not None and not isinstance(value, str):
+                    raise TypeError(f"task {name} must be a string")
+            text = "\n".join(part for part in (title, long_title, tldr, body) if part is not None)
             promoted = structured_paths(detail)
             tparent = task.get("parent")
             if tparent is not None and not isinstance(tparent, dict):
@@ -409,7 +416,9 @@ def sweep(args):
 
         results.append({
             "row": row, "parent": parent_id, "dead": dead, "cited": sorted(cited),
-            "deps_closed": deps_closed, "touched": touched, "words": words(row["title"]),
+            "deps_closed": deps_closed, "touched": touched,
+            # Twins compare the original sentence when a title was shortened.
+            "words": words(row.get("long_title") or row["title"]),
             "action_evidence": json.dumps(actions, separators=(",", ":")),
         })
 
