@@ -988,18 +988,25 @@ fn progress_display_empty_fixed_floor() {
         }
     }
 
-    // One column below the computed minimum (65 < 66): deliberate Mode::Unwrapped single-line row!
-    let unwrapped_tree = env
+    // Below the computed table minimum, tree keeps the task readable in a compact row.
+    let compact_tree = env
         .cmd(&aa)
         .env("COLUMNS", "65")
         .args(["--pretty", "tree"])
         .output()
         .unwrap();
-    let tree_65 = String::from_utf8(unwrapped_tree.stdout).unwrap();
-    assert_eq!(
-        tree_65.trim_end().lines().count(),
-        1,
-        "below floor 66 should render unwrapped: {tree_65:?}"
+    assert!(compact_tree.status.success(), "{compact_tree:?}");
+    let tree_65 = String::from_utf8(compact_tree.stdout).unwrap();
+    assert!(
+        tree_65.lines().all(|line| line.chars().count() <= 65),
+        "{tree_65}"
     );
-    assert!(tree_65.contains(long_title), "{tree_65:?}");
+    assert!(
+        tree_65.starts_with(&format!("{leaf}  alpha beta")),
+        "{tree_65}"
+    );
+    assert!(
+        tree_65.contains("omicron") && tree_65.contains("doing"),
+        "{tree_65}"
+    );
 }

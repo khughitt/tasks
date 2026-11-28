@@ -193,8 +193,11 @@ declared-piece targets encountered during the membership walk. Unlike `goals`,
 missing declared pieces only; `doing` goals read from another claimed checkout use
 that checkout's scan. Tree containment stays local to each project (foreign pieces
 contribute to `work` without becoming local child nodes), drawn with three-cell
-guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering and blank ID
-cells on wrapped continuations. When any displayed goal is present, a wrapping
+guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering. Rails continue
+alongside wrapped rows. When the table is too wide for the terminal, `tree` and
+`prime`'s roadmap put metadata below each task and wrap titles under their branch.
+Very deep rows keep the nearest guides that fit alongside the ID.
+When any displayed goal is present, a wrapping
 legend (`work: done/total local descendants and declared pieces`, with
 `; tree: local containment` in `prime` and `; +N: ideas` and
 `; ?N: unresolved declared pieces` when displayed) appears after `prime`'s top
@@ -454,8 +457,9 @@ and title suffixes. Lane headings are bold in the project colour; each top-level
 goal heading is bold in its own hue, the project colour turned in OKLCH by a step
 fixed by the goal's id, and the rails inside its subtree take that hue. A project
 with no colour, or one too close to grey, gets bold headings in the default
-foreground. On kitty, headings are scaled with text sizing (lanes 1.5x, goals
-1.25x, two terminal rows each); `TASKS_TEXT_SIZING` or `[output] text_sizing`
-chooses `auto`, `always` or `never`
+foreground. On Kitty, text sizing draws each word as a single block (lanes 1.5x,
+goals 1.25x, two terminal rows each). A heading with a word that exceeds Kitty's
+block width uses one bold, normal-sized line. Set `TASKS_TEXT_SIZING` or
+`[output] text_sizing` to `auto`, `always` or `never`
 ([configuration](configuration.md#host-settings-and-document-providers)). Headings
-clip with `…` to the terminal width, counted in scaled cells.
+clip with `…` using the number of columns they occupy.

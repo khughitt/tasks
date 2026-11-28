@@ -57,96 +57,47 @@ pub enum Role {
     GoalHeading,
 }
 
-/// One OSC 66 scale: `s=2` with fraction `n/d`, each chunk `payload_cells` wide and
-/// occupying `width * 2` cells.
+/// One OSC 66 scale: `s=2` with fraction `n/d`.
 #[derive(Debug, Clone, Copy)]
 struct Scale {
     numerator: usize,
     denominator: usize,
-    width: usize,
-    payload_cells: usize,
 }
 
 impl Scale {
-    /// Cells one chunk occupies (`s * w`).
-    fn occupied(self) -> usize {
-        2 * self.width
+    fn word_width(self, word: &str) -> usize {
+        (crate::ellipsis::display_cells(word) * self.numerator).div_ceil(self.denominator)
     }
+
+    fn line_width(self, text: &str) -> Option<usize> {
+        text.split_inclusive(' ').try_fold(0, |total, piece| {
+            let (word, spaces) = heading_word(piece);
+            let width = self.word_width(word);
+            // Kitty's explicit width is limited to seven scaled cells.
+            (width <= 7).then_some(total + 2 * width + spaces.len())
+        })
+    }
+}
+
+fn heading_word(piece: &str) -> (&str, &str) {
+    let word = piece.trim_end_matches(' ');
+    (word, &piece[word.len()..])
 }
 
 impl Role {
     fn scale(self) -> Scale {
         match self {
-            // 1.5x: 4 cells of text drawn in 6.
+            // 1.5x
             Role::LaneHeading => Scale {
                 numerator: 3,
                 denominator: 4,
-                width: 3,
-                payload_cells: 4,
             },
-            // 1.25x: 8 cells of text drawn in 10.
+            // 1.25x
             Role::GoalHeading => Scale {
                 numerator: 5,
                 denominator: 8,
-                width: 5,
-                payload_cells: 8,
             },
         }
-    }
-}
-
-/// `text` packed into chunks of exactly `cells` display cells: a wide glyph that would
-/// straddle a boundary opens the next chunk, and every short chunk is space-padded.
-fn chunks(text: &str, cells: usize) -> Vec<String> {
-    use unicode_width::UnicodeWidthChar;
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut used = 0;
-    for c in text.chars() {
-        let width = c.width().unwrap_or(0);
-        if used + width > cells {
-            current.push_str(&" ".repeat(cells - used));
-            out.push(std::mem::take(&mut current));
-            used = 0;
-        }
-        current.push(c);
-        used += width;
-    }
-    if !current.is_empty() {
-        current.push_str(&" ".repeat(cells - used));
-        out.push(current);
-    }
-    out
-}
-
-/// Cells `text` occupies once scaled for `role`; tests measure headings with it.
-#[cfg(test)]
-pub fn scaled_width(text: &str, role: Role) -> usize {
-    let scale = role.scale();
-    chunks(text, scale.payload_cells).len() * scale.occupied()
-}
-
-/// `title` clipped with `…` so that, scaled for `role`, it fits in `available` cells.
-/// Counted in chunks, not cells: a wide glyph pushed past a chunk boundary adds a chunk.
-pub fn clip_for_heading(title: &str, role: Role, available: usize) -> String {
-    let scale = role.scale();
-    let fits = |text: &str| chunks(text, scale.payload_cells).len() * scale.occupied() <= available;
-    if fits(title) {
-        return title.to_string();
-    }
-    let mut clipped = String::new();
-    for c in title.chars() {
-        let mut longer = clipped.clone();
-        longer.push(c);
-        if !fits(&format!("{longer}…")) {
-            break;
-        }
-        clipped = longer;
-    }
-    if fits(&format!("{clipped}…")) {
-        format!("{clipped}…")
-    } else {
-        String::new()
     }
 }
 
@@ -508,26 +459,60 @@ impl Painter {
         Painter { sizing: on, ..self }
     }
 
-    pub fn sizing(&self) -> bool {
-        self.sizing
-    }
+    /// Scale complete words so glyph rounding at a block boundary cannot split a word.
+    /// A heading with a word too wide for one block uses normal-sized bold text.
+    pub(crate) fn scaled_heading(
+        &self,
+        text: &str,
+        role: Role,
+        available: Option<usize>,
+    ) -> Option<String> {
+        use std::fmt::Write as _;
 
-    /// `text` scaled for `role` as OSC 66 chunks when sizing is on, else unchanged.
-    /// Style it (bold, colour) around the result: the terminal scales painted text.
-    pub fn scaled(&self, text: &str, role: Role) -> String {
         if !self.sizing {
-            return text.to_string();
+            return None;
         }
         let scale = role.scale();
-        chunks(text, scale.payload_cells)
-            .iter()
-            .map(|payload| {
-                format!(
-                    "\x1b]66;s=2:n={}:d={}:w={}:v=2;{payload}\x07",
-                    scale.numerator, scale.denominator, scale.width
+        let width = scale.line_width(text)?;
+        let clipped;
+        let text = if let Some(available) = available.filter(|&available| width > available) {
+            // Scaling never takes fewer cells than plain text. Start at the plain
+            // width limit and trim until the encoded blocks plus ellipsis fit.
+            use crate::ellipsis::{Measure, clip};
+            let limit = clip(text, available, Measure::DisplayCells);
+            let limit = limit.strip_suffix('…').unwrap_or(&limit);
+            clipped = limit
+                .char_indices()
+                .map(|(end, _)| end)
+                .chain(std::iter::once(limit.len()))
+                .rev()
+                .map(|end| format!("{}…", limit[..end].trim_end_matches(' ')))
+                .find(|candidate| {
+                    scale
+                        .line_width(candidate)
+                        .is_some_and(|width| width <= available)
+                })?;
+            &clipped
+        } else {
+            text
+        };
+        let mut scaled = String::new();
+        for piece in text.split_inclusive(' ') {
+            let (word, spaces) = heading_word(piece);
+            let width = scale.word_width(word);
+            if width == 0 {
+                scaled.push_str(word);
+            } else {
+                write!(
+                    scaled,
+                    "\x1b]66;s=2:n={}:d={}:w={width}:v=2;{word}\x07",
+                    scale.numerator, scale.denominator
                 )
-            })
-            .collect()
+                .expect("writing to String");
+            }
+            scaled.push_str(spaces);
+        }
+        (!scaled.is_empty()).then_some(scaled)
     }
 
     /// Dates paint only with a recency; without one `Style::Date` is the identity.
@@ -1245,10 +1230,11 @@ mod tests {
             true
         ));
         let painter = Painter::new(ColorMode::Auto, Format::Pretty, false).with_text_sizing(true);
-        assert!(painter.sizing());
+        assert!(painter.sizing);
         assert!(
             painter
-                .scaled("Tag", Role::GoalHeading)
+                .scaled_heading("Tag", Role::GoalHeading, None)
+                .unwrap()
                 .starts_with("\x1b]66;")
         );
         assert!(!text_sizing_on(
@@ -1272,70 +1258,58 @@ mod tests {
             false
         ));
         let off = Painter::new(ColorMode::Never, Format::Pretty, true);
-        assert!(!off.sizing());
+        assert!(!off.sizing);
         assert_eq!(
-            off.scaled("Tag semantics", Role::LaneHeading),
-            "Tag semantics"
+            off.scaled_heading("Tag semantics", Role::LaneHeading, None),
+            None
         );
     }
 
     #[test]
-    fn lane_scaled_chunks_are_four_characters() {
+    fn scaled_heading_preserves_whole_words() {
         let painter = Painter::new(ColorMode::Always, Format::Pretty, true).with_text_sizing(true);
-        let chunk = |payload: &str| format!("\x1b]66;s=2:n=3:d=4:w=3:v=2;{payload}\x07");
-        assert_eq!(
-            painter.scaled("Tag semantics", Role::LaneHeading),
-            [chunk("Tag "), chunk("sema"), chunk("ntic"), chunk("s   ")].concat()
-        );
-        assert_eq!(scaled_width("Tag semantics", Role::LaneHeading), 24);
+        for (role, words) in [
+            (Role::GoalHeading, ["Combining", "association", "p-values"]),
+            (Role::LaneHeading, ["Research", "planning", "work"]),
+        ] {
+            let heading = painter
+                .scaled_heading(&words.join(" "), role, None)
+                .unwrap();
+            for word in words {
+                assert!(heading.contains(word), "{heading:?} split {word:?}");
+            }
+        }
     }
 
     #[test]
-    fn goal_scaled_chunks_are_eight_characters() {
+    fn scaled_heading_preserves_wide_words_and_spaces() {
         let painter = Painter::new(ColorMode::Always, Format::Pretty, true).with_text_sizing(true);
-        let chunk = |payload: &str| format!("\x1b]66;s=2:n=5:d=8:w=5:v=2;{payload}\x07");
+        let title = "漢字語  p-values";
         assert_eq!(
-            painter.scaled("Tag semantics", Role::GoalHeading),
-            [chunk("Tag sema"), chunk("ntics   ")].concat()
+            painter
+                .scaled_heading(title, Role::GoalHeading, None)
+                .unwrap(),
+            "\x1b]66;s=2:n=5:d=8:w=4:v=2;漢字語\x07  \x1b]66;s=2:n=5:d=8:w=5:v=2;p-values\x07"
         );
-        assert_eq!(scaled_width("Tag semantics", Role::GoalHeading), 20);
+        assert_eq!(
+            painter.scaled_heading("Characteristically", Role::GoalHeading, None),
+            None
+        );
     }
 
     #[test]
-    fn scaled_chunks_count_wide_cells() {
+    fn scaled_heading_clips_to_its_encoded_width() {
         let painter = Painter::new(ColorMode::Always, Format::Pretty, true).with_text_sizing(true);
-        let chunk = |payload: &str| format!("\x1b]66;s=2:n=5:d=8:w=5:v=2;{payload}\x07");
-        // 漢字abc = 7 cells; the next 漢 would straddle cell 8, so it opens the next chunk.
-        assert_eq!(
-            painter.scaled("漢字abc漢&x", Role::GoalHeading),
-            [chunk("漢字abc "), chunk("漢&x    ")].concat()
-        );
-        assert_eq!(scaled_width("漢字abc漢&x", Role::GoalHeading), 20);
-        // A wide glyph that ends exactly on the boundary stays in its chunk.
-        assert_eq!(
-            painter.scaled("漢字ab漢", Role::GoalHeading),
-            chunk("漢字ab漢")
-        );
-        assert_eq!(scaled_width("", Role::GoalHeading), 0);
-    }
-
-    #[test]
-    fn clip_for_heading_never_exceeds_width() {
-        let long = "x".repeat(200);
-        let lane = clip_for_heading(&long, Role::LaneHeading, 80);
-        assert_eq!(crate::ellipsis::display_cells(&lane), 52);
-        assert!(lane.ends_with('…'));
-        assert!(scaled_width(&lane, Role::LaneHeading) <= 80);
-        let goal = clip_for_heading(&long, Role::GoalHeading, 80);
-        assert_eq!(crate::ellipsis::display_cells(&goal), 64);
-        assert!(scaled_width(&goal, Role::GoalHeading) <= 80);
-        assert_eq!(clip_for_heading("Short", Role::GoalHeading, 80), "Short");
-        // Wide glyphs pushed past a chunk boundary add chunks; the clip must count them.
-        let mixed = "a漢漢漢".repeat(20);
+        let title = "A long title with some 漢字 inside";
         for role in [Role::LaneHeading, Role::GoalHeading] {
-            let clipped = clip_for_heading(&mixed, role, 80);
-            assert!(scaled_width(&clipped, role) <= 80, "{role:?}: {clipped}");
-            assert!(clipped.ends_with('…'), "{role:?}: {clipped}");
+            for width in [2, 10, 17, 30] {
+                let clipped = painter.scaled_heading(title, role, Some(width)).unwrap();
+                assert!(
+                    crate::table::visible_width(&clipped) <= width,
+                    "{role:?}: {clipped:?}"
+                );
+                assert!(clipped.contains('…'), "{role:?}: {clipped:?}");
+            }
         }
     }
 
