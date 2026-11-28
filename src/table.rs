@@ -475,9 +475,19 @@ fn compact_tree(
             );
             rendered.push_str(&wrap_with_prefix(title_text, &first, &rest, width));
         } else {
-            // Keep the ID copyable even when it exceeds the whole terminal width.
-            rendered.push_str(&key_text);
-            rendered.push('\n');
+            if key_width > width {
+                // Wrap decorations independently and keep the final ID token whole.
+                let id = row.cells[key].rsplit(' ').next().expect("tree ID");
+                rendered.push_str(&wrap_with_prefix(
+                    &key_text,
+                    "",
+                    "",
+                    width.max(visible_width(id)),
+                ));
+            } else {
+                rendered.push_str(&key_text);
+                rendered.push('\n');
+            }
             if !title_text.is_empty() {
                 rendered.push_str(&wrap_with_prefix(
                     title_text,

@@ -3054,10 +3054,19 @@ mod tests {
 
     #[test]
     fn tree_emits_indivisible_ids_even_in_a_narrower_terminal() {
-        let id = "long-project-000001";
-        let node = hnode(id, "A short title", Kind::Leaf, None, None, None, vec![]);
-        let text = tree_text(vec![node], &plain(), Some(10));
-        assert!(text.lines().any(|line| line == id), "{text:?}");
+        let id = "tasks-000001";
+        for width in [10, 12] {
+            let node = hnode(id, "A short title", Kind::Lane, None, None, None, vec![]);
+            let text = tree_text(vec![node], &plain(), Some(width));
+            assert!(text.lines().any(|line| line == id), "{width}: {text:?}");
+            assert!(text.contains('≡'), "{width}: {text:?}");
+            assert!(
+                text.lines()
+                    .filter(|line| *line != id)
+                    .all(|line| crate::table::visible_width(line) <= width),
+                "{width}: {text:?}"
+            );
+        }
     }
 
     #[test]
