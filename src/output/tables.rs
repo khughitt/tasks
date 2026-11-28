@@ -726,10 +726,10 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
                     let mut rails = Vec::new();
                     tree_rows(
                         std::slice::from_ref(node),
-                        0,
                         &mut rails, None,
                         painter,
                         marks,
+                        layout.width,
                         &mut roadmap,
                     );
                 } else if ready_ids.contains(node.summary.id.as_str()) {
@@ -937,7 +937,7 @@ pub(super) fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Lay
             let marks = Marks::of_tree(&o.nodes, TypeColumn::Leading);
             let mut rows = Vec::new();
             let mut rails = Vec::new();
-            tree_rows(&o.nodes, 0, &mut rails, None, painter, marks, &mut rows);
+            tree_rows(&o.nodes, &mut rails, None, painter, marks, layout.width, &mut rows);
             let mut displayed_works = Vec::new();
             collect_tree_goal_work(&o.nodes, &mut displayed_works);
             let mut rendered =
@@ -1466,23 +1466,38 @@ fn heading_hue(row: &TaskSummary, role: Role) -> Option<Rgb> {
 /// colour, rails inside a top-level goal's subtree that goal's hue.
 fn tree_rows(
     nodes: &[TreeNode],
-    depth: usize,
     rails: &mut Vec<(bool, Option<Rgb>)>,
     parent_rail: Option<Rgb>,
     painter: &Painter,
     marks: Marks,
+    width: Option<usize>,
     rows: &mut Vec<crate::table::Row>,
 ) {
+    let depth = rails.len();
+    let pad = if marks.review { "  " } else { "" };
+    let lead = if matches!(marks.kind, Some(TypeColumn::Leading)) {
+        3
+    } else {
+        0
+    };
     for (index, node) in nodes.iter().enumerate() {
         let has_more = index + 1 < nodes.len();
         let summary = &node.summary;
+        let key_width = lead + pad.len() + summary.id.len();
+        let visible_depth = width.map_or(depth, |width| {
+            depth.min(width.saturating_sub(key_width) / 3)
+        });
         let mut guides = String::new();
-        for (col_idx, &(ancestor_has_more, color)) in rails.iter().enumerate() {
+        for (col_idx, &(ancestor_has_more, color)) in rails
+            .iter()
+            .enumerate()
+            .skip((depth + 1).saturating_sub(visible_depth))
+        {
             let seg = if ancestor_has_more { "│  " } else { "   " };
-            guides.push_str(&present::tree_guide(seg, color, col_idx + 1).paint(painter));
+            guides.push_str(&present::tree_guide(seg, color, col_idx).paint(painter));
         }
         let guide = |segment: &str| {
-            if depth == 0 {
+            if visible_depth == 0 {
                 String::new()
             } else {
                 present::tree_guide(segment, parent_rail, depth).paint(painter)
@@ -1499,7 +1514,7 @@ fn tree_rows(
             _ if depth == 0 => summary.project_color,
             _ => parent_rail,
         };
-        let row = match role {
+        let mut row = match role {
             None => task_row(summary, DateColumn::Updated, painter, marks, true, &branch),
             Some(role) => {
                 let mut row = task_row(
@@ -1513,7 +1528,6 @@ fn tree_rows(
                 *row.cells
                     .last_mut()
                     .expect("a task row ends with its title") = title_cell(summary, painter, false);
-                let pad = if marks.review { "  " } else { "" };
                 row.heading = Some(crate::table::Heading {
                     prefix: format!("{pad}{branch}"),
                     title: summary.title.clone(),
@@ -1524,22 +1538,11 @@ fn tree_rows(
                 row
             }
         };
+        row.tree_rail = Some(format!("{pad}{continuation}"));
         rows.push(row);
-        if depth > 0 {
-            rails.push((has_more, parent_rail));
-        }
-        tree_rows(
-            &node.children,
-            depth + 1,
-            rails,
-            own_rail,
-            painter,
-            marks,
-            rows,
-        );
-        if depth > 0 {
-            rails.pop();
-        }
+        rails.push((has_more, parent_rail));
+        tree_rows(&node.children, rails, own_rail, painter, marks, width, rows);
+        rails.pop();
     }
 }
 
@@ -1754,7 +1757,15 @@ mod tests {
         };
         let mut built = Vec::new();
         let mut rails = Vec::new();
-        tree_rows(nodes, 0, &mut rails, None, painter, marks, &mut built);
+        tree_rows(
+            nodes,
+            &mut rails,
+            None,
+            painter,
+            marks,
+            layout.width,
+            &mut built,
+        );
         crate::table::render(&task_columns(marks, true), &built, &layout, None, painter)
     }
 
@@ -2075,11 +2086,11 @@ mod tests {
         let mut rails = Vec::new();
         tree_rows(
             &[root],
-            0,
             &mut rails,
             None,
             &plain(),
             Marks::default(),
+            None,
             &mut built,
         );
         let text = crate::table::render(
@@ -3025,6 +3036,40 @@ mod tests {
     }
 
     #[test]
+    fn tree_keeps_rails_and_long_titles_within_terminal_width() {
+        let title = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+        for width in [40, 60, 80, 100] {
+            let mut forest = headed_forest(None);
+            forest[0].children[0].children[1].summary.title = title.into();
+            let text = tree_text(forest, &plain(), Some(width));
+            assert!(
+                text.lines()
+                    .all(|line| crate::table::visible_width(line) <= width),
+                "at {width} columns:\n{text}"
+            );
+            let (_, last_word) = line_with(&text, "lambda");
+            assert!(last_word.trim_start().starts_with('│'), "{text}");
+        }
+    }
+
+    #[test]
+    fn tree_emits_indivisible_ids_even_in_a_narrower_terminal() {
+        let id = "tasks-000001";
+        for width in [10, 12] {
+            let node = hnode(id, "A short title", Kind::Lane, None, None, None, vec![]);
+            let text = tree_text(vec![node], &plain(), Some(width));
+            assert!(text.lines().any(|line| line == id), "{width}: {text:?}");
+            assert!(text.contains('≡'), "{width}: {text:?}");
+            assert!(
+                text.lines()
+                    .filter(|line| *line != id)
+                    .all(|line| crate::table::visible_width(line) <= width),
+                "{width}: {text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn tree_heads_lane_and_top_level_goals_only() {
         let text = tree_text(headed_forest(None), &plain(), Some(120));
         for (id, title) in [
@@ -3071,9 +3116,11 @@ mod tests {
 
     #[test]
     fn scaled_heading_reserves_two_rows_with_rail() {
-        let text = tree_text(headed_forest(None), &sized(), Some(120));
+        let mut forest = headed_forest(None);
+        forest[0].summary.title = "Research planning".into();
+        let text = tree_text(forest, &sized(), Some(120));
         let heading = text
-            .find("\x1b]66;s=2:n=5:d=8:w=5:v=2;Tag sema\x07")
+            .find("\x1b]66;s=2:n=5:d=8:w=6:v=2;semantics\x07")
             .expect("goal heading is scaled");
         let start = text[..heading]
             .rfind("\n\n\x1b[2A")
@@ -3083,7 +3130,7 @@ mod tests {
         assert!(after[2].contains("xx-00000b"), "row: {:?}", after[2]);
         assert!(!text[start..heading].contains("xx-"), "{text:?}");
         assert!(
-            text.contains("\x1b]66;s=2:n=3:d=4:w=3:v=2;Voca\x07"),
+            text.contains("\x1b]66;s=2:n=3:d=4:w=6:v=2;Research\x07"),
             "{text:?}"
         );
         let plain_text = tree_text(headed_forest(None), &plain(), Some(120));
@@ -3114,7 +3161,7 @@ mod tests {
     #[test]
     fn heading_clips_to_scaled_width() {
         let mut forest = headed_forest(None);
-        forest[0].children[0].summary.title = "x".repeat(70);
+        forest[0].children[0].summary.title = "long title ".repeat(12);
         let text = tree_text(forest, &sized(), Some(80));
         let heading = text
             .lines()

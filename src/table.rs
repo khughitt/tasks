@@ -75,6 +75,8 @@ pub struct Row {
     pub details: Vec<(&'static str, Detail)>,
     /// A heading line printed above the row, outside the table.
     pub heading: Option<Heading>,
+    /// Painted guides and review padding inside the key column on wrapped tree rows.
+    pub tree_rail: Option<String>,
 }
 
 impl Row {
@@ -83,6 +85,7 @@ impl Row {
             cells,
             details: Vec::new(),
             heading: None,
+            tree_rail: None,
         }
     }
 }
@@ -278,6 +281,11 @@ pub fn render(
         })
         .collect();
     let mode = mode(columns, &natural, layout.width);
+    if let (Mode::Unwrapped, Some(width)) = (mode, layout.width)
+        && rows.iter().any(|row| row.tree_rail.is_some())
+    {
+        return compact_tree(columns, rows, layout.headers, width, painter);
+    }
     let kept: Vec<usize> = (0..columns.len())
         .filter(|&index| mode != Mode::Stacked(index))
         .collect();
@@ -350,7 +358,7 @@ pub fn render(
     let has_details = matches!(mode, Mode::Stacked(_))
         || rows
             .iter()
-            .any(|row| !row.details.is_empty() || row.heading.is_some());
+            .any(|row| !row.details.is_empty() || row.heading.is_some() || row.tree_rail.is_some());
     let mut rendered = String::new();
     for line in &lines[..header_lines] {
         rendered.push_str(line);
@@ -381,8 +389,17 @@ pub fn render(
         if let Some(heading) = &row.heading {
             rendered.push_str(&heading_lines(heading, lead, layout.width, painter));
         }
-        for line in block {
-            rendered.push_str(line);
+        for (index, line) in block.iter().enumerate() {
+            if index > 0
+                && let Some(rail) = &row.tree_rail
+                && let Some(body) = line.get(lead + visible_width(rail)..)
+            {
+                rendered.push_str(&" ".repeat(lead));
+                rendered.push_str(rail);
+                rendered.push_str(body);
+            } else {
+                rendered.push_str(line);
+            }
             rendered.push('\n');
         }
         if let Mode::Stacked(moved) = mode
@@ -403,6 +420,130 @@ pub fn render(
     rendered
 }
 
+/// When the metadata columns take too much room, keep the title with the ID and
+/// place metadata under the same branch using the space after the rails.
+fn compact_tree(
+    columns: &[Column],
+    rows: &[Row],
+    headers: bool,
+    width: usize,
+    painter: &Painter,
+) -> String {
+    let key = columns
+        .iter()
+        .position(|column| column.header == "id")
+        .expect("tree ID column");
+    let title = columns.len() - 1;
+    let lead = GAP + 1;
+    let lead = if key == 0 { 0 } else { lead };
+    let indent = " ".repeat(lead);
+    let mut rendered = String::new();
+    if headers {
+        rendered.push_str(&paragraph(
+            "id  title",
+            painter,
+            &Layout {
+                width: Some(width),
+                headers: false,
+            },
+        ));
+    }
+    for row in rows {
+        if let Some(heading) = &row.heading {
+            rendered.push_str(&heading_lines(heading, lead, Some(width), painter));
+        }
+        let key_text = if key == 0 {
+            row.cells[key].clone()
+        } else if row.cells[0].is_empty() {
+            format!("{indent}{}", row.cells[key])
+        } else {
+            format!("{}  {}", row.cells[0], row.cells[key])
+        };
+        let rail = format!("{indent}{}", row.tree_rail.as_deref().unwrap_or(""));
+        let continuation = if visible_width(&rail) + 2 <= width {
+            &rail
+        } else {
+            ""
+        };
+        let title_text = row.cells[title].trim_start();
+        let key_width = visible_width(&key_text);
+        if !title_text.is_empty() && key_width + GAP + 12 <= width {
+            let first = format!("{key_text}  ");
+            let rest = format!(
+                "{continuation}{}",
+                " ".repeat(key_width + GAP - visible_width(continuation))
+            );
+            rendered.push_str(&wrap_with_prefix(title_text, &first, &rest, width));
+        } else {
+            if key_width > width {
+                // Wrap decorations independently and keep the final ID token whole.
+                let id = row.cells[key].rsplit(' ').next().expect("tree ID");
+                rendered.push_str(&wrap_with_prefix(
+                    &key_text,
+                    "",
+                    "",
+                    width.max(visible_width(id)),
+                ));
+            } else {
+                rendered.push_str(&key_text);
+                rendered.push('\n');
+            }
+            if !title_text.is_empty() {
+                rendered.push_str(&wrap_with_prefix(
+                    title_text,
+                    continuation,
+                    continuation,
+                    width,
+                ));
+            }
+        }
+        let metadata = (key + 1..title)
+            .filter(|&index| !row.cells[index].is_empty())
+            .map(|index| {
+                let cell = &row.cells[index];
+                if headers {
+                    format!("{}: {cell}", columns[index].header)
+                } else {
+                    cell.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        if !metadata.is_empty() {
+            rendered.push_str(&wrap_with_prefix(
+                &metadata,
+                continuation,
+                continuation,
+                width,
+            ));
+        }
+    }
+    rendered
+}
+
+fn wrap_with_prefix(text: &str, first: &str, rest: &str, width: usize) -> String {
+    let mut cell = Table::new();
+    cell.load_style(NOTHING)
+        .force_no_tty()
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_width(clamp(
+            width
+                .saturating_sub(visible_width(first).max(visible_width(rest)))
+                .max(1),
+        ))
+        .add_row(vec![text]);
+    if let Some(column) = cell.column_mut(0) {
+        column.set_padding((0, 0));
+    }
+    let mut rendered = String::new();
+    for (index, line) in cell.lines().enumerate() {
+        let prefix = if index == 0 { first } else { rest };
+        rendered.push_str(&trim_visible_end(&format!("{prefix}{line}")));
+        rendered.push('\n');
+    }
+    rendered
+}
+
 /// The heading's line (two when scaled: the heading, then its rail), indented by `lead`.
 fn heading_lines(
     heading: &Heading,
@@ -413,18 +554,9 @@ fn heading_lines(
     use crate::ellipsis::{Measure, clip};
     let indent = " ".repeat(lead);
     let available = width.map(|width| width.saturating_sub(lead + visible_width(&heading.prefix)));
-    let title = match available {
-        Some(available) if painter.sizing() => {
-            crate::style::clip_for_heading(&heading.title, heading.role, available)
-        }
-        Some(available) => clip(&heading.title, available, Measure::DisplayCells),
-        None => heading.title.clone(),
-    };
-    let text = painter.paint(
-        Style::Heading(heading.color),
-        &painter.scaled(&title, heading.role),
-    );
-    if painter.sizing() {
+    let style = Style::Heading(heading.color);
+    if let Some(title) = painter.scaled_heading(&heading.title, heading.role, available) {
+        let text = painter.paint(style, &title);
         // Reserve both rows first, so a heading on the last row scrolls before it is drawn.
         format!(
             "\n\n\x1b[2A{}\n{}\n",
@@ -432,6 +564,11 @@ fn heading_lines(
             trim_visible_end(&format!("{indent}{}", heading.rail))
         )
     } else {
+        let title = available.map_or_else(
+            || heading.title.clone(),
+            |available| clip(&heading.title, available, Measure::DisplayCells),
+        );
+        let text = painter.paint(style, &title);
         format!(
             "{}\n",
             trim_visible_end(&format!("{indent}{}{text}", heading.prefix))
@@ -465,26 +602,7 @@ fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -
     };
     match width.map(|width| width.saturating_sub(indent)) {
         Some(available) if wrap && available >= DETAIL_FLOOR => {
-            let mut cell = Table::new();
-            cell.load_style(NOTHING)
-                .force_no_tty()
-                .set_content_arrangement(ContentArrangement::Dynamic)
-                .set_width(clamp(available))
-                .add_row(vec![text.clone()]);
-            if let Some(column) = cell.column_mut(0) {
-                column.set_padding((0, 0));
-            }
-            let mut rendered = String::new();
-            for (index, line) in cell.lines().enumerate() {
-                let prefix = if index == 0 {
-                    lead.clone()
-                } else {
-                    " ".repeat(indent)
-                };
-                rendered.push_str(&trim_visible_end(&format!("{prefix}{line}")));
-                rendered.push('\n');
-            }
-            rendered
+            wrap_with_prefix(text, &lead, &" ".repeat(indent), available + indent)
         }
         _ => format!("{}\n", trim_visible_end(&format!("{lead}{text}"))),
     }
