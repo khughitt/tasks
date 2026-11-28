@@ -196,7 +196,8 @@ contribute to `work` without becoming local child nodes), drawn with three-cell
 guides (`├─ `, `└─ `, `│  `, `   `) decided after display filtering. Rails continue
 alongside wrapped rows. When the table is too wide for the terminal, `tree` and
 `prime`'s roadmap put metadata below each task and wrap titles under their branch.
-Very deep rows keep the nearest guides that fit alongside the ID.
+Very deep rows keep the nearest guides that fit alongside the ID. IDs stay whole
+in the output so they can be copied even when the terminal soft-wraps them.
 When any displayed goal is present, a wrapping
 legend (`work: done/total local descendants and declared pieces`, with
 `; tree: local containment` in `prime` and `; +N: ideas` and

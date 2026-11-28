@@ -3053,6 +3053,14 @@ mod tests {
     }
 
     #[test]
+    fn tree_emits_indivisible_ids_even_in_a_narrower_terminal() {
+        let id = "long-project-000001";
+        let node = hnode(id, "A short title", Kind::Leaf, None, None, None, vec![]);
+        let text = tree_text(vec![node], &plain(), Some(10));
+        assert!(text.lines().any(|line| line == id), "{text:?}");
+    }
+
+    #[test]
     fn tree_heads_lane_and_top_level_goals_only() {
         let text = tree_text(headed_forest(None), &plain(), Some(120));
         for (id, title) in [
